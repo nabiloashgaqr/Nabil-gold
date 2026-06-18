@@ -1,7 +1,7 @@
 name: 📊 Gold Analysis Bot
 on:
   schedule:
-    - cron: "*/15 11-17 * * 0,1,2,3,4"  # كل 15 دقيقة، 11-17 UTC، الأحد-الخميس
+    - cron: "*/15 8-17 * * 0,1,2,3,4"  # كل 15 دقيقة، 11-17 UTC، الأحد-الخميس
   workflow_dispatch:
 
 jobs:
