@@ -163,11 +163,11 @@
   },
   "ai_service": {
     "enabled": true,
-    "provider": "openai",
-    "model": "gpt-4o-mini",
+    "provider": "groq",
+    "model": "llama-3.1-8b-instant",
     "max_tokens": 800,
     "temperature": 0.25,
-    "api_key": "ENV:OPENAI_API_KEY",
+    "api_key": "ENV:GROQ_API_KEY",
     "fallback_to_classic": true,
     "description": "خدمة الذكاء الاصطناعي للتحليل الذكي"
   },
@@ -208,6 +208,15 @@
       ],
       "default_model": "gemini-2.0-flash-exp",
       "cost_per_1k_tokens": 0.000125
+    },
+    "groq": {
+      "models": [
+        "llama-3.1-8b-instant",
+        "llama-3.3-70b-versatile",
+        "llama-3.1-70b-versatile"
+      ],
+      "default_model": "llama-3.1-8b-instant",
+      "cost_per_1k_tokens": 5e-05
     }
   },
   "learning": {

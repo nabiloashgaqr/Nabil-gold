@@ -21,7 +21,8 @@ class AIProvider(Enum):
     """مزودي AI المدعومين"""
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
-    GROK = "grok"
+    GROK = "grok"  # xAI / Grok
+    GROQ = "groq"  # GroqCloud
     GEMINI = "gemini"
 
 
@@ -64,6 +65,7 @@ class AIService:
             'openai': {'input': 0.00015, 'output': 0.0006},
             'anthropic': {'input': 0.0008, 'output': 0.004},
             'grok': {'input': 0.0005, 'output': 0.0015},
+            'groq': {'input': 0.00005, 'output': 0.00008},
             'gemini': {'input': 0.000125, 'output': 0.0005}
         }
         
@@ -76,6 +78,7 @@ class AIService:
             'openai': 'OPENAI_API_KEY',
             'anthropic': 'ANTHROPIC_API_KEY',
             'grok': 'GROK_API_KEY',
+            'groq': 'GROQ_API_KEY',
             'gemini': 'GEMINI_API_KEY'
         }
         
@@ -351,6 +354,8 @@ class AIService:
                 return await self._call_anthropic(prompt, agent_type)
             elif self.provider == AIProvider.GROK:
                 return await self._call_grok(prompt, agent_type)
+            elif self.provider == AIProvider.GROQ:
+                return await self._call_groq(prompt, agent_type)
             elif self.provider == AIProvider.GEMINI:
                 return await self._call_gemini(prompt, agent_type)
             else:
@@ -465,6 +470,69 @@ class AIService:
                 provider="anthropic"
             )
     
+    async def _call_groq(self, prompt: str, agent_type: str) -> AIResponse:
+        """استدعاء GroqCloud API (OpenAI-compatible)."""
+
+        try:
+            import requests
+
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            }
+
+            system_prompt = self.system_prompts.get(agent_type, self.system_prompts['technical'])
+            data = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                "max_tokens": self.max_tokens,
+                "temperature": self.temperature,
+                "response_format": {"type": "json_object"},
+            }
+
+            response = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers=headers,
+                json=data,
+                timeout=35,
+            )
+            result = response.json()
+
+            if not response.ok:
+                return AIResponse(
+                    success=False,
+                    content="",
+                    error=result.get("error", {}).get("message", str(result)),
+                    provider="groq",
+                    model=self.model,
+                )
+
+            content = result['choices'][0]['message']['content']
+            tokens = int(result.get('usage', {}).get('total_tokens', 0) or 0)
+            cost = (tokens / 1000) * self.token_costs['groq']['input']
+
+            return AIResponse(
+                success=True,
+                content=content,
+                provider="groq",
+                model=self.model,
+                tokens_used=tokens,
+                cost=cost,
+            )
+
+        except Exception as e:
+            logger.error(f"❌ خطأ Groq: {e}")
+            return AIResponse(
+                success=False,
+                content="",
+                error=str(e),
+                provider="groq",
+                model=self.model,
+            )
+
     async def _call_grok(self, prompt: str, agent_type: str) -> AIResponse:
         """استدعاء Grok API (xAI)"""
         
