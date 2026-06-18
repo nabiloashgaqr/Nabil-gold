@@ -1,59 +1,130 @@
-name: Daily Report & Learning
-
+name: 📊 Daily Report & Learning
 on:
   schedule:
-    # يعمل الساعة 23:00 UTC يومياً
-    - cron: '0 23 * * *'
+    - cron: "0 23 * * *"  # 23:00 UTC يومياً
+  
   workflow_dispatch:
+    inputs:
+      force_learning:
+        description: 'Force learning update'
+        required: false
+        default: 'false'
 
 jobs:
   daily-report:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
+    timeout-minutes: 30
+    
     steps:
-      - name: Checkout repository
+      - name: 📥 Checkout
         uses: actions/checkout@v4
-
-      - name: Setup Python
+      
+      - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
+      
+      - name: 📦 Install Dependencies
+        run: |
+          pip install -r requirements.txt
+      
+      - name: 🧠 Run Learning Update
+        run: |
+          python scripts/run_learning.py
+      
+      - name: 📊 Generate Daily Report
+        run: |
+          python scripts/run_daily_report.py
+      
+      - name: 📈 Update Open Trades Status
+        run: |
+          python -c "
+import asyncio
+import sys
+from datetime import datetime
+sys.path.insert(0, '.')
+from utils.helpers import load_config
+from services.database import DatabaseService
+from services.telegram_bot import TelegramBot
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+async def update_open_trades():
+    config = load_config()
+    db = DatabaseService(config)
+    telegram = TelegramBot(config)
+    
+    # Get open trades
+    query = '''
+        SELECT id, signal_id, trade_type, entry_price, 
+               current_price, sl, tp1, tp2, opened_at
+        FROM trades 
+        WHERE status IN ('OPEN', 'PARTIAL')
+        ORDER BY opened_at DESC
+    '''
+    trades = await db.execute_query(query)
+    
+    if not trades:
+        await telegram.send_message('📊 *تقرير الصفقات المفتوحة*\n\n❌ لا توجد صفقات مفتوحة حالياً')
+        return
+    
+    # Build report
+    lines = [
+        '━━━━━━━━━━━━━━━━━━━━',
+        '📊 *تقرير الصفقات المفتوحة*',
+        f'📅 تاريخ التقرير: {datetime.now().strftime(\"%Y-%m-%d %H:%M\")} UTC',
+        f'📈 عدد الصفقات: {len(trades)}',
+        '━━━━━━━━━━━━━━━━━━━━',
+        ''
+    ]
+    
+    for trade in trades:
+        trade_type = trade.get('trade_type', 'BUY')
+        entry = trade.get('entry_price', 0)
+        current = trade.get('current_price', 0)
+        sl = trade.get('sl', 0)
+        tp1 = trade.get('tp1', 0)
+        tp2 = trade.get('tp2', 0)
+        
+        # Calculate P/L
+        if trade_type == 'BUY':
+            pnl_points = current - entry
+        else:
+            pnl_points = entry - current
+        
+        # Calculate progress to targets
+        if sl and entry:
+            risk = abs(entry - sl)
+            if risk > 0:
+                progress = (abs(pnl_points) / risk) * 100
+            else:
+                progress = 0
+        else:
+            progress = 0
+        
+        emoji = '🟢' if pnl_points > 0 else '🔴' if pnl_points < 0 else '🟡'
+        
+        lines.append(f'{emoji} *{trade_type}* - {trade[\"id\"][:8]}...')
+        lines.append(f'├ الدخول: {entry}')
+        lines.append(f'├ الحالي: {current} ({pnl_points:+.2f})')
+        lines.append(f'├ SL: {sl}')
+        lines.append(f'├ TP1: {tp1}')
+        lines.append(f'├ TP2: {tp2}')
+        lines.append(f'└ التقدم: {progress:.0f}%')
+        lines.append('')
+    
+    lines.append('━━━━━━━━━━━━━━━━━━━━')
+    
+    await telegram.send_message('\\n'.join(lines))
 
-      - name: Generate daily report
+asyncio.run(update_open_trades())
+"
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: python scripts/run_daily_report.py
-
-  learning:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: daily-report
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Run daily learning
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: python scripts/run_learning.py
+      
+      - name: ✅ Success Notification
+        if: always()
+        run: |
+          echo "Daily report completed at $(date)"
