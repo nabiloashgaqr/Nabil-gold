@@ -404,7 +404,18 @@ class DecisionAgent(BaseAgent):
     ) -> tuple:
         """
         🎯 القرار النهائي
+        
+        🚀 التحقق من allow_signals:
+        - إذا كانت session = Report Session → لا إرسال إشارات
         """
+        
+        # 🚀 التحقق من allow_signals من session_info
+        allow_signals = session_info.get('allow_signals', True)
+        current_session = session_info.get('current_session', 'Unknown')
+        
+        # إذا الجلسة不允许 الإشارات (جلسة التقارير مثلاً)
+        if not allow_signals:
+            return 'WAIT', 0, f"جلسة التقارير ({current_session}) - لا إرسال إشارات"
         
         # التحقق من جلسة التداول
         if not session_info.get('trading_allowed'):
