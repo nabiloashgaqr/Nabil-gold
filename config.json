@@ -263,5 +263,12 @@
     "recent_trades_limit": 30,
     "review_only_losses": true,
     "description": "يراجع Groq الصفقات الخاسرة المغلقة ويستخرج دروساً وقواعد تحسين"
+  },
+  "ai_memory_rules": {
+    "enabled": true,
+    "max_active_rules_in_prompt": 8,
+    "min_confidence_to_apply": 60,
+    "advisory_mode": true,
+    "description": "قواعد ذاكرة مستخرجة من مراجعات Groq للخسائر وتضاف إلى Prompt القرار القادم"
   }
 }

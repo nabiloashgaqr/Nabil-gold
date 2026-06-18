@@ -230,6 +230,10 @@ async def run_analysis_async() -> None:
         all_results["session"] = session
         all_results["news"] = NewsRiskAgent(config).check()
         all_results["risk"] = RiskManagementAgent(config).evaluate(all_results)
+        all_results["memory_rules"] = database.get_active_memory_rules(
+            limit=int(config.get("ai_memory_rules", {}).get("max_active_rules_in_prompt", 8))
+        )
+        logger.info("🧠 قواعد الذاكرة النشطة المحملة: %s", len(all_results["memory_rules"]))
 
         # ── تشغيل وكيل القرار (مع AI) ──
         logger.info("تشغيل وكيل القرار (AI-enabled)...")

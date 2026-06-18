@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from services.ai_service import get_ai_service
+from services.memory_rules import build_memory_rules_from_review
 
 logger = logging.getLogger(__name__)
 
@@ -135,9 +136,17 @@ class TradeReviewService:
             "tokens_used": response.tokens_used,
             "review": parsed,
         }
+        memory_rules = build_memory_rules_from_review(review, trade)
+        saved_rule_ids: List[str] = []
+        if memory_rules:
+            saved_rule_ids = self.db.save_memory_rules(memory_rules)
+            review["memory_rule_ids"] = saved_rule_ids
         self.db.save_trade_review(review)
         if trade.get("id"):
-            self.db.update_trade(str(trade.get("id")), {"ai_reviewed": True, "ai_review": parsed})
+            self.db.update_trade(
+                str(trade.get("id")),
+                {"ai_reviewed": True, "ai_review": parsed, "memory_rule_ids": saved_rule_ids},
+            )
         return review
 
     async def review_recent_losses(self) -> Dict[str, Any]:
@@ -188,6 +197,7 @@ def format_trade_review_summary(result: Dict[str, Any]) -> str:
                 f"├ التصنيف: {review.get('failure_category', 'OTHER')}",
                 f"├ السبب: {review.get('root_cause', 'غير محدد')}",
                 f"└ الثقة بالمراجعة: {review.get('confidence_in_review', 'N/A')}%",
+                f"🧠 قواعد ذاكرة جديدة: {len(item.get('memory_rule_ids', []) or [])}",
             ]
         )
         if suggestions_text:

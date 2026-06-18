@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS trades (
     signal_snapshot JSONB DEFAULT '{}'::jsonb,
     ai_reviewed BOOLEAN DEFAULT FALSE,
     ai_review JSONB,
+    memory_rule_ids TEXT[] DEFAULT ARRAY[]::TEXT[],
 
     created_at TIMESTAMPTZ DEFAULT NOW(),
     opened_at TIMESTAMPTZ GENERATED ALWAYS AS (entry_time) STORED,
@@ -89,6 +90,25 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS paper_balance_start DECIMAL(18, 4);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS paper_lot_size DECIMAL(18, 6);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS ai_reviewed BOOLEAN DEFAULT FALSE;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS ai_review JSONB;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS memory_rule_ids TEXT[] DEFAULT ARRAY[]::TEXT[];
+
+-- AI Memory Rules table
+CREATE TABLE IF NOT EXISTS ai_memory_rules (
+    id TEXT PRIMARY KEY,
+    rule_text TEXT NOT NULL,
+    category VARCHAR(80) DEFAULT 'AI_REVIEW_LESSON',
+    applies_to VARCHAR(20) DEFAULT 'BOTH' CHECK (applies_to IN ('BUY', 'SELL', 'BOTH')),
+    confidence INTEGER DEFAULT 70,
+    source_trade_id TEXT,
+    source VARCHAR(80) DEFAULT 'ai_trade_review',
+    active BOOLEAN DEFAULT TRUE,
+    times_triggered INTEGER DEFAULT 0,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ai_memory_rules_active ON ai_memory_rules(active, confidence DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_memory_rules_source_trade ON ai_memory_rules(source_trade_id);
 
 -- AI trade reviews table
 CREATE TABLE IF NOT EXISTS ai_trade_reviews (
@@ -293,6 +313,7 @@ ALTER TABLE agent_weights ENABLE ROW LEVEL SECURITY;
 ALTER TABLE learning_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_evaluations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_trade_reviews ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ai_memory_rules ENABLE ROW LEVEL SECURITY;
 
 -- If you intentionally use anon key for a private bot, create restricted policies manually.
 -- Recommended GitHub Secret: SUPABASE_KEY = service_role key, not anon key.

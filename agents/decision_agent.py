@@ -7,6 +7,7 @@ import logging
 from typing import Dict, List, Any, Optional
 from collections import Counter
 from .base_agent import BaseAgent
+from services.memory_rules import format_memory_rules_for_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,7 @@ class DecisionAgent(BaseAgent):
         price_data = data.get('price_data') or data
         indicators = data.get('indicators', {})
         session_info = data.get('session', data.get('session_info', {}))
+        memory_rules = agents_results.get('memory_rules', []) if isinstance(agents_results, dict) else []
         
         # 1️⃣ تجميع أصوات الوكلاء (مع weights متعلمة)
         votes = self._collect_votes(agents_results)
@@ -142,6 +144,7 @@ class DecisionAgent(BaseAgent):
         price_data = data.get('price_data') or data
         indicators = data.get('indicators', {})
         session_info = data.get('session', data.get('session_info', {}))
+        memory_rules = agents_results.get('memory_rules', []) if isinstance(agents_results, dict) else []
         
         # 1️⃣ تجميع أصوات الوكلاء (مع weights متعلمة)
         votes = self._collect_votes(agents_results)
@@ -153,7 +156,7 @@ class DecisionAgent(BaseAgent):
         ai_decision = {}
         if self.ai_service:
             ai_decision = await self._ai_decision(
-                votes, price_data, indicators, session_info
+                votes, price_data, indicators, session_info, memory_rules
             )
         
         # 4️⃣ القرار النهائي
@@ -292,7 +295,8 @@ class DecisionAgent(BaseAgent):
         votes: Dict,
         price_data: Dict,
         indicators: Dict,
-        session_info: Dict
+        session_info: Dict,
+        memory_rules: List[Dict] | None = None
     ) -> Dict:
         """
         🤖 القرار بالذكاء الاصطناعي
@@ -334,6 +338,9 @@ class DecisionAgent(BaseAgent):
 معلومات الجلسة:
 - الجودة: {session_quality}
 - مسموح بالتداول: {trading_allowed}
+
+قواعد الذاكرة من أخطاء سابقة (التزم بها قدر الإمكان، وإذا خالفتها اجعل القرار WAIT أو اخفض الثقة):
+{format_memory_rules_for_prompt(memory_rules or [])}
 
 أجب بصيغة JSON فقط وبدون Markdown:
 {{

@@ -28,11 +28,12 @@ def main() -> None:
 
     trades = db.get_recent_trades(limit=limit)
     reviews = db.get_recent_trade_reviews(limit=20)
-    html_text = render_dashboard(trades, reviews)
+    memory_rules = db.get_active_memory_rules(limit=20)
+    html_text = render_dashboard(trades, reviews, memory_rules)
     output_path = save_dashboard(html_text, output)
     summary = summarize_trades(trades)
 
-    logger.info("Dashboard generated: %s | trades=%s | reviews=%s", output_path, len(trades), len(reviews))
+    logger.info("Dashboard generated: %s | trades=%s | reviews=%s | memory_rules=%s", output_path, len(trades), len(reviews), len(memory_rules))
     print(f"Dashboard generated: {output_path}")
     print(summary)
 

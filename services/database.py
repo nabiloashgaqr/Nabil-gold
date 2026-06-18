@@ -222,6 +222,63 @@ class DatabaseService:
         reviews = load_trades(reviews_path)
         return sorted(reviews, key=lambda item: str(item.get("reviewed_at", item.get("created_at", ""))), reverse=True)[:limit]
 
+
+    def save_memory_rule(self, rule: Dict[str, Any]) -> str:
+        """Persist an AI memory rule."""
+        rule_id = str(rule.get("id") or f"MEM_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}")
+        payload = {
+            "id": rule_id,
+            "rule_text": rule.get("rule_text", ""),
+            "category": rule.get("category", "AI_REVIEW_LESSON"),
+            "applies_to": rule.get("applies_to", "BOTH"),
+            "confidence": int(rule.get("confidence", 70) or 70),
+            "source_trade_id": rule.get("source_trade_id"),
+            "source": rule.get("source", "ai_trade_review"),
+            "active": bool(rule.get("active", True)),
+            "times_triggered": int(rule.get("times_triggered", 0) or 0),
+            "metadata": rule.get("metadata", {}),
+            "created_at": rule.get("created_at") or datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            "updated_at": rule.get("updated_at") or datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        }
+
+        if self.use_supabase and self.client:
+            try:
+                self.client.table("ai_memory_rules").upsert(payload).execute()
+                return rule_id
+            except Exception as exc:  # noqa: BLE001
+                self.logger.error("Failed to save AI memory rule in Supabase, falling back local: %s", exc)
+
+        rules_path = self.local_path.parent / "memory_rules.json"
+        rules = load_trades(rules_path)
+        existing = [r for r in rules if str(r.get("id")) != rule_id]
+        existing.append(payload)
+        save_trades(existing, rules_path)
+        return rule_id
+
+    def save_memory_rules(self, rules: List[Dict[str, Any]]) -> List[str]:
+        """Persist multiple memory rules."""
+        return [self.save_memory_rule(rule) for rule in rules]
+
+    def get_active_memory_rules(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Return active AI memory rules ordered by confidence/update time."""
+        rules_path = self.local_path.parent / "memory_rules.json"
+        if self.use_supabase and self.client:
+            try:
+                response = (
+                    self.client.table("ai_memory_rules")
+                    .select("*")
+                    .eq("active", True)
+                    .order("confidence", desc=True)
+                    .order("updated_at", desc=True)
+                    .limit(limit)
+                    .execute()
+                )
+                return list(response.data or [])
+            except Exception as exc:  # noqa: BLE001
+                self.logger.error("Failed to fetch AI memory rules from Supabase: %s", exc)
+        rules = [r for r in load_trades(rules_path) if r.get("active", True)]
+        return sorted(rules, key=lambda r: (float(r.get("confidence", 0) or 0), str(r.get("updated_at", ""))), reverse=True)[:limit]
+
     def get_today_signals_count(self) -> int:
         """Return number of trades created today UTC."""
         return len(self.get_today_trades())

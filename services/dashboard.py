@@ -159,13 +159,33 @@ def _render_reviews(reviews: List[Dict[str, Any]]) -> str:
     return "\n".join(blocks)
 
 
-def render_dashboard(trades: List[Dict[str, Any]], reviews: List[Dict[str, Any]] | None = None) -> str:
+
+
+def _render_memory_rules(rules: List[Dict[str, Any]]) -> str:
+    if not rules:
+        return "<div class='empty-box'>No active memory rules yet.</div>"
+    blocks = []
+    for rule in rules[:16]:
+        blocks.append(
+            f"""
+            <div class="review">
+              <div class="review-head">🧠 {html.escape(str(rule.get('category', 'MEMORY')))} · {html.escape(str(rule.get('applies_to', 'BOTH')))} · {html.escape(str(rule.get('confidence', 0)))}%</div>
+              <div class="review-cause">{html.escape(str(rule.get('rule_text', '')))}</div>
+              <div class="muted">Source trade: <code>{html.escape(str(rule.get('source_trade_id', 'N/A')))}</code></div>
+            </div>
+            """
+        )
+    return "\n".join(blocks)
+
+def render_dashboard(trades: List[Dict[str, Any]], reviews: List[Dict[str, Any]] | None = None, memory_rules: List[Dict[str, Any]] | None = None) -> str:
     reviews = reviews or []
+    memory_rules = memory_rules or []
     summary = summarize_trades(trades)
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     cards = _render_cards(summary)
     rows = _render_trades_table(sorted(trades, key=lambda t: str(t.get("created_at", "")), reverse=True))
     reviews_html = _render_reviews(reviews)
+    memory_rules_html = _render_memory_rules(memory_rules)
     return f"""<!doctype html>
 <html lang="ar" dir="rtl">
 <head>
@@ -210,6 +230,10 @@ def render_dashboard(trades: List[Dict[str, Any]], reviews: List[Dict[str, Any]]
         <thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Entry</th><th>Current</th><th>SL</th><th>TP1</th><th>TP2</th><th>PnL</th><th>Conf</th><th>Mode</th><th>Created</th></tr></thead>
         <tbody>{rows}</tbody>
       </table></div>
+    </div>
+    <div class="panel">
+      <h2>🧠 Active Memory Rules</h2>
+      {memory_rules_html}
     </div>
     <div class="panel">
       <h2>🧠 AI Trade Reviews</h2>
