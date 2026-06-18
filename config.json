@@ -222,5 +222,9 @@
     "aggressive_mode": true,
     "streak_bonus": 0.1,
     "description": "نظام التعلم الذكي لتحديث أوزان الوكلاء"
+  },
+  "notifications": {
+    "send_no_signal_updates": false,
+    "manual_run_status_updates": true
   }
 }
