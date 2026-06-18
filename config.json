@@ -1,0 +1,173 @@
+{
+  "symbol": "XAU/USD",
+  "timeframes": [
+    "5m",
+    "15m",
+    "1H",
+    "4H"
+  ],
+  "primary_timeframe": "15m",
+  "trend_timeframe": "4H",
+  "entry_timeframe": "15m",
+  "data_source": {
+    "primary": "twelve_data",
+    "fallback": "synthetic_demo",
+    "api_keys": {
+      "twelve_data": "ENV:TWELVE_DATA_API_KEY"
+    }
+  },
+  "telegram": {
+    "bot_token": "ENV:TELEGRAM_BOT_TOKEN",
+    "chat_id": "ENV:TELEGRAM_CHAT_ID",
+    "signals_channel": "ENV:TELEGRAM_CHAT_ID"
+  },
+  "database": {
+    "provider": "supabase",
+    "url": "ENV:SUPABASE_URL",
+    "key": "ENV:SUPABASE_KEY",
+    "local_fallback_file": "storage/trades.json"
+  },
+  "agent_weights": {
+    "technical": 0.2,
+    "classical": 0.2,
+    "smc": 0.25,
+    "price_action": 0.15,
+    "multitimeframe": 0.15
+  },
+  "risk_settings": {
+    "min_confidence": 60,
+    "min_rr_ratio": 1.5,
+    "default_risk_percent": 1.0,
+    "atr_multiplier_sl": 1.5,
+    "atr_multiplier_tp1": 2.0,
+    "atr_multiplier_tp2": 3.5,
+    "account_capital": 10000
+  },
+  "signal_requirements": {
+    "min_agents_agree": 3,
+    "min_agreement_percentage": 60,
+    "allow_all_signals": true,
+    "description": "شروط إرسال الإشارة: 3 وكلاء كحد أدنى + 60% توافق"
+  },
+  "schedule": {
+    "analysis_interval_minutes": 15,
+    "trade_update_interval_minutes": 60,
+    "daily_report_time": "23:00",
+    "timezone": "UTC"
+  },
+  "filters": {
+    "no_signal_before_news_minutes": 30,
+    "no_signal_after_news_minutes": 15,
+    "max_spread_points": 5,
+    "min_atr_for_entry": 1.0,
+    "max_consecutive_losses": 3
+  },
+  "trading_hours": {
+    "enabled": true,
+    "timezone": "UTC",
+    "sessions": [
+      {
+        "name": "London-NY Trading",
+        "start_hour": 11,
+        "end_hour": 17,
+        "days": [6, 0, 1, 2, 3],
+        "quality": "HIGH",
+        "description": "جلسة التداول: 11 صباحاً - 6 مساءً UTC (الأحد-الخميس)"
+      }
+    ],
+    "min_quality_required": "HIGH",
+    "allow_friday_after_hours": false,
+    "friday_cutoff_hour": 20,
+    "exclude_weekends": false
+  },
+  "signal_filters": {
+    "require_trading_hours": true,
+    "allow_contrarian_in_low_quality": false,
+    "pause_on_friday_afternoon": false,
+    "friday_pause_after_hour": 18
+  },
+  "github_actions": {
+    "enabled": true,
+    "state_storage": "supabase",
+    "note": "GitHub Actions is stateless; persistent trades must be stored in Supabase."
+  },
+  "trade_management": {
+    "near_tp1_progress": 0.8,
+    "time_warning_hours": 4,
+    "expire_after_hours": 8,
+    "auto_move_sl_to_entry_after_tp1": true,
+    "trailing_stop_enabled": true,
+    "trailing_activation_at": "TP1",
+    "trailing_distance_points": 15,
+    "partial_close_at_tp1": true,
+    "partial_close_percentage": 50
+  },
+  "performance": {
+    "track_win_rate_per_agent": true,
+    "track_session_performance": true,
+    "alert_on_drawdown_percent": 5,
+    "report_interval_days": 7
+  },
+  "trailing_stop": {
+    "enabled": true,
+    "tp1_trigger_pct": 50.0,
+    "partial_close_pct": 50.0,
+    "trailing_distance": 20.0,
+    "trailing_step": 5.0,
+    "tp2_trigger_pct": 100.0,
+    "tp2_distance": 15.0,
+    "min_profit_lock": 0.0
+  },
+  "news_feed": {
+    "enabled": true,
+    "source": "forexfactory",
+    "hours_before": 2,
+    "hours_after": 1,
+    "min_impact": "medium",
+    "auto_block_on_high": true,
+    "gold_currencies": ["USD", "EUR", "GBP", "AUD", "JPY", "CAD", "CHF"]
+  },
+  "ai_service": {
+    "enabled": true,
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "max_tokens": 500,
+    "temperature": 0.3,
+    "api_key": "ENV:OPENAI_API_KEY",
+    "fallback_to_classic": true,
+    "description": "خدمة الذكاء الاصطناعي للتحليل الذكي"
+  },
+  "ai_providers": {
+    "openai": {
+      "models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
+      "default_model": "gpt-4o-mini",
+      "cost_per_1k_tokens": 0.00015
+    },
+    "anthropic": {
+      "models": ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-haiku-20240307"],
+      "default_model": "claude-3-5-sonnet-20241022",
+      "cost_per_1k_tokens": 0.0008
+    },
+    "grok": {
+      "models": ["grok-2", "grok-2-mini", "grok-1"],
+      "default_model": "grok-2-mini",
+      "cost_per_1k_tokens": 0.0005
+    },
+    "gemini": {
+      "models": ["gemini-2.0-flash-exp", "gemini-1.5-pro", "gemini-1.5-flash"],
+      "default_model": "gemini-2.0-flash-exp",
+      "cost_per_1k_tokens": 0.000125
+    }
+  },
+  "learning": {
+    "enabled": true,
+    "update_frequency_days": 1,
+    "min_predictions_for_adjustment": 5,
+    "max_weight_change": 0.15,
+    "momentum_weight": 0.3,
+    "decay_factor": 0.95,
+    "performance_threshold": 0.6,
+    "auto_adjust_confidence": true,
+    "description": "نظام التعلم الذكي لتحديث أوزان الوكلاء"
+  }
+}
