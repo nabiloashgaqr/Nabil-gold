@@ -79,6 +79,26 @@ class TelegramService:
         entry_high = entry.get("high", entry.get("price", 0))
         reasons = decision.get("reasons", [])[:8]
         reasons_text = "\n".join(f"• {html.escape(str(reason))}" for reason in reasons) or "• لا توجد أسباب كافية"
+        ai = decision.get("ai", {}) or {}
+        ai_text = ""
+        if ai.get("available"):
+            quality_notes = ai.get("quality_notes") or []
+            if isinstance(quality_notes, list):
+                quality_notes_text = "\n".join(f"• {html.escape(str(note))}" for note in quality_notes[:3])
+            else:
+                quality_notes_text = f"• {html.escape(str(quality_notes))}" if quality_notes else ""
+            ai_lines = [
+                "🤖 <b>تحليل Groq:</b>",
+                f"├ الاتجاه: {html.escape(str(ai.get('market_bias', 'غير محدد')))}",
+                f"├ سبب الدخول: {html.escape(str(ai.get('entry_reason', ai.get('reasoning', ''))))}",
+                f"├ خطر الاتجاه المعاكس: {html.escape(str(ai.get('opposite_risk', 'غير محدد')))}",
+                f"├ ملاحظات المخاطر: {html.escape(str(ai.get('risk_notes', 'غير محدد')))}",
+                f"└ الخطة: {html.escape(str(ai.get('action_plan', 'غير محدد')))}",
+            ]
+            if quality_notes_text:
+                ai_lines.append("\n<b>نقاط Groq:</b>")
+                ai_lines.append(quality_notes_text)
+            ai_text = "\n".join(ai_lines) + "\n\n"
         trade_id = decision.get("trade_id", signal.get("trade_id", "غير محفوظ بعد"))
         current_price = decision.get("current_price", signal.get("current_price", entry.get("price", 0)))
         quality = decision.get("quality", {}) or {}
@@ -110,7 +130,7 @@ class TelegramService:
 📊 <b>R:R =</b> 1:{float(signal.get('rr_ratio', 0)):.2f}
 🔒 <b>الثقة:</b> {int(decision.get('confidence', 0))}%
 {quality_line}
-📋 <b>أسباب الإشارة:</b>
+{ai_text}📋 <b>أسباب الإشارة:</b>
 {reasons_text}
 
 ⚠️ <b>تحذير:</b> هذه الإشارة تعليمية/تجريبية وليست توصية مالية.

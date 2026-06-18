@@ -99,7 +99,7 @@ class DecisionAgent(BaseAgent):
         """
         
         agents_results = data.get('all_agents_results', data)
-        price_data = data.get('price_data', {})
+        price_data = data.get('price_data') or data
         indicators = data.get('indicators', {})
         session_info = data.get('session', data.get('session_info', {}))
         
@@ -139,7 +139,7 @@ class DecisionAgent(BaseAgent):
         """
         
         agents_results = data.get('all_agents_results', data)
-        price_data = data.get('price_data', {})
+        price_data = data.get('price_data') or data
         indicators = data.get('indicators', {})
         session_info = data.get('session', data.get('session_info', {}))
         
@@ -335,23 +335,33 @@ class DecisionAgent(BaseAgent):
 - الجودة: {session_quality}
 - مسموح بالتداول: {trading_allowed}
 
-أجب بصيغة JSON:
+أجب بصيغة JSON فقط وبدون Markdown:
 {{
     "final_signal": "BUY" أو "SELL" أو "WAIT",
     "confidence": 0-100,
     "consensus_strength": "Strong" أو "Moderate" أو "Weak",
-    "reasoning": "سبب القرار",
-    "risk_reward": "نسبة المخاطرة/العائد"
+    "reasoning": "سبب القرار المختصر",
+    "risk_reward": "نسبة المخاطرة/العائد",
+    "market_bias": "Bullish أو Bearish أو Neutral مع سبب قصير",
+    "entry_reason": "لماذا الدخول مناسب أو غير مناسب الآن",
+    "opposite_risk": "لماذا لا نأخذ الاتجاه المعاكس",
+    "risk_notes": "أهم مخاطر الصفقة",
+    "action_plan": "خطة التعامل: دخول/انتظار/إلغاء",
+    "quality_notes": ["نقطة قوة 1", "نقطة ضعف أو تحذير 1"]
 }}
 """
-            
-            response = await self.ai_service.analyze_chart(
-                symbol=price_data.get('symbol', 'XAUUSD'),
-                price_data=price_data,
-                technical_indicators=indicators,
-                timeframe=price_data.get('timeframe', '1h'),
-                agent_type='decision'
-            )
+
+            # استخدم prompt القرار المخصص الذي يحتوي أصوات الوكلاء، بدلاً من prompt عام.
+            if hasattr(self.ai_service, '_call_ai'):
+                response = await self.ai_service._call_ai(prompt, 'decision')
+            else:
+                response = await self.ai_service.analyze_chart(
+                    symbol=price_data.get('symbol', 'XAUUSD'),
+                    price_data=price_data,
+                    technical_indicators=indicators,
+                    timeframe=price_data.get('timeframe', '1h'),
+                    agent_type='decision'
+                )
             
             if response.success:
                 parsed = self.ai_service.parse_json_response(response.content)
@@ -359,12 +369,19 @@ class DecisionAgent(BaseAgent):
                 if parsed:
                     return {
                         'available': True,
-                        'signal': parsed.get('final_signal', 'WAIT'),
+                        'signal': parsed.get('final_signal', parsed.get('signal', 'WAIT')),
                         'confidence': parsed.get('confidence', 50),
                         'consensus_strength': parsed.get('consensus_strength', 'Unknown'),
                         'reasoning': parsed.get('reasoning', ''),
                         'risk_reward': parsed.get('risk_reward', ''),
+                        'market_bias': parsed.get('market_bias', ''),
+                        'entry_reason': parsed.get('entry_reason', ''),
+                        'opposite_risk': parsed.get('opposite_risk', ''),
+                        'risk_notes': parsed.get('risk_notes', ''),
+                        'action_plan': parsed.get('action_plan', ''),
+                        'quality_notes': parsed.get('quality_notes', []),
                         'provider': response.provider,
+                        'model': getattr(response, 'model', ''),
                         'tokens_used': response.tokens_used,
                         'cost': response.cost
                     }
