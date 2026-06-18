@@ -106,6 +106,7 @@ class DecisionAgent(BaseAgent):
         memory_rules = agents_results.get('memory_rules', []) if isinstance(agents_results, dict) else []
         daily_bias = agents_results.get('daily_bias', {}) if isinstance(agents_results, dict) else {}
         news_ai = agents_results.get('news_ai', {}) if isinstance(agents_results, dict) else {}
+        dynamic_risk = agents_results.get('dynamic_risk', {}) if isinstance(agents_results, dict) else {}
         
         # 1️⃣ تجميع أصوات الوكلاء (مع weights متعلمة)
         votes = self._collect_votes(agents_results)
@@ -158,7 +159,7 @@ class DecisionAgent(BaseAgent):
         ai_decision = {}
         if self.ai_service:
             ai_decision = await self._ai_decision(
-                votes, price_data, indicators, session_info, memory_rules, daily_bias, news_ai
+                votes, price_data, indicators, session_info, memory_rules, daily_bias, news_ai, dynamic_risk
             )
         
         # 4️⃣ القرار النهائي
@@ -300,7 +301,8 @@ class DecisionAgent(BaseAgent):
         session_info: Dict,
         memory_rules: List[Dict] | None = None,
         daily_bias: Dict | None = None,
-        news_ai: Dict | None = None
+        news_ai: Dict | None = None,
+        dynamic_risk: Dict | None = None
     ) -> Dict:
         """
         🤖 القرار بالذكاء الاصطناعي
@@ -348,6 +350,9 @@ Daily Bias / الاتجاه الأعلى:
 
 تفسير Groq للأخبار:
 {news_ai or {}}
+
+Dynamic Risk Management / قيود المخاطرة الديناميكية:
+{dynamic_risk or {}}
 
 قواعد الذاكرة من أخطاء سابقة (التزم بها قدر الإمكان، وإذا خالفتها اجعل القرار WAIT أو اخفض الثقة):
 {format_memory_rules_for_prompt(memory_rules or [])}
@@ -757,6 +762,7 @@ Daily Bias / الاتجاه الأعلى:
             'news': context.get('news', {}),
             'news_ai': context.get('news_ai', {}),
             'daily_bias': context.get('daily_bias', {}),
+            'dynamic_risk': context.get('dynamic_risk', {}),
             'summary': analysis.get('reasoning', ''),
             'timestamp': analysis.get('timestamp', self.now_iso()),
         }

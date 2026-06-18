@@ -120,6 +120,14 @@ class TelegramService:
                 f"{html.escape(str(news_ai.get('allowed_direction', 'BOTH')))} | "
                 f"{html.escape(str(news_ai.get('gold_bias', 'NEUTRAL')))}\n"
             )
+        dynamic_risk = decision.get("dynamic_risk", {}) or {}
+        dynamic_risk_line = ""
+        if dynamic_risk:
+            dynamic_risk_line = (
+                f"🛡️ <b>Dynamic Risk:</b> {html.escape(str(dynamic_risk.get('level', 'NORMAL')))} | "
+                f"min conf {html.escape(str(dynamic_risk.get('min_confidence_required', '')))}% | "
+                f"quality {html.escape(str(dynamic_risk.get('min_quality_score', '')))}%\n"
+            )
 
         # Session info
         session_info = decision.get("session_info", {})
@@ -144,7 +152,7 @@ class TelegramService:
 🎯 <b>الهدف الثاني:</b> {format_price(signal.get('tp2'))}
 📊 <b>R:R =</b> 1:{float(signal.get('rr_ratio', 0)):.2f}
 🔒 <b>الثقة:</b> {int(decision.get('confidence', 0))}%
-{quality_line}{bias_line}{news_ai_line}
+{quality_line}{bias_line}{news_ai_line}{dynamic_risk_line}
 {ai_text}📋 <b>أسباب الإشارة:</b>
 {reasons_text}
 

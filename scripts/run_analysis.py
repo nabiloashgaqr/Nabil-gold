@@ -26,6 +26,7 @@ from agents.smc_agent import SMCAgent
 from agents.technical_agent import TechnicalAgent
 from agents.trading_session_agent import TradingSessionAgent
 from services.database import DatabaseService
+from services.dynamic_risk import DynamicRiskManager, should_block_signal
 from services.market_data import MarketDataService
 from services.news_interpreter import NewsInterpreter
 from services.telegram_bot import TelegramService
@@ -243,6 +244,7 @@ async def run_analysis_async() -> None:
             )
             all_results["news"]["ai_interpretation"] = all_results["news_ai"]
         all_results["risk"] = RiskManagementAgent(config).evaluate(all_results)
+        all_results["dynamic_risk"] = DynamicRiskManager(config).evaluate(database)
         all_results["memory_rules"] = database.get_active_memory_rules(
             limit=int(config.get("ai_memory_rules", {}).get("max_active_rules_in_prompt", 8))
         )
@@ -253,11 +255,13 @@ async def run_analysis_async() -> None:
 
         decision = await DecisionAgent(config, ai_service).decide_async(all_results)
 
+        decision["dynamic_risk"] = all_results.get("dynamic_risk", {})
         logger.info(
-            "القرار: %s - الثقة: %s%% - %s",
+            "القرار: %s - الثقة: %s%% - %s | DynamicRisk=%s",
             decision.get("decision"),
             decision.get("confidence"),
             decision.get("summary"),
+            decision.get("dynamic_risk", {}).get("summary"),
         )
 
         # ── إضافة وضع التداول الحالي للقرار ──
@@ -291,6 +295,20 @@ async def run_analysis_async() -> None:
                 logger.info("تم الوصول للحد الأقصى للصفقات المفتوحة: %s", max_open)
                 if should_send_status(config):
                     telegram.send_message(f"🟡 لا توجد إشارة: تم الوصول للحد الأقصى للصفقات المفتوحة ({max_open}).")
+                return
+
+            dynamic_block_reason = should_block_signal(decision, all_results.get("dynamic_risk", {}))
+            if dynamic_block_reason:
+                logger.info("تم منع الإشارة بسبب Dynamic Risk: %s", dynamic_block_reason)
+                if should_send_status(config):
+                    telegram.send_message(
+                        "🟡 <b>تم منع الإشارة بواسطة Dynamic Risk</b>\n"
+                        "━━━━━━━━━━━━━━━━━━━━\n"
+                        f"القرار: {decision.get('decision')}\n"
+                        f"السبب: {dynamic_block_reason}\n"
+                        f"الحالة: {all_results.get('dynamic_risk', {}).get('level')}\n"
+                        "━━━━━━━━━━━━━━━━━━━━"
+                    )
                 return
 
             duplicate_reason = duplicate_signal_reason(decision, database, config)

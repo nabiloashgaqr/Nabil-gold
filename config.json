@@ -288,5 +288,21 @@
     "block_on_extreme": true,
     "respect_allowed_direction": true,
     "description": "Groq يفسر الأخبار ويحدد هل نمنع التداول أو نسمح باتجاه معين فقط"
+  },
+  "dynamic_risk_management": {
+    "enabled": true,
+    "warn_after_losses": 2,
+    "halt_after_losses": 3,
+    "daily_loss_limit_points": 30,
+    "recent_trades_limit": 20,
+    "recent_losses_caution": 2,
+    "normal_min_quality_score": 0,
+    "caution_min_confidence": 75,
+    "strict_min_confidence": 82,
+    "caution_min_quality_score": 70,
+    "strict_min_quality_score": 80,
+    "caution_risk_multiplier": 0.75,
+    "strict_risk_multiplier": 0.5,
+    "description": "يرفع شروط الثقة والجودة أو يوقف التداول بعد خسائر متتالية/خسارة يومية"
   }
 }

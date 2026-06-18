@@ -411,6 +411,41 @@ Groq لا يكتفي بقراءة وجود الأخبار، بل يفسر تأث
 
 ---
 
+### 18. 🛡️ Dynamic Risk Management
+
+إدارة مخاطرة ديناميكية ترفع شروط الإشارة أو توقف التداول مؤقتًا عند تدهور الأداء.
+
+تعمل حسب:
+
+- عدد الخسائر المتتالية
+- خسارة اليوم بالنقاط
+- أداء آخر الصفقات
+- جودة الإشارة
+- ثقة القرار
+
+مثال:
+
+```text
+بعد خسارتين متتاليتين → وضع STRICT
+مطلوب ثقة أعلى وجودة أعلى
+بعد 3 خسائر → HALT مؤقت
+```
+
+الإعدادات الأساسية:
+
+```json
+"dynamic_risk_management": {
+  "enabled": true,
+  "warn_after_losses": 2,
+  "halt_after_losses": 3,
+  "daily_loss_limit_points": 30,
+  "strict_min_confidence": 82,
+  "strict_min_quality_score": 80
+}
+```
+
+---
+
 ## ⏰ أوقات التشغيل الحالية
 
 تم ضبط النظام للتجربة حسب توقيت:
@@ -617,23 +652,13 @@ python -m pytest -q
 - HTML Dashboard
 - Daily Bias Filter
 - AI News Interpretation
+- Dynamic Risk Management
 
 ---
 
 ## 🧭 ما تبقى من المقترحات القادمة
 
-### 1. Dynamic Risk Management
-
-تعديل المخاطرة حسب الأداء:
-
-- بعد خسارتين: تقليل المخاطرة
-- بعد 3 خسائر: إيقاف مؤقت
-- بعد سلسلة أرباح: رفع تدريجي محدود
-- عند Drawdown: إيقاف التداول
-
----
-
-### 2. Weekly AI Performance Report
+## 2. Weekly AI Performance Report
 
 تقرير أسبوعي يكتبه Groq يوضح:
 
@@ -645,7 +670,7 @@ python -m pytest -q
 
 ---
 
-### 3. Telegram Commands
+### 2. Telegram Commands
 
 أوامر مثل:
 
@@ -663,7 +688,7 @@ python -m pytest -q
 
 ---
 
-### 4. GitHub Pages Dashboard
+### 3. GitHub Pages Dashboard
 
 تحويل Dashboard من Artifact إلى رابط دائم مثل:
 
@@ -673,7 +698,7 @@ https://nabiloashgaqr.github.io/Nabil-gold/dashboard.html
 
 ---
 
-### 5. Backtest متقدم بـ Groq اختياريًا
+### 4. Backtest متقدم بـ Groq اختياريًا
 
 تشغيل Groq على عدد محدود من نقاط الاختبار فقط لتحليل جودة قراراته تاريخيًا بدون استهلاك كبير.
 
@@ -681,13 +706,13 @@ https://nabiloashgaqr.github.io/Nabil-gold/dashboard.html
 
 ## 📌 أفضل خطوة تالية مقترحة
 
-بعد إضافة Daily Bias وAI News Interpretation، أفضل خطوة تالية هي:
+بعد إضافة Dynamic Risk Management، أفضل خطوة تالية هي:
 
 ```text
-Dynamic Risk Management
+Weekly AI Performance Report
 ```
 
-لأنه يحمي النظام من سلاسل الخسائر ويرفع/يخفض المخاطرة حسب الأداء.
+لأنه يلخص أداء الأسبوع ويعطي توصيات استراتيجية لتحسين النظام.
 
 ---
 
