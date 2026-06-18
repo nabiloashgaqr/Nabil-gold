@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict
 
 # إضافة المسار الرئيسي للمشروع
@@ -45,6 +45,90 @@ def should_send_status(config: Dict[str, Any]) -> bool:
         return True
     return bool(config.get("notifications", {}).get("send_no_signal_updates", False))
 
+
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    """Parse common ISO timestamps safely as UTC-aware datetimes."""
+    if not value:
+        return None
+    try:
+        text = str(value).replace('Z', '+00:00')
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _trade_direction(trade: Dict[str, Any]) -> str:
+    return str(trade.get('type') or trade.get('trade_type') or trade.get('decision') or '').upper()
+
+
+def _trade_entry_price(trade: Dict[str, Any]) -> float | None:
+    for key in ('entry_price', 'current_price'):
+        value = trade.get(key)
+        try:
+            if value is not None:
+                return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService, config: Dict[str, Any]) -> str | None:
+    """Return a reason if this signal is a duplicate of an open/recent similar signal."""
+    filt = config.get('duplicate_signal_filter', {}) or {}
+    if not filt.get('enabled', True):
+        return None
+
+    direction = str(decision.get('decision', '')).upper()
+    if direction not in {'BUY', 'SELL'}:
+        return None
+
+    signal = decision.get('signal', {}) or {}
+    entry = signal.get('entry', {}) or {}
+    try:
+        entry_price = float(entry.get('price') or decision.get('current_price') or 0)
+    except (TypeError, ValueError):
+        entry_price = 0.0
+
+    risk = decision.get('risk', {}) or {}
+    try:
+        atr = float((risk.get('risk_metrics', {}) or {}).get('atr') or 0)
+    except (TypeError, ValueError):
+        atr = 0.0
+
+    tolerance_points = float(filt.get('price_tolerance_points', 3.0) or 3.0)
+    tolerance_atr = float(filt.get('price_tolerance_atr_multiplier', 0.75) or 0.75)
+    tolerance = max(tolerance_points, atr * tolerance_atr)
+    now = datetime.now(timezone.utc)
+
+    open_trades = database.get_open_trades()
+    if filt.get('block_if_open_same_direction', True):
+        for trade in open_trades:
+            if _trade_direction(trade) == direction:
+                return f"توجد صفقة {direction} مفتوحة بالفعل: {trade.get('id', 'unknown')}"
+
+    lookback_minutes = int(filt.get('lookback_minutes', 90) or 90)
+    cutoff = now - timedelta(minutes=lookback_minutes)
+    for trade in database.get_recent_trades(limit=30):
+        if _trade_direction(trade) != direction:
+            continue
+        created = _parse_datetime(trade.get('created_at') or trade.get('entry_time') or trade.get('opened_at'))
+        if created and created < cutoff:
+            continue
+        previous_entry = _trade_entry_price(trade)
+        if previous_entry is None or entry_price <= 0:
+            return f"إشارة {direction} مشابهة أرسلت خلال آخر {lookback_minutes} دقيقة: {trade.get('id', 'unknown')}"
+        if abs(entry_price - previous_entry) <= tolerance:
+            return (
+                f"إشارة مكررة {direction}: السعر قريب من إشارة حديثة "
+                f"({previous_entry:.2f} vs {entry_price:.2f}, tolerance={tolerance:.2f})"
+            )
+
+    return None
 
 def run_agent(agent_name: str, agent: Any, data: Dict[str, Any]) -> Dict[str, Any]:
     """Run one agent safely so one failure does not stop the workflow."""
@@ -176,6 +260,19 @@ async def run_analysis_async() -> None:
                 logger.info("تم الوصول للحد الأقصى للصفقات المفتوحة: %s", max_open)
                 if should_send_status(config):
                     telegram.send_message(f"🟡 لا توجد إشارة: تم الوصول للحد الأقصى للصفقات المفتوحة ({max_open}).")
+                return
+
+            duplicate_reason = duplicate_signal_reason(decision, database, config)
+            if duplicate_reason:
+                logger.info("تم منع إشارة مكررة: %s", duplicate_reason)
+                if should_send_status(config):
+                    telegram.send_message(
+                        "🟡 <b>تم منع إشارة مكررة</b>\n"
+                        "━━━━━━━━━━━━━━━━━━━━\n"
+                        f"القرار: {decision.get('decision')}\n"
+                        f"السبب: {duplicate_reason}\n"
+                        "━━━━━━━━━━━━━━━━━━━━"
+                    )
                 return
 
             trade_id = database.save_trade(decision)

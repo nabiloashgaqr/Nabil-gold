@@ -235,5 +235,17 @@
   "notifications": {
     "send_no_signal_updates": false,
     "manual_run_status_updates": true
+  },
+  "duplicate_signal_filter": {
+    "enabled": true,
+    "lookback_minutes": 90,
+    "price_tolerance_points": 3.0,
+    "price_tolerance_atr_multiplier": 0.75,
+    "block_if_open_same_direction": true,
+    "description": "يمنع تكرار نفس الإشارة إذا كانت صفقة مشابهة مفتوحة أو أرسلت حديثاً"
+  },
+  "quality_score": {
+    "enabled": true,
+    "description": "يعرض درجة جودة الإشارة في Telegram ولا يمنع الإشارة حالياً"
   }
 }

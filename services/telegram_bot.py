@@ -81,6 +81,10 @@ class TelegramService:
         reasons_text = "\n".join(f"• {html.escape(str(reason))}" for reason in reasons) or "• لا توجد أسباب كافية"
         trade_id = decision.get("trade_id", signal.get("trade_id", "غير محفوظ بعد"))
         current_price = decision.get("current_price", signal.get("current_price", entry.get("price", 0)))
+        quality = decision.get("quality", {}) or {}
+        quality_line = ""
+        if quality:
+            quality_line = f"⭐ <b>جودة الإشارة:</b> {html.escape(str(quality.get('grade', 'N/A')))} / {float(quality.get('score', 0)):.1f}% ({html.escape(str(quality.get('label', '')))} )\n"
 
         # Session info
         session_info = decision.get("session_info", {})
@@ -105,7 +109,7 @@ class TelegramService:
 🎯 <b>الهدف الثاني:</b> {format_price(signal.get('tp2'))}
 📊 <b>R:R =</b> 1:{float(signal.get('rr_ratio', 0)):.2f}
 🔒 <b>الثقة:</b> {int(decision.get('confidence', 0))}%
-
+{quality_line}
 📋 <b>أسباب الإشارة:</b>
 {reasons_text}
 

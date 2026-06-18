@@ -572,6 +572,75 @@ class DecisionAgent(BaseAgent):
         result['warnings'] = warnings
         return result
 
+
+    def _calculate_quality_score(self, analysis: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        """Calculate a human-friendly signal quality score (0-100 + grade)."""
+        confidence = float(analysis.get('confidence') or 0)
+        risk = context.get('risk', {}) or {}
+        news = context.get('news', {}) or {}
+        session = context.get('session', {}) or {}
+        classic = analysis.get('classic', {}) or {}
+        signal = str(analysis.get('signal', 'WAIT')).upper()
+
+        tp = risk.get('take_profit', {}) or {}
+        tp2 = tp.get('tp2', {}) or {}
+        rr = float(tp2.get('rr_ratio') or 0)
+
+        agreement = 0.0
+        if signal == 'BUY':
+            agreement = float(classic.get('buy_agreement_pct') or 0)
+        elif signal == 'SELL':
+            agreement = float(classic.get('sell_agreement_pct') or 0)
+        else:
+            agreement = max(float(classic.get('buy_agreement_pct') or 0), float(classic.get('sell_agreement_pct') or 0))
+
+        components: Dict[str, float] = {}
+        components['confidence'] = min(confidence, 100) * 0.30
+        components['agreement'] = min(agreement, 100) * 0.20
+        components['risk_reward'] = min(max((rr / 3.0) * 20.0, 0), 20.0)
+        components['risk_approved'] = 10.0 if risk.get('approved') else 0.0
+
+        news_status = str(news.get('market_status', 'SAFE')).upper()
+        if news_status == 'SAFE' and news.get('can_trade', True):
+            components['news'] = 10.0
+        elif news_status in {'CAUTION', 'HIGH_VOLATILITY'} and news.get('can_trade', True):
+            components['news'] = 5.0
+        else:
+            components['news'] = 0.0
+
+        session_quality = str(session.get('session_quality', session.get('quality', 'LOW'))).upper()
+        session_points = {'BEST': 10.0, 'HIGH': 9.0, 'MEDIUM': 6.0, 'LOW': 3.0}.get(session_quality, 0.0)
+        components['session'] = session_points if session.get('trading_allowed', True) else 0.0
+
+        penalty = min(len(analysis.get('warnings', []) or []) * 4.0, 12.0)
+        raw_score = max(0.0, min(100.0, sum(components.values()) - penalty))
+
+        if raw_score >= 90:
+            grade = 'A+'
+            label = 'Elite'
+        elif raw_score >= 80:
+            grade = 'A'
+            label = 'Strong'
+        elif raw_score >= 70:
+            grade = 'B'
+            label = 'Good'
+        elif raw_score >= 60:
+            grade = 'C'
+            label = 'Acceptable'
+        else:
+            grade = 'D'
+            label = 'Weak'
+
+        return {
+            'score': round(raw_score, 1),
+            'grade': grade,
+            'label': label,
+            'components': {k: round(v, 1) for k, v in components.items()},
+            'penalty': round(penalty, 1),
+            'rr_ratio': round(rr, 2),
+            'agreement_pct': round(agreement, 1),
+        }
+
     def _to_trade_decision(self, analysis: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
         """Convert analysis output to the canonical payload expected by DB/Telegram."""
         final_signal = str(analysis.get('signal', 'WAIT')).upper()
@@ -608,10 +677,13 @@ class DecisionAgent(BaseAgent):
         for warning in analysis.get('warnings', []) or []:
             reasons.append(warning)
 
+        quality = self._calculate_quality_score(analysis, context)
+
         return {
             'decision': final_signal,
             'signal': signal_payload,
             'confidence': analysis.get('confidence', 0),
+            'quality': quality,
             'current_price': current_price,
             'reasons': [r for r in reasons if r],
             'warnings': analysis.get('warnings', []),
