@@ -1,34 +1,41 @@
-name: Update Open Trades
-
+name: 🔄 Update Open Trades
 on:
   schedule:
-    # يعمل كل ساعة لتحديث الصفقات المفتوحة. قابل للتخصيص من config.json
-    - cron: '0 * * * *'
+    - cron: "0 11-17 * * 0,1,2,3,4"  # كل ساعة، 11-17 UTC، الأحد-الخميس
   workflow_dispatch:
 
 jobs:
-  update:
+  update-trades:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
+    timeout-minutes: 20
+    
     steps:
-      - name: Checkout repository
+      - name: 📥 Checkout
         uses: actions/checkout@v4
-
-      - name: Setup Python
+      
+      - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Update trades
+      
+      - name: 📦 Install Dependencies
+        run: |
+          pip install -r requirements.txt
+      
+      - name: 🔄 Update Trades
+        run: |
+          python scripts/run_trade_updates.py
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: python scripts/run_trade_updates.py
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+      
+      - name: ✅ Success Log
+        if: always()
+        run: |
+          echo "Trade update completed at $(date)"
