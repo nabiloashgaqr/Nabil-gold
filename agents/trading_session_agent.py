@@ -1,9 +1,13 @@
-"""Trading Session Agent.
+"""Trading Session Agent v2.0.
 
 يتحقق من ساعات التداول المسموحة ويمنع الإشارات خارج ساعات العمل.
-يدعم جلسات متعددة (لندن، نيويورك، الخ) مع تقييم جودة كل جلسة.
+يدعم جلسات متعددة مع allow_signals و allow_reports.
 
 days في config.json: 0=Sunday, 1=Monday, ..., 6=Saturday (مثل Python weekday())
+
+الSessions:
+- Trading Session (11-17): allow_signals=true, allow_reports=false
+- Report Session (22-23): allow_signals=false, allow_reports=true
 """
 
 from __future__ import annotations
@@ -39,6 +43,8 @@ class TradingSessionAgent(BaseAgent):
                     current_session=None,
                     session_quality="UNKNOWN",
                     trading_allowed=True,
+                    allow_signals=True,
+                    allow_reports=True,
                 )
 
             # Check Friday after-hours (before session check)
@@ -73,7 +79,11 @@ class TradingSessionAgent(BaseAgent):
 
             session_name = active_session.get("name", "Unknown")
             session_quality = active_session.get("quality", "UNKNOWN")
-
+            
+            # 🚀 الحصول على allow_signals و allow_reports
+            allow_signals = active_session.get("allow_signals", True)
+            allow_reports = active_session.get("allow_reports", False)
+            
             # Check minimum quality requirement
             min_quality = self.hours_config.get("min_quality_required", "HIGH")
             if self._quality_order(session_quality) > self._quality_order(min_quality):
@@ -81,6 +91,8 @@ class TradingSessionAgent(BaseAgent):
                     reason=f"Session quality ({session_quality}) below minimum ({min_quality})",
                     current_session=session_name,
                     session_quality=session_quality,
+                    allow_signals=allow_signals,
+                    allow_reports=allow_reports,
                 )
 
             return self._allowed(
@@ -88,9 +100,13 @@ class TradingSessionAgent(BaseAgent):
                 current_session=session_name,
                 session_quality=session_quality,
                 trading_allowed=True,
+                allow_signals=allow_signals,
+                allow_reports=allow_reports,
                 session_details={
                     "name": session_name,
                     "quality": session_quality,
+                    "allow_signals": allow_signals,
+                    "allow_reports": allow_reports,
                     "description": active_session.get("description", ""),
                     "hours": f"{active_session.get('start_hour')}:00 - {active_session.get('end_hour')}:00 UTC",
                     "days": active_session.get("days", []),
@@ -104,6 +120,8 @@ class TradingSessionAgent(BaseAgent):
                 current_session=None,
                 session_quality="UNKNOWN",
                 trading_allowed=True,
+                allow_signals=True,
+                allow_reports=True,
             )
 
     def _find_active_session(self, now: datetime) -> Dict[str, Any] | None:
@@ -171,6 +189,8 @@ class TradingSessionAgent(BaseAgent):
         current_session: str | None,
         session_quality: str,
         trading_allowed: bool = True,
+        allow_signals: bool = True,
+        allow_reports: bool = False,
         session_details: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         return {
@@ -179,9 +199,11 @@ class TradingSessionAgent(BaseAgent):
             "reason": reason,
             "current_session": current_session,
             "session_quality": session_quality,
+            "allow_signals": allow_signals,
+            "allow_reports": allow_reports,
             "session_details": session_details,
             "is_trading_hours": trading_allowed,
-            "summary": f"{'✅' if trading_allowed else '🚫'} الجلسة: {current_session or 'غير محدد'} | الجودة: {session_quality} | {reason}",
+            "summary": f"{'✅' if allow_signals else '🚫'} الجلسة: {current_session or 'غير محدد'} | الجودة: {session_quality} | {reason}",
         }
 
     def _blocked(
@@ -189,6 +211,8 @@ class TradingSessionAgent(BaseAgent):
         reason: str,
         current_session: str | None,
         session_quality: str,
+        allow_signals: bool = False,
+        allow_reports: bool = False,
         next_session: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         return {
@@ -197,6 +221,8 @@ class TradingSessionAgent(BaseAgent):
             "reason": reason,
             "current_session": current_session,
             "session_quality": session_quality,
+            "allow_signals": allow_signals,
+            "allow_reports": allow_reports,
             "session_details": None,
             "is_trading_hours": False,
             "next_session": next_session,
