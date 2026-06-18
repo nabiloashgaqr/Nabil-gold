@@ -1,35 +1,42 @@
-name: Gold Analysis Bot
-
+name: 📊 Gold Analysis Bot
 on:
   schedule:
-    # يعمل كل 15 دقيقة خلال ساعات التداول.
-    # الوكيل يتحقق من الجلسة ويخرج إذا كان خارج ساعات العمل.
-    - cron: '*/15 * * * *'
+    - cron: "*/15 11-17 * * 0,1,2,3,4"  # كل 15 دقيقة، 11-17 UTC، الأحد-الخميس
   workflow_dispatch:
 
 jobs:
   analyze:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
+    timeout-minutes: 15
+    
     steps:
-      - name: Checkout repository
+      - name: 📥 Checkout
         uses: actions/checkout@v4
-
-      - name: Setup Python
+      
+      - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Run analysis
+      
+      - name: 📦 Install Dependencies
+        run: |
+          pip install -r requirements.txt
+      
+      - name: 🔍 Run Analysis
+        run: |
+          python scripts/run_analysis.py
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: python scripts/run_analysis.py
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+      
+      - name: ✅ Success Log
+        if: always()
+        run: |
+          echo "Analysis completed at $(date)"
