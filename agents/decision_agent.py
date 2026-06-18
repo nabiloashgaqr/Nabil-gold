@@ -104,6 +104,8 @@ class DecisionAgent(BaseAgent):
         indicators = data.get('indicators', {})
         session_info = data.get('session', data.get('session_info', {}))
         memory_rules = agents_results.get('memory_rules', []) if isinstance(agents_results, dict) else []
+        daily_bias = agents_results.get('daily_bias', {}) if isinstance(agents_results, dict) else {}
+        news_ai = agents_results.get('news_ai', {}) if isinstance(agents_results, dict) else {}
         
         # 1️⃣ تجميع أصوات الوكلاء (مع weights متعلمة)
         votes = self._collect_votes(agents_results)
@@ -156,7 +158,7 @@ class DecisionAgent(BaseAgent):
         ai_decision = {}
         if self.ai_service:
             ai_decision = await self._ai_decision(
-                votes, price_data, indicators, session_info, memory_rules
+                votes, price_data, indicators, session_info, memory_rules, daily_bias, news_ai
             )
         
         # 4️⃣ القرار النهائي
@@ -296,7 +298,9 @@ class DecisionAgent(BaseAgent):
         price_data: Dict,
         indicators: Dict,
         session_info: Dict,
-        memory_rules: List[Dict] | None = None
+        memory_rules: List[Dict] | None = None,
+        daily_bias: Dict | None = None,
+        news_ai: Dict | None = None
     ) -> Dict:
         """
         🤖 القرار بالذكاء الاصطناعي
@@ -338,6 +342,12 @@ class DecisionAgent(BaseAgent):
 معلومات الجلسة:
 - الجودة: {session_quality}
 - مسموح بالتداول: {trading_allowed}
+
+Daily Bias / الاتجاه الأعلى:
+{daily_bias or {}}
+
+تفسير Groq للأخبار:
+{news_ai or {}}
 
 قواعد الذاكرة من أخطاء سابقة (التزم بها قدر الإمكان، وإذا خالفتها اجعل القرار WAIT أو اخفض الثقة):
 {format_memory_rules_for_prompt(memory_rules or [])}
@@ -581,6 +591,31 @@ class DecisionAgent(BaseAgent):
             warnings.append(f"News blocked: {news.get('summary', news.get('market_status', 'DANGER'))}")
             signal = 'WAIT'
 
+        news_ai = agents_results.get('news_ai', {}) or news.get('ai_interpretation', {}) or {}
+        if news_ai and news_ai.get('available'):
+            risk_level = str(news_ai.get('risk_level', '')).upper()
+            allowed_direction = str(news_ai.get('allowed_direction', 'BOTH')).upper()
+            block_trading = bool(news_ai.get('block_trading', False))
+            if block_trading or allowed_direction == 'NONE' or risk_level == 'EXTREME':
+                warnings.append(f"AI News blocked trading: {news_ai.get('reasoning', risk_level)}")
+                signal = 'WAIT'
+            elif signal in {'BUY', 'SELL'} and allowed_direction in {'BUY', 'SELL'} and signal != allowed_direction:
+                warnings.append(f"AI News allows only {allowed_direction}: {news_ai.get('reasoning', '')}")
+                signal = 'WAIT'
+
+        daily_bias = agents_results.get('daily_bias', {}) or {}
+        if signal in {'BUY', 'SELL'} and daily_bias.get('enabled', True):
+            bias = str(daily_bias.get('bias', 'NEUTRAL')).upper()
+            bias_conf = float(daily_bias.get('confidence') or 0)
+            db_settings = self.config.get('daily_bias_filter', {}) or {}
+            contrarian_min = float(db_settings.get('contrarian_min_confidence', 80) or 80)
+            is_contrarian = (bias == 'BULLISH' and signal == 'SELL') or (bias == 'BEARISH' and signal == 'BUY')
+            if is_contrarian and float(result.get('confidence') or 0) < contrarian_min:
+                warnings.append(
+                    f"Daily Bias يمنع صفقة عكس الاتجاه: bias={bias} ({bias_conf}%), signal={signal}, required_conf={contrarian_min}%"
+                )
+                signal = 'WAIT'
+
         risk = agents_results.get('risk', {}) or {}
         if signal in {'BUY', 'SELL'} and risk and not risk.get('approved', False):
             warnings.append(f"Risk rejected: {risk.get('rejection_reason', 'not approved')}")
@@ -720,6 +755,8 @@ class DecisionAgent(BaseAgent):
             'risk_assessment': analysis.get('risk_assessment', {}),
             'session_info': context.get('session', {}),
             'news': context.get('news', {}),
+            'news_ai': context.get('news_ai', {}),
+            'daily_bias': context.get('daily_bias', {}),
             'summary': analysis.get('reasoning', ''),
             'timestamp': analysis.get('timestamp', self.now_iso()),
         }

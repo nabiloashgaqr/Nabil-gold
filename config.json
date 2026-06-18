@@ -270,5 +270,23 @@
     "min_confidence_to_apply": 60,
     "advisory_mode": true,
     "description": "قواعد ذاكرة مستخرجة من مراجعات Groq للخسائر وتضاف إلى Prompt القرار القادم"
+  },
+  "daily_bias_filter": {
+    "enabled": true,
+    "timeframe": "4H",
+    "ema_fast": 20,
+    "ema_slow": 50,
+    "rsi_period": 14,
+    "slope_lookback": 12,
+    "score_threshold": 1.25,
+    "contrarian_min_confidence": 80,
+    "block_strong_contrarian_below": 80,
+    "description": "فلتر اتجاه أعلى: يمنع الصفقات الضعيفة عكس bias اليومي/4H"
+  },
+  "ai_news_interpretation": {
+    "enabled": true,
+    "block_on_extreme": true,
+    "respect_allowed_direction": true,
+    "description": "Groq يفسر الأخبار ويحدد هل نمنع التداول أو نسمح باتجاه معين فقط"
   }
 }

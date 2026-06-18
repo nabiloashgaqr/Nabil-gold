@@ -374,6 +374,43 @@ gold-dashboard
 
 ---
 
+### 16. 🧭 Daily Bias Filter
+
+فلتر اتجاه أعلى يستخدم فريم 4H كمرجع عملي للاتجاه العام، ويمنع الصفقات الضعيفة عكس الاتجاه.
+
+مثال:
+
+```text
+Daily Bias = Bullish
+BUY مسموح طبيعيًا
+SELL يحتاج ثقة أعلى أو يتحول إلى WAIT
+```
+
+الإعدادات:
+
+```json
+"daily_bias_filter": {
+  "enabled": true,
+  "timeframe": "4H",
+  "contrarian_min_confidence": 80
+}
+```
+
+---
+
+### 17. 📰 AI News Interpretation
+
+Groq لا يكتفي بقراءة وجود الأخبار، بل يفسر تأثيرها المحتمل على الذهب والدولار:
+
+- هل الخبر يدعم الذهب أم الدولار؟
+- هل يجب منع التداول؟
+- هل يُسمح باتجاه واحد فقط؟
+- كم يجب الانتظار؟
+
+ويظهر أثره في القرار النهائي ورسالة Telegram.
+
+---
+
 ## ⏰ أوقات التشغيل الحالية
 
 تم ضبط النظام للتجربة حسب توقيت:
@@ -578,26 +615,14 @@ python -m pytest -q
 - AI Trade Review للخسائر
 - AI Memory Rules Engine
 - HTML Dashboard
+- Daily Bias Filter
+- AI News Interpretation
 
 ---
 
 ## 🧭 ما تبقى من المقترحات القادمة
 
-### 1. Daily Bias Filter
-
-فلتر اتجاه يومي يمنع الصفقات عكس الاتجاه العام إلا بثقة عالية.
-
-مثال:
-
-```text
-Daily Bias = Bullish
-BUY يحتاج 60%
-SELL يحتاج 80%
-```
-
----
-
-### 2. Dynamic Risk Management
+### 1. Dynamic Risk Management
 
 تعديل المخاطرة حسب الأداء:
 
@@ -608,19 +633,7 @@ SELL يحتاج 80%
 
 ---
 
-### 3. AI News Interpretation
-
-Groq يفسر الأخبار بدل الاكتفاء بمنعها.
-
-مثال:
-
-```text
-CPI أعلى من المتوقع → الدولار إيجابي → الذهب سلبي غالبًا
-```
-
----
-
-### 4. Weekly AI Performance Report
+### 2. Weekly AI Performance Report
 
 تقرير أسبوعي يكتبه Groq يوضح:
 
@@ -632,7 +645,7 @@ CPI أعلى من المتوقع → الدولار إيجابي → الذهب 
 
 ---
 
-### 5. Telegram Commands
+### 3. Telegram Commands
 
 أوامر مثل:
 
@@ -650,7 +663,7 @@ CPI أعلى من المتوقع → الدولار إيجابي → الذهب 
 
 ---
 
-### 6. GitHub Pages Dashboard
+### 4. GitHub Pages Dashboard
 
 تحويل Dashboard من Artifact إلى رابط دائم مثل:
 
@@ -660,7 +673,7 @@ https://nabiloashgaqr.github.io/Nabil-gold/dashboard.html
 
 ---
 
-### 7. Backtest متقدم بـ Groq اختياريًا
+### 5. Backtest متقدم بـ Groq اختياريًا
 
 تشغيل Groq على عدد محدود من نقاط الاختبار فقط لتحليل جودة قراراته تاريخيًا بدون استهلاك كبير.
 
@@ -668,13 +681,13 @@ https://nabiloashgaqr.github.io/Nabil-gold/dashboard.html
 
 ## 📌 أفضل خطوة تالية مقترحة
 
-بعد إضافة الذاكرة والDashboard، أفضل خطوة تالية هي:
+بعد إضافة Daily Bias وAI News Interpretation، أفضل خطوة تالية هي:
 
 ```text
-Daily Bias Filter
+Dynamic Risk Management
 ```
 
-لأنه يحسن جودة الإشارات مباشرة ويقلل الصفقات عكس الاتجاه الكبير.
+لأنه يحمي النظام من سلاسل الخسائر ويرفع/يخفض المخاطرة حسب الأداء.
 
 ---
 

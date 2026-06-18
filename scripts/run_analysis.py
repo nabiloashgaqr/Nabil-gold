@@ -17,6 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.classical_agent import ClassicalAgent
 from agents.decision_agent import DecisionAgent
+from agents.daily_bias_agent import DailyBiasAgent
 from agents.multitimeframe_agent import MultiTimeframeAgent
 from agents.news_risk_agent import NewsRiskAgent
 from agents.price_action_agent import PriceActionAgent
@@ -26,6 +27,7 @@ from agents.technical_agent import TechnicalAgent
 from agents.trading_session_agent import TradingSessionAgent
 from services.database import DatabaseService
 from services.market_data import MarketDataService
+from services.news_interpreter import NewsInterpreter
 from services.telegram_bot import TelegramService
 from services.ai_service import get_ai_service
 from utils.helpers import load_config, setup_logging
@@ -229,6 +231,17 @@ async def run_analysis_async() -> None:
         # ── تشغيل وكلاء إضافية (بدون AI) ──
         all_results["session"] = session
         all_results["news"] = NewsRiskAgent(config).check()
+        all_results["daily_bias"] = run_agent("daily_bias", DailyBiasAgent(config), data)
+        if config.get("ai_news_interpretation", {}).get("enabled", True):
+            all_results["news_ai"] = await NewsInterpreter(config).interpret(
+                all_results["news"],
+                {
+                    "current_price": all_results.get("current_price"),
+                    "daily_bias": all_results.get("daily_bias"),
+                    "technical_summary": all_results.get("technical", {}).get("summary"),
+                },
+            )
+            all_results["news"]["ai_interpretation"] = all_results["news_ai"]
         all_results["risk"] = RiskManagementAgent(config).evaluate(all_results)
         all_results["memory_rules"] = database.get_active_memory_rules(
             limit=int(config.get("ai_memory_rules", {}).get("max_active_rules_in_prompt", 8))

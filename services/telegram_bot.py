@@ -108,6 +108,18 @@ class TelegramService:
         quality_line = ""
         if quality:
             quality_line = f"⭐ <b>جودة الإشارة:</b> {html.escape(str(quality.get('grade', 'N/A')))} / {float(quality.get('score', 0)):.1f}% ({html.escape(str(quality.get('label', '')))} )\n"
+        daily_bias = decision.get("daily_bias", {}) or {}
+        bias_line = ""
+        if daily_bias:
+            bias_line = f"🧭 <b>Daily Bias:</b> {html.escape(str(daily_bias.get('bias', 'NEUTRAL')))} ({float(daily_bias.get('confidence', 0)):.1f}%)\n"
+        news_ai = decision.get("news_ai", {}) or {}
+        news_ai_line = ""
+        if news_ai.get("available"):
+            news_ai_line = (
+                f"📰 <b>AI News:</b> {html.escape(str(news_ai.get('risk_level', 'N/A')))} | "
+                f"{html.escape(str(news_ai.get('allowed_direction', 'BOTH')))} | "
+                f"{html.escape(str(news_ai.get('gold_bias', 'NEUTRAL')))}\n"
+            )
 
         # Session info
         session_info = decision.get("session_info", {})
@@ -132,7 +144,7 @@ class TelegramService:
 🎯 <b>الهدف الثاني:</b> {format_price(signal.get('tp2'))}
 📊 <b>R:R =</b> 1:{float(signal.get('rr_ratio', 0)):.2f}
 🔒 <b>الثقة:</b> {int(decision.get('confidence', 0))}%
-{quality_line}
+{quality_line}{bias_line}{news_ai_line}
 {ai_text}📋 <b>أسباب الإشارة:</b>
 {reasons_text}
 
