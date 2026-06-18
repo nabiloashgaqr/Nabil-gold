@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS trades (
     tp2 DECIMAL(18, 4),
 
     confidence INTEGER DEFAULT 0,
+    trading_mode VARCHAR(20) DEFAULT 'paper' CHECK (trading_mode IN ('paper', 'live', 'demo', 'manual')),
+    paper_trading BOOLEAN DEFAULT TRUE,
+    paper_balance_start DECIMAL(18, 4),
+    paper_lot_size DECIMAL(18, 6),
     status VARCHAR(30) DEFAULT 'OPEN' CHECK (status IN (
         'OPEN', 'PARTIAL', 'TP1_HIT', 'TP2_HIT', 'SL_HIT', 'BE_HIT',
         'MANUAL_CLOSE', 'EXPIRED', 'CLOSED', 'PENDING', 'CANCELLED'
@@ -75,6 +79,12 @@ CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_created ON trades(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_trades_open ON trades(status) WHERE status IN ('OPEN', 'PARTIAL', 'TP1_HIT');
+
+-- Safe migrations for existing tables
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS trading_mode VARCHAR(20) DEFAULT 'paper';
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS paper_trading BOOLEAN DEFAULT TRUE;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS paper_balance_start DECIMAL(18, 4);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS paper_lot_size DECIMAL(18, 6);
 
 -- 3) Portfolio summary
 CREATE TABLE IF NOT EXISTS portfolio (

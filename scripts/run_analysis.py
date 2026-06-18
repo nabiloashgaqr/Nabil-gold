@@ -243,6 +243,20 @@ async def run_analysis_async() -> None:
             decision.get("summary"),
         )
 
+        # ── إضافة وضع التداول الحالي للقرار ──
+        trading_mode = str(config.get("trading_mode", "paper")).lower()
+        paper_config = config.get("paper_trading", {}) or {}
+        decision["trading_mode"] = trading_mode
+        decision["paper_trading"] = trading_mode == "paper" or bool(paper_config.get("enabled", False))
+        decision["paper_config"] = {
+            "starting_balance": paper_config.get("starting_balance"),
+            "currency": paper_config.get("currency", "USD"),
+            "default_lot_size": paper_config.get("default_lot_size", 0.01),
+        }
+        if decision.get("signal"):
+            decision["signal"]["trading_mode"] = trading_mode
+            decision["signal"]["paper_trading"] = decision["paper_trading"]
+
         # ── إرسال الإشارة إذا كانت مؤهلة ──
         if decision.get("decision") in {"BUY", "SELL"}:
             settings = config.get("risk_settings", {})

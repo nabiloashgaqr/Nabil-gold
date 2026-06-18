@@ -101,6 +101,9 @@ class TelegramService:
             ai_text = "\n".join(ai_lines) + "\n\n"
         trade_id = decision.get("trade_id", signal.get("trade_id", "غير محفوظ بعد"))
         current_price = decision.get("current_price", signal.get("current_price", entry.get("price", 0)))
+        trading_mode = str(decision.get("trading_mode", signal.get("trading_mode", "paper"))).lower()
+        paper_trading = bool(decision.get("paper_trading", signal.get("paper_trading", trading_mode == "paper")))
+        mode_text = "🧪 <b>الوضع:</b> Paper Trading - صفقة تجريبية غير منفذة فعلياً\n" if paper_trading else "⚡ <b>الوضع:</b> Live/Manual Tracking\n"
         quality = decision.get("quality", {}) or {}
         quality_line = ""
         if quality:
@@ -121,7 +124,7 @@ class TelegramService:
 {emoji} <b>القرار:</b> {direction_ar}
 ⏰ <b>الوقت:</b> {self._now_text()}
 💰 <b>السعر الحالي:</b> {format_price(current_price)}
-{session_text}
+{mode_text}{session_text}
 
 📍 <b>منطقة الدخول:</b> {format_price(entry_low)} - {format_price(entry_high)}
 🛑 <b>وقف الخسارة:</b> {format_price(signal.get('stop_loss'))}
@@ -133,7 +136,7 @@ class TelegramService:
 {ai_text}📋 <b>أسباب الإشارة:</b>
 {reasons_text}
 
-⚠️ <b>تحذير:</b> هذه الإشارة تعليمية/تجريبية وليست توصية مالية.
+⚠️ <b>تحذير:</b> هذه الإشارة تعليمية/تجريبية وليست توصية مالية ولا تنفيذ آلي.
 🆔 <b>معرف الصفقة:</b> <code>{html.escape(str(trade_id))}</code>
 """.strip()
         return self.send_message(text, urgent=True)

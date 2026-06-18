@@ -247,5 +247,14 @@
   "quality_score": {
     "enabled": true,
     "description": "يعرض درجة جودة الإشارة في Telegram ولا يمنع الإشارة حالياً"
+  },
+  "trading_mode": "paper",
+  "paper_trading": {
+    "enabled": true,
+    "starting_balance": 10000,
+    "currency": "USD",
+    "default_lot_size": 0.01,
+    "track_virtual_pnl": true,
+    "description": "وضع تجريبي: يتم حفظ ومتابعة الصفقات افتراضياً بدون تنفيذ حقيقي"
   }
 }
