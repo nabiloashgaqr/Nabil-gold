@@ -1,60 +1,84 @@
 -- =====================================================
--- Gold AI Signals - Supabase Schema (آمن لإعادة التشغيل)
--- أنشئ هذا الملف في Supabase Dashboard > SQL Editor
+-- Gold AI Signals - Supabase Schema v2
+-- Compatible with current Python services.
+-- Recommended: use SUPABASE_KEY as a Service Role key in GitHub Secrets.
+-- Do NOT expose this database for public writes with anon keys.
 -- =====================================================
 
--- 1. جدول الإشارات (Signals)
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- 1) Signals table (optional audit trail)
 CREATE TABLE IF NOT EXISTS signals (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     signal_type VARCHAR(10) NOT NULL CHECK (signal_type IN ('BUY', 'SELL', 'WAIT')),
-    symbol VARCHAR(20) NOT NULL DEFAULT 'XAUUSD',
+    symbol VARCHAR(20) NOT NULL DEFAULT 'XAU/USD',
     entry_price DECIMAL(18, 4),
     confidence_score DECIMAL(5, 2) DEFAULT 0,
-    quality VARCHAR(10) CHECK (quality IN ('HIGH', 'MEDIUM', 'LOW')),
+    quality VARCHAR(20),
     session_name VARCHAR(100),
-    session_quality VARCHAR(10),
+    session_quality VARCHAR(20),
     signal_reason TEXT,
-    agent_inputs JSONB,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    agent_inputs JSONB DEFAULT '{}'::jsonb,
     is_active BOOLEAN DEFAULT TRUE,
-    expires_at TIMESTAMPTZ
+    expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_signals_active ON signals(is_active) WHERE is_active = TRUE;
 CREATE INDEX IF NOT EXISTS idx_signals_created ON signals(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_signals_type ON signals(signal_type);
 
--- 2. جدول الصفقات (Trades)
+-- 2) Trades table: matches services.database.DatabaseService payload.
 CREATE TABLE IF NOT EXISTS trades (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    signal_id UUID REFERENCES signals(id) ON DELETE SET NULL,
-    trade_type VARCHAR(10) NOT NULL CHECK (trade_type IN ('BUY', 'SELL')),
-    symbol VARCHAR(20) NOT NULL DEFAULT 'XAUUSD',
+    id TEXT PRIMARY KEY,
+    signal_id TEXT REFERENCES signals(id) ON DELETE SET NULL,
+    type VARCHAR(10) CHECK (type IN ('BUY', 'SELL')),
+    trade_type VARCHAR(10) GENERATED ALWAYS AS (type) STORED,
+    symbol VARCHAR(20) NOT NULL DEFAULT 'XAU/USD',
+
     entry_price DECIMAL(18, 4) NOT NULL,
+    entry_time TIMESTAMPTZ,
     stop_loss DECIMAL(18, 4),
-    take_profit DECIMAL(18, 4),
+    initial_stop_loss DECIMAL(18, 4),
+    tp1 DECIMAL(18, 4),
+    tp2 DECIMAL(18, 4),
+
+    confidence INTEGER DEFAULT 0,
+    status VARCHAR(30) DEFAULT 'OPEN' CHECK (status IN (
+        'OPEN', 'PARTIAL', 'TP1_HIT', 'TP2_HIT', 'SL_HIT', 'BE_HIT',
+        'MANUAL_CLOSE', 'EXPIRED', 'CLOSED', 'PENDING', 'CANCELLED'
+    )),
+
     current_price DECIMAL(18, 4),
-    quantity DECIMAL(18, 6) DEFAULT 0.01,
-    status VARCHAR(20) DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'CLOSED', 'PENDING', 'CANCELLED')),
-    pnl DECIMAL(18, 4) DEFAULT 0,
-    pnl_percentage DECIMAL(10, 4) DEFAULT 0,
-    risk_amount DECIMAL(18, 4),
-    risk_reward_ratio DECIMAL(5, 2),
-    opened_at TIMESTAMPTZ DEFAULT NOW(),
-    closed_at TIMESTAMPTZ,
-    notes TEXT,
+    current_pnl DECIMAL(18, 4) DEFAULT 0,
+    current_pnl_points DECIMAL(18, 4) DEFAULT 0,
+    final_pnl DECIMAL(18, 4),
+
+    sl_moved_to_entry BOOLEAN DEFAULT FALSE,
+    partial_close BOOLEAN DEFAULT FALSE,
+    updates_sent JSONB DEFAULT '[]'::jsonb,
+    result VARCHAR(30),
+    reasons JSONB DEFAULT '[]'::jsonb,
+    signal_snapshot JSONB DEFAULT '{}'::jsonb,
+
     created_at TIMESTAMPTZ DEFAULT NOW(),
+    opened_at TIMESTAMPTZ GENERATED ALWAYS AS (entry_time) STORED,
+    closed_at TIMESTAMPTZ,
+    close_time TIMESTAMPTZ,
+    close_price DECIMAL(18, 4),
+    last_updated TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status) WHERE status = 'OPEN';
+CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
-CREATE INDEX IF NOT EXISTS idx_trades_opened ON trades(opened_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trades_created ON trades(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trades_open ON trades(status) WHERE status IN ('OPEN', 'PARTIAL', 'TP1_HIT');
 
--- 3. جدول المحفظة (Portfolio)
+-- 3) Portfolio summary
 CREATE TABLE IF NOT EXISTS portfolio (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     balance DECIMAL(18, 4) DEFAULT 10000.00,
     equity DECIMAL(18, 4) DEFAULT 10000.00,
     available_margin DECIMAL(18, 4) DEFAULT 10000.00,
@@ -69,9 +93,9 @@ CREATE TABLE IF NOT EXISTS portfolio (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4. جدول التقارير اليومية (Daily Reports)
+-- 4) Daily reports
 CREATE TABLE IF NOT EXISTS daily_reports (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     report_date DATE NOT NULL,
     total_signals INTEGER DEFAULT 0,
     buy_signals INTEGER DEFAULT 0,
@@ -91,25 +115,25 @@ CREATE TABLE IF NOT EXISTS daily_reports (
 
 CREATE INDEX IF NOT EXISTS idx_daily_reports_date ON daily_reports(report_date DESC);
 
--- 5. جدول سجل الأخبار (News Log)
+-- 5) News log
 CREATE TABLE IF NOT EXISTS news_log (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     headline TEXT NOT NULL,
     source VARCHAR(100),
     impact VARCHAR(20) CHECK (impact IN ('HIGH', 'MEDIUM', 'LOW')),
     affected_pairs TEXT[],
-    trading_impact VARCHAR(20) DEFAULT 'NEUTRAL' CHECK (trading_impact IN ('POSITIVE', 'NEGATIVE', 'NEUTRAL')),
+    trading_impact VARCHAR(20) DEFAULT 'NEUTRAL',
     confidence_adjustment DECIMAL(5, 2) DEFAULT 0,
-    sentiment VARCHAR(20) DEFAULT 'NEUTRAL' CHECK (sentiment IN ('BULLISH', 'BEARISH', 'NEUTRAL')),
+    sentiment VARCHAR(20) DEFAULT 'NEUTRAL',
     logged_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_news_impact ON news_log(impact);
 CREATE INDEX IF NOT EXISTS idx_news_logged ON news_log(logged_at DESC);
 
--- 6. جدول إعدادات المخاطر (Risk Settings)
+-- 6) Risk settings
 CREATE TABLE IF NOT EXISTS risk_settings (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     setting_key VARCHAR(50) UNIQUE NOT NULL,
     setting_value JSONB NOT NULL,
     description TEXT,
@@ -119,18 +143,18 @@ CREATE TABLE IF NOT EXISTS risk_settings (
 INSERT INTO risk_settings (setting_key, setting_value, description) VALUES
 ('max_risk_per_trade', '{"value": 2, "unit": "percent"}', 'الحد الأقصى للمخاطرة لكل صفقة'),
 ('daily_risk_limit', '{"value": 6, "unit": "percent"}', 'الحد الأقصى للمخاطرة اليومية'),
-('max_open_positions', '{"value": 5, "unit": "count"}', 'الحد الأقصى للصفقات المفتوحة'),
+('max_open_positions', '{"value": 3, "unit": "count"}', 'الحد الأقصى للصفقات المفتوحة'),
 ('min_confidence_threshold', '{"value": 60, "unit": "percent"}', 'الحد الأدنى للثقة'),
 ('max_drawdown_stop', '{"value": 10, "unit": "percent"}', 'وقف السحب الأقصى')
 ON CONFLICT (setting_key) DO NOTHING;
 
--- 7. جدول سجل الجلسات (Session Log)
+-- 7) Sessions
 CREATE TABLE IF NOT EXISTS session_log (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     session_name VARCHAR(100) NOT NULL,
-    quality VARCHAR(10),
+    quality VARCHAR(20),
     trading_allowed BOOLEAN NOT NULL,
-    reason VARCHAR(200),
+    reason VARCHAR(300),
     signals_generated INTEGER DEFAULT 0,
     trades_opened INTEGER DEFAULT 0,
     total_confidence DECIMAL(5, 2) DEFAULT 0,
@@ -138,120 +162,25 @@ CREATE TABLE IF NOT EXISTS session_log (
     ended_at TIMESTAMPTZ
 );
 
--- 8. Function للتحديث التلقائي
-CREATE OR REPLACE FUNCTION update_updated_at()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- 9. إضافة Triggers (مع DROP أولاً لتجنب التكرار)
-DROP TRIGGER IF EXISTS update_signals_timestamp ON signals;
-CREATE TRIGGER update_signals_timestamp
-    BEFORE UPDATE ON signals
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at();
-
-DROP TRIGGER IF EXISTS update_trades_timestamp ON trades;
-CREATE TRIGGER update_trades_timestamp
-    BEFORE UPDATE ON trades
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at();
-
-DROP TRIGGER IF EXISTS update_portfolio_timestamp ON portfolio;
-CREATE TRIGGER update_portfolio_timestamp
-    BEFORE UPDATE ON portfolio
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at();
-
-DROP TRIGGER IF EXISTS update_risk_settings_timestamp ON risk_settings;
-CREATE TRIGGER update_risk_settings_timestamp
-    BEFORE UPDATE ON risk_settings
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at();
-
--- 10. Views للتحليل
-DROP VIEW IF EXISTS active_trades_view;
-CREATE OR REPLACE VIEW active_trades_view AS
-SELECT 
-    t.*,
-    s.signal_type as signal_type,
-    s.confidence_score,
-    s.quality as session_quality
-FROM trades t
-LEFT JOIN signals s ON t.signal_id = s.id
-WHERE t.status = 'OPEN';
-
-DROP VIEW IF EXISTS daily_pnl_summary;
-CREATE OR REPLACE VIEW daily_pnl_summary AS
-SELECT 
-    DATE(opened_at) as trade_date,
-    COUNT(*) as total_trades,
-    COUNT(*) FILTER (WHERE pnl > 0) as winning_trades,
-    COUNT(*) FILTER (WHERE pnl < 0) as losing_trades,
-    SUM(pnl) as total_pnl,
-    AVG(pnl_percentage) as avg_pnl_pct
-FROM trades
-WHERE closed_at IS NOT NULL
-GROUP BY DATE(opened_at)
-ORDER BY trade_date DESC;
-
--- 11. Row Level Security (RLS)
-ALTER TABLE signals ENABLE ROW LEVEL SECURITY;
-ALTER TABLE trades ENABLE ROW LEVEL SECURITY;
-ALTER TABLE portfolio ENABLE ROW LEVEL SECURITY;
-ALTER TABLE daily_reports ENABLE ROW LEVEL SECURITY;
-
--- Allow public access
-CREATE POLICY "Allow all for signals" ON signals FOR ALL TO anon USING (true);
-CREATE POLICY "Allow all for trades" ON trades FOR ALL TO anon USING (true);
-CREATE POLICY "Allow all for portfolio" ON portfolio FOR ALL TO anon USING (true);
-CREATE POLICY "Allow all for daily_reports" ON daily_reports FOR ALL TO anon USING (true);
-
--- Grant permissions
-GRANT ALL ON signals TO anon;
-GRANT ALL ON trades TO anon;
-GRANT ALL ON portfolio TO anon;
-GRANT ALL ON daily_reports TO anon;
-GRANT ALL ON news_log TO anon;
-GRANT ALL ON risk_settings TO anon;
-GRANT ALL ON session_log TO anon;
-GRANT ALL ON agent_weights TO anon;
-GRANT ALL ON learning_history TO anon;
-GRANT ALL ON agent_evaluations TO anon;
-
--- =====================================================
--- ✅ تم بنجاح!
--- =====================================================
-
--- =====================================================
--- 🧠 جداول التعلم الذكي (اختياري)
--- =====================================================
-
--- جدول أوزان الوكلاء المتعلمة
+-- 8) Learning tables
 CREATE TABLE IF NOT EXISTS agent_weights (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     agent_name VARCHAR(50) UNIQUE NOT NULL,
-    weight DECIMAL(5, 4) NOT NULL DEFAULT 0.15,
+    weight DECIMAL(7, 6) NOT NULL DEFAULT 0.15,
     win_rate DECIMAL(5, 2) DEFAULT 0,
     total_predictions INTEGER DEFAULT 0,
     trend VARCHAR(20) DEFAULT 'STABLE' CHECK (trend IN ('IMPROVING', 'STABLE', 'DECLINING')),
-    learning_score DECIMAL(5, 4) DEFAULT 0.5,
+    learning_score DECIMAL(7, 6) DEFAULT 0.5,
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_agent_weights_name ON agent_weights(agent_name);
-
--- جدول سجل التعلم
 CREATE TABLE IF NOT EXISTS learning_history (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    report_date TIMESTAMPTZ NOT NULL,
-    agents_performance JSONB,
-    adjusted_weights JSONB,
-    previous_weights JSONB,
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    report_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    agents_performance JSONB DEFAULT '{}'::jsonb,
+    adjusted_weights JSONB DEFAULT '{}'::jsonb,
+    previous_weights JSONB DEFAULT '{}'::jsonb,
     total_trades_analyzed INTEGER DEFAULT 0,
     overall_win_rate DECIMAL(5, 2) DEFAULT 0,
     recommendations TEXT[],
@@ -259,12 +188,9 @@ CREATE TABLE IF NOT EXISTS learning_history (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_learning_history_date ON learning_history(report_date DESC);
-
--- جدول تقييم الوكلاء
 CREATE TABLE IF NOT EXISTS agent_evaluations (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    signal_id UUID REFERENCES signals(id) ON DELETE SET NULL,
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    signal_id TEXT REFERENCES signals(id) ON DELETE SET NULL,
     agent_name VARCHAR(50) NOT NULL,
     predicted_signal VARCHAR(10),
     actual_outcome VARCHAR(20) CHECK (actual_outcome IN ('WIN', 'LOSS', 'NEUTRAL')),
@@ -275,14 +201,73 @@ CREATE TABLE IF NOT EXISTS agent_evaluations (
     evaluated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_agent_weights_name ON agent_weights(agent_name);
+CREATE INDEX IF NOT EXISTS idx_learning_history_date ON learning_history(report_date DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_evaluations_agent ON agent_evaluations(agent_name);
 CREATE INDEX IF NOT EXISTS idx_agent_evaluations_trade ON agent_evaluations(trade_closed_at DESC);
 
--- Insert الأوزان الافتراضية
 INSERT INTO agent_weights (agent_name, weight) VALUES
 ('technical', 0.20),
 ('classical', 0.20),
 ('smc', 0.25),
 ('price_action', 0.15),
-('multitimeframe', 0.15)
+('multitimeframe', 0.20)
 ON CONFLICT (agent_name) DO NOTHING;
+
+-- 9) Timestamp trigger
+CREATE OR REPLACE FUNCTION update_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS update_signals_timestamp ON signals;
+CREATE TRIGGER update_signals_timestamp BEFORE UPDATE ON signals FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+DROP TRIGGER IF EXISTS update_trades_timestamp ON trades;
+CREATE TRIGGER update_trades_timestamp BEFORE UPDATE ON trades FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+DROP TRIGGER IF EXISTS update_portfolio_timestamp ON portfolio;
+CREATE TRIGGER update_portfolio_timestamp BEFORE UPDATE ON portfolio FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+DROP TRIGGER IF EXISTS update_risk_settings_timestamp ON risk_settings;
+CREATE TRIGGER update_risk_settings_timestamp BEFORE UPDATE ON risk_settings FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- 10) Views
+DROP VIEW IF EXISTS active_trades_view;
+CREATE VIEW active_trades_view AS
+SELECT * FROM trades WHERE status IN ('OPEN', 'PARTIAL', 'TP1_HIT');
+
+DROP VIEW IF EXISTS daily_pnl_summary;
+CREATE VIEW daily_pnl_summary AS
+SELECT
+    DATE(COALESCE(entry_time, created_at)) AS trade_date,
+    COUNT(*) AS total_trades,
+    COUNT(*) FILTER (WHERE COALESCE(final_pnl, current_pnl, 0) > 0) AS winning_trades,
+    COUNT(*) FILTER (WHERE COALESCE(final_pnl, current_pnl, 0) < 0) AS losing_trades,
+    SUM(COALESCE(final_pnl, current_pnl, 0)) AS total_pnl
+FROM trades
+WHERE status NOT IN ('OPEN', 'PARTIAL', 'TP1_HIT', 'PENDING')
+GROUP BY DATE(COALESCE(entry_time, created_at))
+ORDER BY trade_date DESC;
+
+-- 11) RLS: enabled and locked by default. Service Role bypasses RLS.
+ALTER TABLE signals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE trades ENABLE ROW LEVEL SECURITY;
+ALTER TABLE portfolio ENABLE ROW LEVEL SECURITY;
+ALTER TABLE daily_reports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE news_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE risk_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE session_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_weights ENABLE ROW LEVEL SECURITY;
+ALTER TABLE learning_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_evaluations ENABLE ROW LEVEL SECURITY;
+
+-- If you intentionally use anon key for a private bot, create restricted policies manually.
+-- Recommended GitHub Secret: SUPABASE_KEY = service_role key, not anon key.
+
+-- =====================================================
+-- ✅ Schema v2 ready.
+-- =====================================================

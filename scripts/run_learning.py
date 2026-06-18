@@ -46,7 +46,8 @@ def main() -> None:
         logger.info("📊 الأوزان الحالية: %s", current_weights)
         
         # تحليل وتحديث الأوزان
-        report = learning_service.analyze_and_update_weights()
+        import asyncio
+        report = asyncio.run(learning_service.analyze_and_update_weights())
         
         # إرسال تقرير التعلم
         summary = learning_service.get_learning_summary()

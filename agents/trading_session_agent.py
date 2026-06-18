@@ -12,7 +12,7 @@ days في config.json: 0=Sunday, 1=Monday, ..., 6=Saturday (مثل Python weekda
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List
 
 from agents.base_agent import BaseAgent
@@ -165,8 +165,7 @@ class TradingSessionAgent(BaseAgent):
         """Return info about the next upcoming session."""
         sessions = self.hours_config.get("sessions", [])
         for offset in range(1, 8):
-            check_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            check_date = check_date.replace(day=now.day + offset)
+            check_date = (now + timedelta(days=offset)).replace(hour=0, minute=0, second=0, microsecond=0)
             check_weekday = check_date.weekday()  # 0=Monday ... 6=Sunday
             for session in sessions:
                 # days: 0=Sunday, 1=Monday, ..., 6=Saturday (Python weekday format)

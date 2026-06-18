@@ -109,7 +109,7 @@ class RiskManagementAgent(BaseAgent):
         details: Dict[str, Any] = {}
         for agent in ["technical", "classical", "smc", "price_action", "multitimeframe"]:
             result = results.get(agent, {}) or {}
-            direction = str(result.get("direction", "NEUTRAL")).upper()
+            direction = str(result.get("direction", result.get("signal", "NEUTRAL"))).upper()
             confidence = max(0.0, min(100.0, self._f(result.get("confidence"))))
             weight = self._f(self.weights.get(agent), 0.0)
             multiplier = 1 if direction == "BUY" else -1 if direction == "SELL" else 0

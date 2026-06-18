@@ -1,6 +1,11 @@
 {
   "symbol": "XAU/USD",
-  "timeframes": ["5m", "15m", "1H", "4H"],
+  "timeframes": [
+    "5m",
+    "15m",
+    "1H",
+    "4H"
+  ],
   "primary_timeframe": "15m",
   "trend_timeframe": "4H",
   "entry_timeframe": "15m",
@@ -9,7 +14,8 @@
     "fallback": "synthetic_demo",
     "api_keys": {
       "twelve_data": "ENV:TWELVE_DATA_API_KEY"
-    }
+    },
+    "allow_synthetic_in_production": false
   },
   "telegram": {
     "bot_token": "ENV:TELEGRAM_BOT_TOKEN",
@@ -23,11 +29,11 @@
     "local_fallback_file": "storage/trades.json"
   },
   "agent_weights": {
-    "technical": 0.20,
-    "classical": 0.20,
+    "technical": 0.2,
+    "classical": 0.2,
     "smc": 0.25,
     "price_action": 0.15,
-    "multitimeframe": 0.20
+    "multitimeframe": 0.2
   },
   "risk_settings": {
     "min_confidence": 60,
@@ -65,7 +71,13 @@
         "name": "London-NY Trading",
         "start_hour": 11,
         "end_hour": 17,
-        "days": [6, 0, 1, 2, 3],
+        "days": [
+          6,
+          0,
+          1,
+          2,
+          3
+        ],
         "quality": "HIGH",
         "allow_signals": true,
         "allow_reports": false,
@@ -75,7 +87,13 @@
         "name": "Daily Report Session",
         "start_hour": 22,
         "end_hour": 23,
-        "days": [6, 0, 1, 2, 3],
+        "days": [
+          6,
+          0,
+          1,
+          2,
+          3
+        ],
         "quality": "LOW",
         "allow_signals": false,
         "allow_reports": true,
@@ -132,7 +150,15 @@
     "hours_after": 1,
     "min_impact": "medium",
     "auto_block_on_high": true,
-    "gold_currencies": ["USD", "EUR", "GBP", "AUD", "JPY", "CAD", "CHF"]
+    "gold_currencies": [
+      "USD",
+      "EUR",
+      "GBP",
+      "AUD",
+      "JPY",
+      "CAD",
+      "CHF"
+    ]
   },
   "ai_service": {
     "enabled": true,
@@ -146,22 +172,39 @@
   },
   "ai_providers": {
     "openai": {
-      "models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
+      "models": [
+        "gpt-4o",
+        "gpt-4o-mini",
+        "gpt-4-turbo",
+        "gpt-3.5-turbo"
+      ],
       "default_model": "gpt-4o-mini",
       "cost_per_1k_tokens": 0.00015
     },
     "anthropic": {
-      "models": ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-haiku-20240307"],
+      "models": [
+        "claude-3-5-sonnet-20241022",
+        "claude-3-opus-20240229",
+        "claude-3-haiku-20240307"
+      ],
       "default_model": "claude-3-5-sonnet-20241022",
       "cost_per_1k_tokens": 0.0008
     },
     "grok": {
-      "models": ["grok-2", "grok-2-mini", "grok-1"],
+      "models": [
+        "grok-2",
+        "grok-2-mini",
+        "grok-1"
+      ],
       "default_model": "grok-2-mini",
       "cost_per_1k_tokens": 0.0005
     },
     "gemini": {
-      "models": ["gemini-2.0-flash-exp", "gemini-1.5-pro", "gemini-1.5-flash"],
+      "models": [
+        "gemini-2.0-flash-exp",
+        "gemini-1.5-pro",
+        "gemini-1.5-flash"
+      ],
       "default_model": "gemini-2.0-flash-exp",
       "cost_per_1k_tokens": 0.000125
     }
@@ -172,11 +215,11 @@
     "min_predictions_for_adjustment": 3,
     "max_weight_change": 0.25,
     "momentum_weight": 0.4,
-    "decay_factor": 0.90,
+    "decay_factor": 0.9,
     "performance_threshold": 0.6,
     "auto_adjust_confidence": true,
     "aggressive_mode": true,
-    "streak_bonus": 0.10,
+    "streak_bonus": 0.1,
     "description": "نظام التعلم الذكي لتحديث أوزان الوكلاء"
   }
 }

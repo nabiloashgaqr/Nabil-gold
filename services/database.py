@@ -102,11 +102,61 @@ class DatabaseService:
         """Get OPEN/TP1_HIT trades."""
         if self.use_supabase and self.client:
             try:
-                response = self.client.table("trades").select("*").in_("status", ["OPEN", "TP1_HIT"]).execute()
+                response = self.client.table("trades").select("*").in_("status", ["OPEN", "PARTIAL", "TP1_HIT"]).execute()
                 return list(response.data or [])
             except Exception as exc:  # noqa: BLE001
                 self.logger.error("Failed to fetch open trades from Supabase: %s", exc)
-        return [trade for trade in load_trades(self.local_path) if trade.get("status") in {"OPEN", "TP1_HIT"}]
+        return [trade for trade in load_trades(self.local_path) if trade.get("status") in {"OPEN", "PARTIAL", "TP1_HIT"}]
+
+
+    async def execute_query(self, query: str, params: List[Any] | None = None) -> List[Dict[str, Any]]:
+        """Small compatibility layer for older services that used raw SQL.
+
+        Supabase's Python PostgREST client does not execute arbitrary SQL directly.
+        This method supports the common read/write patterns used by this project and
+        falls back safely instead of crashing scheduled GitHub Actions.
+        """
+        params = params or []
+        q = " ".join(str(query).strip().lower().split())
+
+        # Local fallback / generic reads from trades.
+        if "from trades" in q:
+            trades = load_trades(self.local_path)
+            if self.use_supabase and self.client:
+                try:
+                    response = self.client.table("trades").select("*").execute()
+                    trades = list(response.data or [])
+                except Exception as exc:  # noqa: BLE001
+                    self.logger.error("execute_query trades fallback after Supabase error: %s", exc)
+            if "where" in q and "status" in q:
+                if "open" in q or "tp1_hit" in q or "partial" in q:
+                    trades = [t for t in trades if str(t.get("status", "")).upper() in {"OPEN", "PARTIAL", "TP1_HIT"}]
+                elif "closed_at is not null" in q or "status not in" in q:
+                    trades = [t for t in trades if str(t.get("status", "")).upper() not in {"OPEN", "PARTIAL", "TP1_HIT", "PENDING"}]
+            return trades
+
+        # agent_weights read/update compatibility.
+        if "from agent_weights" in q:
+            if self.use_supabase and self.client:
+                try:
+                    response = self.client.table("agent_weights").select("*").execute()
+                    return list(response.data or [])
+                except Exception as exc:  # noqa: BLE001
+                    self.logger.error("Failed to read agent_weights: %s", exc)
+            return []
+
+        if "insert into agent_weights" in q or "update agent_weights" in q:
+            if self.use_supabase and self.client and len(params) >= 2:
+                try:
+                    agent_name = str(params[0])
+                    weight = float(params[1])
+                    self.client.table("agent_weights").upsert({"agent_name": agent_name, "weight": weight}).execute()
+                except Exception as exc:  # noqa: BLE001
+                    self.logger.error("Failed to upsert agent_weights: %s", exc)
+            return []
+
+        self.logger.warning("Unsupported execute_query call ignored safely: %s", str(query)[:160])
+        return []
 
     def update_trade(self, trade_id: str, updates: Dict[str, Any]) -> None:
         """Update a trade by id."""

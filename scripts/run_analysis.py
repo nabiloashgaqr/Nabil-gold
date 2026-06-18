@@ -89,6 +89,14 @@ async def run_analysis_async() -> None:
             logger.error("فشل في جلب البيانات")
             return
 
+        # Safety: never send production signals from synthetic/demo prices on GitHub Actions.
+        allow_synthetic = bool(config.get("data_source", {}).get("allow_synthetic_in_production", False))
+        if os.environ.get("GITHUB_ACTIONS") == "true" and data.get("source") == "synthetic_demo" and not allow_synthetic:
+            message = "تم إيقاف التحليل: بيانات السوق وهمية synthetic_demo. أضف TWELVE_DATA_API_KEY قبل تشغيل الإشارات."
+            logger.error(message)
+            telegram.send_error_alert(message)
+            return
+
         # سياق الحساب/المحفظة
         open_trades = database.get_open_trades()
         today_signals = database.get_today_signals_count()
@@ -118,7 +126,7 @@ async def run_analysis_async() -> None:
         # ── تشغيل وكيل القرار (مع AI) ──
         logger.info("تشغيل وكيل القرار (AI-enabled)...")
         
-        decision = DecisionAgent(config, ai_service).decide(all_results)
+        decision = await DecisionAgent(config, ai_service).decide_async(all_results)
         
         logger.info(
             "القرار: %s - الثقة: %s%% - %s",

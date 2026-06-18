@@ -1,14 +1,15 @@
 """سكريبت التقرير اليومي v2.0.
 
 يعمل يومياً عبر GitHub Actions الساعة 23:00 UTC:
-1. تقييم أداء الوكلاء
-2. إرسال تقرير الأداء
-3. إرسال تقرير الصفقات المفتوحة
+1. إرسال تقرير أداء اليوم
+2. إرسال تقرير الصفقات المفتوحة
+
+ملاحظة: لا يعتمد هذا السكريبت على SQL raw حتى يعمل مع DatabaseService الحالي
+سواءً كان التخزين Supabase أو JSON fallback.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import sys
@@ -18,136 +19,116 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.daily_report_agent import DailyReportAgent
 from services.database import DatabaseService
-from services.telegram_bot import TelegramBot
+from services.telegram_bot import TelegramService
 from utils.helpers import load_config, setup_logging
 
 setup_logging()
 logger = logging.getLogger(__name__)
 
 
-async def send_open_trades_report(db: DatabaseService, telegram: TelegramBot):
-    """إرسال تقرير الصفقات المفتوحة"""
-    
+def _trade_value(trade: dict, *keys: str, default=None):
+    """Return the first existing/non-empty value from possible schema aliases."""
+    for key in keys:
+        value = trade.get(key)
+        if value is not None and value != "":
+            return value
+    return default
+
+
+def send_open_trades_report(db: DatabaseService, telegram: TelegramService) -> None:
+    """إرسال تقرير الصفقات المفتوحة بدون الاعتماد على execute_query."""
     try:
-        # Get open trades
-        query = """
-            SELECT id, signal_id, trade_type, entry_price, 
-                   current_price, sl, tp1, tp2, opened_at
-            FROM trades 
-            WHERE status IN ('OPEN', 'PARTIAL', 'TP1_HIT')
-            ORDER BY opened_at DESC
-        """
-        trades = await db.execute_query(query)
-        
+        trades = db.get_open_trades()
+
         if not trades:
-            await telegram.send_message(
-                '📊 *تقرير الصفقات المفتوحة*\n\n'
-                '❌ لا توجد صفقات مفتوحة حالياً'
+            telegram.send_message(
+                "📊 <b>تقرير الصفقات المفتوحة</b>\n\n"
+                "❌ لا توجد صفقات مفتوحة حالياً"
             )
             return
-        
-        # Build report
+
         lines = [
-            '━━━━━━━━━━━━━━━━━━━━',
-            '📊 *تقرير الصفقات المفتوحة*',
-            f'📅 تاريخ التقرير: {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")} UTC',
-            f'📈 عدد الصفقات المفتوحة: {len(trades)}',
-            '━━━━━━━━━━━━━━━━━━━━',
-            ''
+            "━━━━━━━━━━━━━━━━━━━━",
+            "📊 <b>تقرير الصفقات المفتوحة</b>",
+            f"📅 تاريخ التقرير: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC",
+            f"📈 عدد الصفقات المفتوحة: {len(trades)}",
+            "━━━━━━━━━━━━━━━━━━━━",
+            "",
         ]
-        
-        total_pnl = 0
-        
+
+        total_pnl = 0.0
+
         for trade in trades:
-            trade_type = trade.get('trade_type', 'BUY')
-            entry = float(trade.get('entry_price', 0))
-            current = float(trade.get('current_price', entry))
-            sl = float(trade.get('sl', 0)) if trade.get('sl') else 0
-            tp1 = float(trade.get('tp1', 0)) if trade.get('tp1') else 0
-            tp2 = float(trade.get('tp2', 0)) if trade.get('tp2') else 0
-            status = trade.get('status', 'OPEN')
-            
-            # Calculate P/L
-            if trade_type == 'BUY':
-                pnl_points = current - entry
-            else:
-                pnl_points = entry - current
-            
+            trade_type = str(_trade_value(trade, "type", "trade_type", default="BUY")).upper()
+            entry = float(_trade_value(trade, "entry_price", default=0) or 0)
+            current = float(_trade_value(trade, "current_price", default=entry) or entry)
+            sl = float(_trade_value(trade, "stop_loss", "sl", default=0) or 0)
+            tp1 = float(_trade_value(trade, "tp1", default=0) or 0)
+            tp2 = float(_trade_value(trade, "tp2", "take_profit", default=0) or 0)
+            status = str(_trade_value(trade, "status", default="OPEN"))
+
+            pnl_points = current - entry if trade_type == "BUY" else entry - current
             total_pnl += pnl_points
-            
-            # Calculate progress to targets
-            if sl and entry and sl != entry:
-                risk = abs(entry - sl)
-                if risk > 0:
-                    progress = (abs(pnl_points) / risk) * 100
-                else:
-                    progress = 0
-            else:
-                progress = 50  # Default
-            
-            # Status emoji
-            if status == 'TP1_HIT':
-                emoji = '🟡'
-                status_text = '(TP1 reached)'
+
+            risk = abs(entry - sl) if sl and entry else 0.0
+            progress = min(abs(pnl_points) / risk * 100, 100) if risk > 0 else 0
+
+            if status == "TP1_HIT":
+                emoji = "🟡"
+                status_text = "(TP1 reached)"
             elif pnl_points > 0:
-                emoji = '🟢'
-                status_text = ''
+                emoji = "🟢"
+                status_text = ""
             elif pnl_points < 0:
-                emoji = '🔴'
-                status_text = ''
+                emoji = "🔴"
+                status_text = ""
             else:
-                emoji = '⚪'
-                status_text = ''
-            
-            lines.append(f'{emoji} *{trade_type}* {status_text}')
-            lines.append(f'├ Entry: {entry:.2f}')
-            lines.append(f'├ Current: {current:.2f} ({pnl_points:+.2f})')
+                emoji = "⚪"
+                status_text = ""
+
+            lines.append(f"{emoji} <b>{trade_type}</b> {status_text}")
+            lines.append(f"├ Entry: {entry:.2f}")
+            lines.append(f"├ Current: {current:.2f} ({pnl_points:+.2f})")
             if sl:
-                lines.append(f'├ SL: {sl:.2f}')
+                lines.append(f"├ SL: {sl:.2f}")
             if tp1:
-                lines.append(f'├ TP1: {tp1:.2f}')
+                lines.append(f"├ TP1: {tp1:.2f}")
             if tp2:
-                lines.append(f'├ TP2: {tp2:.2f}')
-            lines.append(f'└ Progress: {min(progress, 100):.0f}%')
-            lines.append('')
-        
-        # Summary
-        total_emoji = '🟢' if total_pnl > 0 else '🔴' if total_pnl < 0 else '⚪'
-        lines.append('━━━━━━━━━━━━━━━━━━━━')
-        lines.append(f'{total_emoji} *إجمالي P/L:* {total_pnl:+.2f} points')
-        lines.append('━━━━━━━━━━━━━━━━━━━━')
-        
-        await telegram.send_message('\n'.join(lines))
-        logger.info(f"تم إرسال تقرير {len(trades)} صفقات مفتوحة")
-        
-    except Exception as e:
-        logger.error(f"خطأ في تقرير الصفقات المفتوحة: {e}")
+                lines.append(f"├ TP2: {tp2:.2f}")
+            lines.append(f"└ Progress: {progress:.0f}%")
+            lines.append("")
+
+        total_emoji = "🟢" if total_pnl > 0 else "🔴" if total_pnl < 0 else "⚪"
+        lines.append("━━━━━━━━━━━━━━━━━━━━")
+        lines.append(f"{total_emoji} <b>إجمالي P/L:</b> {total_pnl:+.2f} points")
+        lines.append("━━━━━━━━━━━━━━━━━━━━")
+
+        telegram.send_message("\n".join(lines))
+        logger.info("تم إرسال تقرير %s صفقات مفتوحة", len(trades))
+
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("خطأ في تقرير الصفقات المفتوحة: %s", exc)
+        telegram.send_error_alert(f"خطأ في تقرير الصفقات المفتوحة: {exc}")
 
 
 def main() -> None:
     """Generate and send daily report."""
     logger.info("بدء التقرير اليومي: %s", datetime.now(timezone.utc).isoformat())
-    
+
     config = load_config()
-    telegram = TelegramBot(config)
+    telegram = TelegramService(config)
     database = DatabaseService(config)
-    
+
     try:
-        # 1️⃣ إرسال التقرير اليومي
         trades = database.get_today_trades()
         report = DailyReportAgent(config).generate(trades)
         telegram.send_daily_report(report["text"])
         logger.info("تم إرسال تقرير الأداء. عدد الصفقات: %s", len(trades))
-        
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.exception("خطأ في التقرير اليومي")
         telegram.send_error_alert(str(exc))
-    
-    # 2️⃣ إرسال تقرير الصفقات المفتوحة (async)
-    try:
-        asyncio.run(send_open_trades_report(database, telegram))
-    except Exception as exc:
-        logger.exception("خطأ في تقرير الصفقات المفتوحة")
+
+    send_open_trades_report(database, telegram)
 
 
 if __name__ == "__main__":

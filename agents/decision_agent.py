@@ -117,9 +117,10 @@ class DecisionAgent(BaseAgent):
         # 4️⃣ إضافة معلومات التعلم
         learning_info = self._get_learning_info()
         
-        return {
+        result = {
             'agent': 'decision',
             'signal': final_signal,
+            'decision': final_signal,
             'confidence': final_confidence,
             'reasoning': reasoning,
             'votes': votes,
@@ -130,6 +131,7 @@ class DecisionAgent(BaseAgent):
             'risk_assessment': self._assess_risk(final_signal, indicators),
             'timestamp': self.now_iso()
         }
+        return self._apply_safety_filters(result, agents_results)
     
     async def analyze_async(self, data: Dict) -> Dict[str, Any]:
         """
@@ -162,9 +164,10 @@ class DecisionAgent(BaseAgent):
         # 5️⃣ معلومات التعلم
         learning_info = self._get_learning_info()
         
-        return {
+        result = {
             'agent': 'decision',
             'signal': final_signal,
+            'decision': final_signal,
             'confidence': final_confidence,
             'reasoning': reasoning,
             'votes': votes,
@@ -175,6 +178,7 @@ class DecisionAgent(BaseAgent):
             'risk_assessment': self._assess_risk(final_signal, indicators),
             'timestamp': self.now_iso()
         }
+        return self._apply_safety_filters(result, agents_results)
     
     def _collect_votes(self, agents_results: Dict) -> Dict:
         """
@@ -515,6 +519,106 @@ class DecisionAgent(BaseAgent):
             'factors': risk_factors
         }
     
+
+    def _apply_safety_filters(self, result: Dict[str, Any], agents_results: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply hard blockers after consensus: session, news, and risk approval."""
+        warnings = list(result.get('warnings', []) or [])
+        signal = str(result.get('signal', 'WAIT')).upper()
+
+        session = agents_results.get('session', {}) or {}
+        if session and not session.get('trading_allowed', True):
+            warnings.append(f"Session blocked: {session.get('reason', 'outside trading hours')}")
+            signal = 'WAIT'
+        if session and not session.get('allow_signals', True):
+            warnings.append(f"Signals disabled in current session: {session.get('current_session')}")
+            signal = 'WAIT'
+
+        news = agents_results.get('news', {}) or {}
+        if news and (news.get('can_trade') is False or str(news.get('market_status', '')).upper() == 'DANGER'):
+            warnings.append(f"News blocked: {news.get('summary', news.get('market_status', 'DANGER'))}")
+            signal = 'WAIT'
+
+        risk = agents_results.get('risk', {}) or {}
+        if signal in {'BUY', 'SELL'} and risk and not risk.get('approved', False):
+            warnings.append(f"Risk rejected: {risk.get('rejection_reason', 'not approved')}")
+            signal = 'WAIT'
+
+        if signal != result.get('signal'):
+            reason = '; '.join(warnings[-3:]) or 'Safety filter blocked signal'
+            result['reasoning'] = f"{result.get('reasoning', '')} | {reason}".strip(' |')
+            result['confidence'] = 0 if signal == 'WAIT' else result.get('confidence', 0)
+
+        result['signal'] = signal
+        result['decision'] = signal
+        result['warnings'] = warnings
+        return result
+
+    def _to_trade_decision(self, analysis: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert analysis output to the canonical payload expected by DB/Telegram."""
+        final_signal = str(analysis.get('signal', 'WAIT')).upper()
+        risk = context.get('risk', {}) or {}
+        current_price = context.get('current_price')
+        signal_payload: Dict[str, Any] = {}
+
+        if final_signal in {'BUY', 'SELL'}:
+            entry_info = risk.get('entry', {}) or {}
+            entry_zone = entry_info.get('zone', {}) or {}
+            sl = risk.get('stop_loss', {}) or {}
+            tp = risk.get('take_profit', {}) or {}
+            tp1 = tp.get('tp1', {}) or {}
+            tp2 = tp.get('tp2', {}) or {}
+            entry_price = entry_info.get('price') or current_price
+            signal_payload = {
+                'type': final_signal,
+                'entry': {
+                    'price': entry_price,
+                    'low': entry_zone.get('low', entry_price),
+                    'high': entry_zone.get('high', entry_price),
+                },
+                'stop_loss': sl.get('price', 0),
+                'tp1': tp1.get('price', 0),
+                'tp2': tp2.get('price', 0),
+                'rr_ratio': tp2.get('rr_ratio', tp1.get('rr_ratio', 0)),
+                'position_size': risk.get('position_size', {}),
+                'risk_summary': risk.get('summary', ''),
+            }
+
+        reasons = [analysis.get('reasoning', '')]
+        if risk.get('summary'):
+            reasons.append(risk.get('summary'))
+        for warning in analysis.get('warnings', []) or []:
+            reasons.append(warning)
+
+        return {
+            'decision': final_signal,
+            'signal': signal_payload,
+            'confidence': analysis.get('confidence', 0),
+            'current_price': current_price,
+            'reasons': [r for r in reasons if r],
+            'warnings': analysis.get('warnings', []),
+            'votes': analysis.get('votes', {}),
+            'weights': analysis.get('weights', {}),
+            'classic': analysis.get('classic', {}),
+            'ai': analysis.get('ai', {}),
+            'learning': analysis.get('learning', {}),
+            'risk': risk,
+            'risk_assessment': analysis.get('risk_assessment', {}),
+            'session_info': context.get('session', {}),
+            'news': context.get('news', {}),
+            'summary': analysis.get('reasoning', ''),
+            'timestamp': analysis.get('timestamp', self.now_iso()),
+        }
+
+    def decide(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Production-compatible sync decision payload for DB/Telegram."""
+        analysis = self.analyze(data)
+        return self._to_trade_decision(analysis, data.get('all_agents_results', data))
+
+    async def decide_async(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Production-compatible async decision payload for DB/Telegram."""
+        analysis = await self.analyze_async(data)
+        return self._to_trade_decision(analysis, data.get('all_agents_results', data))
+
     def get_decision_message(self, result: Dict) -> str:
         """تنسيق رسالة القرار لتيليجرام"""
         
