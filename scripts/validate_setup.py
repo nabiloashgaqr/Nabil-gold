@@ -45,6 +45,10 @@ REQUIRED_BY_MODE = {
         "SUPABASE_URL",
         "SUPABASE_KEY",
     ],
+    "telegram": [
+        "TELEGRAM_BOT_TOKEN",
+        "TELEGRAM_CHAT_ID",
+    ],
     "test": [],
 }
 
