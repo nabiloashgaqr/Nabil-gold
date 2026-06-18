@@ -305,7 +305,7 @@ class DecisionAgent(BaseAgent):
             # بناء prompt مع كل البيانات
             votes_summary = self._format_votes_for_ai(votes)
             
-            session_quality = session_info.get('quality', 'UNKNOWN')
+            session_quality = session_info.get('quality', session_info.get('session_quality', 'UNKNOWN'))
             trading_allowed = session_info.get('trading_allowed', False)
             
             # إضافة معلومات التعلم للـ AI
@@ -425,17 +425,20 @@ class DecisionAgent(BaseAgent):
         if not session_info.get('trading_allowed'):
             return 'WAIT', 0, "خارج ساعات التداول"
         
-        session_quality = session_info.get('quality', 'LOW')
-        
-        # تعديل الحد الأدنى للثقة حسب الجودة
+        session_quality = session_info.get('quality', session_info.get('session_quality', 'LOW'))
+
+        # لا نخفض الحد الأدنى للثقة تحت قيمة config أبداً.
+        # في السابق كانت جلسة HIGH تضرب الحد ×0.7، فكانت تسمح بإشارات ضعيفة مثل 41%.
+        # الآن الحد الأدنى الحقيقي هو risk_settings.min_confidence، ويمكن رفعه للجلسات الضعيفة فقط.
         quality_multipliers = {
-            'BEST': 0.8,
-            'HIGH': 0.7,
-            'MEDIUM': 0.6,
-            'LOW': 0.5
+            'BEST': 1.0,
+            'HIGH': 1.0,
+            'MEDIUM': 1.10,
+            'LOW': 1.20,
+            'NONE': 1.50,
         }
-        
-        min_conf = self.min_confidence * quality_multipliers.get(session_quality, 0.5)
+
+        min_conf = self.min_confidence * quality_multipliers.get(str(session_quality).upper(), 1.20)
         
         # دمج الكلاسيكي مع AI
         if ai.get('available'):
