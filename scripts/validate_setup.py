@@ -84,11 +84,20 @@ def main() -> int:
         ai_config = config.get("ai_service", {})
         ai_enabled = bool(ai_config.get("enabled", False))
         fallback = bool(ai_config.get("fallback_to_classic", True))
-        if ai_enabled and not any(os.environ.get(k) for k in AI_KEYS):
+        provider = str(ai_config.get("provider", "openai")).lower()
+        provider_key_map = {
+            "openai": "OPENAI_API_KEY",
+            "grok": "GROK_API_KEY",
+            "groq": "GROQ_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "gemini": "GEMINI_API_KEY",
+        }
+        required_ai_key = provider_key_map.get(provider, "OPENAI_API_KEY")
+        if ai_enabled and not os.environ.get(required_ai_key):
             if fallback:
-                warnings.append("No AI provider key found; analysis will fallback to classic if code path allows it")
+                warnings.append(f"{required_ai_key} not found; analysis may fallback to classic")
             else:
-                missing.append("ONE_OF_OPENAI_GROQ_ANTHROPIC_GEMINI_API_KEY")
+                missing.append(required_ai_key)
 
     for warning in warnings:
         print(f"⚠️ {warning}")

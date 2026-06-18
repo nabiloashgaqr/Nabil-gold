@@ -103,6 +103,9 @@ async def run_analysis_async() -> None:
                 logger.info("🤖 AI Service مفعّل: %s", ai_config.get("provider", "unknown"))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("⚠️ فشل تهيئة AI: %s", exc)
+                if not bool(ai_config.get("fallback_to_classic", True)):
+                    telegram.send_error_alert(f"Groq إجباري لكن فشلت تهيئة AI: {exc}")
+                    return
 
         logger.info("جلب بيانات السوق...")
         data = market_data.get_gold_data()

@@ -168,7 +168,7 @@
     "max_tokens": 800,
     "temperature": 0.25,
     "api_key": "ENV:GROQ_API_KEY",
-    "fallback_to_classic": true,
+    "fallback_to_classic": false,
     "description": "خدمة الذكاء الاصطناعي للتحليل الذكي"
   },
   "ai_providers": {

@@ -299,7 +299,7 @@ class DecisionAgent(BaseAgent):
         """
         
         if not self.ai_service:
-            return {'available': False}
+            return {'available': False, 'error': 'AI service not initialized'}
         
         try:
             # بناء prompt مع كل البيانات
@@ -369,7 +369,7 @@ class DecisionAgent(BaseAgent):
                         'cost': response.cost
                     }
             
-            return {'available': True, 'error': response.error}
+            return {'available': False, 'error': response.error or 'AI response parsing failed'}
             
         except Exception as e:
             logger.error(f"❌ خطأ في قرار AI: {e}")
@@ -439,6 +439,12 @@ class DecisionAgent(BaseAgent):
         }
 
         min_conf = self.min_confidence * quality_multipliers.get(str(session_quality).upper(), 1.20)
+
+        ai_config = self.config.get('ai_service', {})
+        ai_required = bool(ai_config.get('enabled', False)) and not bool(ai_config.get('fallback_to_classic', True))
+        if ai_required and (not ai.get('available') or ai.get('error')):
+            error = ai.get('error') or 'AI unavailable'
+            return 'WAIT', 0, f"Groq إجباري لكن فشل AI: {error}"
         
         # دمج الكلاسيكي مع AI
         if ai.get('available'):
@@ -451,13 +457,23 @@ class DecisionAgent(BaseAgent):
                 final_confidence = (ai_conf * 0.7) + (classic.get('confidence', 50) * 0.3)
                 reasoning = ai.get('reasoning', classic.get('decision', 'N/A'))
             else:
+                if ai_required:
+                    final_signal = 'WAIT'
+                    final_confidence = ai_conf
+                    reasoning = f"Groq إجباري: قرار AI غير كافٍ أو WAIT (ثقة AI: {ai_conf}%)"
+                else:
+                    final_signal = classic.get('decision', 'WAIT')
+                    final_confidence = classic.get('confidence', 50)
+                    reasoning = f"قرار كلاسيكي - AI غير متوفر أو ثقة منخفضة"
+        else:
+            if ai_required:
+                final_signal = 'WAIT'
+                final_confidence = 0
+                reasoning = "Groq إجباري لكن AI غير مفعّل أو غير متاح"
+            else:
                 final_signal = classic.get('decision', 'WAIT')
                 final_confidence = classic.get('confidence', 50)
-                reasoning = f"قرار كلاسيكي - AI غير متوفر أو ثقة منخفضة"
-        else:
-            final_signal = classic.get('decision', 'WAIT')
-            final_confidence = classic.get('confidence', 50)
-            reasoning = "قرار كلاسيكي - AI غير مفعّل"
+                reasoning = "قرار كلاسيكي - AI غير مفعّل"
         
         # التحقق من الحد الأدنى للثقة
         if final_confidence < min_conf:
