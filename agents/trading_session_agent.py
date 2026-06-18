@@ -1,0 +1,204 @@
+"""Trading Session Agent.
+
+يتحقق من ساعات التداول المسموحة ويمنع الإشارات خارج ساعات العمل.
+يدعم جلسات متعددة (لندن، نيويورك، الخ) مع تقييم جودة كل جلسة.
+
+days في config.json: 0=Sunday, 1=Monday, ..., 6=Saturday (مثل Python weekday())
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any, Dict, List
+
+from agents.base_agent import BaseAgent
+from utils.helpers import load_config
+
+
+class TradingSessionAgent(BaseAgent):
+    """Check if current time is within allowed trading hours."""
+
+    name = "trading_session"
+
+    def __init__(self, config: Dict[str, Any] | None = None) -> None:
+        super().__init__(config or load_config())
+        self.hours_config = self.config.get("trading_hours", {})
+        self.signal_filters = self.config.get("signal_filters", {})
+        self.quality_order = {"BEST": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
+
+    def check(self, now: datetime | None = None) -> Dict[str, Any]:
+        """Return trading session status and whether trading is allowed."""
+        try:
+            now = now or datetime.now(timezone.utc)
+            if now.tzinfo is None:
+                now = now.replace(tzinfo=timezone.utc)
+
+            if not self.hours_config.get("enabled", False):
+                return self._allowed(
+                    reason="Trading hours check is disabled",
+                    current_session=None,
+                    session_quality="UNKNOWN",
+                    trading_allowed=True,
+                )
+
+            # Check Friday after-hours (before session check)
+            if now.weekday() == 4:  # Friday
+                cutoff = int(self.hours_config.get("friday_cutoff_hour", 20))
+                if now.hour >= cutoff and not self.signal_filters.get("allow_friday_after_hours", False):
+                    return self._blocked(
+                        reason=f"Friday after {cutoff}:00 UTC - weekend approaching",
+                        current_session=None,
+                        session_quality="LOW",
+                        next_session=self._next_session_info(now),
+                    )
+
+            # Find active session (handles all day/weekend checks via session.days)
+            active_session = self._find_active_session(now)
+            if active_session is None:
+                # Check if it's a weekend day not in any session
+                is_weekend = now.weekday() in {5, 6}  # Saturday/Sunday
+                if is_weekend:
+                    return self._blocked(
+                        reason="Weekend - markets closed",
+                        current_session=None,
+                        session_quality="NONE",
+                        next_session=self._next_session_info(now),
+                    )
+                return self._blocked(
+                    reason="Outside trading hours",
+                    current_session=None,
+                    session_quality="NONE",
+                    next_session=self._next_session_info(now),
+                )
+
+            session_name = active_session.get("name", "Unknown")
+            session_quality = active_session.get("quality", "UNKNOWN")
+
+            # Check minimum quality requirement
+            min_quality = self.hours_config.get("min_quality_required", "HIGH")
+            if self._quality_order(session_quality) > self._quality_order(min_quality):
+                return self._blocked(
+                    reason=f"Session quality ({session_quality}) below minimum ({min_quality})",
+                    current_session=session_name,
+                    session_quality=session_quality,
+                )
+
+            return self._allowed(
+                reason=f"Active session: {session_name} ({session_quality} quality)",
+                current_session=session_name,
+                session_quality=session_quality,
+                trading_allowed=True,
+                session_details={
+                    "name": session_name,
+                    "quality": session_quality,
+                    "description": active_session.get("description", ""),
+                    "hours": f"{active_session.get('start_hour')}:00 - {active_session.get('end_hour')}:00 UTC",
+                    "days": active_session.get("days", []),
+                },
+            )
+
+        except Exception as exc:  # noqa: BLE001
+            self.logger.exception("Trading session check failed")
+            return self._allowed(
+                reason=f"Session check failed: {exc} - allowing by default",
+                current_session=None,
+                session_quality="UNKNOWN",
+                trading_allowed=True,
+            )
+
+    def _find_active_session(self, now: datetime) -> Dict[str, Any] | None:
+        """Find which session is currently active. Prioritize the most specific session."""
+        sessions = self.hours_config.get("sessions", [])
+        current_hour = now.hour
+        current_weekday = now.weekday()  # 0=Monday ... 6=Sunday
+
+        matches: List[Dict[str, Any]] = []
+        for session in sessions:
+            start = int(session.get("start_hour", 0))
+            end = int(session.get("end_hour", 23))
+            # days: 0=Sunday, 1=Monday, ..., 6=Saturday (Python weekday format)
+            allowed_days = [int(d) for d in session.get("days", [1, 2, 3, 4, 5])]
+
+            if current_weekday not in allowed_days:
+                continue
+
+            if start <= end:
+                if start <= current_hour <= end:
+                    matches.append(session)
+            else:
+                # Overnight range (e.g., 22-6)
+                if current_hour >= start or current_hour <= end:
+                    matches.append(session)
+
+        if not matches:
+            return None
+
+        # Pick the narrowest session (smallest duration = most specific)
+        quality_order = {"BEST": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
+        return min(
+            matches,
+            key=lambda s: (
+                int(s.get("end_hour", 23)) - int(s.get("start_hour", 0)),
+                quality_order.get(str(s.get("quality", "UNKNOWN")).upper(), 4),
+            ),
+        )
+
+    def _next_session_info(self, now: datetime) -> Dict[str, Any] | None:
+        """Return info about the next upcoming session."""
+        sessions = self.hours_config.get("sessions", [])
+        for offset in range(1, 8):
+            check_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            check_date = check_date.replace(day=now.day + offset)
+            check_weekday = check_date.weekday()  # 0=Monday ... 6=Sunday
+            for session in sessions:
+                # days: 0=Sunday, 1=Monday, ..., 6=Saturday (Python weekday format)
+                allowed_days = [int(d) for d in session.get("days", [1, 2, 3, 4, 5])]
+                if check_weekday in allowed_days:
+                    return {
+                        "session": session.get("name", "Unknown"),
+                        "day": check_date.strftime("%A"),
+                        "hour": session.get("start_hour", 8),
+                        "quality": session.get("quality", "UNKNOWN"),
+                    }
+        return None
+
+    def _quality_order(self, quality: str) -> int:
+        return self.quality_order.get(quality.upper(), 4)
+
+    def _allowed(
+        self,
+        reason: str,
+        current_session: str | None,
+        session_quality: str,
+        trading_allowed: bool = True,
+        session_details: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        return {
+            "agent": self.name,
+            "trading_allowed": trading_allowed,
+            "reason": reason,
+            "current_session": current_session,
+            "session_quality": session_quality,
+            "session_details": session_details,
+            "is_trading_hours": trading_allowed,
+            "summary": f"{'✅' if trading_allowed else '🚫'} الجلسة: {current_session or 'غير محدد'} | الجودة: {session_quality} | {reason}",
+        }
+
+    def _blocked(
+        self,
+        reason: str,
+        current_session: str | None,
+        session_quality: str,
+        next_session: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        return {
+            "agent": self.name,
+            "trading_allowed": False,
+            "reason": reason,
+            "current_session": current_session,
+            "session_quality": session_quality,
+            "session_details": None,
+            "is_trading_hours": False,
+            "next_session": next_session,
+            "summary": f"🚫 خارج ساعات التداول - {reason}",
+        }
