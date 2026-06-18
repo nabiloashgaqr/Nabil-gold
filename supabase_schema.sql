@@ -65,6 +65,8 @@ CREATE TABLE IF NOT EXISTS trades (
     result VARCHAR(30),
     reasons JSONB DEFAULT '[]'::jsonb,
     signal_snapshot JSONB DEFAULT '{}'::jsonb,
+    ai_reviewed BOOLEAN DEFAULT FALSE,
+    ai_review JSONB,
 
     created_at TIMESTAMPTZ DEFAULT NOW(),
     opened_at TIMESTAMPTZ GENERATED ALWAYS AS (entry_time) STORED,
@@ -85,6 +87,22 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS trading_mode VARCHAR(20) DEFAULT 'pa
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS paper_trading BOOLEAN DEFAULT TRUE;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS paper_balance_start DECIMAL(18, 4);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS paper_lot_size DECIMAL(18, 6);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS ai_reviewed BOOLEAN DEFAULT FALSE;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS ai_review JSONB;
+
+-- AI trade reviews table
+CREATE TABLE IF NOT EXISTS ai_trade_reviews (
+    id TEXT PRIMARY KEY,
+    trade_id TEXT,
+    reviewed_at TIMESTAMPTZ DEFAULT NOW(),
+    provider VARCHAR(50),
+    model VARCHAR(100),
+    tokens_used INTEGER DEFAULT 0,
+    review JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ai_trade_reviews_trade ON ai_trade_reviews(trade_id);
+CREATE INDEX IF NOT EXISTS idx_ai_trade_reviews_reviewed ON ai_trade_reviews(reviewed_at DESC);
 
 -- 3) Portfolio summary
 CREATE TABLE IF NOT EXISTS portfolio (
@@ -274,6 +292,7 @@ ALTER TABLE session_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_weights ENABLE ROW LEVEL SECURITY;
 ALTER TABLE learning_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_evaluations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ai_trade_reviews ENABLE ROW LEVEL SECURITY;
 
 -- If you intentionally use anon key for a private bot, create restricted policies manually.
 -- Recommended GitHub Secret: SUPABASE_KEY = service_role key, not anon key.

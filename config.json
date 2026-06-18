@@ -256,5 +256,12 @@
     "default_lot_size": 0.01,
     "track_virtual_pnl": true,
     "description": "وضع تجريبي: يتم حفظ ومتابعة الصفقات افتراضياً بدون تنفيذ حقيقي"
+  },
+  "ai_trade_review": {
+    "enabled": true,
+    "max_reviews_per_run": 3,
+    "recent_trades_limit": 30,
+    "review_only_losses": true,
+    "description": "يراجع Groq الصفقات الخاسرة المغلقة ويستخرج دروساً وقواعد تحسين"
   }
 }

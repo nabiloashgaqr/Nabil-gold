@@ -178,6 +178,37 @@ class DatabaseService:
                 break
         save_trades(trades, self.local_path)
 
+
+    def save_trade_review(self, review: Dict[str, Any]) -> str:
+        """Persist an AI review for a closed trade."""
+        trade_id = str(review.get("trade_id") or "unknown")
+        reviewed_at = str(review.get("reviewed_at") or datetime.now(timezone.utc).replace(microsecond=0).isoformat())
+        review_id = review.get("id") or f"REVIEW_{trade_id}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        payload = {
+            "id": review_id,
+            "trade_id": trade_id,
+            "reviewed_at": reviewed_at,
+            "provider": review.get("provider"),
+            "model": review.get("model"),
+            "tokens_used": review.get("tokens_used", 0),
+            "review": review.get("review", {}),
+            "created_at": reviewed_at,
+        }
+
+        if self.use_supabase and self.client:
+            try:
+                self.client.table("ai_trade_reviews").upsert(payload).execute()
+                return str(review_id)
+            except Exception as exc:  # noqa: BLE001
+                self.logger.error("Failed to save AI trade review in Supabase, falling back local: %s", exc)
+
+        reviews_path = self.local_path.parent / "trade_reviews.json"
+        reviews = load_trades(reviews_path)
+        existing = [r for r in reviews if str(r.get("id")) != str(review_id)]
+        existing.append(payload)
+        save_trades(existing, reviews_path)
+        return str(review_id)
+
     def get_today_signals_count(self) -> int:
         """Return number of trades created today UTC."""
         return len(self.get_today_trades())
