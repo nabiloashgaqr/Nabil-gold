@@ -125,7 +125,8 @@
     "trailing_activation_at": "TP1",
     "trailing_distance_points": 15,
     "partial_close_at_tp1": true,
-    "partial_close_percentage": 50
+    "partial_close_percentage": 50,
+    "update_outside_trading_hours": true
   },
   "performance": {
     "track_win_rate_per_agent": true,

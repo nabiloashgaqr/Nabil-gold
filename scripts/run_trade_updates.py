@@ -39,13 +39,18 @@ def main() -> None:
         session.get("trading_allowed"),
     )
 
-    if not session.get("trading_allowed"):
+    update_outside_hours = bool(config.get("trade_management", {}).get("update_outside_trading_hours", True))
+    if not session.get("trading_allowed") and not update_outside_hours:
         logger.info(
             "🚫 خارج ساعات التداول (%s) - لا تحديث حالياً. السبب: %s",
             session.get("current_session") or "غير محدد",
             session.get("reason", ""),
         )
-        return  # ══ لا تحديث خارج الجلسات ══
+        return  # ══ لا تحديث خارج الجلسات عند تعطيل الخيار ══
+    if not session.get("trading_allowed") and update_outside_hours:
+        logger.info(
+            "ℹ️ خارج ساعات الإشارات، لكن متابعة الصفقات المفتوحة مستمرة حسب trade_management.update_outside_trading_hours"
+        )
 
     try:
         market_data = MarketDataService(config)
