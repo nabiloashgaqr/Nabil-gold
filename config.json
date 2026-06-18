@@ -1,11 +1,6 @@
 {
   "symbol": "XAU/USD",
-  "timeframes": [
-    "5m",
-    "15m",
-    "1H",
-    "4H"
-  ],
+  "timeframes": ["5m", "15m", "1H", "4H"],
   "primary_timeframe": "15m",
   "trend_timeframe": "4H",
   "entry_timeframe": "15m",
@@ -28,11 +23,11 @@
     "local_fallback_file": "storage/trades.json"
   },
   "agent_weights": {
-    "technical": 0.2,
-    "classical": 0.2,
+    "technical": 0.20,
+    "classical": 0.20,
     "smc": 0.25,
     "price_action": 0.15,
-    "multitimeframe": 0.15
+    "multitimeframe": 0.20
   },
   "risk_settings": {
     "min_confidence": 60,
@@ -72,7 +67,19 @@
         "end_hour": 17,
         "days": [6, 0, 1, 2, 3],
         "quality": "HIGH",
+        "allow_signals": true,
+        "allow_reports": false,
         "description": "جلسة التداول: 11 صباحاً - 6 مساءً UTC (الأحد-الخميس)"
+      },
+      {
+        "name": "Daily Report Session",
+        "start_hour": 22,
+        "end_hour": 23,
+        "days": [6, 0, 1, 2, 3],
+        "quality": "LOW",
+        "allow_signals": false,
+        "allow_reports": true,
+        "description": "جلسة التقارير: 10 مساءً - 11 مساءً UTC (الأحد-الخميس)"
       }
     ],
     "min_quality_required": "HIGH",
@@ -131,8 +138,8 @@
     "enabled": true,
     "provider": "openai",
     "model": "gpt-4o-mini",
-    "max_tokens": 500,
-    "temperature": 0.3,
+    "max_tokens": 800,
+    "temperature": 0.25,
     "api_key": "ENV:OPENAI_API_KEY",
     "fallback_to_classic": true,
     "description": "خدمة الذكاء الاصطناعي للتحليل الذكي"
@@ -162,12 +169,14 @@
   "learning": {
     "enabled": true,
     "update_frequency_days": 1,
-    "min_predictions_for_adjustment": 5,
-    "max_weight_change": 0.15,
-    "momentum_weight": 0.3,
-    "decay_factor": 0.95,
+    "min_predictions_for_adjustment": 3,
+    "max_weight_change": 0.25,
+    "momentum_weight": 0.4,
+    "decay_factor": 0.90,
     "performance_threshold": 0.6,
     "auto_adjust_confidence": true,
+    "aggressive_mode": true,
+    "streak_bonus": 0.10,
     "description": "نظام التعلم الذكي لتحديث أوزان الوكلاء"
   }
 }
