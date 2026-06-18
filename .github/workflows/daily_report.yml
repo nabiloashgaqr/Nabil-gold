@@ -1,7 +1,7 @@
 name: 📊 Daily Report & Learning
 on:
   schedule:
-    - cron: "0 23 * * *"  # 23:00 UTC يومياً
+    - cron: "0 20 * * *"  # 23:00 Asia/Jerusalem تقريباً (20:00 UTC حالياً)
   workflow_dispatch:
 
 jobs:

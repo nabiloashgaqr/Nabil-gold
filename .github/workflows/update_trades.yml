@@ -1,7 +1,7 @@
 name: 🔄 Update Open Trades
 on:
   schedule:
-    - cron: "0 11-17 * * 0,1,2,3,4"  # كل ساعة، 11-17 UTC، الأحد-الخميس
+    - cron: "0 20 * * 0,1,2,3,4"  # الساعة 23:00 Asia/Jerusalem تقريباً (20:00 UTC حالياً)
   workflow_dispatch:
 
 jobs:

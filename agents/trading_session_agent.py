@@ -13,6 +13,7 @@ days في config.json: 0=Sunday, 1=Monday, ..., 6=Saturday (مثل Python weekda
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, List
 
 from agents.base_agent import BaseAgent
@@ -37,6 +38,12 @@ class TradingSessionAgent(BaseAgent):
             if now.tzinfo is None:
                 now = now.replace(tzinfo=timezone.utc)
 
+            session_timezone = self.hours_config.get("timezone", "UTC")
+            try:
+                local_now = now.astimezone(ZoneInfo(str(session_timezone)))
+            except Exception:  # noqa: BLE001 - fallback safely to UTC if timezone is invalid
+                local_now = now.astimezone(timezone.utc)
+
             if not self.hours_config.get("enabled", False):
                 return self._allowed(
                     reason="Trading hours check is disabled",
@@ -48,33 +55,33 @@ class TradingSessionAgent(BaseAgent):
                 )
 
             # Check Friday after-hours (before session check)
-            if now.weekday() == 4:  # Friday
+            if local_now.weekday() == 4:  # Friday
                 cutoff = int(self.hours_config.get("friday_cutoff_hour", 20))
-                if now.hour >= cutoff and not self.signal_filters.get("allow_friday_after_hours", False):
+                if local_now.hour >= cutoff and not self.signal_filters.get("allow_friday_after_hours", False):
                     return self._blocked(
                         reason=f"Friday after {cutoff}:00 UTC - weekend approaching",
                         current_session=None,
                         session_quality="LOW",
-                        next_session=self._next_session_info(now),
+                        next_session=self._next_session_info(local_now),
                     )
 
             # Find active session (handles all day/weekend checks via session.days)
-            active_session = self._find_active_session(now)
+            active_session = self._find_active_session(local_now)
             if active_session is None:
                 # Check if it's a weekend day not in any session
-                is_weekend = now.weekday() in {5, 6}  # Saturday/Sunday
+                is_weekend = local_now.weekday() in {5, 6}  # Saturday/Sunday
                 if is_weekend:
                     return self._blocked(
                         reason="Weekend - markets closed",
                         current_session=None,
                         session_quality="NONE",
-                        next_session=self._next_session_info(now),
+                        next_session=self._next_session_info(local_now),
                     )
                 return self._blocked(
                     reason="Outside trading hours",
                     current_session=None,
                     session_quality="NONE",
-                    next_session=self._next_session_info(now),
+                    next_session=self._next_session_info(local_now),
                 )
 
             session_name = active_session.get("name", "Unknown")
