@@ -1,0 +1,59 @@
+name: 🧪 Backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      outputsize:
+        description: 'Number of candles to fetch'
+        required: false
+        default: '420'
+      window:
+        description: 'Rolling analysis window'
+        required: false
+        default: '160'
+      step:
+        description: 'Step between evaluations'
+        required: false
+        default: '12'
+      horizon:
+        description: 'Candles to simulate after entry'
+        required: false
+        default: '32'
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: 📦 Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: 🧪 Run Backtest
+        run: |
+          python scripts/run_backtest.py \
+            --outputsize "${{ github.event.inputs.outputsize }}" \
+            --window "${{ github.event.inputs.window }}" \
+            --step "${{ github.event.inputs.step }}" \
+            --horizon "${{ github.event.inputs.horizon }}" \
+            --send-telegram
+        env:
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: 📤 Upload Backtest Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-report
+          path: storage/backtest_report.json
