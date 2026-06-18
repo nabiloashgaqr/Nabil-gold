@@ -209,6 +209,19 @@ class DatabaseService:
         save_trades(existing, reviews_path)
         return str(review_id)
 
+
+    def get_recent_trade_reviews(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Return recent AI trade reviews."""
+        reviews_path = self.local_path.parent / "trade_reviews.json"
+        if self.use_supabase and self.client:
+            try:
+                response = self.client.table("ai_trade_reviews").select("*").order("reviewed_at", desc=True).limit(limit).execute()
+                return list(response.data or [])
+            except Exception as exc:  # noqa: BLE001
+                self.logger.error("Failed to fetch AI trade reviews from Supabase: %s", exc)
+        reviews = load_trades(reviews_path)
+        return sorted(reviews, key=lambda item: str(item.get("reviewed_at", item.get("created_at", ""))), reverse=True)[:limit]
+
     def get_today_signals_count(self) -> int:
         """Return number of trades created today UTC."""
         return len(self.get_today_trades())

@@ -1,0 +1,41 @@
+name: 📊 Dashboard
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 20 * * *"  # بعد تقرير 23:00 Asia/Jerusalem تقريباً
+
+jobs:
+  dashboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: 📦 Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: 📊 Generate Dashboard
+        run: |
+          python scripts/generate_dashboard.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SEND_TELEGRAM: "true"
+
+      - name: 📤 Upload Dashboard Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gold-dashboard
+          path: storage/dashboard.html
