@@ -2,13 +2,7 @@ name: 📊 Daily Report & Learning
 on:
   schedule:
     - cron: "0 23 * * *"  # 23:00 UTC يومياً
-  
   workflow_dispatch:
-    inputs:
-      force_learning:
-        description: 'Force learning update'
-        required: false
-        default: 'false'
 
 jobs:
   daily-report:
@@ -53,68 +47,54 @@ async def update_open_trades():
     db = DatabaseService(config)
     telegram = TelegramBot(config)
     
-    # Get open trades
     query = '''
         SELECT id, signal_id, trade_type, entry_price, 
                current_price, sl, tp1, tp2, opened_at
         FROM trades 
-        WHERE status IN ('OPEN', 'PARTIAL')
+        WHERE status IN ('OPEN', 'PARTIAL', 'TP1_HIT')
         ORDER BY opened_at DESC
     '''
     trades = await db.execute_query(query)
     
     if not trades:
-        await telegram.send_message('📊 *تقرير الصفقات المفتوحة*\n\n❌ لا توجد صفقات مفتوحة حالياً')
+        await telegram.send_message('📊 تقرير الصفقات المفتوحة\n\n❌ لا توجد صفقات مفتوحة حالياً')
         return
     
-    # Build report
     lines = [
         '━━━━━━━━━━━━━━━━━━━━',
-        '📊 *تقرير الصفقات المفتوحة*',
-        f'📅 تاريخ التقرير: {datetime.now().strftime(\"%Y-%m-%d %H:%M\")} UTC',
-        f'📈 عدد الصفقات: {len(trades)}',
+        '📊 تقرير الصفقات المفتوحة',
+        f'📅 {datetime.now(timezone.utc).strftime(\"%Y-%m-%d %H:%M\")} UTC',
+        f'📈 العدد: {len(trades)}',
         '━━━━━━━━━━━━━━━━━━━━',
         ''
     ]
     
-    for trade in trades:
-        trade_type = trade.get('trade_type', 'BUY')
-        entry = trade.get('entry_price', 0)
-        current = trade.get('current_price', 0)
-        sl = trade.get('sl', 0)
-        tp1 = trade.get('tp1', 0)
-        tp2 = trade.get('tp2', 0)
+    for t in trades:
+        ttype = t.get('trade_type', 'BUY')
+        entry = float(t.get('entry_price', 0))
+        current = float(t.get('current_price', entry) or entry)
+        sl = t.get('sl', 0)
+        tp1 = t.get('tp1', 0)
+        tp2 = t.get('tp2', 0)
         
-        # Calculate P/L
-        if trade_type == 'BUY':
-            pnl_points = current - entry
+        if ttype == 'BUY':
+            pnl = current - entry
         else:
-            pnl_points = entry - current
+            pnl = entry - current
         
-        # Calculate progress to targets
-        if sl and entry:
-            risk = abs(entry - sl)
-            if risk > 0:
-                progress = (abs(pnl_points) / risk) * 100
-            else:
-                progress = 0
-        else:
-            progress = 0
+        emoji = '🟢' if pnl > 0 else '🔴' if pnl < 0 else '🟡'
         
-        emoji = '🟢' if pnl_points > 0 else '🔴' if pnl_points < 0 else '🟡'
-        
-        lines.append(f'{emoji} *{trade_type}* - {trade[\"id\"][:8]}...')
+        lines.append(f'{emoji} {ttype}')
         lines.append(f'├ الدخول: {entry}')
-        lines.append(f'├ الحالي: {current} ({pnl_points:+.2f})')
-        lines.append(f'├ SL: {sl}')
-        lines.append(f'├ TP1: {tp1}')
-        lines.append(f'├ TP2: {tp2}')
-        lines.append(f'└ التقدم: {progress:.0f}%')
+        lines.append(f'├ الحالي: {current} ({pnl:+.2f})')
+        if sl: lines.append(f'├ SL: {sl}')
+        if tp1: lines.append(f'├ TP1: {tp1}')
+        if tp2: lines.append(f'├ TP2: {tp2}')
         lines.append('')
     
     lines.append('━━━━━━━━━━━━━━━━━━━━')
     
-    await telegram.send_message('\\n'.join(lines))
+    await telegram.send_message('\n'.join(lines))
 
 asyncio.run(update_open_trades())
 "
@@ -123,8 +103,9 @@ asyncio.run(update_open_trades())
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       
-      - name: ✅ Success Notification
+      - name: ✅ Success Log
         if: always()
         run: |
           echo "Daily report completed at $(date)"
