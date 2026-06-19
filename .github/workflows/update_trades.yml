@@ -3,8 +3,8 @@ on:
   schedule:
     # Asia/Jerusalem test window: hourly 07:59 → 18:01.
     # During UTC+3 this is 04:59 → 15:01 UTC.
-    - cron: "59 4-15 * * 0,1,2,3,4"
-    - cron: "1 15-16 * * 0,1,2,3,4"
+    - cron: "59 4-15 * * 0,1,2,3,4,5"
+    - cron: "1 15-16 * * 0,1,2,3,4,5"
   workflow_dispatch:
 
 jobs:

@@ -76,12 +76,13 @@
           0,
           1,
           2,
-          3
+          3,
+          4
         ],
         "quality": "HIGH",
         "allow_signals": true,
         "allow_reports": false,
-        "description": "جلسة التداول التجريبية: 07:59 - 18:01 بتوقيت Asia/Jerusalem (الأحد-الخميس)",
+        "description": "جلسة التداول التجريبية: 07:59 - 18:01 بتوقيت Asia/Jerusalem (الأحد-الجمعة)",
         "start_minute": 59,
         "end_minute": 1
       },
@@ -94,12 +95,13 @@
           0,
           1,
           2,
-          3
+          3,
+          4
         ],
         "quality": "LOW",
         "allow_signals": false,
         "allow_reports": true,
-        "description": "جلسة التقارير ونهاية اليوم: 23:00 - 23:59 بتوقيت Asia/Jerusalem",
+        "description": "جلسة التقارير ونهاية اليوم: 23:00 - 23:59 بتوقيت Asia/Jerusalem (الأحد-الجمعة)",
         "start_minute": 0,
         "end_minute": 59
       }
