@@ -342,64 +342,72 @@ class DecisionAgent(BaseAgent):
         }
     
     def _format_agent_context_for_ai(self, agents_results: Dict[str, Any]) -> str:
-        """Format detailed agent outputs for Groq so it cannot answer generically."""
+        """Format compact, high-signal agent outputs for Groq under token limits."""
+        def short(value: Any, limit: int = 550) -> str:
+            text = str(value)
+            return text if len(text) <= limit else text[:limit] + "..."
+
         sections: List[str] = []
-        for name in ['technical', 'classical', 'smc', 'price_action', 'multitimeframe', 'daily_bias', 'risk', 'news', 'news_ai', 'dynamic_risk']:
-            result = agents_results.get(name, {}) or {}
-            if not isinstance(result, dict):
-                continue
-            sections.append(f"\n## {name}")
-            if name == 'technical':
-                t = result.get('technical', {}) or {}
-                sections.extend([
-                    f"signal={result.get('signal')} confidence={result.get('confidence')}",
-                    f"trend={t.get('trend')} score={t.get('classic_score')} RSI={t.get('rsi')} RSI7={t.get('rsi_7')} divergence={t.get('rsi_divergence')}",
-                    f"MACD={t.get('macd')} hist={t.get('macd_histogram')} slope={t.get('macd_histogram_slope')}",
-                    f"EMA ribbon={t.get('ema_ribbon')} EMA values={t.get('ema_values')}",
-                    f"Bollinger={t.get('bollinger')} ATR={t.get('atr')} regime={t.get('market_regime')}",
-                    f"levels={t.get('key_levels')} reasons={t.get('reasons')}",
-                ])
-            elif name == 'classical':
-                sections.extend([
-                    f"direction={result.get('direction')} confidence={result.get('confidence')}",
-                    f"support={result.get('support_levels')} resistance={result.get('resistance_levels')}",
-                    f"patterns={result.get('patterns_detected')} trendline={result.get('trendline')}",
-                    f"scenarios={result.get('scenarios')} signals={result.get('signals')}",
-                ])
-            elif name == 'smc':
-                sections.extend([
-                    f"direction={result.get('direction')} confidence={result.get('confidence')}",
-                    f"structure={result.get('market_structure')}",
-                    f"order_blocks={result.get('order_blocks')}",
-                    f"liquidity={result.get('liquidity')}",
-                    f"fvg={result.get('fvg')} zone={result.get('zone')} entry_suggestion={result.get('entry_suggestion')}",
-                    f"signals={result.get('signals')}",
-                ])
-            elif name == 'price_action':
-                sections.extend([
-                    f"direction={result.get('direction')} confidence={result.get('confidence')} role={result.get('role')}",
-                    f"patterns={result.get('candle_patterns')}",
-                    f"candle_analysis={result.get('candle_analysis')}",
-                    f"breakout={result.get('breakout_analysis')} rejection={result.get('rejection')}",
-                    f"signals={result.get('signals')}",
-                ])
-            elif name == 'multitimeframe':
-                sections.extend([
-                    f"direction={result.get('direction')} confidence={result.get('confidence')} alignment={result.get('alignment')} score={result.get('alignment_score')}",
-                    f"setup_type={result.get('setup_type')} counter_trend={result.get('counter_trend')} htf={result.get('trend_direction_from_htf')}",
-                    f"weighted_bias={result.get('weighted_bias')} conflicts={result.get('conflicts')} warnings={result.get('warnings')}",
-                    f"tf_analysis={result.get('timeframe_analysis')}",
-                ])
-            elif name == 'risk':
-                sections.extend([
-                    f"approved={result.get('approved')} rejection={result.get('rejection_reason')} direction={result.get('direction')}",
-                    f"entry={result.get('entry')} SL={result.get('stop_loss')} TP={result.get('take_profit')}",
-                    f"risk_metrics={result.get('risk_metrics')} grade={result.get('trade_grade')}",
-                    f"position_size={result.get('position_size')}",
-                ])
-            else:
-                sections.append(str(result)[:3000])
-        return "\n".join(sections)[:18000]
+        tech = agents_results.get('technical', {}) or {}
+        t = tech.get('technical', {}) or {}
+        sections.append(
+            "TECHNICAL: "
+            f"signal={tech.get('signal')} conf={tech.get('confidence')} trend={t.get('trend')} score={t.get('classic_score')} "
+            f"RSI={t.get('rsi')} div={t.get('rsi_divergence')} MACD={t.get('macd')} hist={t.get('macd_histogram')} "
+            f"EMA={short(t.get('ema_ribbon'), 180)} ATR={t.get('atr')} regime={short(t.get('market_regime'), 180)} "
+            f"levels={short(t.get('key_levels'), 160)} reasons={short(t.get('reasons'), 220)}"
+        )
+
+        classical = agents_results.get('classical', {}) or {}
+        sections.append(
+            "CLASSICAL: "
+            f"dir={classical.get('direction')} conf={classical.get('confidence')} "
+            f"S={short(classical.get('support_levels'), 120)} R={short(classical.get('resistance_levels'), 120)} "
+            f"patterns={short(classical.get('patterns_detected'), 450)}"
+        )
+
+        smc = agents_results.get('smc', {}) or {}
+        sections.append(
+            "SMC: "
+            f"dir={smc.get('direction')} conf={smc.get('confidence')} structure={short(smc.get('market_structure'), 300)} "
+            f"OB={short(smc.get('order_blocks'), 450)} liquidity={short(smc.get('liquidity'), 350)} "
+            f"FVG={short(smc.get('fvg'), 300)} zone={smc.get('zone')} signals={short(smc.get('signals'), 250)}"
+        )
+
+        pa = agents_results.get('price_action', {}) or {}
+        sections.append(
+            "PRICE_ACTION: "
+            f"dir={pa.get('direction')} conf={pa.get('confidence')} role={pa.get('role')} "
+            f"patterns={short(pa.get('candle_patterns'), 400)} breakout={short(pa.get('breakout_analysis'), 220)} "
+            f"rejection={short(pa.get('rejection'), 220)} signals={short(pa.get('signals'), 250)}"
+        )
+
+        mtf = agents_results.get('multitimeframe', {}) or {}
+        sections.append(
+            "MTF: "
+            f"dir={mtf.get('direction')} conf={mtf.get('confidence')} align={mtf.get('alignment')} score={mtf.get('alignment_score')} "
+            f"setup={mtf.get('setup_type')} counter={mtf.get('counter_trend')} bias={short(mtf.get('weighted_bias'), 220)} "
+            f"conflicts={short(mtf.get('conflicts'), 180)}"
+        )
+
+        daily = agents_results.get('daily_bias', {}) or {}
+        risk = agents_results.get('risk', {}) or {}
+        news = agents_results.get('news', {}) or {}
+        news_ai = agents_results.get('news_ai', {}) or {}
+        dyn = agents_results.get('dynamic_risk', {}) or {}
+        sections.append(f"DAILY_BIAS: {short(daily, 350)}")
+        sections.append(
+            "RISK: "
+            f"approved={risk.get('approved')} rejection={risk.get('rejection_reason')} dir={risk.get('direction')} "
+            f"entry={short(risk.get('entry'), 160)} SL={short(risk.get('stop_loss'), 160)} TP={short(risk.get('take_profit'), 260)} "
+            f"grade={short(risk.get('trade_grade'), 220)}"
+        )
+        sections.append(f"NEWS: status={news.get('market_status')} can_trade={news.get('can_trade')} risk_score={news.get('risk_score')} restrictions={short(news.get('active_restrictions'), 220)}")
+        if news_ai:
+            sections.append(f"AI_NEWS: {short(news_ai, 350)}")
+        if dyn:
+            sections.append(f"DYNAMIC_RISK: {short(dyn, 300)}")
+        return "\n".join(sections)[:6500]
 
     def _generic_ai_reasoning(self, ai: Dict[str, Any]) -> bool:
         """Detect weak/generic Groq explanations."""
@@ -476,10 +484,10 @@ Dynamic Risk Management / قيود المخاطرة الديناميكية:
 {dynamic_risk or {}}
 
 Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
-{format_agent_playbooks_for_prompt()}
+{format_agent_playbooks_for_prompt(max_items_per_agent=2)}
 
 قواعد الذاكرة من أخطاء سابقة (التزم بها قدر الإمكان، وإذا خالفتها اجعل القرار WAIT أو اخفض الثقة):
-{format_memory_rules_for_prompt(memory_rules or [])}
+{format_memory_rules_for_prompt(memory_rules or [], max_rules=4)}
 
 أجب بصيغة JSON فقط وبدون Markdown:
 {{
