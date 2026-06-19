@@ -8,6 +8,7 @@ from typing import Dict, List, Any, Optional
 from collections import Counter
 from .base_agent import BaseAgent
 from services.memory_rules import format_memory_rules_for_prompt
+from services.agent_playbooks import format_agent_playbooks_for_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -356,6 +357,9 @@ Daily Bias / الاتجاه الأعلى:
 
 Dynamic Risk Management / قيود المخاطرة الديناميكية:
 {dynamic_risk or {}}
+
+Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
+{format_agent_playbooks_for_prompt()}
 
 قواعد الذاكرة من أخطاء سابقة (التزم بها قدر الإمكان، وإذا خالفتها اجعل القرار WAIT أو اخفض الثقة):
 {format_memory_rules_for_prompt(memory_rules or [])}

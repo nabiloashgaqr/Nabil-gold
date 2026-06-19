@@ -675,6 +675,57 @@ python -m pytest -q
 
 ---
 
+
+---
+
+## 📘 Agent Playbooks v3.0 من ملف Arena
+
+تمت قراءة الملف المرفوع:
+
+```text
+Arena _ Benchmark & Compare the Best AI Models.html
+```
+
+واستخلاص قواعد تشغيل متقدمة للوكلاء، ثم تطبيقها داخل المشروع في ملف:
+
+```text
+services/agent_playbooks.py
+```
+
+هذه القواعد أصبحت تدخل مباشرة في Prompt قرار Groq النهائي عبر `DecisionAgent`، بحيث لا يكتفي Groq بأصوات الوكلاء فقط، بل يراجع أيضًا معايير كل وكيل حسب تخصصه قبل إصدار BUY/SELL/WAIT.
+
+### ماذا تحتوي Playbooks؟
+
+| الوكيل | أهم ما أضيف من ملف Arena |
+|---|---|
+| TechnicalAgent | RSI/MACD/EMA/ATR/Bollinger/ADX وفحص التعارض بين المؤشرات |
+| ClassicalAgent | H&S، Double/Triple Tops، Triangles، Flags، Wedges، S/R بشروط لمس تاريخية |
+| SMCAgent | Order Blocks، Liquidity Sweeps، FVG، BOS/CHoCH، Premium/Discount |
+| PriceActionAgent | شموع مفصلة مثل Hammer, Engulfing, Harami, Piercing, Dark Cloud, Doji variants |
+| MultiTimeframeAgent | قاعدة الاتجاه الأعلى أولًا والدخول من الفريم الأدنى |
+| NewsRiskAgent | Tier 1/2 events، FOMC، CPI، NFP، قرارات البنوك المركزية |
+| RiskManagementAgent | رأس المال أولًا، veto power، position sizing، drawdown/loss limits |
+| DecisionAgent | لا يتجاوز Veto، لا Grade D/F، جودة قبل الكمية، انتظار عند التعارض |
+| OpenTradesManager | متابعة TP/SL/BE/Trailing/long-running/expiry |
+| DailyReportAgent | تقرير أداء شامل وتوصيات تحسين مستمرة |
+
+### كيف تم التطبيق؟
+
+في كل تحليل، يرسل `DecisionAgent` إلى Groq:
+
+```text
+- أصوات الوكلاء
+- Daily Bias
+- AI News Interpretation
+- Dynamic Risk
+- Memory Rules
+- Agent Playbooks v3.0
+```
+
+وهذا يجعل قرار Groq النهائي ملتزمًا بقواعد كل وكيل ووظيفته.
+
+---
+
 ## 🤖 شروط التداول لكل وكيل Trading Conditions by Agent
 
 هذا القسم يوضح وظيفة كل وكيل داخل النظام، ومتى يعطي موافقة أو رفض أو انتظار. الهدف أن تكون شروط التداول واضحة ومكتوبة داخل README، بحيث يمكن مراجعة منطق كل وكيل قبل الاعتماد على الإشارات.
