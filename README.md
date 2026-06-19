@@ -685,6 +685,18 @@ python -m pytest -q
 
 بالإضافة إلى إدخال Agent Playbooks في Prompt قرار Groq، تم تنفيذ تطويرات فعلية داخل الكود:
 
+### SMCAgent v3.1
+
+تمت إضافة تحسينات مؤسسية فعلية داخل الكود:
+
+- Order Block mitigation status: FRESH / TESTED / MITIGATED / INVALIDATED
+- Displacement quality: STRONG / MODERATE / WEAK
+- Order Block equilibrium
+- FVG size وstrength وpartial fill
+- Liquidity Sweep confirmation: STRONG / MODERATE
+- Scoring أدق للـ OB/FVG/Sweep حسب القوة والحالة
+- تجاهل المناطق invalidated في scoring
+
 ### TechnicalAgent v3.1
 
 أصبح يحسب المؤشرات من الشموع مباشرة إذا لم تكن جاهزة، ويضيف:

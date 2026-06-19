@@ -167,14 +167,23 @@ class SMCAgent(BaseAgent):
             else:
                 continue
 
-            mitigated = self._zone_touched(candles[index + 4 :], zone)
-            strength = "strong" if impulse >= atr * 2.0 and not mitigated else "medium" if impulse >= atr * 1.5 else "weak"
+            mitigation = self._mitigation_status(candles[index + 4 :], zone)
+            mitigated = mitigation["status"] in {"MITIGATED", "INVALIDATED"}
+            displacement_quality = "STRONG" if impulse >= atr * 2.0 else "MODERATE" if impulse >= atr * 1.5 else "WEAK"
+            strength = "strong" if displacement_quality == "STRONG" and mitigation["status"] == "FRESH" else "medium" if displacement_quality in {"STRONG", "MODERATE"} and mitigation["status"] != "INVALIDATED" else "weak"
+            equilibrium = (zone["top"] + zone["bottom"]) / 2
             blocks.append(
                 {
                     "type": block_type,
                     "zone": zone,
+                    "equilibrium": round(equilibrium, 2),
                     "mitigated": mitigated,
+                    "mitigation_status": mitigation["status"],
+                    "touches": mitigation["touches"],
+                    "invalidated": mitigation["status"] == "INVALIDATED",
                     "strength": strength,
+                    "displacement_quality": displacement_quality,
+                    "displacement_atr": round(impulse / max(atr, 0.01), 2),
                     "timeframe": timeframe,
                     "created_at": candle.get("time"),
                     "impulse_points": round(impulse * 10, 1),
@@ -217,12 +226,18 @@ class SMCAgent(BaseAgent):
             c3_low = self._f(c3.get("low"))
             if c1_high < c3_low:
                 zone = {"top": round(c3_low, 2), "bottom": round(c1_high, 2)}
+                size = zone["top"] - zone["bottom"]
                 filled = any(self._f(c.get("low")) <= zone["bottom"] for c in candles[index + 1 :])
-                gaps.append({"type": "bullish", "zone": zone, "filled": filled, "created_at": c3.get("time")})
+                partial = any(self._f(c.get("low")) <= zone["top"] for c in candles[index + 1 :]) and not filled
+                strength = "strong" if size >= self._avg_range(candles[max(0, index-20):index]) * 0.7 else "medium" if size > 0 else "weak"
+                gaps.append({"type": "bullish", "zone": zone, "size": round(size, 2), "strength": strength, "filled": filled, "partial_fill": partial, "created_at": c3.get("time")})
             elif c1_low > c3_high:
                 zone = {"top": round(c1_low, 2), "bottom": round(c3_high, 2)}
+                size = zone["top"] - zone["bottom"]
                 filled = any(self._f(c.get("high")) >= zone["top"] for c in candles[index + 1 :])
-                gaps.append({"type": "bearish", "zone": zone, "filled": filled, "created_at": c3.get("time")})
+                partial = any(self._f(c.get("high")) >= zone["bottom"] for c in candles[index + 1 :]) and not filled
+                strength = "strong" if size >= self._avg_range(candles[max(0, index-20):index]) * 0.7 else "medium" if size > 0 else "weak"
+                gaps.append({"type": "bearish", "zone": zone, "size": round(size, 2), "strength": strength, "filled": filled, "partial_fill": partial, "created_at": c3.get("time")})
         return gaps[-6:]
 
     def _premium_discount_zone(
@@ -274,32 +289,43 @@ class SMCAgent(BaseAgent):
 
         sweep = liquidity.get("recent_sweep", {}) or {}
         if sweep.get("occurred") and sweep.get("type") == "sell_side":
-            score += 3.0
-            signals.append("Sell-side liquidity sweep detected - bullish after sweep")
+            add = 3.4 if sweep.get("confirmation") == "STRONG" else 2.6
+            score += add
+            signals.append(f"Sell-side liquidity sweep detected ({sweep.get('confirmation')}) - bullish after sweep")
         elif sweep.get("occurred") and sweep.get("type") == "buy_side":
-            score -= 3.0
-            signals.append("Buy-side liquidity sweep detected - bearish after sweep")
+            sub = 3.4 if sweep.get("confirmation") == "STRONG" else 2.6
+            score -= sub
+            signals.append(f"Buy-side liquidity sweep detected ({sweep.get('confirmation')}) - bearish after sweep")
 
         for block in order_blocks:
             zone_obj = block.get("zone", {})
             if not self._price_in_or_near_zone(current_price, zone_obj, atr * 0.35):
                 continue
+            if block.get("invalidated"):
+                continue
+            status = block.get("mitigation_status", "FRESH")
+            strength_points = 2.4 if block.get("strength") == "strong" else 1.5 if block.get("strength") == "medium" else 0.7
+            if status == "TESTED":
+                strength_points *= 0.85
             if block.get("type") == "bullish" and not block.get("mitigated"):
-                score += 2.0 if block.get("strength") == "strong" else 1.2
-                signals.append("Price reacting near unmitigated bullish Order Block")
+                score += strength_points
+                signals.append(f"Price reacting near {status} bullish Order Block ({block.get('displacement_quality')})")
             elif block.get("type") == "bearish" and not block.get("mitigated"):
-                score -= 2.0 if block.get("strength") == "strong" else 1.2
-                signals.append("Price reacting near unmitigated bearish Order Block")
+                score -= strength_points
+                signals.append(f"Price reacting near {status} bearish Order Block ({block.get('displacement_quality')})")
 
         active_fvg = [gap for gap in fvg if not gap.get("filled")]
         for gap in active_fvg[-3:]:
             if self._price_in_or_near_zone(current_price, gap.get("zone", {}), atr * 0.25):
+                fvg_points = 1.4 if gap.get("strength") == "strong" else 1.0
+                if gap.get("partial_fill"):
+                    fvg_points *= 0.75
                 if gap.get("type") == "bullish":
-                    score += 1.0
-                    signals.append("Price near bullish FVG")
+                    score += fvg_points
+                    signals.append(f"Price near {gap.get('strength')} bullish FVG")
                 elif gap.get("type") == "bearish":
-                    score -= 1.0
-                    signals.append("Price near bearish FVG")
+                    score -= fvg_points
+                    signals.append(f"Price near {gap.get('strength')} bearish FVG")
 
         if trend == "BULLISH" and zone in {"DISCOUNT", "EQUILIBRIUM"}:
             score += 1.0
@@ -373,10 +399,14 @@ class SMCAgent(BaseAgent):
             high = self._f(candle.get("high"))
             low = self._f(candle.get("low"))
             close = self._f(candle.get("close"))
+            candle_range = max(high - low, 0.0001)
+            close_position = (close - low) / candle_range
             if high > prev_high + tolerance and close < prev_high:
-                return {"occurred": True, "type": "buy_side", "level": round(prev_high, 2), "time": candle.get("time")}
+                confirmation = "STRONG" if close_position <= 0.35 else "MODERATE"
+                return {"occurred": True, "type": "buy_side", "level": round(prev_high, 2), "time": candle.get("time"), "confirmation": confirmation, "sweep_distance": round(high - prev_high, 2)}
             if low < prev_low - tolerance and close > prev_low:
-                return {"occurred": True, "type": "sell_side", "level": round(prev_low, 2), "time": candle.get("time")}
+                confirmation = "STRONG" if close_position >= 0.65 else "MODERATE"
+                return {"occurred": True, "type": "sell_side", "level": round(prev_low, 2), "time": candle.get("time"), "confirmation": confirmation, "sweep_distance": round(prev_low - low, 2)}
         return {"occurred": False, "type": None, "level": None, "time": None}
 
     def _cluster_liquidity(self, levels: List[float], tolerance: float) -> List[float]:
@@ -395,6 +425,44 @@ class SMCAgent(BaseAgent):
     def _unique_levels(self, levels: List[float]) -> List[float]:
         """Deduplicate rounded price levels."""
         return sorted({round(level, 2) for level in levels if level > 0})
+
+
+    def _mitigation_status(self, future_candles: List[Candle], zone: Dict[str, float]) -> Dict[str, Any]:
+        """Classify an order block as FRESH, TESTED, MITIGATED or INVALIDATED."""
+        top = self._f(zone.get("top"))
+        bottom = self._f(zone.get("bottom"))
+        touches = 0
+        deep_touches = 0
+        invalidated = False
+        midpoint = (top + bottom) / 2
+        for candle in future_candles:
+            high = self._f(candle.get("high"))
+            low = self._f(candle.get("low"))
+            close = self._f(candle.get("close"))
+            if low <= top and high >= bottom:
+                touches += 1
+                if low <= midpoint <= high:
+                    deep_touches += 1
+            # If price closes fully beyond the zone, mark invalidated.
+            if close < bottom or close > top:
+                # invalidation direction is imperfect without OB type, so require a deep touch first
+                if deep_touches and (close < bottom - abs(top-bottom)*0.25 or close > top + abs(top-bottom)*0.25):
+                    invalidated = True
+                    break
+        if invalidated:
+            status = "INVALIDATED"
+        elif deep_touches:
+            status = "MITIGATED"
+        elif touches:
+            status = "TESTED"
+        else:
+            status = "FRESH"
+        return {"status": status, "touches": touches, "deep_touches": deep_touches}
+
+    def _avg_range(self, candles: List[Candle]) -> float:
+        if not candles:
+            return 0.0
+        return mean(max(self._f(c.get("high")) - self._f(c.get("low")), 0.0) for c in candles)
 
     def _zone_touched(self, future_candles: List[Candle], zone: Dict[str, float]) -> bool:
         """Return True if later price traded into the zone."""
