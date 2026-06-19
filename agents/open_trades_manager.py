@@ -64,8 +64,14 @@ class OpenTradesManager(BaseAgent):
         updates_sent = self._updates_sent(trade.get("updates_sent", []))
         sl_moved_to_entry = self._bool(trade.get("sl_moved_to_entry", False))
         partial_close = self._bool(trade.get("partial_close", False))
+        previous_mfe = self._f(trade.get("max_favorable_excursion"), 0.0)
+        previous_mae = self._f(trade.get("max_adverse_excursion"), 0.0)
 
         pnl_points = calculate_pips(entry, current_price, trade_type)
+        max_favorable_excursion = max(previous_mfe, pnl_points)
+        max_adverse_excursion = min(previous_mae, pnl_points)
+        management_phase = self._management_phase(old_status, sl_moved_to_entry, partial_close, pnl_points)
+        exit_warning = self._exit_warning(trade_type, entry, stop_loss, tp1, current_price, pnl_points)
         new_status = old_status
         events: List[str] = []
         result: str | None = trade.get("result")
@@ -83,6 +89,9 @@ class OpenTradesManager(BaseAgent):
                     "current_price": round(current_price, 2),
                     "current_pnl": round(pnl_points, 1),
                     "current_pnl_points": round(pnl_points, 1),
+                    "max_favorable_excursion": round(max(previous_mfe, pnl_points), 1),
+                    "max_adverse_excursion": round(min(previous_mae, pnl_points), 1),
+                    "management_phase": self._management_phase(old_status, sl_moved_to_entry, partial_close, pnl_points),
                     "last_updated": self._iso(now),
                 },
             }
@@ -121,6 +130,8 @@ class OpenTradesManager(BaseAgent):
             hours_open = self._hours_open(trade, now)
             if old_status == "OPEN" and hours_open >= self.time_warning_hours and "LONG_RUNNING" not in updates_sent:
                 events.append("LONG_RUNNING")
+            if exit_warning and "EXIT_WARNING" not in updates_sent:
+                events.append("EXIT_WARNING")
             if self.expire_after_hours > 0 and old_status == "OPEN" and hours_open >= self.expire_after_hours:
                 new_status = "EXPIRED"
                 events.append("EXPIRED")
@@ -131,7 +142,7 @@ class OpenTradesManager(BaseAgent):
         # Avoid repeating informational events already sent. Status events are naturally one-time after status changes.
         filtered_events: List[str] = []
         for event in events:
-            if event in {"NEAR_TP1", "LONG_RUNNING", "MOVE_SL_TO_BE"} and event in updates_sent:
+            if event in {"NEAR_TP1", "LONG_RUNNING", "MOVE_SL_TO_BE", "EXIT_WARNING"} and event in updates_sent:
                 continue
             if event not in filtered_events:
                 filtered_events.append(event)
@@ -142,6 +153,10 @@ class OpenTradesManager(BaseAgent):
             "current_price": round(current_price, 2),
             "current_pnl": round(pnl_points, 1),
             "current_pnl_points": round(pnl_points, 1),
+            "max_favorable_excursion": round(max_favorable_excursion, 1),
+            "max_adverse_excursion": round(max_adverse_excursion, 1),
+            "management_phase": management_phase,
+            "exit_warning": exit_warning,
             "status": new_status,
             "sl_moved_to_entry": sl_moved_to_entry,
             "partial_close": partial_close,
@@ -166,6 +181,10 @@ class OpenTradesManager(BaseAgent):
             "updates": updates,
             "progress_to_tp1": round(self._progress_to_tp1(trade_type, entry, tp1, current_price), 3),
             "hours_open": round(self._hours_open(trade, now), 2),
+            "max_favorable_excursion": round(max_favorable_excursion, 1),
+            "max_adverse_excursion": round(max_adverse_excursion, 1),
+            "management_phase": management_phase,
+            "exit_warning": exit_warning,
         }
 
     def create_trade_record(self, decision: Dict[str, Any], trade_id: str | None = None) -> Dict[str, Any]:
@@ -187,6 +206,10 @@ class OpenTradesManager(BaseAgent):
             "current_price": round(self._f(decision.get("current_price"), entry_price), 2),
             "current_pnl": 0,
             "current_pnl_points": 0,
+            "max_favorable_excursion": 0,
+            "max_adverse_excursion": 0,
+            "management_phase": "INITIAL",
+            "exit_warning": None,
             "sl_moved_to_entry": False,
             "partial_close": False,
             "updates_sent": [],
@@ -202,6 +225,31 @@ class OpenTradesManager(BaseAgent):
         current_price = self._f(data.get("current_price"))
         evaluations = [self.evaluate_trade(trade, current_price) for trade in trades]
         return {"agent": self.name, "evaluated": len(evaluations), "results": evaluations, "summary": f"تم تقييم {len(evaluations)} صفقة مفتوحة"}
+
+    def _management_phase(self, status: str, sl_moved_to_entry: bool, partial_close: bool, pnl_points: float) -> str:
+        if status == "TP1_HIT" or partial_close:
+            return "POST_TP1_TRAILING" if sl_moved_to_entry else "POST_TP1"
+        if pnl_points > 0:
+            return "IN_PROFIT"
+        if pnl_points < 0:
+            return "DEFENSIVE"
+        return "INITIAL"
+
+    def _exit_warning(self, trade_type: str, entry: float, stop_loss: float, tp1: float, current_price: float, pnl_points: float) -> str | None:
+        if not stop_loss or not entry:
+            return None
+        risk = abs(entry - stop_loss)
+        if risk <= 0:
+            return None
+        adverse_distance = abs(current_price - stop_loss)
+        if adverse_distance <= risk * 0.25:
+            return "NEAR_STOP_LOSS"
+        if pnl_points < -risk * 0.65:
+            return "ADVERSE_MOVE_DEEP"
+        # If trade moved more than halfway to TP1 then returned close to entry.
+        if tp1 and abs(current_price - entry) <= risk * 0.15:
+            return None
+        return None
 
     def _hit_tp1(self, trade_type: str, current_price: float, tp1: float) -> bool:
         if tp1 <= 0:

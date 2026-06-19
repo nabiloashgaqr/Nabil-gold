@@ -423,6 +423,12 @@ class LearningService:
         
         # توصيات
         recommendations = []
+        memory_rules = []
+        try:
+            if hasattr(self.db, "get_active_memory_rules"):
+                memory_rules = self.db.get_active_memory_rules(limit=10)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not load memory rules for learning report: %s", exc)
         for name, record in agent_stats.items():
             if record.trend == "IMPROVING":
                 recommendations.append(f"✅ {name}: أداء جيد (+{record.win_rate:.0f}%)")
@@ -430,6 +436,15 @@ class LearningService:
                 recommendations.append(f"⚠️ {name}: تراجع (-{record.win_rate:.0f}%)")
             if record.consecutive_wins >= 3:
                 recommendations.append(f"🔥 {name}: {record.consecutive_wins} نجاح متتالي!")
+        if memory_rules:
+            categories = {}
+            for rule in memory_rules:
+                cat = str(rule.get("category", "MEMORY"))
+                categories[cat] = categories.get(cat, 0) + 1
+            top_category = max(categories.items(), key=lambda item: item[1])[0]
+            recommendations.append(f"🧠 الذاكرة النشطة تشير إلى تكرار مشكلة: {top_category} ({categories[top_category]} قواعد)")
+            for rule in memory_rules[:2]:
+                recommendations.append(f"📌 قاعدة ذاكرة: {str(rule.get('rule_text', ''))[:90]}")
         
         # ملخص التغييرات
         changes = []

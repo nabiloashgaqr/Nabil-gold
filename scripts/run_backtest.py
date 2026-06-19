@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.backtesting import BacktestEngine, format_backtest_telegram, save_backtest_report
+from services.backtesting import BacktestEngine, format_backtest_telegram, save_backtest_report, save_backtest_csv
 from services.market_data import MarketDataService
 from services.telegram_bot import TelegramService
 from utils.helpers import load_config, setup_logging
@@ -32,6 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-trades", type=int, default=60)
     parser.add_argument("--send-telegram", action="store_true", default=False)
     parser.add_argument("--output", default="storage/backtest_report.json")
+    parser.add_argument("--csv-output", default="storage/backtest_trades.csv")
     return parser.parse_args()
 
 
@@ -50,10 +51,12 @@ def main() -> None:
     engine = BacktestEngine(config, candles)
     report = engine.run(window=args.window, step=args.step, horizon=args.horizon, max_trades=args.max_trades)
     report_path = save_backtest_report(report, args.output)
+    csv_path = save_backtest_csv(report, args.csv_output)
     summary_text = format_backtest_telegram(report)
 
     print(summary_text.replace("<b>", "").replace("</b>", ""))
     print(f"Report saved to: {report_path}")
+    print(f"CSV saved to: {csv_path}")
 
     should_send = args.send_telegram or os.environ.get("GITHUB_ACTIONS") == "true"
     if should_send:

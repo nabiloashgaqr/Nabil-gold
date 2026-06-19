@@ -14,6 +14,7 @@ import logging
 import os
 import sys
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -121,9 +122,22 @@ def main() -> None:
 
     try:
         trades = database.get_today_trades()
-        report = DailyReportAgent(config).generate(trades)
+        agent = DailyReportAgent(config)
+        report = agent.generate(trades)
         telegram.send_daily_report(report["text"])
         logger.info("تم إرسال تقرير الأداء. عدد الصفقات: %s", len(trades))
+
+        # Weekly AI-style performance summary on Friday in configured timezone.
+        tz_name = config.get("schedule", {}).get("timezone", "Asia/Jerusalem")
+        try:
+            local_now = datetime.now(ZoneInfo(str(tz_name)))
+        except Exception:  # noqa: BLE001
+            local_now = datetime.now(timezone.utc)
+        if local_now.weekday() == 4:  # Friday
+            weekly_trades = database.get_recent_trades(limit=150)
+            weekly_report = agent.generate_weekly(weekly_trades)
+            telegram.send_daily_report(weekly_report["text"])
+            logger.info("تم إرسال التقرير الأسبوعي. عدد الصفقات: %s", len(weekly_trades))
     except Exception as exc:  # noqa: BLE001
         logger.exception("خطأ في التقرير اليومي")
         telegram.send_error_alert(str(exc))

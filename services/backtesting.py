@@ -9,6 +9,7 @@ API usage across many historical candles.
 from __future__ import annotations
 
 import copy
+import csv
 import json
 import logging
 from dataclasses import dataclass, asdict
@@ -224,6 +225,14 @@ class BacktestEngine:
             }
             for side in ["BUY", "SELL"]
         }
+        by_grade: Dict[str, Dict[str, Any]] = {}
+        for grade in sorted({t.quality_grade for t in trades}):
+            subset = [t for t in trades if t.quality_grade == grade]
+            by_grade[grade] = {
+                "count": len(subset),
+                "wins": len([t for t in subset if t.pnl_points > 0]),
+                "net_points": round(sum(t.pnl_points for t in subset), 2),
+            }
         report = {
             "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
             "symbol": self.config.get("symbol", "XAU/USD"),
@@ -241,6 +250,7 @@ class BacktestEngine:
                 "max_drawdown_points": round(max_dd, 2),
                 "avg_quality_score": round(sum(t.quality_score for t in trades) / len(trades), 2) if trades else 0,
                 "by_signal": by_signal,
+                "by_grade": by_grade,
             },
             "trades": [asdict(t) for t in trades],
         }
@@ -254,6 +264,24 @@ def save_backtest_report(report: Dict[str, Any], path: str | Path = "storage/bac
     target.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return target
 
+
+
+def save_backtest_csv(report: Dict[str, Any], path: str | Path = "storage/backtest_trades.csv") -> Path:
+    """Save backtest trades as CSV."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    trades = report.get("trades", []) or []
+    fieldnames = [
+        "id", "signal", "entry_time", "exit_time", "entry_price", "exit_price",
+        "stop_loss", "tp1", "tp2", "confidence", "quality_grade", "quality_score",
+        "result", "pnl_points", "rr_ratio", "reason",
+    ]
+    with target.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        for trade in trades:
+            writer.writerow({key: trade.get(key) for key in fieldnames})
+    return target
 
 def format_backtest_telegram(report: Dict[str, Any]) -> str:
     """Format a compact Arabic Telegram summary."""
@@ -273,6 +301,7 @@ def format_backtest_telegram(report: Dict[str, Any]) -> str:
             "",
             f"BUY: {by_signal.get('BUY', {}).get('count', 0)} | Net {by_signal.get('BUY', {}).get('net_points', 0):+}",
             f"SELL: {by_signal.get('SELL', {}).get('count', 0)} | Net {by_signal.get('SELL', {}).get('net_points', 0):+}",
+            f"Grades: {report.get('summary', {}).get('by_grade', {})}",
             "━━━━━━━━━━━━━━━━━━━━",
             "ملاحظة: الاختبار التاريخي Classic/offline ولا يستخدم Groq افتراضياً لتجنب استهلاك API.",
             "إذا كان عدد الصفقات 0 فهذا يعني أن الشروط الحالية لم تنتج إشارات مؤهلة على العينة المختبرة.",
