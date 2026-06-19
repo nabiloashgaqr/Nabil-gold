@@ -53,7 +53,12 @@
       "enabled": true,
       "min_confidence": 1,
       "bypass_groq_min_confidence": true,
-      "description": "وضع تجريبي مؤقت: يسمح بإشارة من أقوى وكيل واحد بغض النظر عن نسبة التوافق لمراقبة خروج الإشارات"
+      "description": "وضع مراقبة تجريبي: يسمح بإشارة من أقوى وكيل واحد ويتجاوز رفض المخاطر غير الحرج مع SL/TP افتراضيين لمراقبة خروج الإشارات",
+      "bypass_risk_rejection": true,
+      "fallback_levels_enabled": true,
+      "fallback_atr": 2.0,
+      "fallback_rr_tp1": 2.0,
+      "fallback_rr_tp2": 3.5
     }
   },
   "schedule": {

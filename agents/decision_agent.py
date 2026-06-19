@@ -681,9 +681,14 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
                 signal = 'WAIT'
 
         risk = agents_results.get('risk', {}) or {}
+        exp_source = (result.get('classic', {}) or {}).get('experimental_single_agent') or {}
+        exp_cfg = self.config.get('signal_requirements', {}).get('experimental_single_agent', {}) or {}
         if signal in {'BUY', 'SELL'} and risk and not risk.get('approved', False):
-            warnings.append(f"Risk rejected: {risk.get('rejection_reason', 'not approved')}")
-            signal = 'WAIT'
+            if exp_source and exp_cfg.get('bypass_risk_rejection', False):
+                warnings.append(f"تجريبي: تم تجاوز رفض RiskManagement للمراقبة فقط: {risk.get('rejection_reason', 'not approved')}")
+            else:
+                warnings.append(f"Risk rejected: {risk.get('rejection_reason', 'not approved')}")
+                signal = 'WAIT'
 
         if signal != result.get('signal'):
             reason = '; '.join(warnings[-3:]) or 'Safety filter blocked signal'
@@ -779,6 +784,33 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
             tp1 = tp.get('tp1', {}) or {}
             tp2 = tp.get('tp2', {}) or {}
             entry_price = entry_info.get('price') or current_price
+            stop_loss = sl.get('price', 0)
+            tp1_price = tp1.get('price', 0)
+            tp2_price = tp2.get('price', 0)
+            rr_ratio = tp2.get('rr_ratio', tp1.get('rr_ratio', 0))
+
+            exp_cfg = self.config.get('signal_requirements', {}).get('experimental_single_agent', {}) or {}
+            exp_source = (analysis.get('classic', {}) or {}).get('experimental_single_agent') or {}
+            if exp_source and exp_cfg.get('fallback_levels_enabled', True) and (not stop_loss or not tp1_price or not tp2_price):
+                try:
+                    atr = float(((context.get('technical', {}) or {}).get('technical', {}) or {}).get('atr') or 0)
+                except Exception:
+                    atr = 0.0
+                atr = atr or float(exp_cfg.get('fallback_atr', 2.0) or 2.0)
+                tp1_mult = float(exp_cfg.get('fallback_rr_tp1', 2.0) or 2.0)
+                tp2_mult = float(exp_cfg.get('fallback_rr_tp2', 3.5) or 3.5)
+                entry_price = entry_price or current_price or 0
+                if final_signal == 'BUY':
+                    stop_loss = float(entry_price) - atr * 1.5
+                    tp1_price = float(entry_price) + atr * tp1_mult
+                    tp2_price = float(entry_price) + atr * tp2_mult
+                else:
+                    stop_loss = float(entry_price) + atr * 1.5
+                    tp1_price = float(entry_price) - atr * tp1_mult
+                    tp2_price = float(entry_price) - atr * tp2_mult
+                rr_ratio = round(abs(tp2_price - float(entry_price)) / max(abs(float(entry_price) - stop_loss), 0.01), 2)
+                entry_zone = {'low': float(entry_price) - max(0.2, atr * 0.05), 'high': float(entry_price) + max(0.2, atr * 0.05)}
+
             signal_payload = {
                 'type': final_signal,
                 'entry': {
@@ -786,10 +818,10 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
                     'low': entry_zone.get('low', entry_price),
                     'high': entry_zone.get('high', entry_price),
                 },
-                'stop_loss': sl.get('price', 0),
-                'tp1': tp1.get('price', 0),
-                'tp2': tp2.get('price', 0),
-                'rr_ratio': tp2.get('rr_ratio', tp1.get('rr_ratio', 0)),
+                'stop_loss': stop_loss,
+                'tp1': tp1_price,
+                'tp2': tp2_price,
+                'rr_ratio': rr_ratio,
                 'position_size': risk.get('position_size', {}),
                 'risk_summary': risk.get('summary', ''),
             }
