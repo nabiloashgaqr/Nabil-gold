@@ -5,6 +5,7 @@ pandas>=2.2.3,<3.0.0
 numpy>=1.26.4,<3.0.0
 supabase==2.3.4
 python-dotenv==1.0.0
+httpx==0.25.2  # compatible with python-telegram-bot 20.7 and supabase-py 2.3.x
 
 # AI Providers
 openai>=1.10.0
