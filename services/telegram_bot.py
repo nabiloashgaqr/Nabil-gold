@@ -103,7 +103,10 @@ class TelegramService:
         current_price = decision.get("current_price", signal.get("current_price", entry.get("price", 0)))
         trading_mode = str(decision.get("trading_mode", signal.get("trading_mode", "paper"))).lower()
         paper_trading = bool(decision.get("paper_trading", signal.get("paper_trading", trading_mode == "paper")))
-        mode_text = "🧪 <b>الوضع:</b> Paper Trading - صفقة تجريبية غير منفذة فعلياً\n" if paper_trading else "⚡ <b>الوضع:</b> Live/Manual Tracking\n"
+        if paper_trading and (decision.get("experimental_single_agent") or {}).get("forced"):
+            mode_text = "🧪 <b>الوضع:</b> Paper Observation - مراقبة فقط وليست إشارة دخول فعلية\n"
+        else:
+            mode_text = "🧪 <b>الوضع:</b> Paper Trading - صفقة تجريبية غير منفذة فعلياً\n" if paper_trading else "⚡ <b>الوضع:</b> Live/Manual Tracking\n"
         quality = decision.get("quality", {}) or {}
         quality_line = ""
         if quality:
@@ -115,11 +118,15 @@ class TelegramService:
         experimental = decision.get("experimental_single_agent") or {}
         experimental_line = ""
         if experimental:
+            forced_note = ""
+            if experimental.get("forced"):
+                forced_note = "⚠️ <b>تنبيه:</b> هذه إشارة مراقبة قسرية فقط؛ Groq/الوكلاء لم يعطوا دخولاً مؤهلاً، وتم إنشاؤها لمراقبة النظام.\n"
             experimental_line = (
                 f"🧪 <b>مصدر الإشارة التجريبي:</b> {html.escape(str(experimental.get('agent', 'N/A')))} | "
                 f"{html.escape(str(experimental.get('signal', '')))} | "
                 f"موثوقية {html.escape(str(experimental.get('reliability_grade', 'N/A')))} "
                 f"({float(experimental.get('adjusted_confidence', experimental.get('confidence', 0))):.1f}%)\n"
+                f"{forced_note}"
             )
         daily_bias = decision.get("daily_bias", {}) or {}
         bias_line = ""
