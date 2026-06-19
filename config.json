@@ -72,7 +72,6 @@
         "start_hour": 7,
         "end_hour": 18,
         "days": [
-          6,
           0,
           1,
           2,
@@ -82,7 +81,7 @@
         "quality": "HIGH",
         "allow_signals": true,
         "allow_reports": false,
-        "description": "جلسة التداول التجريبية: 07:59 - 18:01 بتوقيت Asia/Jerusalem (الأحد-الجمعة)",
+        "description": "جلسة التداول التجريبية: 07:59 - 18:01 بتوقيت Asia/Jerusalem (الاثنين-الجمعة)",
         "start_minute": 59,
         "end_minute": 1
       },
@@ -91,7 +90,6 @@
         "start_hour": 23,
         "end_hour": 23,
         "days": [
-          6,
           0,
           1,
           2,
@@ -101,7 +99,7 @@
         "quality": "LOW",
         "allow_signals": false,
         "allow_reports": true,
-        "description": "جلسة التقارير ونهاية اليوم: 23:00 - 23:59 بتوقيت Asia/Jerusalem (الأحد-الجمعة)",
+        "description": "جلسة التقارير ونهاية اليوم: 23:00 - 23:59 بتوقيت Asia/Jerusalem (الاثنين-الجمعة)",
         "start_minute": 0,
         "end_minute": 59
       }
