@@ -164,7 +164,7 @@ class DecisionAgent(BaseAgent):
         ai_decision = {}
         if self.ai_service:
             ai_decision = await self._ai_decision(
-                votes, price_data, indicators, session_info, memory_rules, daily_bias, news_ai, dynamic_risk
+                votes, price_data, indicators, session_info, memory_rules, daily_bias, news_ai, dynamic_risk, agents_results
             )
         
         # 4️⃣ القرار النهائي
@@ -341,6 +341,75 @@ class DecisionAgent(BaseAgent):
             'rejection_reason': rejection_reason
         }
     
+    def _format_agent_context_for_ai(self, agents_results: Dict[str, Any]) -> str:
+        """Format detailed agent outputs for Groq so it cannot answer generically."""
+        sections: List[str] = []
+        for name in ['technical', 'classical', 'smc', 'price_action', 'multitimeframe', 'daily_bias', 'risk', 'news', 'news_ai', 'dynamic_risk']:
+            result = agents_results.get(name, {}) or {}
+            if not isinstance(result, dict):
+                continue
+            sections.append(f"\n## {name}")
+            if name == 'technical':
+                t = result.get('technical', {}) or {}
+                sections.extend([
+                    f"signal={result.get('signal')} confidence={result.get('confidence')}",
+                    f"trend={t.get('trend')} score={t.get('classic_score')} RSI={t.get('rsi')} RSI7={t.get('rsi_7')} divergence={t.get('rsi_divergence')}",
+                    f"MACD={t.get('macd')} hist={t.get('macd_histogram')} slope={t.get('macd_histogram_slope')}",
+                    f"EMA ribbon={t.get('ema_ribbon')} EMA values={t.get('ema_values')}",
+                    f"Bollinger={t.get('bollinger')} ATR={t.get('atr')} regime={t.get('market_regime')}",
+                    f"levels={t.get('key_levels')} reasons={t.get('reasons')}",
+                ])
+            elif name == 'classical':
+                sections.extend([
+                    f"direction={result.get('direction')} confidence={result.get('confidence')}",
+                    f"support={result.get('support_levels')} resistance={result.get('resistance_levels')}",
+                    f"patterns={result.get('patterns_detected')} trendline={result.get('trendline')}",
+                    f"scenarios={result.get('scenarios')} signals={result.get('signals')}",
+                ])
+            elif name == 'smc':
+                sections.extend([
+                    f"direction={result.get('direction')} confidence={result.get('confidence')}",
+                    f"structure={result.get('market_structure')}",
+                    f"order_blocks={result.get('order_blocks')}",
+                    f"liquidity={result.get('liquidity')}",
+                    f"fvg={result.get('fvg')} zone={result.get('zone')} entry_suggestion={result.get('entry_suggestion')}",
+                    f"signals={result.get('signals')}",
+                ])
+            elif name == 'price_action':
+                sections.extend([
+                    f"direction={result.get('direction')} confidence={result.get('confidence')} role={result.get('role')}",
+                    f"patterns={result.get('candle_patterns')}",
+                    f"candle_analysis={result.get('candle_analysis')}",
+                    f"breakout={result.get('breakout_analysis')} rejection={result.get('rejection')}",
+                    f"signals={result.get('signals')}",
+                ])
+            elif name == 'multitimeframe':
+                sections.extend([
+                    f"direction={result.get('direction')} confidence={result.get('confidence')} alignment={result.get('alignment')} score={result.get('alignment_score')}",
+                    f"setup_type={result.get('setup_type')} counter_trend={result.get('counter_trend')} htf={result.get('trend_direction_from_htf')}",
+                    f"weighted_bias={result.get('weighted_bias')} conflicts={result.get('conflicts')} warnings={result.get('warnings')}",
+                    f"tf_analysis={result.get('timeframe_analysis')}",
+                ])
+            elif name == 'risk':
+                sections.extend([
+                    f"approved={result.get('approved')} rejection={result.get('rejection_reason')} direction={result.get('direction')}",
+                    f"entry={result.get('entry')} SL={result.get('stop_loss')} TP={result.get('take_profit')}",
+                    f"risk_metrics={result.get('risk_metrics')} grade={result.get('trade_grade')}",
+                    f"position_size={result.get('position_size')}",
+                ])
+            else:
+                sections.append(str(result)[:3000])
+        return "\n".join(sections)[:18000]
+
+    def _generic_ai_reasoning(self, ai: Dict[str, Any]) -> bool:
+        """Detect weak/generic Groq explanations."""
+        text = " ".join(str(ai.get(k, '')) for k in ['reasoning', 'entry_reason', 'opposite_risk', 'risk_notes', 'action_plan'])
+        generic_phrases = [
+            'الوكلاء يوصون', 'لا يوجد سبب', 'لا يوجد مخاطر', 'مخاطر بيع الذهب',
+            'الدخول الآن', 'الاتجاه المعاكس', 'لا يوجد قوة محددة', 'لا يوجد ضعف'
+        ]
+        return any(p in text for p in generic_phrases) or len(text.strip()) < 80
+
     async def _ai_decision(
         self,
         votes: Dict,
@@ -350,7 +419,8 @@ class DecisionAgent(BaseAgent):
         memory_rules: List[Dict] | None = None,
         daily_bias: Dict | None = None,
         news_ai: Dict | None = None,
-        dynamic_risk: Dict | None = None
+        dynamic_risk: Dict | None = None,
+        agents_results: Dict[str, Any] | None = None
     ) -> Dict:
         """
         🤖 القرار بالذكاء الاصطناعي
@@ -387,6 +457,9 @@ class DecisionAgent(BaseAgent):
 تفاصيل الأصوات:
 {self._format_votes_for_ai(votes)}
 
+تفاصيل تحليل الوكلاء الكاملة، استخدم أرقامها ومستوياتها في شرحك ولا تكتفِ بعبارة "الوكلاء يوصون":
+{self._format_agent_context_for_ai(agents_results or {})}
+
 {learning_summary}
 
 معلومات الجلسة:
@@ -413,14 +486,17 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
     "final_signal": "BUY" أو "SELL" أو "WAIT",
     "confidence": 0-100,
     "consensus_strength": "Strong" أو "Moderate" أو "Weak",
-    "reasoning": "سبب القرار المختصر",
-    "risk_reward": "نسبة المخاطرة/العائد",
-    "market_bias": "Bullish أو Bearish أو Neutral مع سبب قصير",
-    "entry_reason": "لماذا الدخول مناسب أو غير مناسب الآن",
-    "opposite_risk": "لماذا لا نأخذ الاتجاه المعاكس",
-    "risk_notes": "أهم مخاطر الصفقة",
-    "action_plan": "خطة التعامل: دخول/انتظار/إلغاء",
-    "quality_notes": ["نقطة قوة 1", "نقطة ضعف أو تحذير 1"]
+    "reasoning": "سبب القرار المختصر مع ذكر 2-3 أدلة رقمية أو مستويات محددة",
+    "risk_reward": "نسبة المخاطرة/العائد من بيانات RiskManagement",
+    "market_bias": "Bullish أو Bearish أو Neutral مع السبب من DailyBias/MTF",
+    "entry_reason": "سبب الدخول باستخدام أرقام فعلية مثل السعر، SL/TP، R:R، فريم، نمط، OB/FVG، EMA/RSI/MACD",
+    "opposite_risk": "سبب رفض الاتجاه المعاكس بأدلة محددة وليس عبارة عامة",
+    "risk_notes": "مخاطر محددة: أخبار، قرب دعم/مقاومة، ضعف فريم، تذبذب، تعارض وكلاء",
+    "action_plan": "دخول/انتظار/إلغاء + شرط الإلغاء أو invalidation scenario",
+    "evidence": ["دليل رقمي أو فني 1", "دليل رقمي أو فني 2", "دليل رقمي أو فني 3"],
+    "invalidation": "ما الذي يجعل القرار خاطئاً؟ مستوى أو شرط واضح",
+    "alternative_scenario": "متى يصبح الاتجاه المعاكس أفضل؟",
+    "quality_notes": ["نقطة قوة محددة", "نقطة ضعف أو تحذير محدد"]
 }}
 """
 
@@ -452,6 +528,9 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
                         'opposite_risk': parsed.get('opposite_risk', ''),
                         'risk_notes': parsed.get('risk_notes', ''),
                         'action_plan': parsed.get('action_plan', ''),
+                        'evidence': parsed.get('evidence', []),
+                        'invalidation': parsed.get('invalidation', ''),
+                        'alternative_scenario': parsed.get('alternative_scenario', ''),
                         'quality_notes': parsed.get('quality_notes', []),
                         'provider': response.provider,
                         'model': getattr(response, 'model', ''),

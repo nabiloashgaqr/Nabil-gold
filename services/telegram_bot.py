@@ -87,14 +87,24 @@ class TelegramService:
                 quality_notes_text = "\n".join(f"• {html.escape(str(note))}" for note in quality_notes[:3])
             else:
                 quality_notes_text = f"• {html.escape(str(quality_notes))}" if quality_notes else ""
+            evidence = ai.get("evidence") or []
+            if isinstance(evidence, list):
+                evidence_text = "\n".join(f"• {html.escape(str(item))}" for item in evidence[:4])
+            else:
+                evidence_text = f"• {html.escape(str(evidence))}" if evidence else ""
             ai_lines = [
                 "🤖 <b>تحليل Groq:</b>",
                 f"├ الاتجاه: {html.escape(str(ai.get('market_bias', 'غير محدد')))}",
                 f"├ سبب الدخول: {html.escape(str(ai.get('entry_reason', ai.get('reasoning', ''))))}",
                 f"├ خطر الاتجاه المعاكس: {html.escape(str(ai.get('opposite_risk', 'غير محدد')))}",
                 f"├ ملاحظات المخاطر: {html.escape(str(ai.get('risk_notes', 'غير محدد')))}",
+                f"├ الإلغاء/الخطأ إذا: {html.escape(str(ai.get('invalidation', 'غير محدد')))}",
+                f"├ السيناريو البديل: {html.escape(str(ai.get('alternative_scenario', 'غير محدد')))}",
                 f"└ الخطة: {html.escape(str(ai.get('action_plan', 'غير محدد')))}",
             ]
+            if evidence_text:
+                ai_lines.append("\n<b>أدلة Groq:</b>")
+                ai_lines.append(evidence_text)
             if quality_notes_text:
                 ai_lines.append("\n<b>نقاط Groq:</b>")
                 ai_lines.append(quality_notes_text)
