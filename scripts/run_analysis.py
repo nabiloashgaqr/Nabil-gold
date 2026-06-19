@@ -264,7 +264,11 @@ async def run_analysis_async() -> None:
             decision.get("dynamic_risk", {}).get("summary"),
         )
 
-        # ── إضافة وضع التداول الحالي للقرار ──
+        # ── إضافة وضع التشغيل/التداول الحالي للقرار ──
+        github_event = os.environ.get("GITHUB_EVENT_NAME", "local")
+        decision["run_source"] = "scheduled" if github_event == "schedule" else "manual" if github_event == "workflow_dispatch" else github_event
+        decision["decision_mode"] = "Groq Observation" if config.get("groq_observation_mode", {}).get("enabled", False) else "Consensus/Groq"
+        decision["requires_three_agents"] = not bool(config.get("groq_observation_mode", {}).get("enabled", False))
         trading_mode = str(config.get("trading_mode", "paper")).lower()
         paper_config = config.get("paper_trading", {}) or {}
         decision["trading_mode"] = trading_mode

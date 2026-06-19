@@ -125,6 +125,11 @@ class TelegramService:
             mode_text = "🧪 <b>الوضع:</b> Paper Observation - مراقبة فقط وليست إشارة دخول فعلية\n"
         else:
             mode_text = "🧪 <b>الوضع:</b> Paper Trading - صفقة تجريبية غير منفذة فعلياً\n" if paper_trading else "⚡ <b>الوضع:</b> Live/Manual Tracking\n"
+        run_source = decision.get("run_source", "unknown")
+        run_source_ar = {"scheduled": "تلقائي", "manual": "يدوي", "workflow_dispatch": "يدوي", "schedule": "تلقائي"}.get(str(run_source), str(run_source))
+        decision_mode = decision.get("decision_mode", "Groq Observation" if decision.get("ai", {}).get("available") else "Unknown")
+        requires_three = "نعم" if decision.get("requires_three_agents") else "لا"
+        run_line = f"🔄 <b>التشغيل:</b> {html.escape(run_source_ar)} | <b>وضع القرار:</b> {html.escape(str(decision_mode))} | <b>يحتاج 3 وكلاء؟</b> {requires_three}\n"
         quality = decision.get("quality", {}) or {}
         quality_line = ""
         if quality:
@@ -185,7 +190,7 @@ class TelegramService:
 {emoji} <b>القرار:</b> {direction_ar}
 ⏰ <b>الوقت:</b> {self._now_text()}
 💰 <b>السعر الحالي:</b> {format_price(current_price)}
-{mode_text}{session_text}
+{mode_text}{run_line}{session_text}
 
 📍 <b>منطقة الدخول:</b> {format_price(entry_low)} - {format_price(entry_high)}
 🛑 <b>وقف الخسارة:</b> {format_price(signal.get('stop_loss'))}
