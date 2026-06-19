@@ -1,4 +1,9 @@
 name: 📊 Gold Analysis Bot
+
+concurrency:
+  group: analyze-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   schedule:
     # Asia/Jerusalem trading window: 09:00 → 22:59, Monday-Friday.

@@ -1,5 +1,10 @@
 name: 📱 Telegram Smoke Test
 
+concurrency:
+  group: telegram_test-${{ github.ref }}
+  cancel-in-progress: true
+
+
 on:
   workflow_dispatch:
 

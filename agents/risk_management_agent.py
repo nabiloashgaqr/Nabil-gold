@@ -157,24 +157,71 @@ class RiskManagementAgent(BaseAgent):
         return direction, {"weighted_score": round(score, 2), "buy_count": buy_count, "sell_count": sell_count, "agents": details}
 
     def _extract_atr(self, results: Dict[str, Any]) -> float:
-        tech_atr = results.get("technical", {}).get("indicators_raw", {}).get("atr")
-        atr = self._f(tech_atr, 0.0)
-        if atr <= 0:
-            # Conservative fallback for gold when indicator is unavailable.
-            atr = 1.5
-        return atr
+        """Extract ATR robustly from all known locations before using fallback."""
+        candidates = [
+            results.get("atr"),
+            results.get("indicators", {}).get("atr") if isinstance(results.get("indicators"), dict) else None,
+            results.get("technical", {}).get("indicators_raw", {}).get("atr"),
+            results.get("technical", {}).get("technical", {}).get("atr"),
+            results.get("technical", {}).get("atr"),
+            results.get("risk", {}).get("risk_metrics", {}).get("atr") if isinstance(results.get("risk"), dict) else None,
+        ]
+        for payload in (results.get("timeframes", {}) or {}).values() if isinstance(results.get("timeframes"), dict) else []:
+            if isinstance(payload, dict):
+                candidates.append(payload.get("atr"))
+                indicators = payload.get("indicators", {}) or {}
+                if isinstance(indicators, dict):
+                    candidates.append(indicators.get("atr"))
+        for candidate in candidates:
+            atr = self._f(candidate, 0.0)
+            if atr > 0:
+                return atr
+        # Conservative fallback for gold when indicator is unavailable.
+        return self._f(self.settings.get("fallback_atr"), 1.5)
 
     def _collect_levels(self, results: Dict[str, Any], current_price: float) -> Tuple[List[float], List[float]]:
+        """Collect support/resistance from technical, classical, SMC, and raw fields."""
         supports: List[float] = []
         resistances: List[float] = []
-        tech_levels = results.get("technical", {}).get("key_levels", {}) or {}
-        if self._f(tech_levels.get("nearest_support")) > 0:
-            supports.append(self._f(tech_levels.get("nearest_support")))
-        if self._f(tech_levels.get("nearest_resistance")) > 0:
-            resistances.append(self._f(tech_levels.get("nearest_resistance")))
+
+        def add_support(value: Any) -> None:
+            v = self._f(value, 0.0)
+            if v > 0:
+                supports.append(v)
+
+        def add_resistance(value: Any) -> None:
+            v = self._f(value, 0.0)
+            if v > 0:
+                resistances.append(v)
+
+        for key in ("support", "nearest_support"):
+            add_support(results.get(key))
+        for key in ("resistance", "nearest_resistance"):
+            add_resistance(results.get(key))
+
+        tech = results.get("technical", {}) or {}
+        tech_levels = tech.get("key_levels", {}) or {}
+        add_support(tech_levels.get("nearest_support"))
+        add_resistance(tech_levels.get("nearest_resistance"))
+        tech_nested = tech.get("technical", {}) or {}
+        add_support(tech_nested.get("support"))
+        add_resistance(tech_nested.get("resistance"))
+        nested_levels = tech_nested.get("key_levels", {}) or {}
+        add_support(nested_levels.get("nearest_support"))
+        add_resistance(nested_levels.get("nearest_resistance"))
+
         classical = results.get("classical", {}) or {}
         supports.extend(self._f(x) for x in classical.get("support_levels", []) if self._f(x) > 0)
         resistances.extend(self._f(x) for x in classical.get("resistance_levels", []) if self._f(x) > 0)
+
+        smc = results.get("smc", {}) or {}
+        dealing_range = smc.get("dealing_range", {}) or {}
+        add_support(dealing_range.get("low"))
+        add_resistance(dealing_range.get("high"))
+        liquidity = smc.get("liquidity", {}) or {}
+        supports.extend(self._f(x) for x in liquidity.get("sell_side", []) if self._f(x) > 0)
+        resistances.extend(self._f(x) for x in liquidity.get("buy_side", []) if self._f(x) > 0)
+
         # Deduplicate and keep logical side levels.
         supports = sorted({round(x, 2) for x in supports if x < current_price}, reverse=True)
         resistances = sorted({round(x, 2) for x in resistances if x > current_price})

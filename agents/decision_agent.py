@@ -207,7 +207,9 @@ class DecisionAgent(BaseAgent):
                 continue
             # دعم 'signal' و 'direction'
             if isinstance(result, dict):
-                signal = result.get('signal', result.get('direction', 'WAIT'))
+                signal = str(result.get('signal', result.get('direction', 'WAIT'))).upper()
+                if signal in {"NEUTRAL", "HOLD", "NO_TRADE", "NONE", ""}:
+                    signal = "WAIT"
                 confidence = result.get('confidence', 50)
             else:
                 continue

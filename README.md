@@ -771,6 +771,21 @@ storage/groq_model_comparison.json
 
 ---
 
+
+---
+
+## 🚨 P0 Reliability Fixes
+
+تم تنفيذ إصلاحات اعتمادية عالية الأولوية:
+
+1. **RiskManagement ATR/levels fix**: قراءة ATR والدعم/المقاومة أصبحت من عدة مصادر وليس من مسار واحد فقط.
+2. **Synthetic data production guard**: أي فريم `synthetic_demo` داخل GitHub Actions يمنع التحليل فورًا.
+3. **Supabase strict mode**: فشل Supabase داخل GitHub Actions يوقف التشغيل ولا يرجع إلى JSON محلي.
+4. **Workflow concurrency**: كل Workflows لديها concurrency لمنع تداخل التشغيلات.
+5. **NEUTRAL = WAIT**: تم توحيد NEUTRAL/HOLD/NO_TRADE مع WAIT داخل تصويت DecisionAgent.
+
+---
+
 ## 🤖 Groq Observation Mode
 
 > تم تفعيل إعادة تصحيح Groq مرة واحدة عند وجود تناقض في الأدلة المؤيدة قبل تحويل القرار إلى WAIT.

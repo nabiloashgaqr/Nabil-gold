@@ -1,5 +1,10 @@
 name: 🤖 Groq Smoke Test
 
+concurrency:
+  group: groq_test-${{ github.ref }}
+  cancel-in-progress: true
+
+
 on:
   workflow_dispatch:
 

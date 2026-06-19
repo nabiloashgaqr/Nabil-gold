@@ -1,5 +1,10 @@
 name: 🧪 Groq Model Compare
 
+concurrency:
+  group: groq_model_compare-${{ github.ref }}
+  cancel-in-progress: true
+
+
 on:
   workflow_dispatch:
     inputs:

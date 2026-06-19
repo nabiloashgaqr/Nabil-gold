@@ -1,4 +1,9 @@
 name: 🔄 Update Open Trades
+
+concurrency:
+  group: update_trades-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   schedule:
     # Asia/Jerusalem regular update window: hourly 09:00 → 22:00, Monday-Friday.

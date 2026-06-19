@@ -1,4 +1,9 @@
 name: 📊 Daily Report & Learning
+
+concurrency:
+  group: daily_report-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   schedule:
     - cron: "0 20 * * *"  # 23:00 Asia/Jerusalem تقريباً (20:00 UTC حالياً)

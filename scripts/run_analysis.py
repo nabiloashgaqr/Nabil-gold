@@ -202,8 +202,14 @@ async def run_analysis_async() -> None:
 
         # Safety: never send production signals from synthetic/demo prices on GitHub Actions.
         allow_synthetic = bool(config.get("data_source", {}).get("allow_synthetic_in_production", False))
-        if os.environ.get("GITHUB_ACTIONS") == "true" and data.get("source") == "synthetic_demo" and not allow_synthetic:
-            message = "تم إيقاف التحليل: بيانات السوق وهمية synthetic_demo. أضف TWELVE_DATA_API_KEY قبل تشغيل الإشارات."
+        synthetic_sources = []
+        if data.get("source") == "synthetic_demo":
+            synthetic_sources.append(data.get("timeframe", "primary"))
+        for tf, payload in (data.get("timeframes", {}) or {}).items():
+            if isinstance(payload, dict) and payload.get("source") == "synthetic_demo":
+                synthetic_sources.append(str(tf))
+        if os.environ.get("GITHUB_ACTIONS") == "true" and synthetic_sources and not allow_synthetic:
+            message = f"Analysis blocked: synthetic_demo data detected in production timeframes: {', '.join(sorted(set(synthetic_sources)))}. Configure TWELVE_DATA_API_KEY."
             logger.error(message)
             telegram.send_error_alert(message)
             return

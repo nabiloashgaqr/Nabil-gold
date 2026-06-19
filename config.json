@@ -139,7 +139,8 @@
   "github_actions": {
     "enabled": true,
     "state_storage": "supabase",
-    "note": "GitHub Actions is stateless; persistent trades must be stored in Supabase."
+    "note": "GitHub Actions is stateless; persistent trades must be stored in Supabase.",
+    "require_supabase": true
   },
   "trade_management": {
     "near_tp1_progress": 0.8,

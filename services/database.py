@@ -46,9 +46,19 @@ class DatabaseService:
                 self.use_supabase = True
                 self.logger.info("Database connected: Supabase")
             except Exception as exc:  # noqa: BLE001
+                if self._strict_supabase():
+                    raise RuntimeError(f"Supabase init failed in production: {exc}") from exc
                 self.logger.warning("Supabase init failed, using local fallback: %s", exc)
         else:
+            if self._strict_supabase():
+                raise RuntimeError("Supabase credentials missing in production GitHub Actions")
             self.logger.warning("Supabase credentials missing, using local fallback JSON")
+
+    def _strict_supabase(self) -> bool:
+        """Require Supabase in GitHub Actions unless explicitly disabled."""
+        if os.environ.get("GITHUB_ACTIONS") != "true":
+            return False
+        return bool(self.config.get("github_actions", {}).get("require_supabase", True))
 
     def save_trade(self, decision: Dict[str, Any]) -> str:
         """Save a new trade from a decision dictionary."""
@@ -95,6 +105,8 @@ class DatabaseService:
                 self._insert_trade_supabase(trade_data)
                 return trade_id
             except Exception as exc:  # noqa: BLE001
+                if self._strict_supabase():
+                    raise RuntimeError(f"Failed to save trade in Supabase in production: {exc}") from exc
                 self.logger.error("Failed to save trade in Supabase, falling back local: %s", exc)
 
         trades = load_trades(self.local_path)
@@ -109,6 +121,8 @@ class DatabaseService:
                 response = self.client.table("trades").select("*").in_("status", ["OPEN", "PARTIAL", "TP1_HIT"]).execute()
                 return list(response.data or [])
             except Exception as exc:  # noqa: BLE001
+                if self._strict_supabase():
+                    raise RuntimeError(f"Failed to fetch open trades from Supabase in production: {exc}") from exc
                 self.logger.error("Failed to fetch open trades from Supabase: %s", exc)
         return [trade for trade in load_trades(self.local_path) if trade.get("status") in {"OPEN", "PARTIAL", "TP1_HIT"}]
 
@@ -169,6 +183,8 @@ class DatabaseService:
                 self._update_trade_supabase(trade_id, updates)
                 return
             except Exception as exc:  # noqa: BLE001
+                if self._strict_supabase():
+                    raise RuntimeError(f"Failed to update Supabase trade {trade_id} in production: {exc}") from exc
                 self.logger.error("Failed to update Supabase trade %s: %s", trade_id, exc)
 
         trades = load_trades(self.local_path)
@@ -291,6 +307,8 @@ class DatabaseService:
                 response = self.client.table("trades").select("*").gte("created_at", today_text).execute()
                 return list(response.data or [])
             except Exception as exc:  # noqa: BLE001
+                if self._strict_supabase():
+                    raise RuntimeError(f"Failed to fetch today trades from Supabase in production: {exc}") from exc
                 self.logger.error("Failed to fetch today trades from Supabase: %s", exc)
         return [trade for trade in load_trades(self.local_path) if str(trade.get("created_at", "")).startswith(today_text)]
 
@@ -305,6 +323,8 @@ class DatabaseService:
                 response = self.client.table("trades").select("*").order("created_at", desc=True).limit(limit).execute()
                 return list(response.data or [])
             except Exception as exc:  # noqa: BLE001
+                if self._strict_supabase():
+                    raise RuntimeError(f"Failed to fetch recent trades from Supabase in production: {exc}") from exc
                 self.logger.error("Failed to fetch recent trades from Supabase: %s", exc)
         trades = load_trades(self.local_path)
         return sorted(trades, key=lambda trade: str(trade.get("created_at", "")), reverse=True)[:limit]
