@@ -148,6 +148,9 @@ class DecisionAgent(BaseAgent):
         indicators = data.get('indicators', {})
         session_info = data.get('session', data.get('session_info', {}))
         memory_rules = agents_results.get('memory_rules', []) if isinstance(agents_results, dict) else []
+        daily_bias = agents_results.get('daily_bias', {}) if isinstance(agents_results, dict) else {}
+        news_ai = agents_results.get('news_ai', {}) if isinstance(agents_results, dict) else {}
+        dynamic_risk = agents_results.get('dynamic_risk', {}) if isinstance(agents_results, dict) else {}
         
         # 1️⃣ تجميع أصوات الوكلاء (مع weights متعلمة)
         votes = self._collect_votes(agents_results)
