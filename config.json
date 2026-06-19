@@ -47,10 +47,10 @@
     "description_max_rr_ratio": "سقف R:R لتجنب أهداف TP2 غير واقعية في الإشارات التجريبية/الحية"
   },
   "signal_requirements": {
-    "min_agents_agree": 1,
-    "min_agreement_percentage": 1,
-    "allow_all_signals": true,
-    "description": "Groq Observation mode: one agent context is enough, but Groq must decide BUY/SELL.",
+    "min_agents_agree": 3,
+    "min_agreement_percentage": 60,
+    "allow_all_signals": false,
+    "description": "Production strict: at least 3 directional agents and 60% agreement are required before Groq can approve BUY/SELL.",
     "experimental_single_agent": {
       "enabled": false,
       "min_confidence": 1,
@@ -187,13 +187,13 @@
       "CHF"
     ],
     "allow_mock": false,
-    "note": "Disabled for production. Use NewsRiskAgent with NEWS_EVENTS_JSON or storage/news_events.json until a real provider is configured."
+    "note": "No live provider is configured here. Use NewsRiskAgent with NEWS_EVENTS_JSON or storage/news_events.json until a real provider is added."
   },
   "ai_service": {
     "enabled": true,
     "provider": "groq",
     "model": "llama-3.3-70b-versatile",
-    "max_tokens": 800,
+    "max_tokens": 900,
     "temperature": 0.1,
     "api_key": "ENV:GROQ_API_KEY",
     "fallback_to_classic": false,
@@ -344,10 +344,10 @@
   },
   "groq_observation_mode": {
     "enabled": true,
-    "min_groq_confidence": 50,
-    "allow_single_agent_context": true,
+    "min_groq_confidence": 60,
+    "allow_single_agent_context": false,
     "disable_forced_observation": true,
-    "description": "Groq decides the final signal using one or more agent contexts. No forced signals.",
+    "description": "Production strict: Groq is final, but requires normal agent agreement context and no forced signals.",
     "block_on_ai_contradiction": true,
     "min_supportive_evidence_items": 2,
     "retry_on_contradiction": true,

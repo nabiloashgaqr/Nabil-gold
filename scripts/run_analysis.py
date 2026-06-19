@@ -37,6 +37,19 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 
+def synthetic_timeframe_sources(data: Dict[str, Any]) -> list[str]:
+    """Return timeframe/source names that are synthetic demo data."""
+    synthetic: list[str] = []
+    if data.get("source") == "synthetic_demo":
+        synthetic.append(str(data.get("timeframe") or "primary"))
+    for timeframe, payload in (data.get("timeframes", {}) or {}).items():
+        if isinstance(payload, dict) and payload.get("source") == "synthetic_demo":
+            name = str(timeframe)
+            if name not in synthetic:
+                synthetic.append(name)
+    return synthetic
+
+
 def should_send_status(config: Dict[str, Any]) -> bool:
     """Send status/no-signal Telegram messages only on manual runs or if enabled.
 
@@ -202,12 +215,7 @@ async def run_analysis_async() -> None:
 
         # Safety: never send production signals from synthetic/demo prices on GitHub Actions.
         allow_synthetic = bool(config.get("data_source", {}).get("allow_synthetic_in_production", False))
-        synthetic_sources = []
-        if data.get("source") == "synthetic_demo":
-            synthetic_sources.append(data.get("timeframe", "primary"))
-        for tf, payload in (data.get("timeframes", {}) or {}).items():
-            if isinstance(payload, dict) and payload.get("source") == "synthetic_demo":
-                synthetic_sources.append(str(tf))
+        synthetic_sources = synthetic_timeframe_sources(data)
         if os.environ.get("GITHUB_ACTIONS") == "true" and synthetic_sources and not allow_synthetic:
             message = f"Analysis blocked: synthetic_demo data detected in production timeframes: {', '.join(sorted(set(synthetic_sources)))}. Configure TWELVE_DATA_API_KEY."
             logger.error(message)

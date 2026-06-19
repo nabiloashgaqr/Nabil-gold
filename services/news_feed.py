@@ -74,40 +74,19 @@ class ForexFactoryScraper:
         """
         📡 جلب تقويم الأخبار.
 
-        ملاحظة إنتاجية: هذا السكربت القديم لا يستخدم مصدراً حقيقياً مستقراً.
-        لذلك لا يولد mock data إلا إذا allow_mock=true داخل news_feed.
-        التحليل الحي يعتمد على NewsRiskAgent + NEWS_EVENTS_JSON/storage/news_events.json.
+        لا يوجد مزود أخبار حي موثوق مفعّل في هذه الخدمة القديمة حالياً.
+        في الإنتاج نعتمد على NewsRiskAgent مع NEWS_EVENTS_JSON أو
+        storage/news_events.json. لا يتم توليد mock data إلا إذا allow_mock=true.
         """
         if not self.news_config.get('enabled', False):
             logger.info("news_feed service disabled; returning empty calendar")
             return []
-        try:
-            # TODO: يمكن استخدام BeautifulSoup أو Selenium لجلب البيانات
-            # حالياً نستخدم HTTP request بسيط
-            
-            from services.market_data import get_market_data_service
-            market = get_market_data_service(self.config)
-            
-            # جلب الصفحة
-            url = f"{self.BASE_URL}/calendar.php"
-            
-            # محاولة الجلب (placeholder - يتطلب implementation حقيقي)
-            # في الإنتاج، يجب استخدام:
-            # 1. BeautifulSoup للـ HTML parsing
-            # 2. أو Selenium للـ JavaScript rendering
-            
-            logger.info(f"📡 جلب تقويم Forex Factory - الأيام: {days}")
-            
-            if self.news_config.get('allow_mock', False):
-                logger.warning("news_feed allow_mock=true: returning mock news data")
-                return self._generate_mock_news(days)
-            logger.warning("news_feed has no real provider configured; returning empty calendar")
-            return []
-            
-        except Exception as e:
-            logger.error(f"❌ خطأ في جلب التقويم: {e}")
-            return []
-    
+        if self.news_config.get('allow_mock', False):
+            logger.warning("news_feed allow_mock=true: returning mock news data")
+            return self._generate_mock_news(days)
+        logger.warning("news_feed has no real provider configured; returning empty calendar")
+        return []
+
     def _generate_mock_news(self, days: int) -> List[ForexNews]:
         """توليد بيانات تجريبية للأخبار"""
         mock_events = [
@@ -282,7 +261,7 @@ class ForexFactoryScraper:
                 relevant_news.append({
                     'title': news.title,
                     'currency': news.currency,
-                    'impact': news.impact.value,
+                    'impact': news.impact.value.upper(),
                     'time': news.time,
                     'sentiment': news.sentiment.value,
                     'trading_impact': news.trading_impact,
@@ -323,7 +302,7 @@ class ForexFactoryScraper:
                 [
                     news.title,
                     'ForexFactory',
-                    news.impact.value,
+                    news.impact.value.upper(),
                     [news.currency],
                     news.trading_impact,
                     news.confidence_adjustment,

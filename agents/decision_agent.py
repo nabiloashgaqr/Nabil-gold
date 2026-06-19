@@ -207,7 +207,7 @@ class DecisionAgent(BaseAgent):
                 continue
             # دعم 'signal' و 'direction'
             if isinstance(result, dict):
-                signal = str(result.get('signal', result.get('direction', 'WAIT'))).upper()
+                signal = str(result.get('signal') or result.get('direction') or 'WAIT').upper()
                 if signal in {"NEUTRAL", "HOLD", "NO_TRADE", "NONE", ""}:
                     signal = "WAIT"
                 confidence = result.get('confidence', 50)
@@ -690,6 +690,18 @@ Return JSON only, no Markdown:
                 return 'WAIT', ai_conf, 'Groq Observation blocked: contradictory supportive evidence: ' + '; '.join(ai_warnings)
             if groq_observation_enabled and min_supportive and supportive_count < min_supportive:
                 return 'WAIT', ai_conf, f'Groq Observation: تم منع الإشارة لأن Groq قدم {supportive_count} أدلة مؤيدة فقط والمطلوب {min_supportive}'
+            if (
+                groq_observation_enabled
+                and not bool(groq_obs.get('allow_single_agent_context', True))
+                and ai_signal in {'BUY', 'SELL'}
+            ):
+                classic_signal = str(classic.get('decision', 'WAIT')).upper()
+                if classic_signal != ai_signal:
+                    return (
+                        'WAIT',
+                        ai_conf,
+                        f'Production strict: Groq returned {ai_signal}, but agent agreement context is {classic_signal}. Required {self.min_agents_agree} agents and {self.min_agreement_pct}% agreement.',
+                    )
 
             if ai_signal != 'WAIT' and ai_conf >= required_conf:
                 final_signal = ai_signal

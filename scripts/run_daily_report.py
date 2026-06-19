@@ -128,7 +128,7 @@ def main() -> None:
         logger.info("تم إرسال تقرير الأداء. عدد الصفقات: %s", len(trades))
 
         # Weekly AI-style performance summary on Friday in configured timezone.
-        tz_name = config.get("schedule", {}).get("timezone", "Asia/Jerusalem")
+        tz_name = config.get("schedule", {}).get("timezone", "Asia/Hebron")
         try:
             local_now = datetime.now(ZoneInfo(str(tz_name)))
         except Exception:  # noqa: BLE001

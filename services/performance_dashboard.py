@@ -4,7 +4,7 @@
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
@@ -75,13 +75,102 @@ class PerformanceDashboard:
         self.db = database_service
         self.config = config
         self.max_drawdown_threshold = config.get('risk_management', {}).get('max_drawdown_stop', 10)
+
+    def _use_trade_snapshots(self) -> bool:
+        """Use DatabaseService trade snapshots instead of legacy raw SQL."""
+        return self.db.__class__.__name__ == "DatabaseService" and callable(getattr(self.db, "get_recent_trades", None))
+
+    def _pnl(self, trade: Dict[str, Any]) -> float:
+        for key in ("final_pnl", "current_pnl_points", "current_pnl", "pnl", "pnl_points"):
+            value = trade.get(key)
+            if value is None:
+                continue
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+        return 0.0
+
+    def _closed(self, trade: Dict[str, Any]) -> bool:
+        return str(trade.get("status", "")).upper() not in {"OPEN", "PARTIAL", "TP1_HIT", "PENDING"}
+
+    def _snapshot(self, trade: Dict[str, Any]) -> Dict[str, Any]:
+        snap = trade.get("signal_snapshot", {}) or {}
+        return snap if isinstance(snap, dict) else {}
+
+    def _agent_performance_from_trades(self, trades: List[Dict[str, Any]]) -> Dict[str, AgentPerformance]:
+        stats: Dict[str, AgentPerformance] = {}
+        confidence_sums: Dict[str, float] = {}
+        confidence_counts: Dict[str, int] = {}
+        for trade in trades:
+            snap = self._snapshot(trade)
+            votes = snap.get("votes", {}) or {}
+            pnl = self._pnl(trade)
+            closed = self._closed(trade)
+            for side in ("BUY", "SELL", "WAIT"):
+                for vote in votes.get(side, []) or []:
+                    name = str(vote.get("agent", "unknown"))
+                    perf = stats.setdefault(name, AgentPerformance(agent_name=name))
+                    perf.total_signals += 1
+                    if side == "BUY":
+                        perf.buy_signals += 1
+                    elif side == "SELL":
+                        perf.sell_signals += 1
+                    else:
+                        perf.wait_signals += 1
+                    try:
+                        confidence_sums[name] = confidence_sums.get(name, 0.0) + float(vote.get("confidence", 0) or 0)
+                        confidence_counts[name] = confidence_counts.get(name, 0) + 1
+                    except (TypeError, ValueError):
+                        pass
+                    if closed and side in {"BUY", "SELL"}:
+                        if pnl > 0:
+                            perf.winning_trades += 1
+                        elif pnl < 0:
+                            perf.losing_trades += 1
+                        perf.total_pnl += pnl
+        for name, perf in stats.items():
+            count = confidence_counts.get(name, 0)
+            perf.avg_confidence = confidence_sums.get(name, 0.0) / count if count else 0.0
+            closed_count = perf.winning_trades + perf.losing_trades
+            perf.avg_pnl = perf.total_pnl / closed_count if closed_count else 0.0
+            perf.win_rate = perf.calculate_win_rate()
+        return stats
+
+    def _session_performance_from_trades(self, trades: List[Dict[str, Any]]) -> List[SessionPerformance]:
+        sessions: Dict[str, SessionPerformance] = {}
+        conf_sums: Dict[str, float] = {}
+        conf_counts: Dict[str, int] = {}
+        wins: Dict[str, int] = {}
+        for trade in trades:
+            snap = self._snapshot(trade)
+            info = snap.get("session_info", {}) or {}
+            name = str(info.get("current_session") or "Unknown")
+            quality = str(info.get("session_quality") or info.get("quality") or "UNKNOWN")
+            session = sessions.setdefault(name, SessionPerformance(session_name=name, quality=quality))
+            session.total_signals += 1
+            conf_sums[name] = conf_sums.get(name, 0.0) + float(trade.get("confidence", snap.get("confidence", 0)) or 0)
+            conf_counts[name] = conf_counts.get(name, 0) + 1
+            if self._closed(trade):
+                pnl = self._pnl(trade)
+                session.trades_count += 1
+                session.total_pnl += pnl
+                if pnl > 0:
+                    wins[name] = wins.get(name, 0) + 1
+        for name, session in sessions.items():
+            session.avg_confidence = conf_sums.get(name, 0.0) / max(conf_counts.get(name, 0), 1)
+            session.win_rate = wins.get(name, 0) / session.trades_count * 100 if session.trades_count else 0.0
+        return sorted(sessions.values(), key=lambda item: item.total_signals, reverse=True)
         
     async def get_agent_performance(self, days: int = 7) -> Dict[str, AgentPerformance]:
         """
         📊 حساب Win Rate لكل وكيل
         """
         try:
-            # استعلام البيانات من Supabase
+            if self._use_trade_snapshots():
+                return self._agent_performance_from_trades(self.db.get_recent_trades(limit=max(days * 50, 150)))
+
+            # Legacy/mocked path for tests and older services.
             query = f"""
                 SELECT 
                     agent_name,
@@ -145,6 +234,9 @@ class PerformanceDashboard:
         📈 أداء كل جلسة تداول
         """
         try:
+            if self._use_trade_snapshots():
+                return self._session_performance_from_trades(self.db.get_recent_trades(limit=max(days * 50, 150)))
+
             query = f"""
                 SELECT 
                     session_name,
@@ -252,6 +344,26 @@ class PerformanceDashboard:
     async def get_portfolio_summary(self) -> Dict:
         """ملخص المحفظة"""
         try:
+            if self._use_trade_snapshots():
+                trades = self.db.get_recent_trades(limit=500)
+                starting = float(self.config.get('paper_trading', {}).get('starting_balance', 10000) or 10000)
+                total_pnl = sum(self._pnl(t) for t in trades if self._closed(t))
+                closed = [t for t in trades if self._closed(t)]
+                wins = len([t for t in closed if self._pnl(t) > 0])
+                losses = len([t for t in closed if self._pnl(t) < 0])
+                balance = starting + total_pnl
+                return {
+                    'balance': balance,
+                    'equity': balance,
+                    'max_drawdown': 0,
+                    'total_trades': len(closed),
+                    'winning_trades': wins,
+                    'losing_trades': losses,
+                    'win_rate': (wins / len(closed) * 100) if closed else 0,
+                    'total_pnl': total_pnl,
+                    'peak_balance': max(starting, balance),
+                }
+
             query = """
                 SELECT 
                     balance,
@@ -293,7 +405,7 @@ class PerformanceDashboard:
         📊 تقرير الأداء الشامل
         """
         report = {
-            'generated_at': datetime.utcnow().isoformat(),
+            'generated_at': datetime.now(timezone.utc).isoformat(),
             'period_days': days,
             'portfolio': await self.get_portfolio_summary(),
             'agents': {},

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -56,7 +55,15 @@ class DatabaseService:
             self.logger.warning("Supabase credentials missing, using local fallback JSON")
 
     def _strict_supabase(self) -> bool:
-        """Require Supabase in GitHub Actions unless explicitly disabled."""
+        """Require Supabase in production or when explicitly requested.
+
+        Local JSON fallback is useful for tests and dry-runs, but GitHub Actions
+        is stateless.  REQUIRE_SUPABASE=true is also supported for workflows/tests
+        that want fail-fast persistence without relying on GITHUB_ACTIONS.
+        """
+        explicit = str(os.environ.get("REQUIRE_SUPABASE", "")).strip().lower() in {"1", "true", "yes", "y"}
+        if explicit:
+            return True
         if os.environ.get("GITHUB_ACTIONS") != "true":
             return False
         return bool(self.config.get("github_actions", {}).get("require_supabase", True))
@@ -300,75 +307,35 @@ class DatabaseService:
         """Return number of trades created today UTC."""
         return len(self.get_today_trades())
 
-    def _timestamp_value(self, trade: Dict[str, Any]) -> str:
-        """Return best available timestamp value for legacy/current schemas."""
-        for key in ("created_at", "entry_time", "opened_at", "updated_at", "last_updated"):
-            value = trade.get(key)
-            if value:
-                return str(value)
-        return ""
-
-    def _select_trades_all_supabase(self) -> List[Dict[str, Any]]:
-        """Fetch all trade rows without relying on optional timestamp columns."""
-        assert self.client is not None
-        response = self.client.table("trades").select("*").execute()
-        return list(response.data or [])
-
-    def _missing_column_from_error(self, exc: Exception) -> str | None:
-        """Extract missing column name from PostgREST/Supabase error text."""
-        text = str(exc)
-        match = re.search(r"column [\w.]*?(?:trades\.)?([A-Za-z_][A-Za-z0-9_]*) does not exist", text)
-        if match:
-            return match.group(1)
-        match = re.search(r"Could not find the '([^']+)' column", text)
-        if match:
-            return match.group(1)
-        return None
-
     def get_today_trades(self) -> List[Dict[str, Any]]:
-        """Return trades created/opened/updated today UTC, supporting legacy schemas."""
+        """Return trades created today UTC."""
         today_text = date.today().isoformat()
         if self.use_supabase and self.client:
-            # Try preferred server-side filters first; fall back to client-side filtering if columns differ.
-            for column in ("created_at", "entry_time", "opened_at", "updated_at", "last_updated"):
-                try:
-                    response = self.client.table("trades").select("*").gte(column, today_text).execute()
-                    return list(response.data or [])
-                except Exception as exc:  # noqa: BLE001
-                    self.logger.debug("Today trades query failed on %s: %s", column, exc)
-                    continue
             try:
-                rows = self._select_trades_all_supabase()
-                return [trade for trade in rows if self._timestamp_value(trade).startswith(today_text)]
+                response = self.client.table("trades").select("*").gte("created_at", today_text).execute()
+                return list(response.data or [])
             except Exception as exc:  # noqa: BLE001
                 if self._strict_supabase():
                     raise RuntimeError(f"Failed to fetch today trades from Supabase in production: {exc}") from exc
                 self.logger.error("Failed to fetch today trades from Supabase: %s", exc)
-        return [trade for trade in load_trades(self.local_path) if self._timestamp_value(trade).startswith(today_text)]
+        return [trade for trade in load_trades(self.local_path) if str(trade.get("created_at", "")).startswith(today_text)]
 
     def get_open_trades_count(self) -> int:
         """Return open trades count."""
         return len(self.get_open_trades())
 
     def get_recent_trades(self, limit: int = 20) -> List[Dict[str, Any]]:
-        """Return recent trades ordered newest first, supporting legacy schemas."""
+        """Return recent trades ordered newest first."""
         if self.use_supabase and self.client:
-            for column in ("created_at", "entry_time", "opened_at", "updated_at", "last_updated"):
-                try:
-                    response = self.client.table("trades").select("*").order(column, desc=True).limit(limit).execute()
-                    return list(response.data or [])
-                except Exception as exc:  # noqa: BLE001
-                    self.logger.debug("Recent trades order failed on %s: %s", column, exc)
-                    continue
             try:
-                rows = self._select_trades_all_supabase()
-                return sorted(rows, key=self._timestamp_value, reverse=True)[:limit]
+                response = self.client.table("trades").select("*").order("created_at", desc=True).limit(limit).execute()
+                return list(response.data or [])
             except Exception as exc:  # noqa: BLE001
                 if self._strict_supabase():
                     raise RuntimeError(f"Failed to fetch recent trades from Supabase in production: {exc}") from exc
                 self.logger.error("Failed to fetch recent trades from Supabase: %s", exc)
         trades = load_trades(self.local_path)
-        return sorted(trades, key=self._timestamp_value, reverse=True)[:limit]
+        return sorted(trades, key=lambda trade: str(trade.get("created_at", "")), reverse=True)[:limit]
 
     def get_consecutive_losses(self, limit: int = 20) -> int:
         """Return consecutive losing closed trades, ignoring open trades."""
@@ -388,54 +355,28 @@ class DatabaseService:
         return losses
 
     def _insert_trade_supabase(self, trade_data: Dict[str, Any]) -> None:
-        """Insert trade row while adapting to legacy/migrated Supabase schemas."""
+        """Insert full trade row, falling back to legacy column set if needed."""
         assert self.client is not None
-        payload = dict(trade_data)
-        removed: set[str] = set()
-        for attempt in range(12):
-            try:
-                self.client.table("trades").insert(payload).execute()
-                if removed:
-                    self.logger.warning("Inserted trade after removing unsupported columns: %s", sorted(removed))
-                return
-            except Exception as exc:  # noqa: BLE001
-                missing = self._missing_column_from_error(exc)
-                if missing and missing in payload:
-                    removed.add(missing)
-                    payload.pop(missing, None)
-                    continue
-                legacy = self._legacy_payload(payload)
-                if legacy and legacy != payload:
-                    payload = legacy
-                    continue
+        try:
+            self.client.table("trades").insert(trade_data).execute()
+        except Exception as exc:  # noqa: BLE001
+            legacy = self._legacy_payload(trade_data)
+            if legacy == trade_data:
                 raise
-        raise RuntimeError("Failed to insert trade after schema compatibility retries")
+            self.logger.warning("Full trade insert failed, trying legacy schema: %s", exc)
+            self.client.table("trades").insert(legacy).execute()
 
     def _update_trade_supabase(self, trade_id: str, updates: Dict[str, Any]) -> None:
-        """Update trade row while adapting to legacy/migrated Supabase schemas."""
+        """Update full trade row, falling back to legacy columns if needed."""
         assert self.client is not None
-        payload = dict(updates)
-        removed: set[str] = set()
-        for attempt in range(12):
-            try:
-                self.client.table("trades").update(payload).eq("id", trade_id).execute()
-                if removed:
-                    self.logger.warning("Updated trade after removing unsupported columns: %s", sorted(removed))
-                return
-            except Exception as exc:  # noqa: BLE001
-                missing = self._missing_column_from_error(exc)
-                if missing and missing in payload:
-                    removed.add(missing)
-                    payload.pop(missing, None)
-                    if not payload:
-                        return
-                    continue
-                legacy = self._legacy_payload(payload)
-                if legacy and legacy != payload:
-                    payload = legacy
-                    continue
+        try:
+            self.client.table("trades").update(updates).eq("id", trade_id).execute()
+        except Exception as exc:  # noqa: BLE001
+            legacy = self._legacy_payload(updates)
+            if not legacy or legacy == updates:
                 raise
-        raise RuntimeError(f"Failed to update trade {trade_id} after schema compatibility retries")
+            self.logger.warning("Full trade update failed, trying legacy schema: %s", exc)
+            self.client.table("trades").update(legacy).eq("id", trade_id).execute()
 
     def _legacy_payload(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Keep only columns from the initial Supabase schema for compatibility."""
@@ -456,8 +397,6 @@ class DatabaseService:
             "final_pnl",
             "reasons",
             "last_updated",
-            "updated_at",
-            "entry_time",
         }
         return {key: value for key, value in data.items() if key in legacy_fields}
 

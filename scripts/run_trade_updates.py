@@ -59,7 +59,15 @@ def main() -> None:
         database = DatabaseService(config)
         manager = OpenTradesManager(config)
 
-        current_price = market_data.get_current_price()
+        # Use an OHLC payload instead of blind quote fallback so production never
+        # manages/closes trades using synthetic_demo prices if the market API fails.
+        price_payload = market_data.get_ohlcv(config.get("primary_timeframe", "15m"), outputsize=60)
+        allow_synthetic = bool(config.get("data_source", {}).get("allow_synthetic_in_production", False))
+        if os.environ.get("GITHUB_ACTIONS") == "true" and price_payload.get("source") == "synthetic_demo" and not allow_synthetic:
+            logger.error("تم إيقاف تحديث الصفقات: السعر من synthetic_demo. راجع TWELVE_DATA_API_KEY.")
+            telegram.send_error_alert("تم إيقاف تحديث الصفقات: السعر من synthetic_demo. راجع TWELVE_DATA_API_KEY.")
+            return
+        current_price = price_payload.get("current_price")
         if not current_price:
             logger.error("فشل في جلب السعر")
             return

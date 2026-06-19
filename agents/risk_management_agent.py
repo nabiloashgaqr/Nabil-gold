@@ -162,6 +162,7 @@ class RiskManagementAgent(BaseAgent):
             results.get("atr"),
             results.get("indicators", {}).get("atr") if isinstance(results.get("indicators"), dict) else None,
             results.get("technical", {}).get("indicators_raw", {}).get("atr"),
+            results.get("technical", {}).get("technical", {}).get("indicators_raw", {}).get("atr"),
             results.get("technical", {}).get("technical", {}).get("atr"),
             results.get("technical", {}).get("atr"),
             results.get("risk", {}).get("risk_metrics", {}).get("atr") if isinstance(results.get("risk"), dict) else None,

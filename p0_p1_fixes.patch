@@ -1,0 +1,834 @@
+From dccaa1c381bacf9537590fe31fdd35ea797c2003 Mon Sep 17 00:00:00 2001
+From: Arena Agent <arena-agent@users.noreply.github.com>
+Date: Fri, 19 Jun 2026 18:16:56 +0000
+Subject: [PATCH] Fix P0 and P1 production readiness issues
+
+---
+ .github/workflows/analyze.yml            |   6 ++
+ .github/workflows/backtest.yml           |   4 +
+ .github/workflows/daily_report.yml       |   9 ++
+ .github/workflows/groq_model_compare.yml |   5 +
+ .github/workflows/update_trades.yml      |   6 ++
+ agents/decision_agent.py                 |  14 ++-
+ agents/risk_management_agent.py          |   1 +
+ config.json                              |  18 ++--
+ scripts/run_analysis.py                  |  20 ++--
+ scripts/run_daily_report.py              |   2 +-
+ scripts/run_trade_updates.py             |  10 +-
+ services/database.py                     |  10 +-
+ services/learning_service.py             |   6 +-
+ services/news_feed.py                    |  43 +++------
+ services/performance_dashboard.py        | 118 ++++++++++++++++++++++-
+ tests/test_p0_fixes.py                   | 107 ++++++++++++++++++++
+ tests/test_p1_fixes.py                   |  92 ++++++++++++++++++
+ 17 files changed, 414 insertions(+), 57 deletions(-)
+ create mode 100644 tests/test_p0_fixes.py
+ create mode 100644 tests/test_p1_fixes.py
+
+diff --git a/.github/workflows/analyze.yml b/.github/workflows/analyze.yml
+index b16251a..0684281 100644
+--- a/.github/workflows/analyze.yml
++++ b/.github/workflows/analyze.yml
+@@ -12,6 +12,10 @@ on:
+     - cron: "*/10 6-19 * * 1,2,3,4,5"
+   workflow_dispatch:
+ 
++concurrency:
++  group: analyze-${{ github.ref }}
++  cancel-in-progress: false
++
+ jobs:
+   analyze:
+     runs-on: ubuntu-latest
+@@ -39,6 +43,7 @@ jobs:
+           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
++          REQUIRE_SUPABASE: "true"
+           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+@@ -53,6 +58,7 @@ jobs:
+           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
++          REQUIRE_SUPABASE: "true"
+           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+ 
+diff --git a/.github/workflows/backtest.yml b/.github/workflows/backtest.yml
+index b0f2317..8edd4be 100644
+--- a/.github/workflows/backtest.yml
++++ b/.github/workflows/backtest.yml
+@@ -29,6 +29,10 @@ on:
+         required: false
+         default: '32'
+ 
++concurrency:
++  group: backtest-${{ github.ref }}
++  cancel-in-progress: false
++
+ jobs:
+   backtest:
+     runs-on: ubuntu-latest
+diff --git a/.github/workflows/daily_report.yml b/.github/workflows/daily_report.yml
+index 5ef03bf..578cf5c 100644
+--- a/.github/workflows/daily_report.yml
++++ b/.github/workflows/daily_report.yml
+@@ -9,6 +9,10 @@ on:
+     - cron: "0 20 * * *"  # 23:00 Asia/Hebron تقريباً (20:00 UTC حالياً)
+   workflow_dispatch:
+ 
++concurrency:
++  group: daily-report-${{ github.ref }}
++  cancel-in-progress: false
++
+ jobs:
+   daily-report:
+     runs-on: ubuntu-latest
+@@ -36,6 +40,7 @@ jobs:
+           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
++          REQUIRE_SUPABASE: "true"
+ 
+       - name: 🔄 End-of-Day Trade Update
+         run: |
+@@ -45,6 +50,7 @@ jobs:
+           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
++          REQUIRE_SUPABASE: "true"
+           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+           FORCE_TRADE_UPDATE: "true"
+@@ -57,6 +63,7 @@ jobs:
+           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
++          REQUIRE_SUPABASE: "true"
+ 
+       - name: 🧠 AI Trade Review for Losses
+         run: |
+@@ -66,6 +73,7 @@ jobs:
+           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
++          REQUIRE_SUPABASE: "true"
+           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+ 
+       - name: 📊 Generate Daily Report + Open Trades Report
+@@ -76,6 +84,7 @@ jobs:
+           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
++          REQUIRE_SUPABASE: "true"
+ 
+       - name: ✅ Success Log
+         if: always()
+diff --git a/.github/workflows/groq_model_compare.yml b/.github/workflows/groq_model_compare.yml
+index d09ae1f..244d998 100644
+--- a/.github/workflows/groq_model_compare.yml
++++ b/.github/workflows/groq_model_compare.yml
+@@ -17,6 +17,10 @@ on:
+         required: false
+         default: 'llama-3.3-70b-versatile'
+ 
++concurrency:
++  group: groq-model-compare-${{ github.ref }}
++  cancel-in-progress: false
++
+ jobs:
+   compare:
+     runs-on: ubuntu-latest
+@@ -49,6 +53,7 @@ jobs:
+           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
++          REQUIRE_SUPABASE: "true"
+ 
+       - name: 📤 Upload Comparison Report
+         uses: actions/upload-artifact@v4
+diff --git a/.github/workflows/update_trades.yml b/.github/workflows/update_trades.yml
+index c694855..404ea33 100644
+--- a/.github/workflows/update_trades.yml
++++ b/.github/workflows/update_trades.yml
+@@ -11,6 +11,10 @@ on:
+     - cron: "0 6-19 * * 1,2,3,4,5"
+   workflow_dispatch:
+ 
++concurrency:
++  group: update-trades-${{ github.ref }}
++  cancel-in-progress: false
++
+ jobs:
+   update-trades:
+     runs-on: ubuntu-latest
+@@ -38,6 +42,7 @@ jobs:
+           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
++          REQUIRE_SUPABASE: "true"
+           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+ 
+       - name: 🔄 Update Trades
+@@ -48,6 +53,7 @@ jobs:
+           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
++          REQUIRE_SUPABASE: "true"
+           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+ 
+diff --git a/agents/decision_agent.py b/agents/decision_agent.py
+index 8ba4fc3..0b61080 100644
+--- a/agents/decision_agent.py
++++ b/agents/decision_agent.py
+@@ -207,7 +207,7 @@ class DecisionAgent(BaseAgent):
+                 continue
+             # دعم 'signal' و 'direction'
+             if isinstance(result, dict):
+-                signal = str(result.get('signal', result.get('direction', 'WAIT'))).upper()
++                signal = str(result.get('signal') or result.get('direction') or 'WAIT').upper()
+                 if signal in {"NEUTRAL", "HOLD", "NO_TRADE", "NONE", ""}:
+                     signal = "WAIT"
+                 confidence = result.get('confidence', 50)
+@@ -690,6 +690,18 @@ Return JSON only, no Markdown:
+                 return 'WAIT', ai_conf, 'Groq Observation blocked: contradictory supportive evidence: ' + '; '.join(ai_warnings)
+             if groq_observation_enabled and min_supportive and supportive_count < min_supportive:
+                 return 'WAIT', ai_conf, f'Groq Observation: تم منع الإشارة لأن Groq قدم {supportive_count} أدلة مؤيدة فقط والمطلوب {min_supportive}'
++            if (
++                groq_observation_enabled
++                and not bool(groq_obs.get('allow_single_agent_context', True))
++                and ai_signal in {'BUY', 'SELL'}
++            ):
++                classic_signal = str(classic.get('decision', 'WAIT')).upper()
++                if classic_signal != ai_signal:
++                    return (
++                        'WAIT',
++                        ai_conf,
++                        f'Production strict: Groq returned {ai_signal}, but agent agreement context is {classic_signal}. Required {self.min_agents_agree} agents and {self.min_agreement_pct}% agreement.',
++                    )
+ 
+             if ai_signal != 'WAIT' and ai_conf >= required_conf:
+                 final_signal = ai_signal
+diff --git a/agents/risk_management_agent.py b/agents/risk_management_agent.py
+index e65a791..41c1407 100644
+--- a/agents/risk_management_agent.py
++++ b/agents/risk_management_agent.py
+@@ -162,6 +162,7 @@ class RiskManagementAgent(BaseAgent):
+             results.get("atr"),
+             results.get("indicators", {}).get("atr") if isinstance(results.get("indicators"), dict) else None,
+             results.get("technical", {}).get("indicators_raw", {}).get("atr"),
++            results.get("technical", {}).get("technical", {}).get("indicators_raw", {}).get("atr"),
+             results.get("technical", {}).get("technical", {}).get("atr"),
+             results.get("technical", {}).get("atr"),
+             results.get("risk", {}).get("risk_metrics", {}).get("atr") if isinstance(results.get("risk"), dict) else None,
+diff --git a/config.json b/config.json
+index 71783d9..c23c79a 100644
+--- a/config.json
++++ b/config.json
+@@ -47,10 +47,10 @@
+     "description_max_rr_ratio": "سقف R:R لتجنب أهداف TP2 غير واقعية في الإشارات التجريبية/الحية"
+   },
+   "signal_requirements": {
+-    "min_agents_agree": 1,
+-    "min_agreement_percentage": 1,
+-    "allow_all_signals": true,
+-    "description": "Groq Observation mode: one agent context is enough, but Groq must decide BUY/SELL.",
++    "min_agents_agree": 3,
++    "min_agreement_percentage": 60,
++    "allow_all_signals": false,
++    "description": "Production strict: at least 3 directional agents and 60% agreement are required before Groq can approve BUY/SELL.",
+     "experimental_single_agent": {
+       "enabled": false,
+       "min_confidence": 1,
+@@ -187,13 +187,13 @@
+       "CHF"
+     ],
+     "allow_mock": false,
+-    "note": "Disabled for production. Use NewsRiskAgent with NEWS_EVENTS_JSON or storage/news_events.json until a real provider is configured."
++    "note": "No live provider is configured here. Use NewsRiskAgent with NEWS_EVENTS_JSON or storage/news_events.json until a real provider is added."
+   },
+   "ai_service": {
+     "enabled": true,
+     "provider": "groq",
+     "model": "llama-3.3-70b-versatile",
+-    "max_tokens": 800,
++    "max_tokens": 900,
+     "temperature": 0.1,
+     "api_key": "ENV:GROQ_API_KEY",
+     "fallback_to_classic": false,
+@@ -344,10 +344,10 @@
+   },
+   "groq_observation_mode": {
+     "enabled": true,
+-    "min_groq_confidence": 50,
+-    "allow_single_agent_context": true,
++    "min_groq_confidence": 60,
++    "allow_single_agent_context": false,
+     "disable_forced_observation": true,
+-    "description": "Groq decides the final signal using one or more agent contexts. No forced signals.",
++    "description": "Production strict: Groq is final, but requires normal agent agreement context and no forced signals.",
+     "block_on_ai_contradiction": true,
+     "min_supportive_evidence_items": 2,
+     "retry_on_contradiction": true,
+diff --git a/scripts/run_analysis.py b/scripts/run_analysis.py
+index ff1b8bb..6028f8b 100644
+--- a/scripts/run_analysis.py
++++ b/scripts/run_analysis.py
+@@ -37,6 +37,19 @@ setup_logging()
+ logger = logging.getLogger(__name__)
+ 
+ 
++def synthetic_timeframe_sources(data: Dict[str, Any]) -> list[str]:
++    """Return timeframe/source names that are synthetic demo data."""
++    synthetic: list[str] = []
++    if data.get("source") == "synthetic_demo":
++        synthetic.append(str(data.get("timeframe") or "primary"))
++    for timeframe, payload in (data.get("timeframes", {}) or {}).items():
++        if isinstance(payload, dict) and payload.get("source") == "synthetic_demo":
++            name = str(timeframe)
++            if name not in synthetic:
++                synthetic.append(name)
++    return synthetic
++
++
+ def should_send_status(config: Dict[str, Any]) -> bool:
+     """Send status/no-signal Telegram messages only on manual runs or if enabled.
+ 
+@@ -202,12 +215,7 @@ async def run_analysis_async() -> None:
+ 
+         # Safety: never send production signals from synthetic/demo prices on GitHub Actions.
+         allow_synthetic = bool(config.get("data_source", {}).get("allow_synthetic_in_production", False))
+-        synthetic_sources = []
+-        if data.get("source") == "synthetic_demo":
+-            synthetic_sources.append(data.get("timeframe", "primary"))
+-        for tf, payload in (data.get("timeframes", {}) or {}).items():
+-            if isinstance(payload, dict) and payload.get("source") == "synthetic_demo":
+-                synthetic_sources.append(str(tf))
++        synthetic_sources = synthetic_timeframe_sources(data)
+         if os.environ.get("GITHUB_ACTIONS") == "true" and synthetic_sources and not allow_synthetic:
+             message = f"Analysis blocked: synthetic_demo data detected in production timeframes: {', '.join(sorted(set(synthetic_sources)))}. Configure TWELVE_DATA_API_KEY."
+             logger.error(message)
+diff --git a/scripts/run_daily_report.py b/scripts/run_daily_report.py
+index 830ac80..854d364 100644
+--- a/scripts/run_daily_report.py
++++ b/scripts/run_daily_report.py
+@@ -128,7 +128,7 @@ def main() -> None:
+         logger.info("تم إرسال تقرير الأداء. عدد الصفقات: %s", len(trades))
+ 
+         # Weekly AI-style performance summary on Friday in configured timezone.
+-        tz_name = config.get("schedule", {}).get("timezone", "Asia/Jerusalem")
++        tz_name = config.get("schedule", {}).get("timezone", "Asia/Hebron")
+         try:
+             local_now = datetime.now(ZoneInfo(str(tz_name)))
+         except Exception:  # noqa: BLE001
+diff --git a/scripts/run_trade_updates.py b/scripts/run_trade_updates.py
+index e296e77..2c0f2c8 100644
+--- a/scripts/run_trade_updates.py
++++ b/scripts/run_trade_updates.py
+@@ -59,7 +59,15 @@ def main() -> None:
+         database = DatabaseService(config)
+         manager = OpenTradesManager(config)
+ 
+-        current_price = market_data.get_current_price()
++        # Use an OHLC payload instead of blind quote fallback so production never
++        # manages/closes trades using synthetic_demo prices if the market API fails.
++        price_payload = market_data.get_ohlcv(config.get("primary_timeframe", "15m"), outputsize=60)
++        allow_synthetic = bool(config.get("data_source", {}).get("allow_synthetic_in_production", False))
++        if os.environ.get("GITHUB_ACTIONS") == "true" and price_payload.get("source") == "synthetic_demo" and not allow_synthetic:
++            logger.error("تم إيقاف تحديث الصفقات: السعر من synthetic_demo. راجع TWELVE_DATA_API_KEY.")
++            telegram.send_error_alert("تم إيقاف تحديث الصفقات: السعر من synthetic_demo. راجع TWELVE_DATA_API_KEY.")
++            return
++        current_price = price_payload.get("current_price")
+         if not current_price:
+             logger.error("فشل في جلب السعر")
+             return
+diff --git a/services/database.py b/services/database.py
+index e423ae1..63543fe 100644
+--- a/services/database.py
++++ b/services/database.py
+@@ -55,7 +55,15 @@ class DatabaseService:
+             self.logger.warning("Supabase credentials missing, using local fallback JSON")
+ 
+     def _strict_supabase(self) -> bool:
+-        """Require Supabase in GitHub Actions unless explicitly disabled."""
++        """Require Supabase in production or when explicitly requested.
++
++        Local JSON fallback is useful for tests and dry-runs, but GitHub Actions
++        is stateless.  REQUIRE_SUPABASE=true is also supported for workflows/tests
++        that want fail-fast persistence without relying on GITHUB_ACTIONS.
++        """
++        explicit = str(os.environ.get("REQUIRE_SUPABASE", "")).strip().lower() in {"1", "true", "yes", "y"}
++        if explicit:
++            return True
+         if os.environ.get("GITHUB_ACTIONS") != "true":
+             return False
+         return bool(self.config.get("github_actions", {}).get("require_supabase", True))
+diff --git a/services/learning_service.py b/services/learning_service.py
+index b5c7877..c431721 100644
+--- a/services/learning_service.py
++++ b/services/learning_service.py
+@@ -170,9 +170,9 @@ class LearningService:
+         try:
+             query = f"""
+                 SELECT 
+-                    id, signal_id, trade_type,
+-                    entry_price, exit_price, pnl,
+-                    status, opened_at, closed_at
++                    id, signal_id, type, trade_type,
++                    entry_price, close_price, final_pnl, current_pnl, current_pnl_points,
++                    status, entry_time, opened_at, closed_at, created_at, signal_snapshot
+                 FROM trades
+                 WHERE closed_at >= NOW() - INTERVAL '{days} days'
+                     AND status IN ('CLOSED', 'TP1_HIT', 'TP2_HIT', 'SL_HIT', 'MANUAL_CLOSE')
+diff --git a/services/news_feed.py b/services/news_feed.py
+index ee009a6..f71946b 100644
+--- a/services/news_feed.py
++++ b/services/news_feed.py
+@@ -74,40 +74,19 @@ class ForexFactoryScraper:
+         """
+         📡 جلب تقويم الأخبار.
+ 
+-        ملاحظة إنتاجية: هذا السكربت القديم لا يستخدم مصدراً حقيقياً مستقراً.
+-        لذلك لا يولد mock data إلا إذا allow_mock=true داخل news_feed.
+-        التحليل الحي يعتمد على NewsRiskAgent + NEWS_EVENTS_JSON/storage/news_events.json.
++        لا يوجد مزود أخبار حي موثوق مفعّل في هذه الخدمة القديمة حالياً.
++        في الإنتاج نعتمد على NewsRiskAgent مع NEWS_EVENTS_JSON أو
++        storage/news_events.json. لا يتم توليد mock data إلا إذا allow_mock=true.
+         """
+         if not self.news_config.get('enabled', False):
+             logger.info("news_feed service disabled; returning empty calendar")
+             return []
+-        try:
+-            # TODO: يمكن استخدام BeautifulSoup أو Selenium لجلب البيانات
+-            # حالياً نستخدم HTTP request بسيط
+-            
+-            from services.market_data import get_market_data_service
+-            market = get_market_data_service(self.config)
+-            
+-            # جلب الصفحة
+-            url = f"{self.BASE_URL}/calendar.php"
+-            
+-            # محاولة الجلب (placeholder - يتطلب implementation حقيقي)
+-            # في الإنتاج، يجب استخدام:
+-            # 1. BeautifulSoup للـ HTML parsing
+-            # 2. أو Selenium للـ JavaScript rendering
+-            
+-            logger.info(f"📡 جلب تقويم Forex Factory - الأيام: {days}")
+-            
+-            if self.news_config.get('allow_mock', False):
+-                logger.warning("news_feed allow_mock=true: returning mock news data")
+-                return self._generate_mock_news(days)
+-            logger.warning("news_feed has no real provider configured; returning empty calendar")
+-            return []
+-            
+-        except Exception as e:
+-            logger.error(f"❌ خطأ في جلب التقويم: {e}")
+-            return []
+-    
++        if self.news_config.get('allow_mock', False):
++            logger.warning("news_feed allow_mock=true: returning mock news data")
++            return self._generate_mock_news(days)
++        logger.warning("news_feed has no real provider configured; returning empty calendar")
++        return []
++
+     def _generate_mock_news(self, days: int) -> List[ForexNews]:
+         """توليد بيانات تجريبية للأخبار"""
+         mock_events = [
+@@ -282,7 +261,7 @@ class ForexFactoryScraper:
+                 relevant_news.append({
+                     'title': news.title,
+                     'currency': news.currency,
+-                    'impact': news.impact.value,
++                    'impact': news.impact.value.upper(),
+                     'time': news.time,
+                     'sentiment': news.sentiment.value,
+                     'trading_impact': news.trading_impact,
+@@ -323,7 +302,7 @@ class ForexFactoryScraper:
+                 [
+                     news.title,
+                     'ForexFactory',
+-                    news.impact.value,
++                    news.impact.value.upper(),
+                     [news.currency],
+                     news.trading_impact,
+                     news.confidence_adjustment,
+diff --git a/services/performance_dashboard.py b/services/performance_dashboard.py
+index ddf4bd1..2f57a3e 100644
+--- a/services/performance_dashboard.py
++++ b/services/performance_dashboard.py
+@@ -4,7 +4,7 @@
+ """
+ 
+ import logging
+-from datetime import datetime, timedelta
++from datetime import datetime, timedelta, timezone
+ from typing import Dict, List, Optional, Any
+ from dataclasses import dataclass, field
+ from enum import Enum
+@@ -75,13 +75,102 @@ class PerformanceDashboard:
+         self.db = database_service
+         self.config = config
+         self.max_drawdown_threshold = config.get('risk_management', {}).get('max_drawdown_stop', 10)
++
++    def _use_trade_snapshots(self) -> bool:
++        """Use DatabaseService trade snapshots instead of legacy raw SQL."""
++        return self.db.__class__.__name__ == "DatabaseService" and callable(getattr(self.db, "get_recent_trades", None))
++
++    def _pnl(self, trade: Dict[str, Any]) -> float:
++        for key in ("final_pnl", "current_pnl_points", "current_pnl", "pnl", "pnl_points"):
++            value = trade.get(key)
++            if value is None:
++                continue
++            try:
++                return float(value)
++            except (TypeError, ValueError):
++                continue
++        return 0.0
++
++    def _closed(self, trade: Dict[str, Any]) -> bool:
++        return str(trade.get("status", "")).upper() not in {"OPEN", "PARTIAL", "TP1_HIT", "PENDING"}
++
++    def _snapshot(self, trade: Dict[str, Any]) -> Dict[str, Any]:
++        snap = trade.get("signal_snapshot", {}) or {}
++        return snap if isinstance(snap, dict) else {}
++
++    def _agent_performance_from_trades(self, trades: List[Dict[str, Any]]) -> Dict[str, AgentPerformance]:
++        stats: Dict[str, AgentPerformance] = {}
++        confidence_sums: Dict[str, float] = {}
++        confidence_counts: Dict[str, int] = {}
++        for trade in trades:
++            snap = self._snapshot(trade)
++            votes = snap.get("votes", {}) or {}
++            pnl = self._pnl(trade)
++            closed = self._closed(trade)
++            for side in ("BUY", "SELL", "WAIT"):
++                for vote in votes.get(side, []) or []:
++                    name = str(vote.get("agent", "unknown"))
++                    perf = stats.setdefault(name, AgentPerformance(agent_name=name))
++                    perf.total_signals += 1
++                    if side == "BUY":
++                        perf.buy_signals += 1
++                    elif side == "SELL":
++                        perf.sell_signals += 1
++                    else:
++                        perf.wait_signals += 1
++                    try:
++                        confidence_sums[name] = confidence_sums.get(name, 0.0) + float(vote.get("confidence", 0) or 0)
++                        confidence_counts[name] = confidence_counts.get(name, 0) + 1
++                    except (TypeError, ValueError):
++                        pass
++                    if closed and side in {"BUY", "SELL"}:
++                        if pnl > 0:
++                            perf.winning_trades += 1
++                        elif pnl < 0:
++                            perf.losing_trades += 1
++                        perf.total_pnl += pnl
++        for name, perf in stats.items():
++            count = confidence_counts.get(name, 0)
++            perf.avg_confidence = confidence_sums.get(name, 0.0) / count if count else 0.0
++            closed_count = perf.winning_trades + perf.losing_trades
++            perf.avg_pnl = perf.total_pnl / closed_count if closed_count else 0.0
++            perf.win_rate = perf.calculate_win_rate()
++        return stats
++
++    def _session_performance_from_trades(self, trades: List[Dict[str, Any]]) -> List[SessionPerformance]:
++        sessions: Dict[str, SessionPerformance] = {}
++        conf_sums: Dict[str, float] = {}
++        conf_counts: Dict[str, int] = {}
++        wins: Dict[str, int] = {}
++        for trade in trades:
++            snap = self._snapshot(trade)
++            info = snap.get("session_info", {}) or {}
++            name = str(info.get("current_session") or "Unknown")
++            quality = str(info.get("session_quality") or info.get("quality") or "UNKNOWN")
++            session = sessions.setdefault(name, SessionPerformance(session_name=name, quality=quality))
++            session.total_signals += 1
++            conf_sums[name] = conf_sums.get(name, 0.0) + float(trade.get("confidence", snap.get("confidence", 0)) or 0)
++            conf_counts[name] = conf_counts.get(name, 0) + 1
++            if self._closed(trade):
++                pnl = self._pnl(trade)
++                session.trades_count += 1
++                session.total_pnl += pnl
++                if pnl > 0:
++                    wins[name] = wins.get(name, 0) + 1
++        for name, session in sessions.items():
++            session.avg_confidence = conf_sums.get(name, 0.0) / max(conf_counts.get(name, 0), 1)
++            session.win_rate = wins.get(name, 0) / session.trades_count * 100 if session.trades_count else 0.0
++        return sorted(sessions.values(), key=lambda item: item.total_signals, reverse=True)
+         
+     async def get_agent_performance(self, days: int = 7) -> Dict[str, AgentPerformance]:
+         """
+         📊 حساب Win Rate لكل وكيل
+         """
+         try:
+-            # استعلام البيانات من Supabase
++            if self._use_trade_snapshots():
++                return self._agent_performance_from_trades(self.db.get_recent_trades(limit=max(days * 50, 150)))
++
++            # Legacy/mocked path for tests and older services.
+             query = f"""
+                 SELECT 
+                     agent_name,
+@@ -145,6 +234,9 @@ class PerformanceDashboard:
+         📈 أداء كل جلسة تداول
+         """
+         try:
++            if self._use_trade_snapshots():
++                return self._session_performance_from_trades(self.db.get_recent_trades(limit=max(days * 50, 150)))
++
+             query = f"""
+                 SELECT 
+                     session_name,
+@@ -252,6 +344,26 @@ class PerformanceDashboard:
+     async def get_portfolio_summary(self) -> Dict:
+         """ملخص المحفظة"""
+         try:
++            if self._use_trade_snapshots():
++                trades = self.db.get_recent_trades(limit=500)
++                starting = float(self.config.get('paper_trading', {}).get('starting_balance', 10000) or 10000)
++                total_pnl = sum(self._pnl(t) for t in trades if self._closed(t))
++                closed = [t for t in trades if self._closed(t)]
++                wins = len([t for t in closed if self._pnl(t) > 0])
++                losses = len([t for t in closed if self._pnl(t) < 0])
++                balance = starting + total_pnl
++                return {
++                    'balance': balance,
++                    'equity': balance,
++                    'max_drawdown': 0,
++                    'total_trades': len(closed),
++                    'winning_trades': wins,
++                    'losing_trades': losses,
++                    'win_rate': (wins / len(closed) * 100) if closed else 0,
++                    'total_pnl': total_pnl,
++                    'peak_balance': max(starting, balance),
++                }
++
+             query = """
+                 SELECT 
+                     balance,
+@@ -293,7 +405,7 @@ class PerformanceDashboard:
+         📊 تقرير الأداء الشامل
+         """
+         report = {
+-            'generated_at': datetime.utcnow().isoformat(),
++            'generated_at': datetime.now(timezone.utc).isoformat(),
+             'period_days': days,
+             'portfolio': await self.get_portfolio_summary(),
+             'agents': {},
+diff --git a/tests/test_p0_fixes.py b/tests/test_p0_fixes.py
+new file mode 100644
+index 0000000..85efcec
+--- /dev/null
++++ b/tests/test_p0_fixes.py
+@@ -0,0 +1,107 @@
++"""Regression tests for P0 production-safety fixes."""
++
++from __future__ import annotations
++
++import pytest
++
++from agents.decision_agent import DecisionAgent
++from agents.risk_management_agent import RiskManagementAgent
++from scripts.run_analysis import synthetic_timeframe_sources
++from services.database import DatabaseService
++
++
++def test_risk_agent_reads_nested_technical_atr_and_levels() -> None:
++    """RiskManagementAgent must use TechnicalAgent's real nested ATR, not fallback 1.5."""
++    config = {
++        "risk_settings": {"max_open_trades": 3, "min_rr_ratio": 1.5},
++        "filters": {"min_atr_for_entry": 1.0, "max_spread_points": 5, "max_consecutive_losses": 3},
++        "agent_weights": {"technical": 0.2, "classical": 0.2, "smc": 0.25, "price_action": 0.15, "multitimeframe": 0.2},
++    }
++    results = {
++        "current_price": 2350.0,
++        "spread_points": 2.0,
++        "technical": {
++            "signal": "BUY",
++            "confidence": 80,
++            "technical": {
++                "indicators_raw": {"atr": 4.0},
++                "key_levels": {"nearest_support": 2344.0, "nearest_resistance": 2360.0},
++            },
++        },
++        "classical": {"direction": "BUY", "confidence": 75, "support_levels": [2344.0], "resistance_levels": [2360.0]},
++        "smc": {"direction": "BUY", "confidence": 75, "entry_suggestion": {"type": "BUY", "entry": 2350.0, "sl": 2343.0, "tp": 2360.0}, "order_blocks": []},
++        "price_action": {"direction": "NEUTRAL", "confidence": 30},
++        "multitimeframe": {"direction": "BUY", "confidence": 80},
++        "portfolio": {"open_trades_count": 0, "today_signals_count": 0, "consecutive_losses": 0},
++    }
++
++    result = RiskManagementAgent(config).evaluate(results)
++
++    assert result["risk_metrics"]["atr"] == 4.0
++    assert result["stop_loss"]["price"] != 2347.75  # 1.5 ATR fallback + SMC buffer path
++
++
++def test_decision_agent_counts_neutral_as_wait_vote() -> None:
++    config = {
++        "risk_settings": {"min_confidence": 60},
++        "agent_weights": {"technical": 0.2, "classical": 0.2, "smc": 0.25, "price_action": 0.15, "multitimeframe": 0.2},
++    }
++    votes = DecisionAgent(config)._collect_votes(
++        {
++            "technical": {"signal": "WAIT", "confidence": 40},
++            "classical": {"direction": "NEUTRAL", "confidence": 30},
++            "smc": {"direction": "BUY", "confidence": 70},
++        }
++    )
++
++    assert len(votes["WAIT"]) == 2
++    assert votes["WAIT"][1]["agent"] == "classical"
++
++
++def test_synthetic_timeframe_sources_detects_any_synthetic_frame() -> None:
++    data = {
++        "source": "twelve_data",
++        "timeframe": "15m",
++        "timeframes": {
++            "5m": {"source": "twelve_data"},
++            "15m": {"source": "twelve_data"},
++            "1H": {"source": "synthetic_demo"},
++            "4H": {"source": "twelve_data"},
++        },
++    }
++
++    assert synthetic_timeframe_sources(data) == ["1H"]
++
++
++def test_database_requires_supabase_when_env_flag_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.setenv("REQUIRE_SUPABASE", "true")
++    monkeypatch.delenv("SUPABASE_URL", raising=False)
++    monkeypatch.delenv("SUPABASE_KEY", raising=False)
++
++    with pytest.raises(RuntimeError, match="Supabase credentials missing|Supabase is required"):
++        DatabaseService({"database": {"local_fallback_file": "storage/test-p0-trades.json"}})
++
++
++def test_database_does_not_fallback_after_supabase_operation_failure(monkeypatch: pytest.MonkeyPatch) -> None:
++    class BrokenTable:
++        def select(self, *_args, **_kwargs):
++            return self
++
++        def in_(self, *_args, **_kwargs):
++            return self
++
++        def execute(self):
++            raise RuntimeError("network down")
++
++    class BrokenClient:
++        def table(self, _name):
++            return BrokenTable()
++
++    monkeypatch.delenv("REQUIRE_SUPABASE", raising=False)
++    service = DatabaseService({"database": {"local_fallback_file": "storage/test-p0-trades.json"}})
++    service.use_supabase = True
++    service.client = BrokenClient()
++
++    monkeypatch.setenv("REQUIRE_SUPABASE", "true")
++    with pytest.raises(RuntimeError, match="Failed to fetch open trades|get_open_trades failed"):
++        service.get_open_trades()
+diff --git a/tests/test_p1_fixes.py b/tests/test_p1_fixes.py
+new file mode 100644
+index 0000000..2983b75
+--- /dev/null
++++ b/tests/test_p1_fixes.py
+@@ -0,0 +1,92 @@
++"""Regression tests for P1 production-readiness fixes."""
++
++from __future__ import annotations
++
++import json
++from datetime import datetime, timezone
++from pathlib import Path
++
++import pytest
++
++from services.database import DatabaseService
++from services.learning_service import LearningService
++from services.news_feed import ForexFactoryScraper, ForexNews, NewsImpact, Sentiment
++from services.performance_dashboard import PerformanceDashboard
++
++
++def test_config_production_strict_defaults() -> None:
++    cfg = json.loads(Path("config.json").read_text(encoding="utf-8"))
++
++    assert cfg["schedule"]["timezone"] == "Asia/Hebron"
++    assert cfg["trading_hours"]["timezone"] == "Asia/Hebron"
++    assert int(cfg["ai_service"]["max_tokens"]) >= 800
++    assert int(cfg["groq_observation_mode"]["min_groq_confidence"]) >= int(cfg["risk_settings"]["min_confidence"])
++    assert cfg["groq_observation_mode"]["allow_single_agent_context"] is False
++    assert int(cfg["signal_requirements"]["min_agents_agree"]) >= 3
++    assert int(cfg["signal_requirements"]["min_agreement_percentage"]) >= 60
++    assert cfg["news_feed"].get("allow_mock") is False
++
++
++def test_learning_service_reads_modern_pnl_fields() -> None:
++    service = LearningService(database_service=None, config={})
++
++    assert service._trade_pnl({"final_pnl": -12.5, "pnl": 99}) == -12.5
++    assert service._trade_pnl({"current_pnl_points": 8.0}) == 8.0
++    assert service._analyze_failure_reason({"final_pnl": -25}) == "SL_hit_large_loss"
++
++
++@pytest.mark.asyncio
++async def test_news_feed_no_mock_by_default_and_uppercase_log() -> None:
++    class DB:
++        def __init__(self) -> None:
++            self.params = None
++
++        async def execute_query(self, _query, params):
++            self.params = params
++            return []
++
++    db = DB()
++    feed = ForexFactoryScraper(db, {"news_feed": {"enabled": True, "allow_mock": False}})
++
++    assert await feed.fetch_calendar(days=1) == []
++
++    news = ForexNews(
++        title="US CPI",
++        date=datetime.now(timezone.utc),
++        time="14:30",
++        currency="USD",
++        impact=NewsImpact.HIGH,
++        forecast=None,
++        previous=None,
++        actual=None,
++        sentiment=Sentiment.NEUTRAL,
++        trading_impact="NEUTRAL",
++        confidence_adjustment=-20,
++    )
++    await feed._log_news(news)
++    assert db.params[2] == "HIGH"
++
++
++@pytest.mark.asyncio
++async def test_performance_dashboard_uses_trade_snapshots(tmp_path: Path) -> None:
++    db = DatabaseService({"database": {"local_fallback_file": str(tmp_path / "trades.json")}})
++    decision = {
++        "decision": "BUY",
++        "signal": {"type": "BUY", "entry": {"price": 2350}, "stop_loss": 2340, "tp1": 2360, "tp2": 2370},
++        "confidence": 80,
++        "current_price": 2350,
++        "votes": {"BUY": [{"agent": "technical", "confidence": 80}], "SELL": [], "WAIT": []},
++        "session_info": {"current_session": "London-NY", "session_quality": "HIGH"},
++    }
++    trade_id = db.save_trade(decision)
++    db.update_trade(trade_id, {"status": "TP2_HIT", "final_pnl": 20})
++
++    dashboard = PerformanceDashboard(db, {"paper_trading": {"starting_balance": 10000}})
++    agents = await dashboard.get_agent_performance(days=7)
++    sessions = await dashboard.get_session_performance(days=7)
++    portfolio = await dashboard.get_portfolio_summary()
++
++    assert agents["technical"].winning_trades == 1
++    assert agents["technical"].win_rate == 100.0
++    assert sessions[0].session_name == "London-NY"
++    assert portfolio["total_pnl"] == 20
+-- 
+2.47.3
+

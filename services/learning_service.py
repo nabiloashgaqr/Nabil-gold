@@ -170,9 +170,9 @@ class LearningService:
         try:
             query = f"""
                 SELECT 
-                    id, signal_id, trade_type,
-                    entry_price, exit_price, pnl,
-                    status, opened_at, closed_at
+                    id, signal_id, type, trade_type,
+                    entry_price, close_price, final_pnl, current_pnl, current_pnl_points,
+                    status, entry_time, opened_at, closed_at, created_at, signal_snapshot
                 FROM trades
                 WHERE closed_at >= NOW() - INTERVAL '{days} days'
                     AND status IN ('CLOSED', 'TP1_HIT', 'TP2_HIT', 'SL_HIT', 'MANUAL_CLOSE')
