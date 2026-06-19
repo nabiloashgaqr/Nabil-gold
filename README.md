@@ -451,14 +451,14 @@ Groq لا يكتفي بقراءة وجود الأخبار، بل يفسر تأث
 تم ضبط النظام للتجربة حسب توقيت:
 
 ```text
-Asia/Jerusalem
+Asia/Hebron
 ```
 
 ### التحليل
 
 ```text
-كل 5 دقائق تقريبًا
-من 07:59 صباحًا إلى 22:59 مساءً بتوقيت Asia/Jerusalem
+كل 10 دقائق تقريبًا
+من 09:00 صباحًا إلى 22:59 مساءً بتوقيت Asia/Hebron
 الأحد إلى الخميس
 ```
 
@@ -466,14 +466,14 @@ Asia/Jerusalem
 
 ```text
 كل ساعة
-من 07:59 صباحًا إلى 22:59 مساءً بتوقيت Asia/Jerusalem
+من 09:00 صباحًا إلى 22:59 مساءً بتوقيت Asia/Hebron
 الأحد إلى الخميس
 ```
 
 ### جلسة نهاية اليوم
 
 ```text
-23:00 بتوقيت Asia/Jerusalem
+23:00 بتوقيت Asia/Hebron
 ```
 
 وتشمل:
@@ -654,7 +654,7 @@ python -m pytest -q
 - إضافة Groq Smoke Test
 - جعل Groq إجباريًا
 - إصلاح فلتر الثقة
-- ضبط أوقات التشغيل حسب Asia/Jerusalem
+- ضبط أوقات التشغيل حسب Asia/Hebron
 
 ### مرحلة الذكاء والتحسين
 
@@ -771,6 +771,23 @@ storage/groq_model_comparison.json
 
 ---
 
+
+---
+
+
+---
+
+## 🟠 P1 Important Fixes
+
+تم تنفيذ إصلاحات P1 المهمة:
+
+1. **LearningService PnL fix**: التعلم يقرأ الآن `final_pnl` ثم `current_pnl_points/current_pnl` ثم الحقول القديمة.
+2. **Legacy news_feed disabled**: `services/news_feed.py` لا يولد بيانات mock في الإنتاج؛ الأخبار الحية تعتمد على `NewsRiskAgent` وملفات/متغيرات الأخبار اليدوية حتى ربط مزود حقيقي.
+3. **Timezone**: تم ضبط النظام إلى `Asia/Hebron`.
+4. **Groq max_tokens**: تم رفعه إلى `800` بعد تقليل حجم prompt.
+5. **Operation modes unified**:
+   - `observation`: وكيل واحد أو أكثر + قرار Groq النهائي، بدون شرط 3 وكلاء.
+   - `production_strict`: نمط صارم يتطلب توافق وكلاء + Groq + فلاتر كاملة.
 
 ---
 
@@ -1329,7 +1346,7 @@ CPI أعلى من المتوقع → الدولار قوي → الذهب سلب
 ```text
 الاثنين إلى الجمعة
 07:59 صباحًا إلى 18:01 مساءً
-Asia/Jerusalem
+Asia/Hebron
 ```
 
 **يسمح بالإشارات عندما:**

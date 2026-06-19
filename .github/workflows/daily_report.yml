@@ -6,7 +6,7 @@ concurrency:
 
 on:
   schedule:
-    - cron: "0 20 * * *"  # 23:00 Asia/Jerusalem تقريباً (20:00 UTC حالياً)
+    - cron: "0 20 * * *"  # 23:00 Asia/Hebron تقريباً (20:00 UTC حالياً)
   workflow_dispatch:
 
 jobs:

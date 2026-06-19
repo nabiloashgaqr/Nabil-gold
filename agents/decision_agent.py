@@ -662,8 +662,9 @@ Return JSON only, no Markdown:
 
         exp_source = classic.get('experimental_single_agent') or {}
         exp_cfg = self.config.get('signal_requirements', {}).get('experimental_single_agent', {}) or {}
+        operation_mode = str(self.config.get('operation_mode', 'observation')).lower()
         groq_obs = self.config.get('groq_observation_mode', {}) or {}
-        groq_observation_enabled = bool(groq_obs.get('enabled', False))
+        groq_observation_enabled = bool(groq_obs.get('enabled', False)) and operation_mode == 'observation'
         observation_min_conf = float(groq_obs.get('min_groq_confidence', min_conf) or min_conf)
         if exp_source and exp_cfg.get('bypass_groq_min_confidence', True) and not groq_observation_enabled:
             return classic.get('decision', 'WAIT'), round(float(classic.get('confidence', 0)), 1), (

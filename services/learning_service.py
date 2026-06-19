@@ -186,6 +186,18 @@ class LearningService:
             logger.error(f"❌ خطأ في جلب الصفقات: {e}")
             return []
     
+    def _trade_pnl(self, trade: Dict[str, Any]) -> float:
+        """Read trade PnL from modern and legacy fields."""
+        for key in ('final_pnl', 'current_pnl_points', 'current_pnl', 'pnl', 'pnl_points'):
+            value = trade.get(key)
+            if value is None:
+                continue
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+        return 0.0
+
     async def _analyze_agent_performance(
         self, 
         closed_trades: List[Dict]
@@ -196,7 +208,7 @@ class LearningService:
         
         # تحليل الأداء من الصفقات المغلقة
         for trade in closed_trades:
-            pnl = trade.get('pnl', 0) or 0
+            pnl = self._trade_pnl(trade)
             is_win = pnl > 0
             
             # توزيع الأداء على الوكلاء (محاكاة بناءً على win rate)
@@ -266,7 +278,7 @@ class LearningService:
     
     def _analyze_failure_reason(self, trade: Dict) -> str:
         """تحليل سبب الفشل"""
-        pnl = trade.get('pnl', 0) or 0
+        pnl = self._trade_pnl(trade)
         if pnl < -20:
             return "SL_hit_large_loss"
         elif pnl < -5:
@@ -408,7 +420,7 @@ class LearningService:
         """🚀 توليد تقرير التعلم - الإصدار 2.0"""
         
         total_trades = len(closed_trades)
-        winning = sum(1 for t in closed_trades if (t.get('pnl', 0) or 0) > 0)
+        winning = sum(1 for t in closed_trades if self._trade_pnl(t) > 0)
         overall_wr = (winning / total_trades * 100) if total_trades > 0 else 0
         
         # ترتيب الوكلاء

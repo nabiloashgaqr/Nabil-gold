@@ -8,7 +8,7 @@ concurrency:
 on:
   workflow_dispatch:
   schedule:
-    - cron: "15 20 * * *"  # بعد تقرير 23:00 Asia/Jerusalem تقريباً
+    - cron: "15 20 * * *"  # بعد تقرير 23:00 Asia/Hebron تقريباً
 
 jobs:
   dashboard:

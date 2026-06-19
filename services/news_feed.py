@@ -72,8 +72,15 @@ class ForexFactoryScraper:
     
     async def fetch_calendar(self, days: int = 3) -> List[ForexNews]:
         """
-        📡 جلب تقويم Forex Factory
+        📡 جلب تقويم الأخبار.
+
+        ملاحظة إنتاجية: هذا السكربت القديم لا يستخدم مصدراً حقيقياً مستقراً.
+        لذلك لا يولد mock data إلا إذا allow_mock=true داخل news_feed.
+        التحليل الحي يعتمد على NewsRiskAgent + NEWS_EVENTS_JSON/storage/news_events.json.
         """
+        if not self.news_config.get('enabled', False):
+            logger.info("news_feed service disabled; returning empty calendar")
+            return []
         try:
             # TODO: يمكن استخدام BeautifulSoup أو Selenium لجلب البيانات
             # حالياً نستخدم HTTP request بسيط
@@ -91,8 +98,11 @@ class ForexFactoryScraper:
             
             logger.info(f"📡 جلب تقويم Forex Factory - الأيام: {days}")
             
-            # إرجاع بيانات تجريبية للاختبار
-            return self._generate_mock_news(days)
+            if self.news_config.get('allow_mock', False):
+                logger.warning("news_feed allow_mock=true: returning mock news data")
+                return self._generate_mock_news(days)
+            logger.warning("news_feed has no real provider configured; returning empty calendar")
+            return []
             
         except Exception as e:
             logger.error(f"❌ خطأ في جلب التقويم: {e}")

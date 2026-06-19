@@ -272,9 +272,11 @@ async def run_analysis_async() -> None:
 
         # ── إضافة وضع التشغيل/التداول الحالي للقرار ──
         github_event = os.environ.get("GITHUB_EVENT_NAME", "local")
+        operation_mode = str(config.get("operation_mode", "observation")).lower()
         decision["run_source"] = "scheduled" if github_event == "schedule" else "manual" if github_event == "workflow_dispatch" else github_event
-        decision["decision_mode"] = "Groq Observation" if config.get("groq_observation_mode", {}).get("enabled", False) else "Consensus/Groq"
-        decision["requires_three_agents"] = not bool(config.get("groq_observation_mode", {}).get("enabled", False))
+        decision["operation_mode"] = operation_mode
+        decision["decision_mode"] = "Groq Observation" if operation_mode == "observation" and config.get("groq_observation_mode", {}).get("enabled", False) else "Production Strict"
+        decision["requires_three_agents"] = bool((config.get("operation_modes", {}).get(operation_mode, {}) or {}).get("requires_three_agents", operation_mode != "observation"))
         trading_mode = str(config.get("trading_mode", "paper")).lower()
         paper_config = config.get("paper_trading", {}) or {}
         decision["trading_mode"] = trading_mode

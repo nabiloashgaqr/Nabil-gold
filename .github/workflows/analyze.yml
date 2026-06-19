@@ -6,7 +6,7 @@ concurrency:
 
 on:
   schedule:
-    # Asia/Jerusalem trading window: 09:00 → 22:59, Monday-Friday.
+    # Asia/Hebron trading window: 09:00 → 22:59, Monday-Friday.
     # During UTC+3 this is 06:00 → 19:59 UTC.
     # Runs every 10 minutes. Internal session filter enforces exact local time.
     - cron: "*/10 6-19 * * 1,2,3,4,5"

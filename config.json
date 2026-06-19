@@ -75,7 +75,7 @@
     "analysis_interval_minutes": 10,
     "trade_update_interval_minutes": 60,
     "daily_report_time": "23:00",
-    "timezone": "Asia/Jerusalem"
+    "timezone": "Asia/Hebron"
   },
   "filters": {
     "no_signal_before_news_minutes": 30,
@@ -86,7 +86,7 @@
   },
   "trading_hours": {
     "enabled": true,
-    "timezone": "Asia/Jerusalem",
+    "timezone": "Asia/Hebron",
     "sessions": [
       {
         "name": "London-NY Trading",
@@ -102,7 +102,7 @@
         "quality": "HIGH",
         "allow_signals": true,
         "allow_reports": false,
-        "description": "Trading session: 09:00 - 22:59 Asia/Jerusalem (Monday-Friday)",
+        "description": "Trading session: 09:00 - 22:59 Asia/Hebron (Monday-Friday)",
         "start_minute": 0,
         "end_minute": 59
       },
@@ -120,7 +120,7 @@
         "quality": "LOW",
         "allow_signals": false,
         "allow_reports": true,
-        "description": "End-of-day reports: 23:00 - 23:59 Asia/Jerusalem (Monday-Friday)",
+        "description": "End-of-day reports: 23:00 - 23:59 Asia/Hebron (Monday-Friday)",
         "start_minute": 0,
         "end_minute": 59
       }
@@ -171,7 +171,7 @@
     "min_profit_lock": 0.0
   },
   "news_feed": {
-    "enabled": true,
+    "enabled": false,
     "source": "forexfactory",
     "hours_before": 2,
     "hours_after": 1,
@@ -185,13 +185,15 @@
       "JPY",
       "CAD",
       "CHF"
-    ]
+    ],
+    "allow_mock": false,
+    "note": "Disabled for production. Use NewsRiskAgent with NEWS_EVENTS_JSON or storage/news_events.json until a real provider is configured."
   },
   "ai_service": {
     "enabled": true,
     "provider": "groq",
     "model": "llama-3.3-70b-versatile",
-    "max_tokens": 500,
+    "max_tokens": 800,
     "temperature": 0.1,
     "api_key": "ENV:GROQ_API_KEY",
     "fallback_to_classic": false,
@@ -365,5 +367,20 @@
       "SELL_STOP"
     ],
     "description": "Paper order classification only: market, limit, or stop based on entry vs current price."
+  },
+  "operation_mode": "observation",
+  "operation_modes": {
+    "observation": {
+      "description": "Groq decides final BUY/SELL using one or more agent contexts. Does not require 3 agents.",
+      "requires_three_agents": false,
+      "groq_observation": true,
+      "paper_only": true
+    },
+    "production_strict": {
+      "description": "Strict production-like mode: requires agent agreement + Groq + all risk filters.",
+      "requires_three_agents": true,
+      "groq_observation": false,
+      "paper_only": true
+    }
   }
 }
