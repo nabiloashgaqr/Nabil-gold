@@ -655,8 +655,14 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
             warnings.append(f"News blocked: {news.get('summary', news.get('market_status', 'DANGER'))}")
             signal = 'WAIT'
 
+        exp_source = (result.get('classic', {}) or {}).get('experimental_single_agent') or {}
+        exp_cfg = self.config.get('signal_requirements', {}).get('experimental_single_agent', {}) or {}
+        experimental_mode = bool(exp_source)
+
+        # في الوضع التجريبي نبقي فقط: الوقت + الأخبار الخطيرة الأساسية + منع التكرار لاحقاً.
+        # لذلك لا نجعل AI News directional أو Daily Bias أو RiskManagement يمنعون الإشارة التجريبية.
         news_ai = agents_results.get('news_ai', {}) or news.get('ai_interpretation', {}) or {}
-        if news_ai and news_ai.get('available'):
+        if not experimental_mode and news_ai and news_ai.get('available'):
             risk_level = str(news_ai.get('risk_level', '')).upper()
             allowed_direction = str(news_ai.get('allowed_direction', 'BOTH')).upper()
             block_trading = bool(news_ai.get('block_trading', False))
@@ -668,7 +674,7 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
                 signal = 'WAIT'
 
         daily_bias = agents_results.get('daily_bias', {}) or {}
-        if signal in {'BUY', 'SELL'} and daily_bias.get('enabled', True):
+        if not experimental_mode and signal in {'BUY', 'SELL'} and daily_bias.get('enabled', True):
             bias = str(daily_bias.get('bias', 'NEUTRAL')).upper()
             bias_conf = float(daily_bias.get('confidence') or 0)
             db_settings = self.config.get('daily_bias_filter', {}) or {}
@@ -681,10 +687,8 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
                 signal = 'WAIT'
 
         risk = agents_results.get('risk', {}) or {}
-        exp_source = (result.get('classic', {}) or {}).get('experimental_single_agent') or {}
-        exp_cfg = self.config.get('signal_requirements', {}).get('experimental_single_agent', {}) or {}
         if signal in {'BUY', 'SELL'} and risk and not risk.get('approved', False):
-            if exp_source and exp_cfg.get('bypass_risk_rejection', False):
+            if experimental_mode and exp_cfg.get('bypass_risk_rejection', False):
                 warnings.append(f"تجريبي: تم تجاوز رفض RiskManagement للمراقبة فقط: {risk.get('rejection_reason', 'not approved')}")
             else:
                 warnings.append(f"Risk rejected: {risk.get('rejection_reason', 'not approved')}")
@@ -781,12 +785,9 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
 
         session = context.get('session', {}) or {}
         news = context.get('news', {}) or {}
-        dynamic_risk = context.get('dynamic_risk', {}) or {}
         if session and not session.get('trading_allowed', True):
             return None
         if news and (news.get('can_trade') is False or str(news.get('market_status', '')).upper() == 'DANGER'):
-            return None
-        if dynamic_risk and dynamic_risk.get('can_trade') is False:
             return None
 
         source = None
