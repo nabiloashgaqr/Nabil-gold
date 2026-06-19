@@ -492,8 +492,9 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
 قواعد صارمة لشرحك:
 - لا تستخدم دليلاً صعودياً مثل "MACD bullish" كسبب مؤيد لصفقة SELL؛ ضعه في risk_notes أو opposite_risk.
 - لا تستخدم دليلاً هبوطياً كسبب مؤيد لصفقة BUY.
-- يجب أن تكون evidence متوافقة مع final_signal أو تذكر بوضوح أنها مخاطرة/تعارض.
-- يجب أن تتطابق risk_reward مع أرقام RiskManagement، ولا تخترع R:R مختلفاً.
+- يجب أن تكون supportive_evidence متوافقة فقط مع final_signal.
+- أي دليل مخالف مثل MACD bullish داخل SELL يجب وضعه في opposing_evidence أو risk_notes وليس supportive_evidence.
+- يجب أن تتطابق risk_reward مع أرقام RiskManagement، ولا تخترع R:R مختلفاً. استخدم TP2 R:R إذا ذكرت R:R الكلي.
 - إذا الأدلة متعارضة، اجعل القرار WAIT أو اخفض الثقة بوضوح.
 
 أجب بصيغة JSON فقط وبدون Markdown:
@@ -508,7 +509,8 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
     "opposite_risk": "سبب رفض الاتجاه المعاكس بأدلة محددة وليس عبارة عامة",
     "risk_notes": "مخاطر محددة: أخبار، قرب دعم/مقاومة، ضعف فريم، تذبذب، تعارض وكلاء",
     "action_plan": "دخول/انتظار/إلغاء + شرط الإلغاء أو invalidation scenario",
-    "evidence": ["دليل رقمي أو فني 1", "دليل رقمي أو فني 2", "دليل رقمي أو فني 3"],
+    "supportive_evidence": ["دليل مؤيد للقرار 1", "دليل مؤيد للقرار 2", "دليل مؤيد للقرار 3"],
+    "opposing_evidence": ["دليل معارض أو مخاطرة 1", "دليل معارض أو مخاطرة 2"],
     "invalidation": "ما الذي يجعل القرار خاطئاً؟ مستوى أو شرط واضح",
     "alternative_scenario": "متى يصبح الاتجاه المعاكس أفضل؟",
     "quality_notes": ["نقطة قوة محددة", "نقطة ضعف أو تحذير محدد"]
@@ -543,7 +545,9 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
                         'opposite_risk': parsed.get('opposite_risk', ''),
                         'risk_notes': parsed.get('risk_notes', ''),
                         'action_plan': parsed.get('action_plan', ''),
-                        'evidence': parsed.get('evidence', []),
+                        'evidence': parsed.get('supportive_evidence', parsed.get('evidence', [])),
+                        'supportive_evidence': parsed.get('supportive_evidence', parsed.get('evidence', [])),
+                        'opposing_evidence': parsed.get('opposing_evidence', []),
                         'invalidation': parsed.get('invalidation', ''),
                         'alternative_scenario': parsed.get('alternative_scenario', ''),
                         'quality_notes': parsed.get('quality_notes', []),
@@ -647,6 +651,13 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
             ai_signal = str(ai.get('signal', 'WAIT')).upper()
             ai_conf = float(ai.get('confidence', 50) or 0)
             required_conf = observation_min_conf if groq_observation_enabled else min_conf
+            ai_warnings = ai.get('ai_warnings', []) or []
+            supportive_count = len(ai.get('supportive_evidence', ai.get('evidence', [])) or [])
+            min_supportive = int(groq_obs.get('min_supportive_evidence_items', 0) or 0)
+            if groq_observation_enabled and groq_obs.get('block_on_ai_contradiction', True) and ai_warnings:
+                return 'WAIT', ai_conf, 'Groq Observation: تم منع الإشارة لأن تحليل Groq يحتوي تناقضات في الأدلة المؤيدة: ' + '; '.join(ai_warnings)
+            if groq_observation_enabled and min_supportive and supportive_count < min_supportive:
+                return 'WAIT', ai_conf, f'Groq Observation: تم منع الإشارة لأن Groq قدم {supportive_count} أدلة مؤيدة فقط والمطلوب {min_supportive}'
 
             if ai_signal != 'WAIT' and ai_conf >= required_conf:
                 final_signal = ai_signal
@@ -881,7 +892,8 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
         """Detect obvious contradictions in Groq explanation."""
         warnings: List[str] = []
         signal = str(ai.get('signal', ai.get('final_signal', ''))).upper()
-        text = " ".join(str(ai.get(k, '')) for k in ['reasoning', 'entry_reason', 'evidence', 'quality_notes'])
+        supportive = ai.get('supportive_evidence', ai.get('evidence', []))
+        text = " ".join(str(x) for x in supportive) + " " + str(ai.get('entry_reason', ''))
         lower = text.lower()
         bullish_terms = ['macd bullish', 'bullish and improving', 'bullish', 'ema bullish', 'صاعد', 'شرائي']
         bearish_terms = ['macd bearish', 'bearish', 'ema bearish', 'هابط', 'بيعي']

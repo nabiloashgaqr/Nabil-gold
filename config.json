@@ -344,6 +344,8 @@
     "min_groq_confidence": 50,
     "allow_single_agent_context": true,
     "disable_forced_observation": true,
-    "description": "يرسل إشارة فقط إذا كان قرار Groq النهائي BUY/SELL، حتى لو كان السياق من وكيل واحد فقط، مع عرض اسم الوكيل ودرجة موثوقيته"
+    "description": "يرسل إشارة فقط إذا كان قرار Groq النهائي BUY/SELL بدون تناقضات واضحة في الأدلة المؤيدة",
+    "block_on_ai_contradiction": true,
+    "min_supportive_evidence_items": 2
   }
 }

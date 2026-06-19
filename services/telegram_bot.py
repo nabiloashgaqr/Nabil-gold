@@ -87,11 +87,16 @@ class TelegramService:
                 quality_notes_text = "\n".join(f"• {html.escape(str(note))}" for note in quality_notes[:3])
             else:
                 quality_notes_text = f"• {html.escape(str(quality_notes))}" if quality_notes else ""
-            evidence = ai.get("evidence") or []
+            evidence = ai.get("supportive_evidence") or ai.get("evidence") or []
+            opposing = ai.get("opposing_evidence") or []
             if isinstance(evidence, list):
                 evidence_text = "\n".join(f"• {html.escape(str(item))}" for item in evidence[:4])
             else:
                 evidence_text = f"• {html.escape(str(evidence))}" if evidence else ""
+            if isinstance(opposing, list):
+                opposing_text = "\n".join(f"• {html.escape(str(item))}" for item in opposing[:3])
+            else:
+                opposing_text = f"• {html.escape(str(opposing))}" if opposing else ""
             ai_lines = [
                 "🤖 <b>تحليل Groq:</b>",
                 f"├ الاتجاه: {html.escape(str(ai.get('market_bias', 'غير محدد')))}",
@@ -103,8 +108,11 @@ class TelegramService:
                 f"└ الخطة: {html.escape(str(ai.get('action_plan', 'غير محدد')))}",
             ]
             if evidence_text:
-                ai_lines.append("\n<b>أدلة Groq:</b>")
+                ai_lines.append("\n<b>أدلة Groq المؤيدة:</b>")
                 ai_lines.append(evidence_text)
+            if opposing_text:
+                ai_lines.append("\n<b>أدلة/مخاطر معارضة:</b>")
+                ai_lines.append(opposing_text)
             if quality_notes_text:
                 ai_lines.append("\n<b>نقاط Groq:</b>")
                 ai_lines.append(quality_notes_text)
