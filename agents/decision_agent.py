@@ -769,12 +769,97 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
             'agreement_pct': round(agreement, 1),
         }
 
+    def _forced_observation_signal(self, context: Dict[str, Any]) -> Dict[str, Any] | None:
+        """Create a clearly-labeled paper observation signal when all agents/Groq say WAIT.
+
+        This is for monitoring only. It still respects session/news/halt safety because
+        it is called after safety filters and checks warnings before forcing.
+        """
+        exp_cfg = self.config.get('signal_requirements', {}).get('experimental_single_agent', {}) or {}
+        if not exp_cfg.get('force_signal_on_wait', False):
+            return None
+
+        session = context.get('session', {}) or {}
+        news = context.get('news', {}) or {}
+        dynamic_risk = context.get('dynamic_risk', {}) or {}
+        if session and not session.get('trading_allowed', True):
+            return None
+        if news and (news.get('can_trade') is False or str(news.get('market_status', '')).upper() == 'DANGER'):
+            return None
+        if dynamic_risk and dynamic_risk.get('can_trade') is False:
+            return None
+
+        source = None
+        direction = None
+        reliability = 'E'
+        confidence = float(exp_cfg.get('force_signal_confidence', 45) or 45)
+
+        daily_bias = context.get('daily_bias', {}) or {}
+        bias = str(daily_bias.get('bias', '')).upper()
+        if bias == 'BULLISH':
+            direction, source, reliability = 'BUY', 'daily_bias', 'D'
+            confidence = max(confidence, min(float(daily_bias.get('confidence') or confidence), 60))
+        elif bias == 'BEARISH':
+            direction, source, reliability = 'SELL', 'daily_bias', 'D'
+            confidence = max(confidence, min(float(daily_bias.get('confidence') or confidence), 60))
+
+        if direction is None:
+            mtf = context.get('multitimeframe', {}) or {}
+            mtf_dir = str((mtf.get('weighted_bias', {}) or {}).get('direction') or mtf.get('direction') or '').upper()
+            if mtf_dir in {'BUY', 'SELL'}:
+                direction, source, reliability = mtf_dir, 'multitimeframe', 'D'
+                confidence = max(confidence, min(float(mtf.get('confidence') or confidence), 58))
+
+        if direction is None:
+            tech = context.get('technical', {}) or {}
+            trend = str((tech.get('technical', {}) or {}).get('trend') or '').upper()
+            if trend == 'UP':
+                direction, source, reliability = 'BUY', 'technical_trend', 'E'
+            elif trend == 'DOWN':
+                direction, source, reliability = 'SELL', 'technical_trend', 'E'
+
+        if direction is None:
+            # Last-resort observation from current candle body.
+            data = context.get('price_data') or context
+            candles = data.get('data', []) if isinstance(data, dict) else []
+            if candles:
+                last = candles[-1]
+                try:
+                    direction = 'BUY' if float(last.get('close', 0)) >= float(last.get('open', 0)) else 'SELL'
+                    source, reliability = 'last_candle', 'E'
+                except Exception:
+                    return None
+
+        if direction not in {'BUY', 'SELL'}:
+            return None
+
+        return {
+            'enabled': True,
+            'forced': True,
+            'agent': source or 'observation_fallback',
+            'signal': direction,
+            'confidence': round(confidence, 1),
+            'adjusted_confidence': round(confidence, 1),
+            'weight': 0.0,
+            'score': 0.0,
+            'reliability_grade': reliability,
+            'reason': 'وضع مراقبة قسري: كل الوكلاء/Groq أعطوا WAIT، وتم إنشاء إشارة Paper لمراقبة النظام فقط',
+        }
+
     def _to_trade_decision(self, analysis: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
         """Convert analysis output to the canonical payload expected by DB/Telegram."""
         final_signal = str(analysis.get('signal', 'WAIT')).upper()
         risk = context.get('risk', {}) or {}
         current_price = context.get('current_price')
         signal_payload: Dict[str, Any] = {}
+        forced_source = None
+        if final_signal == 'WAIT' and not (analysis.get('warnings') or []):
+            forced_source = self._forced_observation_signal(context)
+            if forced_source:
+                final_signal = forced_source['signal']
+                analysis['confidence'] = forced_source['confidence']
+                analysis['reasoning'] = forced_source['reason']
+                analysis.setdefault('classic', {})['experimental_single_agent'] = forced_source
 
         if final_signal in {'BUY', 'SELL'}:
             entry_info = risk.get('entry', {}) or {}
