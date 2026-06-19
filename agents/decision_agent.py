@@ -926,6 +926,53 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
             'reason': 'وضع مراقبة قسري: كل الوكلاء/Groq أعطوا WAIT، وتم إنشاء إشارة Paper لمراقبة النظام فقط',
         }
 
+    def _levels_match_signal(self, signal: str, entry: float, stop_loss: float, tp1: float, tp2: float) -> bool:
+        """Validate that SL/TP are on the correct side of entry for signal."""
+        try:
+            entry = float(entry)
+            stop_loss = float(stop_loss)
+            tp1 = float(tp1)
+            tp2 = float(tp2)
+        except (TypeError, ValueError):
+            return False
+        if entry <= 0 or stop_loss <= 0 or tp1 <= 0 or tp2 <= 0:
+            return False
+        if signal == 'BUY':
+            return stop_loss < entry < tp1 <= tp2
+        if signal == 'SELL':
+            return stop_loss > entry > tp1 >= tp2
+        return False
+
+    def _build_fallback_levels(self, signal: str, entry_price: float, context: Dict[str, Any], exp_cfg: Dict[str, Any]) -> Dict[str, float]:
+        """Build ATR-based levels guaranteed to match signal direction."""
+        try:
+            atr = float(((context.get('technical', {}) or {}).get('technical', {}) or {}).get('atr') or 0)
+        except Exception:
+            atr = 0.0
+        atr = atr or float(exp_cfg.get('fallback_atr', 2.0) or 2.0)
+        tp1_mult = float(exp_cfg.get('fallback_rr_tp1', 2.0) or 2.0)
+        tp2_mult = float(exp_cfg.get('fallback_rr_tp2', 3.5) or 3.5)
+        entry = float(entry_price or context.get('current_price') or 0)
+        if signal == 'BUY':
+            stop_loss = entry - atr * 1.5
+            tp1_price = entry + atr * tp1_mult
+            tp2_price = entry + atr * tp2_mult
+        else:
+            stop_loss = entry + atr * 1.5
+            tp1_price = entry - atr * tp1_mult
+            tp2_price = entry - atr * tp2_mult
+        rr_ratio = round(abs(tp2_price - entry) / max(abs(entry - stop_loss), 0.01), 2)
+        return {
+            'entry': entry,
+            'stop_loss': stop_loss,
+            'tp1': tp1_price,
+            'tp2': tp2_price,
+            'rr_ratio': rr_ratio,
+            'atr': atr,
+            'zone_low': entry - max(0.2, atr * 0.05),
+            'zone_high': entry + max(0.2, atr * 0.05),
+        }
+
     def _to_trade_decision(self, analysis: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
         """Convert analysis output to the canonical payload expected by DB/Telegram."""
         final_signal = str(analysis.get('signal', 'WAIT')).upper()
@@ -953,28 +1000,27 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
             tp1_price = tp1.get('price', 0)
             tp2_price = tp2.get('price', 0)
             rr_ratio = tp2.get('rr_ratio', tp1.get('rr_ratio', 0))
+            levels_corrected = False
+            corrected_risk_summary = ''
 
             exp_cfg = self.config.get('signal_requirements', {}).get('experimental_single_agent', {}) or {}
             exp_source = (analysis.get('classic', {}) or {}).get('experimental_single_agent') or {}
-            if exp_source and exp_cfg.get('fallback_levels_enabled', True) and (not stop_loss or not tp1_price or not tp2_price):
-                try:
-                    atr = float(((context.get('technical', {}) or {}).get('technical', {}) or {}).get('atr') or 0)
-                except Exception:
-                    atr = 0.0
-                atr = atr or float(exp_cfg.get('fallback_atr', 2.0) or 2.0)
-                tp1_mult = float(exp_cfg.get('fallback_rr_tp1', 2.0) or 2.0)
-                tp2_mult = float(exp_cfg.get('fallback_rr_tp2', 3.5) or 3.5)
-                entry_price = entry_price or current_price or 0
-                if final_signal == 'BUY':
-                    stop_loss = float(entry_price) - atr * 1.5
-                    tp1_price = float(entry_price) + atr * tp1_mult
-                    tp2_price = float(entry_price) + atr * tp2_mult
-                else:
-                    stop_loss = float(entry_price) + atr * 1.5
-                    tp1_price = float(entry_price) - atr * tp1_mult
-                    tp2_price = float(entry_price) - atr * tp2_mult
-                rr_ratio = round(abs(tp2_price - float(entry_price)) / max(abs(float(entry_price) - stop_loss), 0.01), 2)
-                entry_zone = {'low': float(entry_price) - max(0.2, atr * 0.05), 'high': float(entry_price) + max(0.2, atr * 0.05)}
+            risk_direction = str(risk.get('direction', '')).upper()
+            levels_invalid = not self._levels_match_signal(final_signal, float(entry_price or current_price or 0), stop_loss, tp1_price, tp2_price)
+            direction_mismatch = risk_direction in {'BUY', 'SELL'} and risk_direction != final_signal
+            if exp_source and exp_cfg.get('fallback_levels_enabled', True) and (levels_invalid or direction_mismatch):
+                fallback = self._build_fallback_levels(final_signal, float(entry_price or current_price or 0), context, exp_cfg)
+                entry_price = fallback['entry']
+                stop_loss = fallback['stop_loss']
+                tp1_price = fallback['tp1']
+                tp2_price = fallback['tp2']
+                rr_ratio = fallback['rr_ratio']
+                entry_zone = {'low': fallback['zone_low'], 'high': fallback['zone_high']}
+                levels_corrected = True
+                corrected_risk_summary = f"مستويات تجريبية مصححة لاتجاه {final_signal}: SL={stop_loss:.2f}, TP1={tp1_price:.2f}, TP2={tp2_price:.2f}, R:R={rr_ratio}"
+                analysis.setdefault('warnings', []).append(
+                    f"تجريبي: تم تصحيح SL/TP لتتوافق مع اتجاه {final_signal} لأن مستويات Risk كانت {'باتجاه ' + risk_direction if risk_direction else 'غير صالحة'}"
+                )
 
             signal_payload = {
                 'type': final_signal,
@@ -988,12 +1034,12 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
                 'tp2': tp2_price,
                 'rr_ratio': rr_ratio,
                 'position_size': risk.get('position_size', {}),
-                'risk_summary': risk.get('summary', ''),
+                'risk_summary': corrected_risk_summary if levels_corrected else risk.get('summary', ''),
             }
 
         reasons = [analysis.get('reasoning', '')]
-        if risk.get('summary'):
-            reasons.append(risk.get('summary'))
+        if signal_payload.get('risk_summary'):
+            reasons.append(signal_payload.get('risk_summary'))
         for warning in analysis.get('warnings', []) or []:
             reasons.append(warning)
 
