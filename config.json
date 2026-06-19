@@ -69,8 +69,8 @@
     "sessions": [
       {
         "name": "London-NY Trading",
-        "start_hour": 8,
-        "end_hour": 17,
+        "start_hour": 7,
+        "end_hour": 18,
         "days": [
           6,
           0,
@@ -81,7 +81,9 @@
         "quality": "HIGH",
         "allow_signals": true,
         "allow_reports": false,
-        "description": "جلسة التداول التجريبية: 08:00 - 18:00 بتوقيت Asia/Jerusalem (الأحد-الخميس)"
+        "description": "جلسة التداول التجريبية: 07:59 - 18:01 بتوقيت Asia/Jerusalem (الأحد-الخميس)",
+        "start_minute": 59,
+        "end_minute": 1
       },
       {
         "name": "Daily Report Session",
@@ -97,7 +99,9 @@
         "quality": "LOW",
         "allow_signals": false,
         "allow_reports": true,
-        "description": "جلسة التقارير: 23:00 بتوقيت Asia/Jerusalem (الأحد-الخميس)"
+        "description": "جلسة التقارير ونهاية اليوم: 23:00 - 23:59 بتوقيت Asia/Jerusalem",
+        "start_minute": 0,
+        "end_minute": 59
       }
     ],
     "min_quality_required": "HIGH",
@@ -126,7 +130,7 @@
     "trailing_distance_points": 15,
     "partial_close_at_tp1": true,
     "partial_close_percentage": 50,
-    "update_outside_trading_hours": true
+    "update_outside_trading_hours": false
   },
   "performance": {
     "track_win_rate_per_agent": true,

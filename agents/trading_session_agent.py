@@ -115,7 +115,7 @@ class TradingSessionAgent(BaseAgent):
                     "allow_signals": allow_signals,
                     "allow_reports": allow_reports,
                     "description": active_session.get("description", ""),
-                    "hours": f"{active_session.get('start_hour')}:00 - {active_session.get('end_hour')}:00 UTC",
+                    "hours": f"{int(active_session.get('start_hour', 0)):02d}:{int(active_session.get('start_minute', 0)):02d} - {int(active_session.get('end_hour', 23)):02d}:{int(active_session.get('end_minute', 59)):02d} {self.hours_config.get('timezone', 'UTC')}",
                     "days": active_session.get("days", []),
                 },
             )
@@ -134,13 +134,18 @@ class TradingSessionAgent(BaseAgent):
     def _find_active_session(self, now: datetime) -> Dict[str, Any] | None:
         """Find which session is currently active. Prioritize the most specific session."""
         sessions = self.hours_config.get("sessions", [])
-        current_hour = now.hour
+        current_minutes = now.hour * 60 + now.minute
         current_weekday = now.weekday()  # 0=Monday ... 6=Sunday
 
         matches: List[Dict[str, Any]] = []
         for session in sessions:
-            start = int(session.get("start_hour", 0))
-            end = int(session.get("end_hour", 23))
+            start_hour = int(session.get("start_hour", 0))
+            end_hour = int(session.get("end_hour", 23))
+            start_minute = int(session.get("start_minute", 0))
+            # Preserve legacy behavior: end_hour without end_minute means through the whole hour.
+            end_minute = int(session.get("end_minute", 59))
+            start = start_hour * 60 + start_minute
+            end = end_hour * 60 + end_minute
             # days: 0=Sunday, 1=Monday, ..., 6=Saturday (Python weekday format)
             allowed_days = [int(d) for d in session.get("days", [1, 2, 3, 4, 5])]
 
@@ -148,11 +153,11 @@ class TradingSessionAgent(BaseAgent):
                 continue
 
             if start <= end:
-                if start <= current_hour <= end:
+                if start <= current_minutes <= end:
                     matches.append(session)
             else:
-                # Overnight range (e.g., 22-6)
-                if current_hour >= start or current_hour <= end:
+                # Overnight range (e.g., 22:00-06:00)
+                if current_minutes >= start or current_minutes <= end:
                     matches.append(session)
 
         if not matches:
@@ -163,7 +168,7 @@ class TradingSessionAgent(BaseAgent):
         return min(
             matches,
             key=lambda s: (
-                int(s.get("end_hour", 23)) - int(s.get("start_hour", 0)),
+                ((int(s.get("end_hour", 23)) * 60 + int(s.get("end_minute", 59))) - (int(s.get("start_hour", 0)) * 60 + int(s.get("start_minute", 0)))) % (24 * 60),
                 quality_order.get(str(s.get("quality", "UNKNOWN")).upper(), 4),
             ),
         )
@@ -182,6 +187,7 @@ class TradingSessionAgent(BaseAgent):
                         "session": session.get("name", "Unknown"),
                         "day": check_date.strftime("%A"),
                         "hour": session.get("start_hour", 8),
+                        "minute": session.get("start_minute", 0),
                         "quality": session.get("quality", "UNKNOWN"),
                     }
         return None

@@ -1,7 +1,12 @@
 name: 📊 Gold Analysis Bot
 on:
   schedule:
-    - cron: "*/15 5-16 * * 0,1,2,3,4"  # كل 15 دقيقة تقريباً بين 08:00-18:00 Asia/Jerusalem (UTC broad window)
+    # Asia/Jerusalem test window: 07:59 → 18:01.
+    # During UTC+3 this is 04:59 → 15:01 UTC.
+    # Quarter-hour cadence anchored at :59: 07:59, 08:14, 08:29, ... 17:59 plus final 18:01 check.
+    - cron: "59 4 * * 0,1,2,3,4"
+    - cron: "14,29,44,59 5-15 * * 0,1,2,3,4"
+    - cron: "1 15-16 * * 0,1,2,3,4"
   workflow_dispatch:
 
 jobs:

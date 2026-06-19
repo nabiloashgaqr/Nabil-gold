@@ -39,17 +39,18 @@ def main() -> None:
         session.get("trading_allowed"),
     )
 
-    update_outside_hours = bool(config.get("trade_management", {}).get("update_outside_trading_hours", True))
-    if not session.get("trading_allowed") and not update_outside_hours:
+    update_outside_hours = bool(config.get("trade_management", {}).get("update_outside_trading_hours", False))
+    force_update = os.environ.get("FORCE_TRADE_UPDATE", "false").lower() in {"1", "true", "yes"}
+    if not session.get("trading_allowed") and not update_outside_hours and not force_update:
         logger.info(
-            "🚫 خارج ساعات التداول (%s) - لا تحديث حالياً. السبب: %s",
+            "🚫 خارج ساعات تحديث الصفقات (%s) - لا تحديث حالياً. السبب: %s",
             session.get("current_session") or "غير محدد",
             session.get("reason", ""),
         )
-        return  # ══ لا تحديث خارج الجلسات عند تعطيل الخيار ══
-    if not session.get("trading_allowed") and update_outside_hours:
+        return  # ══ لا تحديث خارج الجلسات إلا عند FORCE_TRADE_UPDATE ══
+    if not session.get("trading_allowed") and (update_outside_hours or force_update):
         logger.info(
-            "ℹ️ خارج ساعات الإشارات، لكن متابعة الصفقات المفتوحة مستمرة حسب trade_management.update_outside_trading_hours"
+            "ℹ️ خارج ساعات التحديث العادية، لكن التحديث مستمر بسبب update_outside_trading_hours أو FORCE_TRADE_UPDATE"
         )
 
     try:
