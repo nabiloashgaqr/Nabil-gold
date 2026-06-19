@@ -56,18 +56,23 @@ class DatabaseService:
             self.logger.warning("Supabase credentials missing, using local fallback JSON")
 
     def _strict_supabase(self) -> bool:
-        """Require Supabase in production or when explicitly requested.
+        """Require Supabase only for production workflows or explicit requests.
 
-        Local JSON fallback is useful for tests and dry-runs, but GitHub Actions
-        is stateless.  REQUIRE_SUPABASE=true is also supported for workflows/tests
-        that want fail-fast persistence without relying on GITHUB_ACTIONS.
+        GitHub Actions sets GITHUB_ACTIONS=true for every workflow, including the
+        Tests workflow. Unit tests must still be allowed to use the local JSON
+        fallback. Production jobs set REQUIRE_SUPABASE=true explicitly in their
+        workflow env, so they continue to fail fast if Supabase is unavailable.
         """
-        explicit = str(os.environ.get("REQUIRE_SUPABASE", "")).strip().lower() in {"1", "true", "yes", "y"}
-        if explicit:
+        explicit = str(os.environ.get("REQUIRE_SUPABASE", "")).strip().lower()
+        if explicit in {"1", "true", "yes", "y"}:
             return True
+        if explicit in {"0", "false", "no", "n"}:
+            return False
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return False
         if os.environ.get("GITHUB_ACTIONS") != "true":
             return False
-        return bool(self.config.get("github_actions", {}).get("require_supabase", True))
+        return bool(self.config.get("github_actions", {}).get("require_supabase", False))
 
     def save_trade(self, decision: Dict[str, Any]) -> str:
         """Save a new trade from a decision dictionary."""
