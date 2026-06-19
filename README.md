@@ -685,6 +685,18 @@ python -m pytest -q
 
 بالإضافة إلى إدخال Agent Playbooks في Prompt قرار Groq، تم تنفيذ تطويرات فعلية داخل الكود:
 
+### NewsRiskAgent v3.1
+
+تمت إضافة تطويرات فعلية لمخاطر الأخبار:
+
+- Tier 1 / Tier 2 / Tier 3 event classification
+- نوافذ منع مختلفة حسب نوع الخبر
+- FOMC / Interest Rate / CPI / PCE / NFP special handling
+- High Risk Day إذا وُجدت 3 أحداث Tier 1 خلال 24 ساعة
+- tier_summary في المخرجات
+- special_handling لكل حدث
+- risk_score أدق حسب توقيت الخبر وقوته
+
 ### RiskManagementAgent v3.1
 
 تمت إضافة تطويرات فعلية لإدارة المخاطر:

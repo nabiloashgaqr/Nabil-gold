@@ -308,5 +308,14 @@
     "caution_risk_multiplier": 0.75,
     "strict_risk_multiplier": 0.5,
     "description": "يرفع شروط الثقة والجودة أو يوقف التداول بعد خسائر متتالية/خسارة يومية"
+  },
+  "news_risk": {
+    "tier1_before_minutes": 60,
+    "tier1_after_minutes": 30,
+    "tier2_before_minutes": 30,
+    "tier2_after_minutes": 15,
+    "warning_before_minutes": 120,
+    "high_risk_day_tier1_count": 3,
+    "description": "تصنيف أخبار Tier 1/2 مع نوافذ منع وتحذير مخصصة للذهب"
   }
 }
