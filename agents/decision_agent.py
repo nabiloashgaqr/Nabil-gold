@@ -538,30 +538,27 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
                 parsed = self.ai_service.parse_json_response(response.content)
                 
                 if parsed:
-                    return {
-                        'available': True,
-                        'signal': parsed.get('final_signal', parsed.get('signal', 'WAIT')),
-                        'confidence': parsed.get('confidence', 50),
-                        'consensus_strength': parsed.get('consensus_strength', 'Unknown'),
-                        'reasoning': parsed.get('reasoning', ''),
-                        'risk_reward': parsed.get('risk_reward', ''),
-                        'market_bias': parsed.get('market_bias', ''),
-                        'entry_reason': parsed.get('entry_reason', ''),
-                        'opposite_risk': parsed.get('opposite_risk', ''),
-                        'risk_notes': parsed.get('risk_notes', ''),
-                        'action_plan': parsed.get('action_plan', ''),
-                        'evidence': parsed.get('supportive_evidence', parsed.get('evidence', [])),
-                        'supportive_evidence': parsed.get('supportive_evidence', parsed.get('evidence', [])),
-                        'opposing_evidence': parsed.get('opposing_evidence', []),
-                        'invalidation': parsed.get('invalidation', ''),
-                        'alternative_scenario': parsed.get('alternative_scenario', ''),
-                        'quality_notes': parsed.get('quality_notes', []),
-                        'ai_warnings': self._ai_contradiction_warnings({'signal': parsed.get('final_signal', parsed.get('signal', 'WAIT')), **parsed}),
-                        'provider': response.provider,
-                        'model': getattr(response, 'model', ''),
-                        'tokens_used': response.tokens_used,
-                        'cost': response.cost
-                    }
+                    result = self._build_ai_decision_result(parsed, response)
+                    groq_obs = self.config.get('groq_observation_mode', {}) or {}
+                    if result.get('ai_warnings') and groq_obs.get('retry_on_contradiction', True):
+                        correction_prompt = prompt + f"""
+
+تصحيح إلزامي: تحليلك السابق يحتوي تناقضات في الأدلة المؤيدة:
+{result.get('ai_warnings')}
+
+أعد الإجابة JSON فقط. إذا كان القرار SELL فلا تضع أدلة صعودية في supportive_evidence.
+إذا كان القرار BUY فلا تضع أدلة هبوطية في supportive_evidence.
+انقل الأدلة المخالفة إلى opposing_evidence أو اجعل final_signal = WAIT.
+"""
+                        retry_response = await self.ai_service._call_ai(correction_prompt, 'decision')
+                        if retry_response.success:
+                            retry_parsed = self.ai_service.parse_json_response(retry_response.content)
+                            if retry_parsed:
+                                retry_result = self._build_ai_decision_result(retry_parsed, retry_response)
+                                retry_result['retry_used'] = True
+                                retry_result['previous_ai_warnings'] = result.get('ai_warnings', [])
+                                return retry_result
+                    return result
             
             return {'available': False, 'error': response.error or 'AI response parsing failed'}
             
@@ -569,6 +566,34 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
             logger.error(f"❌ خطأ في قرار AI: {e}")
             return {'available': False, 'error': str(e)}
     
+    def _build_ai_decision_result(self, parsed: Dict[str, Any], response: Any) -> Dict[str, Any]:
+        """Build normalized AI decision dict and attach validation warnings."""
+        result = {
+            'available': True,
+            'signal': parsed.get('final_signal', parsed.get('signal', 'WAIT')),
+            'confidence': parsed.get('confidence', 50),
+            'consensus_strength': parsed.get('consensus_strength', 'Unknown'),
+            'reasoning': parsed.get('reasoning', ''),
+            'risk_reward': parsed.get('risk_reward', ''),
+            'market_bias': parsed.get('market_bias', ''),
+            'entry_reason': parsed.get('entry_reason', ''),
+            'opposite_risk': parsed.get('opposite_risk', ''),
+            'risk_notes': parsed.get('risk_notes', ''),
+            'action_plan': parsed.get('action_plan', ''),
+            'evidence': parsed.get('supportive_evidence', parsed.get('evidence', [])),
+            'supportive_evidence': parsed.get('supportive_evidence', parsed.get('evidence', [])),
+            'opposing_evidence': parsed.get('opposing_evidence', []),
+            'invalidation': parsed.get('invalidation', ''),
+            'alternative_scenario': parsed.get('alternative_scenario', ''),
+            'quality_notes': parsed.get('quality_notes', []),
+            'provider': response.provider,
+            'model': getattr(response, 'model', ''),
+            'tokens_used': response.tokens_used,
+            'cost': response.cost,
+        }
+        result['ai_warnings'] = self._ai_contradiction_warnings({'signal': result['signal'], **parsed})
+        return result
+
     def _format_votes_for_ai(self, votes: Dict) -> str:
         """تنسيق الأصوات لـ AI"""
         

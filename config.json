@@ -72,7 +72,7 @@
     }
   },
   "schedule": {
-    "analysis_interval_minutes": 15,
+    "analysis_interval_minutes": 5,
     "trade_update_interval_minutes": 60,
     "daily_report_time": "23:00",
     "timezone": "Asia/Jerusalem"
@@ -346,6 +346,8 @@
     "disable_forced_observation": true,
     "description": "يرسل إشارة فقط إذا كان قرار Groq النهائي BUY/SELL بدون تناقضات واضحة في الأدلة المؤيدة",
     "block_on_ai_contradiction": true,
-    "min_supportive_evidence_items": 2
+    "min_supportive_evidence_items": 2,
+    "retry_on_contradiction": true,
+    "max_retry": 1
   }
 }
