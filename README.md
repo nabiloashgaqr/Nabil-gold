@@ -685,6 +685,19 @@ python -m pytest -q
 
 بالإضافة إلى إدخال Agent Playbooks في Prompt قرار Groq، تم تنفيذ تطويرات فعلية داخل الكود:
 
+### MultiTimeframeAgent v3.1
+
+تمت إضافة تطويرات فعلية لتحليل الفريمات:
+
+- Timeframe hierarchy واضح: 4H → 1H → 15m → 5m
+- Alignment Score موزون حسب أهمية الفريم
+- Conflict Matrix بين الفريمات
+- Counter-trend penalty ضد الفريم الأعلى
+- Setup Type: TREND_CONTINUATION / PULLBACK_ENTRY / REVERSAL_ATTEMPT / INTRADAY_ALIGNMENT
+- Recommended Entry Timeframe
+- Pullback detection إلى EMA20/EMA50
+- تخفيض الثقة عند تعارض الفريمات أو محاولة انعكاس ضد الاتجاه الأعلى
+
 ### ClassicalAgent v3.1
 
 تمت إضافة تطويرات فعلية للتحليل الكلاسيكي:

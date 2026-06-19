@@ -43,22 +43,33 @@ class MultiTimeframeAgent(BaseAgent):
             weighted_bias = self._weighted_bias(timeframe_analysis)
             direction = weighted_bias["direction"]
             alignment, alignment_score, conflicts, warnings = self._alignment(timeframe_analysis, direction)
-            confidence = self._confidence(timeframe_analysis, direction, alignment_score, conflicts)
+            conflict_matrix = self._conflict_matrix(timeframe_analysis)
+            setup_type = self._setup_type(timeframe_analysis, direction)
+            entry_tf = self._recommended_entry_tf(timeframe_analysis, setup_type)
             htf = timeframe_analysis.get("4H") or timeframe_analysis.get("1H") or next(iter(timeframe_analysis.values()))
+            htf_bias = htf.get("bias", "NEUTRAL")
+            counter_trend = direction in {"BUY", "SELL"} and htf_bias not in {direction, "NEUTRAL"}
+            if counter_trend:
+                warnings.append(f"Counter-trend vs HTF: {direction} ضد {htf_bias}")
+            confidence = self._confidence(timeframe_analysis, direction, alignment_score, conflicts, counter_trend, setup_type)
 
             return {
                 "agent": self.name,
                 "direction": direction,
                 "confidence": confidence,
                 "timeframe_analysis": timeframe_analysis,
+                "timeframe_hierarchy": self.TIMEFRAME_ORDER,
                 "alignment": alignment,
                 "alignment_score": alignment_score,
-                "recommended_entry_tf": "15m" if "15m" in timeframe_analysis else next(iter(timeframe_analysis.keys())),
+                "setup_type": setup_type,
+                "counter_trend": counter_trend,
+                "recommended_entry_tf": entry_tf,
                 "trend_direction_from_htf": htf.get("trend", "SIDEWAYS"),
                 "weighted_bias": weighted_bias,
+                "conflict_matrix": conflict_matrix,
                 "conflicts": conflicts,
                 "warnings": warnings,
-                "summary": f"توافق الفريمات {alignment} بدرجة {alignment_score}%، اتجاه الفريم الأعلى {htf.get('trend')}، القرار {direction}",
+                "summary": f"توافق الفريمات {alignment} بدرجة {alignment_score}%، setup={setup_type}، اتجاه الفريم الأعلى {htf.get('trend')}، القرار {direction}",
             }
         except Exception as exc:  # noqa: BLE001
             self.logger.exception("MTF analysis failed")
@@ -130,6 +141,8 @@ class MultiTimeframeAgent(BaseAgent):
         strength_abs = abs(score)
         strength = "STRONG" if strength_abs >= 4.0 else "MODERATE" if strength_abs >= 2.2 else "WEAK"
         key_level = self._key_level(candles, close, bias, ema50)
+        pullback_state = self._pullback_state(close, ema20, ema50, bias)
+        momentum = "UP" if price_slope > 1.0 else "DOWN" if price_slope < -1.0 else "FLAT"
 
         return {
             "trend": trend,
@@ -137,6 +150,8 @@ class MultiTimeframeAgent(BaseAgent):
             "key_level": round(key_level, 2),
             "bias": bias,
             "score": round(score, 2),
+            "momentum": momentum,
+            "pullback_state": pullback_state,
             "ema_20": round(ema20, 2),
             "ema_50": round(ema50, 2),
             "sma_long": round(sma_long, 2),
@@ -219,16 +234,83 @@ class MultiTimeframeAgent(BaseAgent):
             warnings.append("الفريم الأعلى محايد، جودة الاتجاه أقل")
         return alignment, alignment_score, conflicts, warnings
 
-    def _confidence(self, analysis: Dict[str, Dict[str, Any]], direction: str, alignment_score: int, conflicts: List[str]) -> int:
+
+    def _conflict_matrix(self, analysis: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, str]]:
+        """Pairwise timeframe agreement matrix."""
+        matrix: Dict[str, Dict[str, str]] = {}
+        tfs = [tf for tf in self.TIMEFRAME_ORDER if tf in analysis]
+        for a in tfs:
+            matrix[a] = {}
+            for b in tfs:
+                ba = analysis[a].get("bias", "NEUTRAL")
+                bb = analysis[b].get("bias", "NEUTRAL")
+                if a == b:
+                    matrix[a][b] = "SELF"
+                elif ba == "NEUTRAL" or bb == "NEUTRAL":
+                    matrix[a][b] = "NEUTRAL"
+                elif ba == bb:
+                    matrix[a][b] = "ALIGNED"
+                else:
+                    matrix[a][b] = "CONFLICT"
+        return matrix
+
+    def _setup_type(self, analysis: Dict[str, Dict[str, Any]], direction: str) -> str:
+        """Classify the MTF setup type."""
+        if direction not in {"BUY", "SELL"}:
+            return "NO_TRADE"
+        htf = analysis.get("4H") or analysis.get("1H") or {}
+        one_h = analysis.get("1H") or {}
+        entry = analysis.get("15m") or analysis.get("5m") or {}
+        htf_bias = htf.get("bias", "NEUTRAL")
+        entry_bias = entry.get("bias", "NEUTRAL")
+        if htf_bias == direction and entry_bias == direction:
+            return "TREND_CONTINUATION"
+        if htf_bias == direction and entry_bias in {"NEUTRAL", direction} and entry.get("pullback_state") in {"PULLBACK_TO_EMA20", "PULLBACK_TO_EMA50"}:
+            return "PULLBACK_ENTRY"
+        if htf_bias not in {direction, "NEUTRAL"}:
+            return "REVERSAL_ATTEMPT"
+        if one_h.get("bias") == direction and entry_bias == direction:
+            return "INTRADAY_ALIGNMENT"
+        return "MIXED_ALIGNMENT"
+
+    def _recommended_entry_tf(self, analysis: Dict[str, Dict[str, Any]], setup_type: str) -> str:
+        if setup_type in {"TREND_CONTINUATION", "PULLBACK_ENTRY"} and "15m" in analysis:
+            return "15m"
+        if "5m" in analysis and setup_type == "INTRADAY_ALIGNMENT":
+            return "5m"
+        return "15m" if "15m" in analysis else next(iter(analysis.keys()), "15m")
+
+    def _pullback_state(self, close: float, ema20: float, ema50: float, bias: str) -> str:
+        near20 = abs(close - ema20) / max(abs(close), 0.01) < 0.0018
+        near50 = abs(close - ema50) / max(abs(close), 0.01) < 0.0025
+        if bias == "BUY" and near20:
+            return "PULLBACK_TO_EMA20"
+        if bias == "BUY" and near50:
+            return "PULLBACK_TO_EMA50"
+        if bias == "SELL" and near20:
+            return "PULLBACK_TO_EMA20"
+        if bias == "SELL" and near50:
+            return "PULLBACK_TO_EMA50"
+        return "NONE"
+
+    def _confidence(self, analysis: Dict[str, Dict[str, Any]], direction: str, alignment_score: int, conflicts: List[str], counter_trend: bool = False, setup_type: str = "UNKNOWN") -> int:
         if direction == "NEUTRAL":
             return min(48, max(20, alignment_score))
         strength_bonus = 0
         for result in analysis.values():
             strength_bonus += {"STRONG": 6, "MODERATE": 3, "WEAK": 0}.get(result.get("strength"), 0)
         confidence = min(92, int(alignment_score * 0.75 + strength_bonus))
+        if setup_type == "TREND_CONTINUATION":
+            confidence += 4
+        elif setup_type == "PULLBACK_ENTRY":
+            confidence += 2
+        elif setup_type == "REVERSAL_ATTEMPT":
+            confidence -= 8
         if conflicts:
             confidence = min(confidence, 58)
-        return max(35, confidence)
+        if counter_trend:
+            confidence = min(confidence, 55)
+        return max(35, min(92, confidence))
 
     def _swing_structure(self, candles: List[Candle]) -> Tuple[str, float]:
         swings = detect_swing_points(candles, lookback=3)
@@ -271,9 +353,13 @@ class MultiTimeframeAgent(BaseAgent):
             "timeframe_analysis": {},
             "alignment": "WEAK",
             "alignment_score": 0,
+            "timeframe_hierarchy": self.TIMEFRAME_ORDER,
+            "setup_type": "NO_TRADE",
+            "counter_trend": False,
             "recommended_entry_tf": "15m",
             "trend_direction_from_htf": "SIDEWAYS",
             "weighted_bias": {"direction": "NEUTRAL", "buy_score": 0, "sell_score": 0, "net_score": 0, "details": {}},
+            "conflict_matrix": {},
             "conflicts": [],
             "warnings": [summary],
             "summary": summary,
