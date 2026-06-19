@@ -43,16 +43,16 @@ def send_open_trades_report(db: DatabaseService, telegram: TelegramService) -> N
 
         if not trades:
             telegram.send_message(
-                "📊 <b>تقرير الصفقات المفتوحة</b>\n\n"
-                "❌ لا توجد صفقات مفتوحة حالياً"
+                "📊 <b>Open Trades Report</b>\n\n"
+                "❌ No open trades currently"
             )
             return
 
         lines = [
             "━━━━━━━━━━━━━━━━━━━━",
-            "📊 <b>تقرير الصفقات المفتوحة</b>",
-            f"📅 تاريخ التقرير: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC",
-            f"📈 عدد الصفقات المفتوحة: {len(trades)}",
+            "📊 <b>Open Trades Report</b>",
+            f"📅 Report time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC",
+            f"📈 Open trades: {len(trades)}",
             "━━━━━━━━━━━━━━━━━━━━",
             "",
         ]
@@ -101,7 +101,7 @@ def send_open_trades_report(db: DatabaseService, telegram: TelegramService) -> N
 
         total_emoji = "🟢" if total_pnl > 0 else "🔴" if total_pnl < 0 else "⚪"
         lines.append("━━━━━━━━━━━━━━━━━━━━")
-        lines.append(f"{total_emoji} <b>إجمالي P/L:</b> {total_pnl:+.2f} points")
+        lines.append(f"{total_emoji} <b>Total P/L:</b> {total_pnl:+.2f} points")
         lines.append("━━━━━━━━━━━━━━━━━━━━")
 
         telegram.send_message("\n".join(lines))
@@ -109,7 +109,7 @@ def send_open_trades_report(db: DatabaseService, telegram: TelegramService) -> N
 
     except Exception as exc:  # noqa: BLE001
         logger.exception("خطأ في تقرير الصفقات المفتوحة: %s", exc)
-        telegram.send_error_alert(f"خطأ في تقرير الصفقات المفتوحة: {exc}")
+        telegram.send_error_alert(f"Open trades report failed: {exc}")
 
 
 def main() -> None:

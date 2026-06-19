@@ -294,12 +294,12 @@ async def run_analysis_async() -> None:
             if not experimental_mode and today_signals >= max_daily:
                 logger.info("تم الوصول للحد الأقصى من الإشارات اليومية: %s", max_daily)
                 if should_send_status(config):
-                    telegram.send_message(f"🟡 لا توجد إشارة: تم الوصول للحد اليومي ({max_daily}).")
+                    telegram.send_message(f"🟡 No signal: daily signal limit reached ({max_daily}).")
                 return
             if not experimental_mode and len(open_trades) >= max_open:
                 logger.info("تم الوصول للحد الأقصى للصفقات المفتوحة: %s", max_open)
                 if should_send_status(config):
-                    telegram.send_message(f"🟡 لا توجد إشارة: تم الوصول للحد الأقصى للصفقات المفتوحة ({max_open}).")
+                    telegram.send_message(f"🟡 No signal: max open trades reached ({max_open}).")
                 return
 
             dynamic_block_reason = None if experimental_mode else should_block_signal(decision, all_results.get("dynamic_risk", {}))

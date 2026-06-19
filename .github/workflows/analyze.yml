@@ -1,11 +1,10 @@
 name: 📊 Gold Analysis Bot
 on:
   schedule:
-    # Asia/Jerusalem test window: 07:59 → 22:59, Monday-Friday.
-    # During UTC+3 this is 04:59 → 19:59 UTC.
-    # Runs every ~5 minutes inside/broadly around the window; internal session filter enforces exact local time.
-    - cron: "59 4 * * 1,2,3,4,5"
-    - cron: "*/5 5-19 * * 1,2,3,4,5"
+    # Asia/Jerusalem trading window: 09:00 → 22:59, Monday-Friday.
+    # During UTC+3 this is 06:00 → 19:59 UTC.
+    # Runs every 10 minutes. Internal session filter enforces exact local time.
+    - cron: "*/10 6-19 * * 1,2,3,4,5"
   workflow_dispatch:
 
 jobs:
@@ -50,9 +49,6 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
 
       - name: ✅ Success Log

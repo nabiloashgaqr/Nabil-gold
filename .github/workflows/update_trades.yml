@@ -1,9 +1,9 @@
 name: 🔄 Update Open Trades
 on:
   schedule:
-    # Asia/Jerusalem test window: hourly 07:59 → 22:59, Monday-Friday.
-    # During UTC+3 this is 04:59 → 19:59 UTC.
-    - cron: "59 4-19 * * 1,2,3,4,5"
+    # Asia/Jerusalem regular update window: hourly 09:00 → 22:00, Monday-Friday.
+    # End-of-day update runs at 23:00 in daily_report.yml with FORCE_TRADE_UPDATE.
+    - cron: "0 6-19 * * 1,2,3,4,5"
   workflow_dispatch:
 
 jobs:
@@ -44,7 +44,6 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
 
       - name: ✅ Success Log

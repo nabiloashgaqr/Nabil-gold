@@ -69,141 +69,107 @@ class TelegramService:
         return False
 
     def send_signal(self, decision: Dict[str, Any]) -> bool:
-        """Format and send a new trade signal."""
+        """Format and send a new trade signal in English."""
         signal = decision.get("signal", {})
         trade_type = decision.get("decision", signal.get("type", "WAIT"))
-        emoji = "🟢" if trade_type == "BUY" else "🔴"
-        direction_ar = "شراء BUY" if trade_type == "BUY" else "بيع SELL"
+        emoji = "🟢" if trade_type == "BUY" else "🔴" if trade_type == "SELL" else "🟡"
+        direction_text = "BUY" if trade_type == "BUY" else "SELL" if trade_type == "SELL" else "WAIT"
         entry = signal.get("entry", {})
         entry_low = entry.get("low", entry.get("price", 0))
         entry_high = entry.get("high", entry.get("price", 0))
         reasons = decision.get("reasons", [])[:8]
-        reasons_text = "\n".join(f"• {html.escape(str(reason))}" for reason in reasons) or "• لا توجد أسباب كافية"
+        reasons_text = "\n".join(f"• {html.escape(str(reason))}" for reason in reasons) or "• No sufficient reasons available"
+
         ai = decision.get("ai", {}) or {}
         ai_text = ""
         if ai.get("available"):
-            quality_notes = ai.get("quality_notes") or []
-            if isinstance(quality_notes, list):
-                quality_notes_text = "\n".join(f"• {html.escape(str(note))}" for note in quality_notes[:3])
-            else:
-                quality_notes_text = f"• {html.escape(str(quality_notes))}" if quality_notes else ""
-            evidence = ai.get("supportive_evidence") or ai.get("evidence") or []
+            notes = ai.get("quality_notes") or []
+            notes_text = "\n".join(f"• {html.escape(str(note))}" for note in notes[:3]) if isinstance(notes, list) else (f"• {html.escape(str(notes))}" if notes else "")
+            supportive = ai.get("supportive_evidence") or ai.get("evidence") or []
             opposing = ai.get("opposing_evidence") or []
-            if isinstance(evidence, list):
-                evidence_text = "\n".join(f"• {html.escape(str(item))}" for item in evidence[:4])
-            else:
-                evidence_text = f"• {html.escape(str(evidence))}" if evidence else ""
-            if isinstance(opposing, list):
-                opposing_text = "\n".join(f"• {html.escape(str(item))}" for item in opposing[:3])
-            else:
-                opposing_text = f"• {html.escape(str(opposing))}" if opposing else ""
+            supportive_text = "\n".join(f"• {html.escape(str(item))}" for item in supportive[:4]) if isinstance(supportive, list) else (f"• {html.escape(str(supportive))}" if supportive else "")
+            opposing_text = "\n".join(f"• {html.escape(str(item))}" for item in opposing[:3]) if isinstance(opposing, list) else (f"• {html.escape(str(opposing))}" if opposing else "")
             ai_lines = [
-                "🤖 <b>تحليل Groq:</b>",
-                f"├ الاتجاه: {html.escape(str(ai.get('market_bias', 'غير محدد')))}",
-                f"├ سبب الدخول: {html.escape(str(ai.get('entry_reason', ai.get('reasoning', ''))))}",
-                f"├ خطر الاتجاه المعاكس: {html.escape(str(ai.get('opposite_risk', 'غير محدد')))}",
-                f"├ ملاحظات المخاطر: {html.escape(str(ai.get('risk_notes', 'غير محدد')))}",
-                f"├ الإلغاء/الخطأ إذا: {html.escape(str(ai.get('invalidation', 'غير محدد')))}",
-                f"├ السيناريو البديل: {html.escape(str(ai.get('alternative_scenario', 'غير محدد')))}",
-                f"└ الخطة: {html.escape(str(ai.get('action_plan', 'غير محدد')))}",
+                "🤖 <b>Groq Analysis:</b>",
+                f"├ Bias: {html.escape(str(ai.get('market_bias', 'N/A')))}",
+                f"├ Entry reason: {html.escape(str(ai.get('entry_reason', ai.get('reasoning', 'N/A'))))}",
+                f"├ Opposite risk: {html.escape(str(ai.get('opposite_risk', 'N/A')))}",
+                f"├ Risk notes: {html.escape(str(ai.get('risk_notes', 'N/A')))}",
+                f"├ Invalidation: {html.escape(str(ai.get('invalidation', 'N/A')))}",
+                f"├ Alternative: {html.escape(str(ai.get('alternative_scenario', 'N/A')))}",
+                f"└ Plan: {html.escape(str(ai.get('action_plan', 'N/A')))}",
             ]
-            if evidence_text:
-                ai_lines.append("\n<b>أدلة Groq المؤيدة:</b>")
-                ai_lines.append(evidence_text)
+            if supportive_text:
+                ai_lines.append("\n<b>Supportive evidence:</b>")
+                ai_lines.append(supportive_text)
             if opposing_text:
-                ai_lines.append("\n<b>أدلة/مخاطر معارضة:</b>")
+                ai_lines.append("\n<b>Opposing evidence / risks:</b>")
                 ai_lines.append(opposing_text)
-            if quality_notes_text:
-                ai_lines.append("\n<b>نقاط Groq:</b>")
-                ai_lines.append(quality_notes_text)
+            if notes_text:
+                ai_lines.append("\n<b>Groq notes:</b>")
+                ai_lines.append(notes_text)
             ai_text = "\n".join(ai_lines) + "\n\n"
-        trade_id = decision.get("trade_id", signal.get("trade_id", "غير محفوظ بعد"))
+
+        trade_id = decision.get("trade_id", signal.get("trade_id", "not saved yet"))
         current_price = decision.get("current_price", signal.get("current_price", entry.get("price", 0)))
         trading_mode = str(decision.get("trading_mode", signal.get("trading_mode", "paper"))).lower()
         paper_trading = bool(decision.get("paper_trading", signal.get("paper_trading", trading_mode == "paper")))
-        if paper_trading and (decision.get("experimental_single_agent") or {}).get("forced"):
-            mode_text = "🧪 <b>الوضع:</b> Paper Observation - مراقبة فقط وليست إشارة دخول فعلية\n"
-        else:
-            mode_text = "🧪 <b>الوضع:</b> Paper Trading - صفقة تجريبية غير منفذة فعلياً\n" if paper_trading else "⚡ <b>الوضع:</b> Live/Manual Tracking\n"
+        mode_text = "🧪 <b>Mode:</b> Paper Trading - simulated, not executed\n" if paper_trading else "⚡ <b>Mode:</b> Live/Manual Tracking\n"
         run_source = decision.get("run_source", "unknown")
-        run_source_ar = {"scheduled": "تلقائي", "manual": "يدوي", "workflow_dispatch": "يدوي", "schedule": "تلقائي"}.get(str(run_source), str(run_source))
-        decision_mode = decision.get("decision_mode", "Groq Observation" if decision.get("ai", {}).get("available") else "Unknown")
-        requires_three = "نعم" if decision.get("requires_three_agents") else "لا"
-        run_line = f"🔄 <b>التشغيل:</b> {html.escape(run_source_ar)} | <b>وضع القرار:</b> {html.escape(str(decision_mode))} | <b>يحتاج 3 وكلاء؟</b> {requires_three}\n"
+        run_source_text = {"scheduled": "Scheduled", "manual": "Manual", "workflow_dispatch": "Manual", "schedule": "Scheduled"}.get(str(run_source), str(run_source))
+        decision_mode = decision.get("decision_mode", "Groq Observation" if ai.get("available") else "Unknown")
+        requires_three = "Yes" if decision.get("requires_three_agents") else "No"
+        run_line = f"🔄 <b>Run:</b> {html.escape(run_source_text)} | <b>Decision mode:</b> {html.escape(str(decision_mode))} | <b>Needs 3 agents?</b> {requires_three}\n"
+
         quality = decision.get("quality", {}) or {}
-        quality_line = ""
-        if quality:
-            quality_line = f"⭐ <b>جودة الإشارة:</b> {html.escape(str(quality.get('grade', 'N/A')))} / {float(quality.get('score', 0)):.1f}% ({html.escape(str(quality.get('label', '')))} )\n"
+        quality_line = f"⭐ <b>Signal Quality:</b> {html.escape(str(quality.get('grade', 'N/A')))} / {float(quality.get('score', 0)):.1f}% ({html.escape(str(quality.get('label', '')))} )\n" if quality else ""
         risk_grade = ((decision.get("risk", {}) or {}).get("trade_grade", {}) or {})
-        risk_grade_line = ""
-        if risk_grade:
-            risk_grade_line = f"🛡️ <b>Risk Grade:</b> {html.escape(str(risk_grade.get('grade', 'N/A')))} / {float(risk_grade.get('score', 0)):.1f}% ({html.escape(str(risk_grade.get('label', '')))} )\n"
+        risk_grade_line = f"🛡️ <b>Risk Grade:</b> {html.escape(str(risk_grade.get('grade', 'N/A')))} / {float(risk_grade.get('score', 0)):.1f}% ({html.escape(str(risk_grade.get('label', '')))} )\n" if risk_grade else ""
         experimental = decision.get("experimental_single_agent") or {}
         experimental_line = ""
         if experimental:
-            forced_note = ""
-            if experimental.get("forced"):
-                forced_note = "⚠️ <b>تنبيه:</b> هذه إشارة مراقبة قسرية فقط؛ Groq/الوكلاء لم يعطوا دخولاً مؤهلاً، وتم إنشاؤها لمراقبة النظام.\n"
             experimental_line = (
-                f"🧪 <b>مصدر الإشارة التجريبي:</b> {html.escape(str(experimental.get('agent', 'N/A')))} | "
+                f"🧪 <b>Agent context:</b> {html.escape(str(experimental.get('agent', 'N/A')))} | "
                 f"{html.escape(str(experimental.get('signal', '')))} | "
-                f"موثوقية {html.escape(str(experimental.get('reliability_grade', 'N/A')))} "
+                f"reliability {html.escape(str(experimental.get('reliability_grade', 'N/A')))} "
                 f"({float(experimental.get('adjusted_confidence', experimental.get('confidence', 0))):.1f}%)\n"
-                f"{forced_note}"
             )
-        groq_observation_line = ""
-        if str(decision.get("summary", "")).startswith("Groq Observation"):
-            groq_observation_line = "🤖 <b>وضع القرار:</b> Groq Observation - الإشارة صادرة من قرار Groq النهائي\n"
+        groq_observation_line = "🤖 <b>Decision:</b> Groq Observation - final signal is from Groq\n" if str(decision.get("summary", "")).startswith("Groq Observation") else ""
         daily_bias = decision.get("daily_bias", {}) or {}
-        bias_line = ""
-        if daily_bias:
-            bias_line = f"🧭 <b>Daily Bias:</b> {html.escape(str(daily_bias.get('bias', 'NEUTRAL')))} ({float(daily_bias.get('confidence', 0)):.1f}%)\n"
-        news_ai = decision.get("news_ai", {}) or {}
-        news_ai_line = ""
-        if news_ai.get("available"):
-            news_ai_line = (
-                f"📰 <b>AI News:</b> {html.escape(str(news_ai.get('risk_level', 'N/A')))} | "
-                f"{html.escape(str(news_ai.get('allowed_direction', 'BOTH')))} | "
-                f"{html.escape(str(news_ai.get('gold_bias', 'NEUTRAL')))}\n"
-            )
+        bias_line = f"🧭 <b>Daily Bias:</b> {html.escape(str(daily_bias.get('bias', 'NEUTRAL')))} ({float(daily_bias.get('confidence', 0)):.1f}%)\n" if daily_bias else ""
         dynamic_risk = decision.get("dynamic_risk", {}) or {}
-        dynamic_risk_line = ""
-        if dynamic_risk:
-            dynamic_risk_line = (
-                f"🛡️ <b>Dynamic Risk:</b> {html.escape(str(dynamic_risk.get('level', 'NORMAL')))} | "
-                f"min conf {html.escape(str(dynamic_risk.get('min_confidence_required', '')))}% | "
-                f"quality {html.escape(str(dynamic_risk.get('min_quality_score', '')))}%\n"
-            )
+        dynamic_risk_line = f"🛡️ <b>Dynamic Risk:</b> {html.escape(str(dynamic_risk.get('level', 'NORMAL')))} | min conf {html.escape(str(dynamic_risk.get('min_confidence_required', '')))}% | quality {html.escape(str(dynamic_risk.get('min_quality_score', '')))}%\n" if dynamic_risk else ""
 
-        # Session info
         session_info = decision.get("session_info", {})
         session_text = ""
         if session_info.get("current_session"):
-            quality = session_info.get("session_quality", "UNKNOWN")
-            quality_emoji = {"BEST": "⭐⭐⭐", "HIGH": "⭐⭐", "MEDIUM": "⭐", "LOW": "⚠️"}.get(quality, "")
-            session_text = f"\n🕐 <b>الجلسة:</b> {session_info.get('current_session')} {quality_emoji}"
+            sq = session_info.get("session_quality", "UNKNOWN")
+            quality_emoji = {"BEST": "⭐⭐⭐", "HIGH": "⭐⭐", "MEDIUM": "⭐", "LOW": "⚠️"}.get(sq, "")
+            session_text = f"\n🕐 <b>Session:</b> {html.escape(str(session_info.get('current_session')))} {quality_emoji}"
 
+        order_type = signal.get('order_type', f'{trade_type}_MARKET')
         text = f"""
-📊 <b>إشارة XAU/USD</b>
+📊 <b>XAU/USD Signal</b>
 ━━━━━━━━━━━━━━━━━━━━━
 
-{emoji} <b>القرار:</b> {direction_ar}
-⏰ <b>الوقت:</b> {self._now_text()}
-💰 <b>السعر الحالي:</b> {format_price(current_price)}
+{emoji} <b>Decision:</b> {direction_text}
+📌 <b>Order Type:</b> {html.escape(str(order_type))}
+⏰ <b>Time:</b> {self._now_text()}
+💰 <b>Current Price:</b> {format_price(current_price)}
 {mode_text}{run_line}{session_text}
 
-📍 <b>منطقة الدخول:</b> {format_price(entry_low)} - {format_price(entry_high)}
-🛑 <b>وقف الخسارة:</b> {format_price(signal.get('stop_loss'))}
-🎯 <b>الهدف الأول:</b> {format_price(signal.get('tp1'))}
-🎯 <b>الهدف الثاني:</b> {format_price(signal.get('tp2'))}
+📍 <b>Entry Zone:</b> {format_price(entry_low)} - {format_price(entry_high)}
+🛑 <b>Stop Loss:</b> {format_price(signal.get('stop_loss'))}
+🎯 <b>Take Profit 1:</b> {format_price(signal.get('tp1'))}
+🎯 <b>Take Profit 2:</b> {format_price(signal.get('tp2'))}
 📊 <b>R:R =</b> 1:{float(signal.get('rr_ratio', 0)):.2f}
-🔒 <b>الثقة:</b> {int(decision.get('confidence', 0))}%
-{quality_line}{risk_grade_line}{experimental_line}{groq_observation_line}{bias_line}{news_ai_line}{dynamic_risk_line}
-{ai_text}📋 <b>أسباب الإشارة:</b>
+🔒 <b>Confidence:</b> {int(decision.get('confidence', 0))}%
+{quality_line}{risk_grade_line}{experimental_line}{groq_observation_line}{bias_line}{dynamic_risk_line}
+{ai_text}📋 <b>Reasons:</b>
 {reasons_text}
 
-⚠️ <b>تحذير:</b> هذه الإشارة تعليمية/تجريبية وليست توصية مالية ولا تنفيذ آلي.
-🆔 <b>معرف الصفقة:</b> <code>{html.escape(str(trade_id))}</code>
+⚠️ <b>Disclaimer:</b> Educational paper-trading signal only. Not financial advice. No automated execution.
+🆔 <b>Trade ID:</b> <code>{html.escape(str(trade_id))}</code>
 """.strip()
         return self.send_message(text, urgent=True)
 
@@ -218,16 +184,16 @@ class TelegramService:
         """Send a detailed trade management event message."""
         evaluation = evaluation or {}
         event_titles = {
-            "NEAR_TP1": "🔄 اقتراب من الهدف الأول",
-            "TP1_HIT": "✅ تحقق الهدف الأول",
-            "MOVE_SL_TO_BE": "💡 اقتراح Break Even",
-            "TP2_HIT": "🏆 تحقق الهدف الثاني",
-            "SL_HIT": "❌ وقف خسارة",
-            "BE_HIT": "➖ ضربت نقطة الدخول",
-            "LONG_RUNNING": "⏱ صفقة مستمرة منذ فترة",
-            "EXIT_WARNING": "⚠️ تحذير خروج/مراقبة",
-            "EXPIRED": "⌛ انتهاء صلاحية الصفقة",
-            "MANUAL_CLOSE": "📌 إغلاق يدوي",
+            "NEAR_TP1": "🔄 Near Take Profit 1",
+            "TP1_HIT": "✅ Take Profit 1 Hit",
+            "MOVE_SL_TO_BE": "💡 Move Stop Loss to Break-even",
+            "TP2_HIT": "🏆 Take Profit 2 Hit",
+            "SL_HIT": "❌ Stop Loss Hit",
+            "BE_HIT": "➖ Break-even Hit",
+            "LONG_RUNNING": "⏱ Long-running Trade",
+            "EXIT_WARNING": "⚠️ Exit / Risk Warning",
+            "EXPIRED": "⌛ Trade Expired",
+            "MANUAL_CLOSE": "📌 Manual Close",
         }
         title = event_titles.get(event_type, "🔄 تحديث صفقة")
         pnl_emoji = "✅" if pnl_points > 0 else "➖" if pnl_points == 0 else "❌"
@@ -247,20 +213,20 @@ class TelegramService:
 {title} - <b>XAU/USD</b>
 ━━━━━━━━━━━━━━━━━━━━━
 
-🆔 <b>المعرف:</b> <code>{html.escape(str(trade.get('id')))}</code>
-📊 <b>النوع:</b> {html.escape(str(trade.get('type')))}
-📍 <b>الدخول:</b> {format_price(trade.get('entry_price'))}
-🛑 <b>وقف الخسارة:</b> {format_price(trade.get('stop_loss'))}
+🆔 <b>ID:</b> <code>{html.escape(str(trade.get('id')))}</code>
+📊 <b>Type:</b> {html.escape(str(trade.get('type')))}
+📍 <b>Entry:</b> {format_price(trade.get('entry_price'))}
+🛑 <b>Stop Loss:</b> {format_price(trade.get('stop_loss'))}
 🎯 <b>TP1:</b> {format_price(trade.get('tp1'))}
 🎯 <b>TP2:</b> {format_price(trade.get('tp2'))}
-💰 <b>السعر الحالي:</b> {format_price(current_price)}
-📈 <b>النتيجة الحالية:</b> {pnl_points:+.1f} نقطة {pnl_emoji}
-📌 <b>الحالة:</b> {html.escape(str(old_status))} → {html.escape(str(new_status))}
+💰 <b>Current Price:</b> {format_price(current_price)}
+📈 <b>Current PnL:</b> {pnl_points:+.1f} نقطة {pnl_emoji}
+📌 <b>Status:</b> {html.escape(str(old_status))} → {html.escape(str(new_status))}
 {extra_text}
 
 {note}
 
-⚠️ ليست توصية مالية.
+⚠️ Educational paper-trading update only. Not financial advice.
 """.strip()
         return self.send_message(text, urgent=event_type in {"TP1_HIT", "TP2_HIT", "SL_HIT", "BE_HIT", "EXPIRED"})
 
@@ -269,26 +235,26 @@ class TelegramService:
         return self.send_trade_event(trade, new_status, current_price, pnl_points, {"old_status": trade.get("status", "OPEN"), "new_status": new_status})
 
     def _trade_event_note(self, event_type: str, trade: Dict[str, Any], current_price: float, evaluation: Dict[str, Any]) -> str:
-        """Return an Arabic note for a trade-management event."""
+        """Return an English note for a trade-management event."""
         if event_type == "NEAR_TP1":
-            return f"💡 السعر وصل إلى حوالي 80% من مسافة الهدف الأول {format_price(trade.get('tp1'))}. راقب إدارة الصفقة."
+            return f"💡 Price reached about 80% of TP1 distance ({format_price(trade.get('tp1'))}). Monitor trade management."
         if event_type == "TP1_HIT":
-            return "✅ تحقق الهدف الأول. يمكن جني جزء من الربح ومراقبة الهدف الثاني."
+            return "✅ TP1 reached. Consider partial profit and monitor TP2."
         if event_type == "MOVE_SL_TO_BE":
-            return f"💡 اقتراح: يمكن تحريك وقف الخسارة إلى نقطة الدخول {format_price(trade.get('entry_price'))} لحماية الصفقة."
+            return f"💡 Suggested: move SL to entry {format_price(trade.get('entry_price'))} to protect the trade."
         if event_type == "TP2_HIT":
-            return "🏆 تحقق الهدف الثاني - نتيجة ممتازة."
+            return "🏆 TP2 reached. Trade completed successfully."
         if event_type == "SL_HIT":
-            return "❌ تم ضرب وقف الخسارة. التزم بالخطة وإدارة المخاطر."
+            return "❌ Stop Loss was hit. Follow the plan and review the setup."
         if event_type == "BE_HIT":
-            return "➖ عاد السعر إلى نقطة الدخول بعد تحريك الوقف - تعادل/حماية رأس المال."
+            return "➖ Trade returned to break-even after SL protection."
         if event_type == "LONG_RUNNING":
-            return "⏱ الصفقة مفتوحة منذ فترة طويلة بدون حسم. راقب ضعف الزخم أو قرب أخبار."
+            return "⏱ Trade has been open for a long time. Monitor momentum and news risk."
         if event_type == "EXIT_WARNING":
-            return "⚠️ تحذير خروج/مراقبة: الصفقة تقترب من منطقة خطر أو فقدت جزءاً كبيراً من المسافة نحو وقف الخسارة."
+            return "⚠️ Exit/risk warning: trade is near a danger zone or adverse move is deep."
         if event_type == "EXPIRED":
-            return "⌛ انتهت صلاحية الصفقة حسب إعدادات إدارة الصفقات."
-        return "🔄 تحديث جديد على الصفقة."
+            return "⌛ Trade expired according to trade-management rules."
+        return "🔄 New trade update."
 
     def send_daily_report(self, report_text: str) -> bool:
         """Send daily report text."""
@@ -297,7 +263,7 @@ class TelegramService:
     def send_error_alert(self, error_message: str) -> bool:
         """Send a compact error alert to Telegram."""
         text = f"""
-🚨 <b>خطأ في Gold AI Signals</b>
+🚨 <b>Gold AI Signals Error</b>
 ━━━━━━━━━━━━━━━━━━━━━
 <code>{html.escape(error_message[:3500])}</code>
 """.strip()

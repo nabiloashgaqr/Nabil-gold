@@ -454,8 +454,8 @@ class DecisionAgent(BaseAgent):
 """
             
             prompt = f"""
-أنت خبير التداول في Gold AI Signals.
-ادمج تحليلات الوكلاء واتخذ القرار النهائي.
+You are the final Groq decision engine for Gold AI Signals.
+Respond in concise professional English only. Integrate all agent outputs and decide BUY, SELL, or WAIT.
 
 إحصائيات الوكلاء:
 - شراء: {len(votes['BUY'])} وكلاء
@@ -465,7 +465,7 @@ class DecisionAgent(BaseAgent):
 تفاصيل الأصوات:
 {self._format_votes_for_ai(votes)}
 
-تفاصيل تحليل الوكلاء الكاملة، استخدم أرقامها ومستوياتها في شرحك ولا تكتفِ بعبارة "الوكلاء يوصون":
+Detailed agent context. Use actual numbers/levels. Do not say generic phrases like "agents recommend":
 {self._format_agent_context_for_ai(agents_results or {})}
 
 {learning_summary}
@@ -489,36 +489,35 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
 قواعد الذاكرة من أخطاء سابقة (التزم بها قدر الإمكان، وإذا خالفتها اجعل القرار WAIT أو اخفض الثقة):
 {format_memory_rules_for_prompt(memory_rules or [], max_rules=4)}
 
-قواعد صارمة لشرحك:
-- لا تستخدم دليلاً صعودياً مثل "MACD bullish" كسبب مؤيد لصفقة SELL؛ ضعه في risk_notes أو opposite_risk.
-- لا تستخدم دليلاً هبوطياً كسبب مؤيد لصفقة BUY.
-- يجب أن تكون supportive_evidence متوافقة فقط مع final_signal.
-- أي دليل مخالف مثل MACD bullish داخل SELL يجب وضعه في opposing_evidence أو risk_notes وليس supportive_evidence.
-- يجب أن تتطابق risk_reward مع أرقام RiskManagement، ولا تخترع R:R مختلفاً. استخدم TP2 R:R إذا ذكرت R:R الكلي.
-- إذا الأدلة متعارضة، اجعل القرار WAIT أو اخفض الثقة بوضوح.
-- في SELL: وجود دعم قوي أسفل السعر ليس دليلاً مؤيداً إلا إذا ذكرت كسر الدعم أو أن الدعم هو هدف/مخاطرة. وإلا ضعه في opposing_evidence أو risk_notes.
-- في BUY: وجود مقاومة قوية أعلى السعر ليس دليلاً مؤيداً إلا إذا ذكرت اختراق المقاومة. وإلا ضعه في opposing_evidence أو risk_notes.
-- HIDDEN_BEARISH يدعم SELL وليس BUY. HIDDEN_BULLISH يدعم BUY وليس SELL.
-- invalidation يجب أن يكون مستوى سعرياً واضحاً مثل SL أو إغلاق فوق/تحت مستوى، وليس تغير ثقة المؤشرات.
-- alternative_scenario يجب أن يكون شرطاً سعرياً واضحاً مثل اختراق مقاومة أو كسر دعم.
+Strict reasoning rules:
+- English only.
+- Do NOT use bullish evidence (e.g., MACD bullish) as supportive evidence for SELL; put it in opposing_evidence/risk_notes.
+- Do NOT use bearish evidence as supportive evidence for BUY.
+- supportive_evidence must support final_signal only.
+- risk_reward must match RiskManagement numbers; do not invent a different R:R.
+- If evidence conflicts, choose WAIT or lower confidence clearly.
+- For SELL: a strong support below price is NOT supportive unless it is broken or explicitly a target/risk.
+- For BUY: a strong resistance above price is NOT supportive unless it is broken or explicitly a target/risk.
+- invalidation must be a clear price level or candle close condition, not indicator confidence.
+- alternative_scenario must be a clear price condition.
 
-أجب بصيغة JSON فقط وبدون Markdown:
+Return JSON only, no Markdown:
 {{
-    "final_signal": "BUY" أو "SELL" أو "WAIT",
+    "final_signal": "BUY or SELL or WAIT",
     "confidence": 0-100,
-    "consensus_strength": "Strong" أو "Moderate" أو "Weak",
-    "reasoning": "سبب القرار المختصر مع ذكر 2-3 أدلة رقمية أو مستويات محددة",
-    "risk_reward": "نسبة المخاطرة/العائد من بيانات RiskManagement",
-    "market_bias": "Bullish أو Bearish أو Neutral مع السبب من DailyBias/MTF",
-    "entry_reason": "سبب الدخول باستخدام أرقام فعلية مثل السعر، SL/TP، R:R، فريم، نمط، OB/FVG، EMA/RSI/MACD",
-    "opposite_risk": "سبب رفض الاتجاه المعاكس بأدلة محددة وليس عبارة عامة",
-    "risk_notes": "مخاطر محددة: أخبار، قرب دعم/مقاومة، ضعف فريم، تذبذب، تعارض وكلاء",
-    "action_plan": "دخول/انتظار/إلغاء + شرط الإلغاء أو invalidation scenario",
-    "supportive_evidence": ["دليل مؤيد للقرار 1", "دليل مؤيد للقرار 2", "دليل مؤيد للقرار 3"],
-    "opposing_evidence": ["دليل معارض أو مخاطرة 1", "دليل معارض أو مخاطرة 2"],
-    "invalidation": "مستوى سعري واضح يبطل الصفقة مثل: إغلاق 15m فوق/تحت مستوى أو ضرب SL",
-    "alternative_scenario": "شرط سعري واضح يجعل الاتجاه المعاكس أفضل مثل: اختراق مقاومة أو كسر دعم",
-    "quality_notes": ["نقطة قوة محددة", "نقطة ضعف أو تحذير محدد"]
+    "consensus_strength": "Strong or Moderate or Weak",
+    "reasoning": "Brief decision rationale with 2-3 numeric/technical facts",
+    "risk_reward": "Risk/reward from RiskManagement",
+    "market_bias": "Bullish/Bearish/Neutral with reason",
+    "entry_reason": "Why entry is valid using price, SL/TP, R:R, timeframe, pattern, OB/FVG, EMA/RSI/MACD",
+    "opposite_risk": "Why the opposite side is weaker or what could invalidate this decision",
+    "risk_notes": "Specific risks: news, nearby support/resistance, weak timeframe, volatility, agent conflict",
+    "action_plan": "Enter/Wait/Cancel + exact condition",
+    "supportive_evidence": ["supporting evidence 1", "supporting evidence 2", "supporting evidence 3"],
+    "opposing_evidence": ["opposing evidence/risk 1", "opposing evidence/risk 2"],
+    "invalidation": "Clear price level or candle-close condition that invalidates the trade",
+    "alternative_scenario": "Clear price condition that makes the opposite scenario better",
+    "quality_notes": ["specific strength", "specific weakness or warning"]
 }}
 """
 
@@ -667,14 +666,14 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
         if exp_source and exp_cfg.get('bypass_groq_min_confidence', True) and not groq_observation_enabled:
             return classic.get('decision', 'WAIT'), round(float(classic.get('confidence', 0)), 1), (
                 f"وضع تجريبي: إشارة {classic.get('decision')} من وكيل واحد "
-                f"({exp_source.get('agent')}) بدرجة موثوقية {exp_source.get('reliability_grade')}"
+                f"({exp_source.get('agent')}) بدرجة reliability {exp_source.get('reliability_grade')}"
             )
 
         ai_config = self.config.get('ai_service', {})
         ai_required = bool(ai_config.get('enabled', False)) and not bool(ai_config.get('fallback_to_classic', True))
         if ai_required and (not ai.get('available') or ai.get('error')):
             error = ai.get('error') or 'AI unavailable'
-            return 'WAIT', 0, f"Groq إجباري لكن فشل AI: {error}"
+            return 'WAIT', 0, f"Groq required but AI failed: {error}"
         
         # دمج الكلاسيكي مع AI / Groq Observation Mode
         if ai.get('available'):
@@ -685,7 +684,7 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
             supportive_count = len(ai.get('supportive_evidence', ai.get('evidence', [])) or [])
             min_supportive = int(groq_obs.get('min_supportive_evidence_items', 0) or 0)
             if groq_observation_enabled and groq_obs.get('block_on_ai_contradiction', True) and ai_warnings:
-                return 'WAIT', ai_conf, 'Groq Observation: تم منع الإشارة لأن تحليل Groq يحتوي تناقضات في الأدلة المؤيدة: ' + '; '.join(ai_warnings)
+                return 'WAIT', ai_conf, 'Groq Observation blocked: contradictory supportive evidence: ' + '; '.join(ai_warnings)
             if groq_observation_enabled and min_supportive and supportive_count < min_supportive:
                 return 'WAIT', ai_conf, f'Groq Observation: تم منع الإشارة لأن Groq قدم {supportive_count} أدلة مؤيدة فقط والمطلوب {min_supportive}'
 
@@ -693,8 +692,8 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
                 final_signal = ai_signal
                 if groq_observation_enabled:
                     final_confidence = ai_conf
-                    source_text = f" | سياق وكيل: {exp_source.get('agent')} موثوقية {exp_source.get('reliability_grade')}" if exp_source else ""
-                    reasoning = f"Groq Observation: قرار Groq = {ai_signal} بثقة {ai_conf:.0f}%{source_text}. {ai.get('reasoning', '')}"
+                    source_text = f" | agent context: {exp_source.get('agent')} reliability {exp_source.get('reliability_grade')}" if exp_source else ""
+                    reasoning = f"Groq Observation: Groq decision = {ai_signal} with confidence {ai_conf:.0f}%{source_text}. {ai.get('reasoning', '')}"
                 else:
                     final_confidence = (ai_conf * 0.7) + (classic.get('confidence', 50) * 0.3)
                     reasoning = ai.get('reasoning', classic.get('decision', 'N/A'))
@@ -702,7 +701,7 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
                 if ai_required or groq_observation_enabled:
                     final_signal = 'WAIT'
                     final_confidence = ai_conf
-                    reasoning = f"Groq Observation: لا توجد إشارة لأن Groq قال {ai_signal} أو الثقة {ai_conf:.0f}% أقل من {required_conf:.0f}%"
+                    reasoning = f"Groq Observation: no signal because Groq returned {ai_signal} or confidence {ai_conf:.0f}% is below {required_conf:.0f}%"
                 else:
                     final_signal = classic.get('decision', 'WAIT')
                     final_confidence = classic.get('confidence', 50)
@@ -1065,6 +1064,22 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
             'zone_high': entry + max(0.2, atr * 0.05),
         }
 
+    def _order_type(self, signal: str, entry: float, current_price: float | None) -> str:
+        """Classify paper order type from entry vs current price."""
+        try:
+            entry = float(entry)
+            current = float(current_price or entry)
+        except (TypeError, ValueError):
+            return f"{signal}_MARKET"
+        threshold = float(self.config.get('order_execution', {}).get('pending_threshold_points', 1.0) or 1.0)
+        if abs(entry - current) <= threshold:
+            return f"{signal}_MARKET"
+        if signal == 'BUY':
+            return 'BUY_LIMIT' if entry < current else 'BUY_STOP'
+        if signal == 'SELL':
+            return 'SELL_LIMIT' if entry > current else 'SELL_STOP'
+        return 'UNKNOWN'
+
     def _to_trade_decision(self, analysis: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
         """Convert analysis output to the canonical payload expected by DB/Telegram."""
         final_signal = str(analysis.get('signal', 'WAIT')).upper()
@@ -1125,6 +1140,7 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
                 'tp1': tp1_price,
                 'tp2': tp2_price,
                 'rr_ratio': rr_ratio,
+                'order_type': self._order_type(final_signal, float(entry_price or 0), current_price),
                 'position_size': risk.get('position_size', {}),
                 'risk_summary': corrected_risk_summary if levels_corrected else risk.get('summary', ''),
             }

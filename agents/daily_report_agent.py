@@ -66,42 +66,43 @@ class DailyReportAgent(BaseAgent):
             "recommendations": recommendations,
         }
 
-    def _format_report(self, stats: Dict[str, Any], title: str = "التقرير اليومي") -> str:
-        agent_lines = self._format_ranked(stats.get("by_agent", {}), empty="لا توجد بيانات وكلاء")
+    def _format_report(self, stats: Dict[str, Any], title: str = "Daily Report") -> str:
+        title_en = "Weekly Report" if "أسبوع" in title or "Weekly" in title else "Daily Report"
+        agent_lines = self._format_ranked(stats.get("by_agent", {}), empty="No agent-source data yet")
         direction = stats.get("by_direction", {})
-        recommendations = "\n".join(f"• {html.escape(str(x))}" for x in stats.get("recommendations", [])[:6]) or "• لا توجد توصيات كافية بعد"
+        recommendations = "\n".join(f"• {html.escape(str(x))}" for x in stats.get("recommendations", [])[:6]) or "• Not enough data for recommendations yet"
         return f"""
-📋 <b>{html.escape(title)} - XAU/USD</b>
+📋 <b>{html.escape(title_en)} - XAU/USD</b>
 ━━━━━━━━━━━━━━━━━━━━━
-📅 <b>التاريخ:</b> {html.escape(date.today().isoformat())}
+📅 <b>Date:</b> {html.escape(date.today().isoformat())}
 
-📊 <b>الإحصائيات:</b>
-• عدد الصفقات: {stats['total']}
-• رابحة: {stats['wins']} ✅
-• خاسرة: {stats['losses']} ❌
-• تعادل: {stats['breakeven']} ➖
-• مفتوحة: {stats['open']} 🔄
-• نسبة النجاح: {stats['win_rate']}%
+📊 <b>Statistics:</b>
+• Total trades: {stats['total']}
+• Wins: {stats['wins']} ✅
+• Losses: {stats['losses']} ❌
+• Breakeven: {stats['breakeven']} ➖
+• Open: {stats['open']} 🔄
+• Win rate: {stats['win_rate']}%
 
-💰 <b>النتائج:</b>
-• صافي النقاط: {stats['net_points']:+.1f} نقطة
-• أفضل صفقة: {stats['best_trade']:+.1f} نقطة
-• أسوأ صفقة: {stats['worst_trade']:+.1f} نقطة
-• متوسط الربح: {stats['avg_win']:.1f}
-• متوسط الخسارة: -{stats['avg_loss']:.1f}
+💰 <b>Results:</b>
+• Net points: {stats['net_points']:+.1f}
+• Best trade: {stats['best_trade']:+.1f}
+• Worst trade: {stats['worst_trade']:+.1f}
+• Avg win: {stats['avg_win']:.1f}
+• Avg loss: -{stats['avg_loss']:.1f}
 • Profit Factor: {stats['profit_factor']}
 
-🧭 <b>حسب الاتجاه:</b>
+🧭 <b>By Direction:</b>
 • BUY: {direction.get('BUY', {}).get('count', 0)} | Net {direction.get('BUY', {}).get('net', 0):+}
 • SELL: {direction.get('SELL', {}).get('count', 0)} | Net {direction.get('SELL', {}).get('net', 0):+}
 
-🤖 <b>أداء مصادر الإشارة/الوكلاء:</b>
+🤖 <b>Signal Source / Agent Performance:</b>
 {agent_lines}
 
-🧠 <b>توصيات:</b>
+🧠 <b>Recommendations:</b>
 {recommendations}
 
-⚠️ <b>تذكير:</b> هذا نظام تجريبي/تعليمي وليس توصية مالية.
+⚠️ <b>Reminder:</b> Paper-trading educational system. Not financial advice.
 """.strip()
 
     def _by_direction(self, trades: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -164,7 +165,7 @@ class DailyReportAgent(BaseAgent):
             return f"• {empty}"
         lines = []
         for name, value in sorted(data.items(), key=lambda x: x[1].get("net", 0), reverse=True)[:6]:
-            lines.append(f"• {html.escape(str(name))}: {value.get('count', 0)} صفقات | WR {value.get('win_rate', 0)}% | Net {value.get('net', 0):+}")
+            lines.append(f"• {html.escape(str(name))}: {value.get('count', 0)} trades | WR {value.get('win_rate', 0)}% | Net {value.get('net', 0):+}")
         return "\n".join(lines)
 
     def _pnl(self, trade: Dict[str, Any]) -> float:

@@ -47,16 +47,16 @@
     "description_max_rr_ratio": "سقف R:R لتجنب أهداف TP2 غير واقعية في الإشارات التجريبية/الحية"
   },
   "signal_requirements": {
-    "min_agents_agree": 3,
-    "min_agreement_percentage": 60,
+    "min_agents_agree": 1,
+    "min_agreement_percentage": 1,
     "allow_all_signals": true,
-    "description": "شروط إرسال الإشارة: 3 وكلاء كحد أدنى + 60% توافق",
+    "description": "Groq Observation mode: one agent context is enough, but Groq must decide BUY/SELL.",
     "experimental_single_agent": {
-      "enabled": true,
+      "enabled": false,
       "min_confidence": 1,
       "bypass_groq_min_confidence": false,
-      "description": "وضع Groq Observation: يسمح بمرور سياق أقوى وكيل واحد إلى Groq، لكن لا يرسل إشارة إلا إذا Groq نفسه قال BUY/SELL",
-      "bypass_risk_rejection": true,
+      "description": "Disabled. Production observation uses one-agent context + Groq final decision only.",
+      "bypass_risk_rejection": false,
       "fallback_levels_enabled": true,
       "fallback_atr": 2.0,
       "fallback_rr_tp1": 2.0,
@@ -72,7 +72,7 @@
     }
   },
   "schedule": {
-    "analysis_interval_minutes": 5,
+    "analysis_interval_minutes": 10,
     "trade_update_interval_minutes": 60,
     "daily_report_time": "23:00",
     "timezone": "Asia/Jerusalem"
@@ -90,7 +90,7 @@
     "sessions": [
       {
         "name": "London-NY Trading",
-        "start_hour": 7,
+        "start_hour": 9,
         "end_hour": 22,
         "days": [
           0,
@@ -102,8 +102,8 @@
         "quality": "HIGH",
         "allow_signals": true,
         "allow_reports": false,
-        "description": "جلسة التداول التجريبية: 07:59 - 22:59 بتوقيت Asia/Jerusalem (الاثنين-الجمعة)",
-        "start_minute": 59,
+        "description": "Trading session: 09:00 - 22:59 Asia/Jerusalem (Monday-Friday)",
+        "start_minute": 0,
         "end_minute": 59
       },
       {
@@ -120,7 +120,7 @@
         "quality": "LOW",
         "allow_signals": false,
         "allow_reports": true,
-        "description": "جلسة التقارير ونهاية اليوم: 23:00 - 23:59 بتوقيت Asia/Jerusalem (الاثنين-الجمعة)",
+        "description": "End-of-day reports: 23:00 - 23:59 Asia/Jerusalem (Monday-Friday)",
         "start_minute": 0,
         "end_minute": 59
       }
@@ -189,7 +189,7 @@
   "ai_service": {
     "enabled": true,
     "provider": "groq",
-    "model": "llama-3.1-8b-instant",
+    "model": "llama-3.3-70b-versatile",
     "max_tokens": 500,
     "temperature": 0.1,
     "api_key": "ENV:GROQ_API_KEY",
@@ -344,10 +344,25 @@
     "min_groq_confidence": 50,
     "allow_single_agent_context": true,
     "disable_forced_observation": true,
-    "description": "يرسل إشارة فقط إذا كان قرار Groq النهائي BUY/SELL بدون تناقضات واضحة في الأدلة المؤيدة",
+    "description": "Groq decides the final signal using one or more agent contexts. No forced signals.",
     "block_on_ai_contradiction": true,
     "min_supportive_evidence_items": 2,
     "retry_on_contradiction": true,
     "max_retry": 1
+  },
+  "order_execution": {
+    "enabled": true,
+    "mode": "paper",
+    "default_order_type": "MARKET",
+    "pending_threshold_points": 1.0,
+    "allowed_order_types": [
+      "BUY_MARKET",
+      "SELL_MARKET",
+      "BUY_LIMIT",
+      "SELL_LIMIT",
+      "BUY_STOP",
+      "SELL_STOP"
+    ],
+    "description": "Paper order classification only: market, limit, or stop based on entry vs current price."
   }
 }
