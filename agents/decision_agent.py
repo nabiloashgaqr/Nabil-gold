@@ -496,6 +496,11 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
 - أي دليل مخالف مثل MACD bullish داخل SELL يجب وضعه في opposing_evidence أو risk_notes وليس supportive_evidence.
 - يجب أن تتطابق risk_reward مع أرقام RiskManagement، ولا تخترع R:R مختلفاً. استخدم TP2 R:R إذا ذكرت R:R الكلي.
 - إذا الأدلة متعارضة، اجعل القرار WAIT أو اخفض الثقة بوضوح.
+- في SELL: وجود دعم قوي أسفل السعر ليس دليلاً مؤيداً إلا إذا ذكرت كسر الدعم أو أن الدعم هو هدف/مخاطرة. وإلا ضعه في opposing_evidence أو risk_notes.
+- في BUY: وجود مقاومة قوية أعلى السعر ليس دليلاً مؤيداً إلا إذا ذكرت اختراق المقاومة. وإلا ضعه في opposing_evidence أو risk_notes.
+- HIDDEN_BEARISH يدعم SELL وليس BUY. HIDDEN_BULLISH يدعم BUY وليس SELL.
+- invalidation يجب أن يكون مستوى سعرياً واضحاً مثل SL أو إغلاق فوق/تحت مستوى، وليس تغير ثقة المؤشرات.
+- alternative_scenario يجب أن يكون شرطاً سعرياً واضحاً مثل اختراق مقاومة أو كسر دعم.
 
 أجب بصيغة JSON فقط وبدون Markdown:
 {{
@@ -511,8 +516,8 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
     "action_plan": "دخول/انتظار/إلغاء + شرط الإلغاء أو invalidation scenario",
     "supportive_evidence": ["دليل مؤيد للقرار 1", "دليل مؤيد للقرار 2", "دليل مؤيد للقرار 3"],
     "opposing_evidence": ["دليل معارض أو مخاطرة 1", "دليل معارض أو مخاطرة 2"],
-    "invalidation": "ما الذي يجعل القرار خاطئاً؟ مستوى أو شرط واضح",
-    "alternative_scenario": "متى يصبح الاتجاه المعاكس أفضل؟",
+    "invalidation": "مستوى سعري واضح يبطل الصفقة مثل: إغلاق 15m فوق/تحت مستوى أو ضرب SL",
+    "alternative_scenario": "شرط سعري واضح يجعل الاتجاه المعاكس أفضل مثل: اختراق مقاومة أو كسر دعم",
     "quality_notes": ["نقطة قوة محددة", "نقطة ضعف أو تحذير محدد"]
 }}
 """
@@ -895,12 +900,20 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
         supportive = ai.get('supportive_evidence', ai.get('evidence', []))
         text = " ".join(str(x) for x in supportive) + " " + str(ai.get('entry_reason', ''))
         lower = text.lower()
-        bullish_terms = ['macd bullish', 'bullish and improving', 'bullish', 'ema bullish', 'صاعد', 'شرائي']
-        bearish_terms = ['macd bearish', 'bearish', 'ema bearish', 'هابط', 'بيعي']
+        bullish_terms = ['macd bullish', 'bullish and improving', 'ema bullish', 'صاعد', 'شرائي', 'hidden_bullish']
+        bearish_terms = ['macd bearish', 'ema bearish', 'هابط', 'بيعي', 'hidden_bearish']
         if signal == 'SELL' and any(term in lower for term in bullish_terms):
-            warnings.append('تحذير: شرح Groq يحتوي دليلاً صعودياً ضمن إشارة SELL؛ اعتبره مخاطرة لا سبب دخول.')
+            warnings.append('تحذير: شرح Groq يحتوي دليلاً صعودياً ضمن أدلة SELL المؤيدة؛ يجب نقله للمخاطر أو جعل القرار WAIT.')
         if signal == 'BUY' and any(term in lower for term in bearish_terms):
-            warnings.append('تحذير: شرح Groq يحتوي دليلاً هبوطياً ضمن إشارة BUY؛ اعتبره مخاطرة لا سبب دخول.')
+            warnings.append('تحذير: شرح Groq يحتوي دليلاً هبوطياً ضمن أدلة BUY المؤيدة؛ يجب نقله للمخاطر أو جعل القرار WAIT.')
+        # Support/resistance misuse: support below is not a SELL reason unless it is being broken; resistance above is not a BUY reason unless it is being broken.
+        if signal == 'SELL' and ('دعم' in lower or 'support' in lower) and not any(x in lower for x in ['كسر', 'تحت', 'break', 'below', 'target', 'هدف']):
+            warnings.append('تحذير: Groq استخدم وجود دعم كدليل مؤيد للبيع دون ذكر كسره؛ هذا يجب أن يكون مخاطرة/هدف لا سبب دخول.')
+        if signal == 'BUY' and ('مقاومة' in lower or 'resistance' in lower) and not any(x in lower for x in ['اختراق', 'فوق', 'break', 'above', 'target', 'هدف']):
+            warnings.append('تحذير: Groq استخدم وجود مقاومة كدليل مؤيد للشراء دون ذكر اختراقها؛ هذا يجب أن يكون مخاطرة/هدف لا سبب دخول.')
+        inv_alt = str(ai.get('invalidation', '')) + ' ' + str(ai.get('alternative_scenario', ''))
+        if signal in {'BUY', 'SELL'} and not any(ch.isdigit() for ch in inv_alt):
+            warnings.append('تحذير: Groq لم يقدم مستوى سعرياً واضحاً للإلغاء أو السيناريو البديل.')
         return warnings
 
     def _forced_observation_signal(self, context: Dict[str, Any]) -> Dict[str, Any] | None:
