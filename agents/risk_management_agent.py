@@ -57,9 +57,19 @@ class RiskManagementAgent(BaseAgent):
                 rr_tp2=rr_tp2,
                 portfolio=portfolio,
             )
+            risk_profile = self._trade_risk_profile(
+                rr_tp2=rr_tp2,
+                risk_distance=risk_distance,
+                atr=atr,
+                direction=direction,
+                direction_details=direction_details,
+                results=results,
+                checks=checks,
+            )
+            checks["trade_grade_filter"] = risk_profile["grade"] not in {"D", "F"}
             approved = all(checks.values())
             rejection_reason = None if approved else self._first_failed_reason(checks)
-            position_size = self._position_size(entry_price, stop_loss)
+            position_size = self._position_size(entry_price, stop_loss, risk_multiplier=risk_profile["risk_multiplier"])
 
             return {
                 "agent": self.name,
@@ -93,7 +103,10 @@ class RiskManagementAgent(BaseAgent):
                     "target_method": target_method,
                     "checks": checks,
                     "portfolio": portfolio,
+                    "trade_grade": risk_profile,
+                    "risk_multiplier": risk_profile["risk_multiplier"],
                 },
+                "trade_grade": risk_profile,
                 "position_size": position_size,
                 "trailing_stop": {"activate_at": "TP1", "move_sl_to": "entry", "trail_distance": round(max(atr * 10, 10), 1)},
                 "summary": self._summary(approved, rejection_reason, stop_loss, tp1, tp2, rr_tp2),
@@ -257,8 +270,10 @@ class RiskManagementAgent(BaseAgent):
         max_spread = self._f(self.filters.get("max_spread_points"), 5.0)
         min_rr = self._f(self.settings.get("min_rr_ratio"), 1.5)
         max_open_trades = int(self.settings.get("max_open_trades", 3))
+        max_daily_signals = int(self.settings.get("max_daily_signals", 8))
         max_losses = int(self.filters.get("max_consecutive_losses", 3))
         open_trades_count = int(portfolio.get("open_trades_count", 0) or 0)
+        today_signals_count = int(portfolio.get("today_signals_count", 0) or 0)
         consecutive_losses = int(portfolio.get("consecutive_losses", 0) or 0)
         spread_value = None if spread_points is None or str(spread_points).strip().lower() in {"", "unknown", "none"} else self._f(spread_points)
 
@@ -269,6 +284,7 @@ class RiskManagementAgent(BaseAgent):
             "sl_width_filter": risk_distance <= atr * 3.0,
             "target_distance_filter": tp1_distance >= atr * 1.0,
             "max_open_trades_filter": open_trades_count < max_open_trades,
+            "max_daily_signals_filter": today_signals_count < max_daily_signals,
             "consecutive_losses_filter": consecutive_losses < max_losses,
         }
 
@@ -280,23 +296,116 @@ class RiskManagementAgent(BaseAgent):
             "sl_width_filter": "SL too wide",
             "target_distance_filter": "Target too close",
             "max_open_trades_filter": "Max trades reached",
+            "max_daily_signals_filter": "Max daily signals reached",
             "consecutive_losses_filter": "Cooling after consecutive losses",
+            "trade_grade_filter": "Trade grade too low",
         }
         for key, passed in checks.items():
             if not passed:
                 return reasons.get(key, key)
         return "Rejected"
 
-    def _position_size(self, entry: float, stop_loss: float) -> Dict[str, Any]:
+
+    def _trade_risk_profile(
+        self,
+        rr_tp2: float,
+        risk_distance: float,
+        atr: float,
+        direction: str,
+        direction_details: Dict[str, Any],
+        results: Dict[str, Any],
+        checks: Dict[str, bool],
+    ) -> Dict[str, Any]:
+        """Grade trade risk quality and assign a risk multiplier."""
+        score = 0.0
+        notes: List[str] = []
+        if rr_tp2 >= 3.0:
+            score += 25; notes.append("R:R ممتاز")
+        elif rr_tp2 >= 2.0:
+            score += 20; notes.append("R:R جيد")
+        elif rr_tp2 >= self._f(self.settings.get("min_rr_ratio"), 1.5):
+            score += 12; notes.append("R:R مقبول")
+        else:
+            score -= 15; notes.append("R:R ضعيف")
+
+        if risk_distance <= atr * 1.6:
+            score += 20; notes.append("وقف منطقي مقارنة بالـ ATR")
+        elif risk_distance <= atr * 2.4:
+            score += 12; notes.append("وقف متوسط")
+        else:
+            score -= 10; notes.append("وقف واسع")
+
+        total_voting = int(direction_details.get("buy_count", 0) or 0) + int(direction_details.get("sell_count", 0) or 0)
+        side_count = int(direction_details.get("buy_count" if direction == "BUY" else "sell_count", 0) or 0)
+        if total_voting and side_count / total_voting >= 0.75:
+            score += 20; notes.append("توافق وكلاء قوي")
+        elif side_count >= 3:
+            score += 14; notes.append("توافق وكلاء مقبول")
+        else:
+            score -= 8; notes.append("توافق وكلاء ضعيف")
+
+        mtf = results.get("multitimeframe", {}) or {}
+        if mtf.get("direction") == direction and mtf.get("alignment") in {"FULL", "PARTIAL"}:
+            score += 15; notes.append("الفريمات متوافقة")
+        elif mtf.get("counter_trend"):
+            score -= 15; notes.append("عكس الفريم الأعلى")
+
+        daily_bias = results.get("daily_bias", {}) or {}
+        bias = str(daily_bias.get("bias", "NEUTRAL")).upper()
+        if (direction == "BUY" and bias == "BULLISH") or (direction == "SELL" and bias == "BEARISH"):
+            score += 10; notes.append("متوافق مع Daily Bias")
+        elif (direction == "BUY" and bias == "BEARISH") or (direction == "SELL" and bias == "BULLISH"):
+            score -= 10; notes.append("عكس Daily Bias")
+
+        if all(checks.values()):
+            score += 10; notes.append("كل فلاتر المخاطر الأساسية ناجحة")
+        else:
+            score -= 20; notes.append("بعض فلاتر المخاطر فشلت")
+
+        if score >= 85:
+            grade, label, risk_multiplier = "A+", "Elite", 1.0
+        elif score >= 75:
+            grade, label, risk_multiplier = "A", "Strong", 1.0
+        elif score >= 65:
+            grade, label, risk_multiplier = "B", "Good", 0.85
+        elif score >= 55:
+            grade, label, risk_multiplier = "C", "Reduced", 0.50
+        elif score >= 45:
+            grade, label, risk_multiplier = "D", "Reject", 0.0
+        else:
+            grade, label, risk_multiplier = "F", "Reject", 0.0
+
+        return {
+            "score": round(max(0, min(100, score)), 1),
+            "grade": grade,
+            "label": label,
+            "risk_multiplier": risk_multiplier,
+            "notes": notes[:8],
+            "rr_tp2": round(rr_tp2, 2),
+            "risk_distance_atr": round(risk_distance / max(atr, 0.01), 2),
+        }
+
+    def _position_size(self, entry: float, stop_loss: float, risk_multiplier: float = 1.0) -> Dict[str, Any]:
         capital = self._f(self.settings.get("account_capital"), 0.0)
-        risk_percent = self._f(self.settings.get("default_risk_percent"), 1.0)
+        base_risk_percent = self._f(self.settings.get("default_risk_percent"), 1.0)
+        max_risk_percent = self._f(self.settings.get("max_risk_percent", 2.0), 2.0)
+        risk_percent = max(0.0, min(max_risk_percent, base_risk_percent * max(0.0, risk_multiplier)))
         if capital <= 0:
-            return {"recommended_lots": None, "risk_amount": None, "based_on_capital": None}
+            return {"recommended_lots": None, "risk_amount": None, "based_on_capital": None, "risk_percent": risk_percent}
         risk_amount = capital * (risk_percent / 100)
         price_distance = abs(entry - stop_loss)
         # Approximation for XAUUSD: 1 standard lot ~= 100 oz, $1 move ~= $100.
         lots = risk_amount / max(price_distance * 100, 0.01)
-        return {"recommended_lots": round(lots, 2), "risk_amount": round(risk_amount, 2), "based_on_capital": round(capital, 2)}
+        max_lots = self._f(self.settings.get("max_lot_size"), 10.0)
+        lots = min(lots, max_lots)
+        return {
+            "recommended_lots": round(lots, 2),
+            "risk_amount": round(risk_amount, 2),
+            "risk_percent": round(risk_percent, 2),
+            "risk_multiplier": round(risk_multiplier, 2),
+            "based_on_capital": round(capital, 2),
+            "price_risk_distance": round(price_distance, 2),
+        }
 
     def _summary(self, approved: bool, rejection_reason: str | None, stop_loss: float, tp1: float, tp2: float, rr_tp2: float) -> str:
         if approved:
@@ -317,7 +426,8 @@ class RiskManagementAgent(BaseAgent):
                 "tp2": {"price": 0.0, "distance_points": 0, "rr_ratio": 0},
                 "tp3": {"price": 0.0, "distance_points": 0, "rr_ratio": 0},
             },
-            "risk_metrics": {"checks": {}, "portfolio": {}},
+            "risk_metrics": {"checks": {}, "portfolio": {}, "trade_grade": {"grade": "F", "score": 0, "label": "Rejected"}},
+            "trade_grade": {"grade": "F", "score": 0, "label": "Rejected", "risk_multiplier": 0},
             "position_size": {"recommended_lots": None, "risk_amount": None, "based_on_capital": None},
             "trailing_stop": {},
             "summary": f"مرفوض: {reason}",

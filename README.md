@@ -685,6 +685,19 @@ python -m pytest -q
 
 بالإضافة إلى إدخال Agent Playbooks في Prompt قرار Groq، تم تنفيذ تطويرات فعلية داخل الكود:
 
+### RiskManagementAgent v3.1
+
+تمت إضافة تطويرات فعلية لإدارة المخاطر:
+
+- Trade Grade: A+ / A / B / C / D / F
+- Grade-based risk multiplier
+- رفض Grade D/F تلقائيًا
+- تقليل المخاطرة لصفقات C وB
+- فلتر max daily signals داخل RiskAgent
+- حساب risk percent وrisk amount وlot size بناءً على multiplier
+- تقييم R:R وSL/ATR وتوافق الوكلاء وMTF وDaily Bias داخل درجة المخاطرة
+- عرض Risk Grade في Telegram
+
 ### MultiTimeframeAgent v3.1
 
 تمت إضافة تطويرات فعلية لتحليل الفريمات:
