@@ -28,7 +28,6 @@ class TradingSessionAgent(BaseAgent):
     def __init__(self, config: Dict[str, Any] | None = None) -> None:
         super().__init__(config or load_config())
         self.hours_config = self.config.get("trading_hours", {})
-        self.signal_filters = self.config.get("signal_filters", {})
         self.quality_order = {"BEST": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
 
     def check(self, now: datetime | None = None) -> Dict[str, Any]:
@@ -54,12 +53,16 @@ class TradingSessionAgent(BaseAgent):
                     allow_reports=True,
                 )
 
-            # Check Friday after-hours (before session check)
-            if local_now.weekday() == 4:  # Friday
+            # Optional Friday cutoff controlled only by trading_hours.
+            # Keep Friday logic in one place; signal_filters no longer controls Friday behavior.
+            if self.hours_config.get("enforce_friday_cutoff", False) and local_now.weekday() == 4:
                 cutoff = int(self.hours_config.get("friday_cutoff_hour", 20))
-                if local_now.hour >= cutoff and not self.signal_filters.get("allow_friday_after_hours", False):
+                cutoff_minute = int(self.hours_config.get("friday_cutoff_minute", 0))
+                cutoff_total = cutoff * 60 + cutoff_minute
+                current_total = local_now.hour * 60 + local_now.minute
+                if current_total >= cutoff_total and not self.hours_config.get("allow_friday_after_hours", False):
                     return self._blocked(
-                        reason=f"Friday after {cutoff}:00 UTC - weekend approaching",
+                        reason=f"Friday after {cutoff:02d}:{cutoff_minute:02d} {self.hours_config.get('timezone', 'UTC')} - weekend approaching",
                         current_session=None,
                         session_quality="LOW",
                         next_session=self._next_session_info(local_now),

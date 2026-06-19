@@ -126,15 +126,15 @@
       }
     ],
     "min_quality_required": "HIGH",
-    "allow_friday_after_hours": false,
-    "friday_cutoff_hour": 20,
-    "exclude_weekends": false
+    "allow_friday_after_hours": true,
+    "friday_cutoff_hour": 23,
+    "exclude_weekends": false,
+    "enforce_friday_cutoff": false,
+    "friday_cutoff_minute": 0
   },
   "signal_filters": {
     "require_trading_hours": true,
-    "allow_contrarian_in_low_quality": false,
-    "pause_on_friday_afternoon": false,
-    "friday_pause_after_hour": 18
+    "allow_contrarian_in_low_quality": false
   },
   "github_actions": {
     "enabled": true,
