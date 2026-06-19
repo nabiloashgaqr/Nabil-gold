@@ -48,7 +48,13 @@
     "min_agents_agree": 3,
     "min_agreement_percentage": 60,
     "allow_all_signals": true,
-    "description": "شروط إرسال الإشارة: 3 وكلاء كحد أدنى + 60% توافق"
+    "description": "شروط إرسال الإشارة: 3 وكلاء كحد أدنى + 60% توافق",
+    "experimental_single_agent": {
+      "enabled": true,
+      "min_confidence": 1,
+      "bypass_groq_min_confidence": true,
+      "description": "وضع تجريبي مؤقت: يسمح بإشارة من أقوى وكيل واحد بغض النظر عن نسبة التوافق لمراقبة خروج الإشارات"
+    }
   },
   "schedule": {
     "analysis_interval_minutes": 15,

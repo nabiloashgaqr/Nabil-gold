@@ -112,6 +112,15 @@ class TelegramService:
         risk_grade_line = ""
         if risk_grade:
             risk_grade_line = f"🛡️ <b>Risk Grade:</b> {html.escape(str(risk_grade.get('grade', 'N/A')))} / {float(risk_grade.get('score', 0)):.1f}% ({html.escape(str(risk_grade.get('label', '')))} )\n"
+        experimental = decision.get("experimental_single_agent") or {}
+        experimental_line = ""
+        if experimental:
+            experimental_line = (
+                f"🧪 <b>مصدر الإشارة التجريبي:</b> {html.escape(str(experimental.get('agent', 'N/A')))} | "
+                f"{html.escape(str(experimental.get('signal', '')))} | "
+                f"موثوقية {html.escape(str(experimental.get('reliability_grade', 'N/A')))} "
+                f"({float(experimental.get('adjusted_confidence', experimental.get('confidence', 0))):.1f}%)\n"
+            )
         daily_bias = decision.get("daily_bias", {}) or {}
         bias_line = ""
         if daily_bias:
@@ -156,7 +165,7 @@ class TelegramService:
 🎯 <b>الهدف الثاني:</b> {format_price(signal.get('tp2'))}
 📊 <b>R:R =</b> 1:{float(signal.get('rr_ratio', 0)):.2f}
 🔒 <b>الثقة:</b> {int(decision.get('confidence', 0))}%
-{quality_line}{risk_grade_line}{bias_line}{news_ai_line}{dynamic_risk_line}
+{quality_line}{risk_grade_line}{experimental_line}{bias_line}{news_ai_line}{dynamic_risk_line}
 {ai_text}📋 <b>أسباب الإشارة:</b>
 {reasons_text}
 

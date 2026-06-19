@@ -125,6 +125,10 @@ def should_block_signal(decision: Dict[str, Any], dynamic_risk: Dict[str, Any]) 
     signal = str(decision.get("decision", "WAIT")).upper()
     if signal not in {"BUY", "SELL"}:
         return None
+    # Experimental single-agent mode is intended to observe signals even when
+    # confidence/agreement is below normal thresholds. It still respects full HALT.
+    if decision.get("experimental_single_agent"):
+        return None
     confidence = float(decision.get("confidence") or 0)
     min_conf = float(dynamic_risk.get("min_confidence_required") or 0)
     if confidence < min_conf:

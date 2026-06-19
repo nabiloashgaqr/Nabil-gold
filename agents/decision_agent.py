@@ -55,6 +55,7 @@ class DecisionAgent(BaseAgent):
         
         # تحميل الأوزان المتعلمة
         self.current_weights = self._load_weights()
+        self.voting_agents = {"technical", "classical", "smc", "price_action", "multitimeframe"}
         
     def _load_weights(self) -> Dict[str, float]:
         """تحميل الأوزان (من learning service أو config)"""
@@ -202,6 +203,8 @@ class DecisionAgent(BaseAgent):
         }
         
         for agent_name, result in agents_results.items():
+            if agent_name not in self.voting_agents:
+                continue
             # دعم 'signal' و 'direction'
             if isinstance(result, dict):
                 signal = result.get('signal', result.get('direction', 'WAIT'))
@@ -230,6 +233,19 @@ class DecisionAgent(BaseAgent):
         
         return votes
     
+    def _reliability_grade(self, confidence: float, weight: float, agent_name: str) -> str:
+        """Human-readable reliability grade for a single agent experimental signal."""
+        weighted = confidence * max(weight, 0.01)
+        if confidence >= 80 and weighted >= 15:
+            return "A"
+        if confidence >= 70:
+            return "B"
+        if confidence >= 60:
+            return "C"
+        if confidence >= 45:
+            return "D"
+        return "E"
+
     def _classic_decision(self, votes: Dict) -> Dict:
         """
         📊 القرار الكلاسيكي (بدون AI)
@@ -282,6 +298,33 @@ class DecisionAgent(BaseAgent):
         # تحديد أقوى وكيل
         all_votes = votes['BUY'] + votes['SELL'] + votes['WAIT']
         strongest_agent = max(all_votes, key=lambda x: x['score'], default=None)
+        directional_votes = votes['BUY'] + votes['SELL']
+        strongest_directional = max(directional_votes, key=lambda x: x['score'], default=None)
+        experimental_source = None
+        exp_cfg = self.config.get('signal_requirements', {}).get('experimental_single_agent', {}) or {}
+        exp_enabled = bool(exp_cfg.get('enabled', False))
+        min_single_conf = float(exp_cfg.get('min_confidence', 1) or 1)
+        if exp_enabled and decision == 'WAIT' and strongest_directional and float(strongest_directional.get('adjusted_confidence', 0)) >= min_single_conf:
+            experimental_signal = 'BUY' if strongest_directional in votes['BUY'] else 'SELL'
+            reliability = self._reliability_grade(
+                float(strongest_directional.get('adjusted_confidence', strongest_directional.get('confidence', 0))),
+                float(strongest_directional.get('weight', 0.0)),
+                str(strongest_directional.get('agent', 'unknown')),
+            )
+            decision = experimental_signal
+            confidence = float(strongest_directional.get('adjusted_confidence', strongest_directional.get('confidence', 50)))
+            rejection_reason = f"EXPERIMENTAL_SINGLE_AGENT: {strongest_directional.get('agent')}"
+            experimental_source = {
+                'enabled': True,
+                'agent': strongest_directional.get('agent'),
+                'signal': experimental_signal,
+                'confidence': round(float(strongest_directional.get('confidence', 0)), 1),
+                'adjusted_confidence': round(float(strongest_directional.get('adjusted_confidence', strongest_directional.get('confidence', 0))), 1),
+                'weight': strongest_directional.get('weight'),
+                'score': round(float(strongest_directional.get('score', 0)), 3),
+                'reliability_grade': reliability,
+                'reason': 'تم تفعيل وضع التجربة: إشارة من أقوى وكيل واحد بغض النظر عن نسبة التوافق',
+            }
         
         return {
             'decision': decision,
@@ -294,6 +337,7 @@ class DecisionAgent(BaseAgent):
             'sell_agreement_pct': round(sell_agreement_pct, 1),
             'total_voting_agents': total_voting,
             'strongest_agent': strongest_agent['agent'] if strongest_agent else None,
+            'experimental_single_agent': experimental_source,
             'rejection_reason': rejection_reason
         }
     
@@ -485,6 +529,14 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
         }
 
         min_conf = self.min_confidence * quality_multipliers.get(str(session_quality).upper(), 1.20)
+
+        exp_source = classic.get('experimental_single_agent') or {}
+        exp_cfg = self.config.get('signal_requirements', {}).get('experimental_single_agent', {}) or {}
+        if exp_source and exp_cfg.get('bypass_groq_min_confidence', True):
+            return classic.get('decision', 'WAIT'), round(float(classic.get('confidence', 0)), 1), (
+                f"وضع تجريبي: إشارة {classic.get('decision')} من وكيل واحد "
+                f"({exp_source.get('agent')}) بدرجة موثوقية {exp_source.get('reliability_grade')}"
+            )
 
         ai_config = self.config.get('ai_service', {})
         ai_required = bool(ai_config.get('enabled', False)) and not bool(ai_config.get('fallback_to_classic', True))
@@ -761,6 +813,7 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
             'votes': analysis.get('votes', {}),
             'weights': analysis.get('weights', {}),
             'classic': analysis.get('classic', {}),
+            'experimental_single_agent': (analysis.get('classic', {}) or {}).get('experimental_single_agent'),
             'ai': analysis.get('ai', {}),
             'learning': analysis.get('learning', {}),
             'risk': risk,
