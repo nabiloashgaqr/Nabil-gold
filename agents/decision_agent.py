@@ -611,7 +611,10 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
 
         exp_source = classic.get('experimental_single_agent') or {}
         exp_cfg = self.config.get('signal_requirements', {}).get('experimental_single_agent', {}) or {}
-        if exp_source and exp_cfg.get('bypass_groq_min_confidence', True):
+        groq_obs = self.config.get('groq_observation_mode', {}) or {}
+        groq_observation_enabled = bool(groq_obs.get('enabled', False))
+        observation_min_conf = float(groq_obs.get('min_groq_confidence', min_conf) or min_conf)
+        if exp_source and exp_cfg.get('bypass_groq_min_confidence', True) and not groq_observation_enabled:
             return classic.get('decision', 'WAIT'), round(float(classic.get('confidence', 0)), 1), (
                 f"وضع تجريبي: إشارة {classic.get('decision')} من وكيل واحد "
                 f"({exp_source.get('agent')}) بدرجة موثوقية {exp_source.get('reliability_grade')}"
@@ -623,21 +626,26 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
             error = ai.get('error') or 'AI unavailable'
             return 'WAIT', 0, f"Groq إجباري لكن فشل AI: {error}"
         
-        # دمج الكلاسيكي مع AI
+        # دمج الكلاسيكي مع AI / Groq Observation Mode
         if ai.get('available'):
-            ai_signal = ai.get('signal', 'WAIT')
-            ai_conf = ai.get('confidence', 50)
-            
-            # 70% AI + 30% كلاسيكي
-            if ai_signal != 'WAIT' and ai_conf >= min_conf:
+            ai_signal = str(ai.get('signal', 'WAIT')).upper()
+            ai_conf = float(ai.get('confidence', 50) or 0)
+            required_conf = observation_min_conf if groq_observation_enabled else min_conf
+
+            if ai_signal != 'WAIT' and ai_conf >= required_conf:
                 final_signal = ai_signal
-                final_confidence = (ai_conf * 0.7) + (classic.get('confidence', 50) * 0.3)
-                reasoning = ai.get('reasoning', classic.get('decision', 'N/A'))
+                if groq_observation_enabled:
+                    final_confidence = ai_conf
+                    source_text = f" | سياق وكيل: {exp_source.get('agent')} موثوقية {exp_source.get('reliability_grade')}" if exp_source else ""
+                    reasoning = f"Groq Observation: قرار Groq = {ai_signal} بثقة {ai_conf:.0f}%{source_text}. {ai.get('reasoning', '')}"
+                else:
+                    final_confidence = (ai_conf * 0.7) + (classic.get('confidence', 50) * 0.3)
+                    reasoning = ai.get('reasoning', classic.get('decision', 'N/A'))
             else:
-                if ai_required:
+                if ai_required or groq_observation_enabled:
                     final_signal = 'WAIT'
                     final_confidence = ai_conf
-                    reasoning = f"Groq إجباري: قرار AI غير كافٍ أو WAIT (ثقة AI: {ai_conf}%)"
+                    reasoning = f"Groq Observation: لا توجد إشارة لأن Groq قال {ai_signal} أو الثقة {ai_conf:.0f}% أقل من {required_conf:.0f}%"
                 else:
                     final_signal = classic.get('decision', 'WAIT')
                     final_confidence = classic.get('confidence', 50)
@@ -653,9 +661,10 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
                 reasoning = "قرار كلاسيكي - AI غير مفعّل"
         
         # التحقق من الحد الأدنى للثقة
-        if final_confidence < min_conf:
+        final_required_conf = observation_min_conf if groq_observation_enabled else min_conf
+        if final_confidence < final_required_conf:
             final_signal = 'WAIT'
-            reasoning += f" (ثقة منخفضة: {final_confidence:.0f}% < {min_conf:.0f}%)"
+            reasoning += f" (ثقة منخفضة: {final_confidence:.0f}% < {final_required_conf:.0f}%)"
         
         return final_signal, round(final_confidence, 1), reasoning
     
@@ -859,6 +868,9 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
         it is called after safety filters and checks warnings before forcing.
         """
         exp_cfg = self.config.get('signal_requirements', {}).get('experimental_single_agent', {}) or {}
+        groq_obs = self.config.get('groq_observation_mode', {}) or {}
+        if groq_obs.get('disable_forced_observation', False):
+            return None
         if not exp_cfg.get('force_signal_on_wait', False):
             return None
 

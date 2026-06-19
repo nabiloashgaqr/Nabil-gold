@@ -731,6 +731,38 @@ python -m pytest -q
 
 ---
 
+
+---
+
+## 🤖 Groq Observation Mode
+
+تم تفعيل وضع مراقبة يعتمد على Groq فقط:
+
+```json
+"groq_observation_mode": {
+  "enabled": true,
+  "min_groq_confidence": 50,
+  "allow_single_agent_context": true,
+  "disable_forced_observation": true
+}
+```
+
+### كيف يعمل؟
+
+- يمكن تمرير سياق أقوى وكيل واحد إلى Groq.
+- لا يشترط 3 وكلاء في هذا الوضع.
+- لا يتم إرسال BUY/SELL إلا إذا Groq نفسه قرر BUY أو SELL.
+- إذا Groq قال WAIT، لا يتم إنشاء Forced Observation Signal.
+- تظهر في Telegram عبارة:
+
+```text
+🤖 وضع القرار: Groq Observation - الإشارة صادرة من قرار Groq النهائي
+```
+
+ويظهر أيضًا اسم الوكيل الذي أعطى السياق ودرجة موثوقيته إن وجد.
+
+---
+
 ## 🧪 وضع تجربة الإشارات من وكيل واحد
 
 تم تفعيل وضع تجريبي مؤقت داخل `DecisionAgent` يسمح بخروج إشارة من **أقوى وكيل واحد** حتى لو لم تتحقق نسبة توافق الوكلاء المعتادة.

@@ -52,14 +52,14 @@
     "experimental_single_agent": {
       "enabled": true,
       "min_confidence": 1,
-      "bypass_groq_min_confidence": true,
-      "description": "وضع مراقبة قوي: يسمح بإشارة من أقوى وكيل، وإذا كل الوكلاء WAIT يخرج إشارة مراقبة من DailyBias/MTF/Technical/آخر شمعة",
+      "bypass_groq_min_confidence": false,
+      "description": "وضع Groq Observation: يسمح بمرور سياق أقوى وكيل واحد إلى Groq، لكن لا يرسل إشارة إلا إذا Groq نفسه قال BUY/SELL",
       "bypass_risk_rejection": true,
       "fallback_levels_enabled": true,
       "fallback_atr": 2.0,
       "fallback_rr_tp1": 2.0,
       "fallback_rr_tp2": 3.5,
-      "force_signal_on_wait": true,
+      "force_signal_on_wait": false,
       "force_signal_source_priority": [
         "daily_bias",
         "multitimeframe",
@@ -336,5 +336,12 @@
     "warning_before_minutes": 120,
     "high_risk_day_tier1_count": 3,
     "description": "تصنيف أخبار Tier 1/2 مع نوافذ منع وتحذير مخصصة للذهب"
+  },
+  "groq_observation_mode": {
+    "enabled": true,
+    "min_groq_confidence": 50,
+    "allow_single_agent_context": true,
+    "disable_forced_observation": true,
+    "description": "يرسل إشارة فقط إذا كان قرار Groq النهائي BUY/SELL، حتى لو كان السياق من وكيل واحد فقط، مع عرض اسم الوكيل ودرجة موثوقيته"
   }
 }
