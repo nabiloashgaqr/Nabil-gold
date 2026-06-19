@@ -1,10 +1,9 @@
 name: 🔄 Update Open Trades
 on:
   schedule:
-    # Asia/Jerusalem test window: hourly 07:59 → 18:01.
-    # During UTC+3 this is 04:59 → 15:01 UTC.
-    - cron: "59 4-15 * * 1,2,3,4,5"
-    - cron: "1 15-16 * * 1,2,3,4,5"
+    # Asia/Jerusalem test window: hourly 07:59 → 22:59, Monday-Friday.
+    # During UTC+3 this is 04:59 → 19:59 UTC.
+    - cron: "59 4-19 * * 1,2,3,4,5"
   workflow_dispatch:
 
 jobs:

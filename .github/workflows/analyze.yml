@@ -1,12 +1,11 @@
 name: 📊 Gold Analysis Bot
 on:
   schedule:
-    # Asia/Jerusalem test window: 07:59 → 18:01, Monday-Friday.
-    # During UTC+3 this is 04:59 → 15:01 UTC.
+    # Asia/Jerusalem test window: 07:59 → 22:59, Monday-Friday.
+    # During UTC+3 this is 04:59 → 19:59 UTC.
     # Runs every ~5 minutes inside/broadly around the window; internal session filter enforces exact local time.
     - cron: "59 4 * * 1,2,3,4,5"
-    - cron: "*/5 5-15 * * 1,2,3,4,5"
-    - cron: "1 15 * * 1,2,3,4,5"
+    - cron: "*/5 5-19 * * 1,2,3,4,5"
   workflow_dispatch:
 
 jobs:
