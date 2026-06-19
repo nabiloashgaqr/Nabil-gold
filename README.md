@@ -685,6 +685,22 @@ python -m pytest -q
 
 بالإضافة إلى إدخال Agent Playbooks في Prompt قرار Groq، تم تنفيذ تطويرات فعلية داخل الكود:
 
+### ClassicalAgent v3.1
+
+تمت إضافة تطويرات فعلية للتحليل الكلاسيكي:
+
+- Double Top / Double Bottom
+- Triple Top / Triple Bottom
+- Ascending Triangle / Descending Triangle
+- Symmetrical Triangle
+- Rising Wedge / Falling Wedge
+- Ascending / Descending Channel
+- Pattern completion %
+- Pattern status: FORMING / COMPLETE / NONE
+- Level strength حسب عدد اللمسات
+- NO_CLEAR_PATTERN protection لمنع إجبار نمط غير واضح
+- أهداف كلاسيكية مبنية على عرض النمط أو neckline
+
 ### SMCAgent v3.1
 
 تمت إضافة تحسينات مؤسسية فعلية داخل الكود:
