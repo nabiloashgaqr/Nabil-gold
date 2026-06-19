@@ -126,12 +126,75 @@ class PriceActionAgent(BaseAgent):
             patterns.append({"pattern": "Shooting Star / Bearish Pin Bar", "timeframe": timeframe, "location": location, "strength": strength, "confirmed": confirmed})
             score -= 2.4 if confirmed else 1.4
 
-        # Doji / Inside bar
+        # Doji variants / Spinning Top / Marubozu / Harami / Piercing / Dark Cloud / Tweezer
         if current_metrics["body_ratio"] <= 0.10:
-            patterns.append({"pattern": "Doji", "timeframe": timeframe, "location": location, "strength": "weak", "confirmed": False})
-            score *= 0.75
+            doji_name = "Doji"
+            if current_metrics["lower_wick_ratio"] >= 0.60 and current_metrics["upper_wick_ratio"] <= 0.15:
+                doji_name = "Dragonfly Doji"
+                score += 1.2 if location in {"at_support", "near_support"} else 0.4
+            elif current_metrics["upper_wick_ratio"] >= 0.60 and current_metrics["lower_wick_ratio"] <= 0.15:
+                doji_name = "Gravestone Doji"
+                score -= 1.2 if location in {"at_resistance", "near_resistance"} else 0.4
+            patterns.append({"pattern": doji_name, "timeframe": timeframe, "location": location, "strength": "medium" if doji_name != "Doji" else "weak", "confirmed": False})
+            score *= 0.75 if doji_name == "Doji" else 1.0
+
+        if 0.10 < current_metrics["body_ratio"] <= 0.25 and current_metrics["upper_wick_ratio"] >= 0.25 and current_metrics["lower_wick_ratio"] >= 0.25:
+            patterns.append({"pattern": "Spinning Top", "timeframe": timeframe, "location": location, "strength": "weak", "confirmed": False})
+            score *= 0.85
+
+        if current_metrics["body_ratio"] >= 0.82:
+            if current_metrics["type"] == "bullish":
+                patterns.append({"pattern": "Bullish Marubozu", "timeframe": timeframe, "location": location, "strength": "strong", "confirmed": True})
+                score += 1.8
+            elif current_metrics["type"] == "bearish":
+                patterns.append({"pattern": "Bearish Marubozu", "timeframe": timeframe, "location": location, "strength": "strong", "confirmed": True})
+                score -= 1.8
+
         if self._f(current.get("high")) < self._f(previous.get("high")) and self._f(current.get("low")) > self._f(previous.get("low")):
             patterns.append({"pattern": "Inside Bar", "timeframe": timeframe, "location": location, "strength": "medium", "confirmed": False})
+
+        # Harami: current body is inside previous body, opposite color preferred.
+        prev_body_high = max(self._f(previous.get("open")), self._f(previous.get("close")))
+        prev_body_low = min(self._f(previous.get("open")), self._f(previous.get("close")))
+        curr_body_high = max(self._f(current.get("open")), self._f(current.get("close")))
+        curr_body_low = min(self._f(current.get("open")), self._f(current.get("close")))
+        if curr_body_high <= prev_body_high and curr_body_low >= prev_body_low and current_metrics["body_ratio"] <= 0.45:
+            if previous_metrics["type"] == "bearish" and current_metrics["type"] == "bullish":
+                patterns.append({"pattern": "Bullish Harami", "timeframe": timeframe, "location": location, "strength": "medium", "confirmed": location in {"at_support", "near_support"}})
+                score += 1.4 if location in {"at_support", "near_support"} else 0.7
+            elif previous_metrics["type"] == "bullish" and current_metrics["type"] == "bearish":
+                patterns.append({"pattern": "Bearish Harami", "timeframe": timeframe, "location": location, "strength": "medium", "confirmed": location in {"at_resistance", "near_resistance"}})
+                score -= 1.4 if location in {"at_resistance", "near_resistance"} else 0.7
+
+        # Piercing Pattern / Dark Cloud Cover
+        prev_mid = (self._f(previous.get("open")) + self._f(previous.get("close"))) / 2
+        if previous_metrics["type"] == "bearish" and current_metrics["type"] == "bullish":
+            if self._f(current.get("open")) < self._f(previous.get("close")) and self._f(current.get("close")) > prev_mid and self._f(current.get("close")) < self._f(previous.get("open")):
+                patterns.append({"pattern": "Piercing Pattern", "timeframe": timeframe, "location": location, "strength": "strong" if location in {"at_support", "near_support"} else "medium", "confirmed": True})
+                score += 2.2 if location in {"at_support", "near_support"} else 1.4
+        if previous_metrics["type"] == "bullish" and current_metrics["type"] == "bearish":
+            if self._f(current.get("open")) > self._f(previous.get("close")) and self._f(current.get("close")) < prev_mid and self._f(current.get("close")) > self._f(previous.get("open")):
+                patterns.append({"pattern": "Dark Cloud Cover", "timeframe": timeframe, "location": location, "strength": "strong" if location in {"at_resistance", "near_resistance"} else "medium", "confirmed": True})
+                score -= 2.2 if location in {"at_resistance", "near_resistance"} else 1.4
+
+        # Tweezer Top/Bottom: equal highs/lows with opposite candles.
+        level_tolerance = max(atr * 0.12, 0.25)
+        if abs(self._f(current.get("low")) - self._f(previous.get("low"))) <= level_tolerance and previous_metrics["type"] == "bearish" and current_metrics["type"] == "bullish":
+            patterns.append({"pattern": "Tweezer Bottom", "timeframe": timeframe, "location": location, "strength": "medium", "confirmed": location in {"at_support", "near_support"}})
+            score += 1.5 if location in {"at_support", "near_support"} else 0.8
+        if abs(self._f(current.get("high")) - self._f(previous.get("high"))) <= level_tolerance and previous_metrics["type"] == "bullish" and current_metrics["type"] == "bearish":
+            patterns.append({"pattern": "Tweezer Top", "timeframe": timeframe, "location": location, "strength": "medium", "confirmed": location in {"at_resistance", "near_resistance"}})
+            score -= 1.5 if location in {"at_resistance", "near_resistance"} else 0.8
+
+        # Inverted Hammer / Hanging Man contextual variants.
+        if current_metrics["upper_wick_ratio"] >= 0.55 and current_metrics["upper_wick"] >= current_metrics["body"] * 2:
+            prior_move = self._prior_move(candles[-8:-1])
+            if prior_move == "DOWN":
+                patterns.append({"pattern": "Inverted Hammer", "timeframe": timeframe, "location": location, "strength": "medium", "confirmed": current_metrics["close_position"] > 0.45})
+                score += 1.0 if location in {"at_support", "near_support"} else 0.4
+            elif prior_move == "UP":
+                patterns.append({"pattern": "Hanging Man / Upper Rejection", "timeframe": timeframe, "location": location, "strength": "medium", "confirmed": current_metrics["close_position"] < 0.55})
+                score -= 1.0 if location in {"at_resistance", "near_resistance"} else 0.4
 
         # Morning/Evening star
         if len(candles) >= 3:
@@ -356,6 +419,21 @@ class PriceActionAgent(BaseAgent):
         if resistance and abs(price - resistance) <= atr * 0.90:
             return "near_resistance"
         return "mid_range"
+
+
+    def _prior_move(self, candles: List[Candle]) -> str:
+        """Classify short prior move before a candle pattern."""
+        if len(candles) < 3:
+            return "FLAT"
+        first = self._f(candles[0].get("close"))
+        last = self._f(candles[-1].get("close"))
+        change = last - first
+        avg_range = mean(max(self._f(c.get("high")) - self._f(c.get("low")), 0.01) for c in candles)
+        if change > avg_range * 0.6:
+            return "UP"
+        if change < -avg_range * 0.6:
+            return "DOWN"
+        return "FLAT"
 
     def _signals_from_components(
         self,

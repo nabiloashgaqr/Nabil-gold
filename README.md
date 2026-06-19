@@ -678,6 +678,51 @@ python -m pytest -q
 
 ---
 
+
+---
+
+## 🛠️ تحديثات كود فعلية للوكلاء بعد ملف Arena
+
+بالإضافة إلى إدخال Agent Playbooks في Prompt قرار Groq، تم تنفيذ تطويرات فعلية داخل الكود:
+
+### TechnicalAgent v3.1
+
+أصبح يحسب المؤشرات من الشموع مباشرة إذا لم تكن جاهزة، ويضيف:
+
+- EMA Ribbon: 8 / 21 / 50 / 100 / 200
+- RSI-14 وRSI-7
+- RSI Divergence مبسط
+- MACD Histogram Slope
+- ATR Percentile وVolatility Regime
+- Bollinger Bands و%B وSqueeze
+- ADX proxy لقياس قوة الترند
+- Support/Resistance من الشموع
+- منع حالة WAIT من الظهور بثقة عالية
+
+### PriceActionAgent v3.1
+
+تمت إضافة نماذج شموع جديدة:
+
+- Bullish/Bearish Harami
+- Piercing Pattern
+- Dark Cloud Cover
+- Tweezer Top / Bottom
+- Bullish/Bearish Marubozu
+- Spinning Top
+- Dragonfly Doji
+- Gravestone Doji
+- Inverted Hammer
+- Hanging Man / Upper Rejection
+
+مع مراعاة:
+
+- موقع النموذج عند دعم/مقاومة
+- الترند السابق قبل النموذج
+- قوة الجسم والذيل
+- ATR tolerance للمستويات المتقاربة
+
+---
+
 ## 📘 Agent Playbooks v3.0 من ملف Arena
 
 تمت قراءة الملف المرفوع:
