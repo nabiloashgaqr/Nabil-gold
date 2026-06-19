@@ -1,7 +1,3 @@
-This archive contains only the updated files, preserving their correct paths under Nabil-gold/.
-Copy/merge the Nabil-gold folder contents over your repository root.
-
-After copying, run:
-python -m pytest -q
-
-Important: run supabase_migration_fix_trades_created_at.sql in Supabase SQL Editor if your trades table is missing created_at.
+Updated files package for Nabil-gold.
+Includes P0/P1 fixes, Supabase legacy schema hotfix, and One-Agent + Groq decision mode.
+Copy the Nabil-gold folder contents over your repository root, then run: python -m pytest -q

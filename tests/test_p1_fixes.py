@@ -14,16 +14,16 @@ from services.news_feed import ForexFactoryScraper, ForexNews, NewsImpact, Senti
 from services.performance_dashboard import PerformanceDashboard
 
 
-def test_config_production_strict_defaults() -> None:
+def test_config_one_agent_groq_defaults() -> None:
     cfg = json.loads(Path("config.json").read_text(encoding="utf-8"))
 
     assert cfg["schedule"]["timezone"] == "Asia/Hebron"
     assert cfg["trading_hours"]["timezone"] == "Asia/Hebron"
     assert int(cfg["ai_service"]["max_tokens"]) >= 800
     assert int(cfg["groq_observation_mode"]["min_groq_confidence"]) >= int(cfg["risk_settings"]["min_confidence"])
-    assert cfg["groq_observation_mode"]["allow_single_agent_context"] is False
-    assert int(cfg["signal_requirements"]["min_agents_agree"]) >= 3
-    assert int(cfg["signal_requirements"]["min_agreement_percentage"]) >= 60
+    assert cfg["groq_observation_mode"]["allow_single_agent_context"] is True
+    assert int(cfg["signal_requirements"]["min_agents_agree"]) == 1
+    assert int(cfg["signal_requirements"]["min_agreement_percentage"]) == 1
     assert cfg["news_feed"].get("allow_mock") is False
 
 

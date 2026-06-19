@@ -283,7 +283,11 @@ async def run_analysis_async() -> None:
         operation_mode = str(config.get("operation_mode", "observation")).lower()
         decision["run_source"] = "scheduled" if github_event == "schedule" else "manual" if github_event == "workflow_dispatch" else github_event
         decision["operation_mode"] = operation_mode
-        decision["decision_mode"] = "Groq Observation" if operation_mode == "observation" and config.get("groq_observation_mode", {}).get("enabled", False) else "Production Strict"
+        groq_obs_cfg = config.get("groq_observation_mode", {}) or {}
+        if operation_mode == "observation" and groq_obs_cfg.get("enabled", False) and groq_obs_cfg.get("allow_single_agent_context", False):
+            decision["decision_mode"] = "One-Agent + Groq"
+        else:
+            decision["decision_mode"] = "Groq Observation" if operation_mode == "observation" and groq_obs_cfg.get("enabled", False) else "Production Strict"
         decision["requires_three_agents"] = bool((config.get("operation_modes", {}).get(operation_mode, {}) or {}).get("requires_three_agents", operation_mode != "observation"))
         trading_mode = str(config.get("trading_mode", "paper")).lower()
         paper_config = config.get("paper_trading", {}) or {}

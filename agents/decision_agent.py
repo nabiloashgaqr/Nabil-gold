@@ -277,31 +277,47 @@ class DecisionAgent(BaseAgent):
         confidence = 50
         rejection_reason = None
         
-        # تحليل BUY
-        if buy_count >= self.min_agents_agree and buy_agreement_pct >= self.min_agreement_pct:
-            if buy_score > sell_score:
-                decision = 'BUY'
-                confidence = min(buy_score * 100, 95)
-        
-        # تحليل SELL
-        elif sell_count >= self.min_agents_agree and sell_agreement_pct >= self.min_agreement_pct:
-            if sell_score >= buy_score:
-                decision = 'SELL'
-                confidence = min(sell_score * 100, 95)
-        
-        # أسباب الرفض
+        buy_valid = buy_count >= self.min_agents_agree and buy_agreement_pct >= self.min_agreement_pct
+        sell_valid = sell_count >= self.min_agents_agree and sell_agreement_pct >= self.min_agreement_pct
+
+        if buy_valid and (not sell_valid or buy_score > sell_score):
+            decision = 'BUY'
+            confidence = min(buy_score * 100, 95)
+        elif sell_valid and (not buy_valid or sell_score >= buy_score):
+            decision = 'SELL'
+            confidence = min(sell_score * 100, 95)
         else:
             if total_voting < self.min_agents_agree:
                 rejection_reason = f"لا يوجد عدد كافٍ من الوكلاء ({total_voting}/{self.min_agents_agree})"
             elif max(buy_agreement_pct, sell_agreement_pct) < self.min_agreement_pct:
                 max_agreement = max(buy_count, sell_count)
                 rejection_reason = f"نسبة التوافق منخفضة ({max_agreement}/{total_voting} = {max(buy_agreement_pct, sell_agreement_pct):.0f}% < {self.min_agreement_pct}%)"
+            else:
+                rejection_reason = "تعارض بين BUY و SELL بدون أفضلية واضحة في الوزن"
         
         # تحديد أقوى وكيل
         all_votes = votes['BUY'] + votes['SELL'] + votes['WAIT']
         strongest_agent = max(all_votes, key=lambda x: x['score'], default=None)
         directional_votes = votes['BUY'] + votes['SELL']
         strongest_directional = max(directional_votes, key=lambda x: x['score'], default=None)
+        strongest_directional_context = None
+        if strongest_directional:
+            strongest_signal = 'BUY' if strongest_directional in votes['BUY'] else 'SELL'
+            strongest_directional_context = {
+                'agent': strongest_directional.get('agent'),
+                'signal': strongest_signal,
+                'confidence': round(float(strongest_directional.get('confidence', 0)), 1),
+                'adjusted_confidence': round(float(strongest_directional.get('adjusted_confidence', strongest_directional.get('confidence', 0))), 1),
+                'weight': strongest_directional.get('weight'),
+                'score': round(float(strongest_directional.get('score', 0)), 3),
+                'reliability_grade': self._reliability_grade(
+                    float(strongest_directional.get('adjusted_confidence', strongest_directional.get('confidence', 0))),
+                    float(strongest_directional.get('weight', 0.0)),
+                    str(strongest_directional.get('agent', 'unknown')),
+                ),
+                'mode': 'one_agent_context',
+            }
+
         experimental_source = None
         exp_cfg = self.config.get('signal_requirements', {}).get('experimental_single_agent', {}) or {}
         exp_enabled = bool(exp_cfg.get('enabled', False))
@@ -339,6 +355,7 @@ class DecisionAgent(BaseAgent):
             'sell_agreement_pct': round(sell_agreement_pct, 1),
             'total_voting_agents': total_voting,
             'strongest_agent': strongest_agent['agent'] if strongest_agent else None,
+            'strongest_directional': strongest_directional_context,
             'experimental_single_agent': experimental_source,
             'rejection_reason': rejection_reason
         }
@@ -1182,6 +1199,8 @@ Return JSON only, no Markdown:
             'weights': analysis.get('weights', {}),
             'classic': analysis.get('classic', {}),
             'experimental_single_agent': (analysis.get('classic', {}) or {}).get('experimental_single_agent'),
+            'agent_context': (analysis.get('classic', {}) or {}).get('strongest_directional'),
+            'one_agent_groq_mode': bool(self.config.get('groq_observation_mode', {}).get('allow_single_agent_context', False)),
             'ai': analysis.get('ai', {}),
             'learning': analysis.get('learning', {}),
             'risk': risk,

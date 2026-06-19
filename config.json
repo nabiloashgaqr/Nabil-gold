@@ -47,10 +47,10 @@
     "description_max_rr_ratio": "سقف R:R لتجنب أهداف TP2 غير واقعية في الإشارات التجريبية/الحية"
   },
   "signal_requirements": {
-    "min_agents_agree": 3,
-    "min_agreement_percentage": 60,
-    "allow_all_signals": false,
-    "description": "Production strict: at least 3 directional agents and 60% agreement are required before Groq can approve BUY/SELL.",
+    "min_agents_agree": 1,
+    "min_agreement_percentage": 1,
+    "allow_all_signals": true,
+    "description": "One-Agent + Groq mode: one directional agent context is enough, but Groq must independently approve BUY/SELL.",
     "experimental_single_agent": {
       "enabled": false,
       "min_confidence": 1,
@@ -345,9 +345,9 @@
   "groq_observation_mode": {
     "enabled": true,
     "min_groq_confidence": 60,
-    "allow_single_agent_context": false,
+    "allow_single_agent_context": true,
     "disable_forced_observation": true,
-    "description": "Production strict: Groq is final, but requires normal agent agreement context and no forced signals.",
+    "description": "One-Agent + Groq mode: strongest/available agent context may be used, but Groq remains the final decision gate. No forced signals.",
     "block_on_ai_contradiction": true,
     "min_supportive_evidence_items": 2,
     "retry_on_contradiction": true,
@@ -371,7 +371,7 @@
   "operation_mode": "observation",
   "operation_modes": {
     "observation": {
-      "description": "Groq decides final BUY/SELL using one or more agent contexts. Does not require 3 agents.",
+      "description": "One-Agent + Groq: one directional agent context is enough, but Groq must approve final BUY/SELL. Paper-only observation mode.",
       "requires_three_agents": false,
       "groq_observation": true,
       "paper_only": true
