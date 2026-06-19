@@ -43,6 +43,15 @@ class RiskManagementAgent(BaseAgent):
             tp1, tp2, tp3, target_method = self._take_profits(direction, entry_price, atr, support_levels, resistance_levels)
 
             risk_distance = abs(entry_price - stop_loss)
+            max_rr = self._f(self.settings.get("max_rr_ratio"), 4.0)
+            if risk_distance > 0 and max_rr > 0:
+                max_tp2_distance = risk_distance * max_rr
+                if direction == "BUY" and tp2 - entry_price > max_tp2_distance:
+                    tp2 = entry_price + max_tp2_distance
+                    tp3 = max(tp3, tp2 + atr)
+                elif direction == "SELL" and entry_price - tp2 > max_tp2_distance:
+                    tp2 = entry_price - max_tp2_distance
+                    tp3 = min(tp3, tp2 - atr)
             tp1_distance = abs(tp1 - entry_price)
             tp2_distance = abs(tp2 - entry_price)
             rr_tp1 = tp1_distance / risk_distance if risk_distance else 0.0
@@ -101,6 +110,7 @@ class RiskManagementAgent(BaseAgent):
                     "tp1_distance_price": round(tp1_distance, 2),
                     "tp2_distance_price": round(tp2_distance, 2),
                     "target_method": target_method,
+                    "max_rr_ratio": self._f(self.settings.get("max_rr_ratio"), 4.0),
                     "checks": checks,
                     "portfolio": portfolio,
                     "trade_grade": risk_profile,

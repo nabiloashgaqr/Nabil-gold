@@ -489,6 +489,13 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
 قواعد الذاكرة من أخطاء سابقة (التزم بها قدر الإمكان، وإذا خالفتها اجعل القرار WAIT أو اخفض الثقة):
 {format_memory_rules_for_prompt(memory_rules or [], max_rules=4)}
 
+قواعد صارمة لشرحك:
+- لا تستخدم دليلاً صعودياً مثل "MACD bullish" كسبب مؤيد لصفقة SELL؛ ضعه في risk_notes أو opposite_risk.
+- لا تستخدم دليلاً هبوطياً كسبب مؤيد لصفقة BUY.
+- يجب أن تكون evidence متوافقة مع final_signal أو تذكر بوضوح أنها مخاطرة/تعارض.
+- يجب أن تتطابق risk_reward مع أرقام RiskManagement، ولا تخترع R:R مختلفاً.
+- إذا الأدلة متعارضة، اجعل القرار WAIT أو اخفض الثقة بوضوح.
+
 أجب بصيغة JSON فقط وبدون Markdown:
 {{
     "final_signal": "BUY" أو "SELL" أو "WAIT",
@@ -540,6 +547,7 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
                         'invalidation': parsed.get('invalidation', ''),
                         'alternative_scenario': parsed.get('alternative_scenario', ''),
                         'quality_notes': parsed.get('quality_notes', []),
+                        'ai_warnings': self._ai_contradiction_warnings({'signal': parsed.get('final_signal', parsed.get('signal', 'WAIT')), **parsed}),
                         'provider': response.provider,
                         'model': getattr(response, 'model', ''),
                         'tokens_used': response.tokens_used,
@@ -869,6 +877,20 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
             'agreement_pct': round(agreement, 1),
         }
 
+    def _ai_contradiction_warnings(self, ai: Dict[str, Any]) -> List[str]:
+        """Detect obvious contradictions in Groq explanation."""
+        warnings: List[str] = []
+        signal = str(ai.get('signal', ai.get('final_signal', ''))).upper()
+        text = " ".join(str(ai.get(k, '')) for k in ['reasoning', 'entry_reason', 'evidence', 'quality_notes'])
+        lower = text.lower()
+        bullish_terms = ['macd bullish', 'bullish and improving', 'bullish', 'ema bullish', 'صاعد', 'شرائي']
+        bearish_terms = ['macd bearish', 'bearish', 'ema bearish', 'هابط', 'بيعي']
+        if signal == 'SELL' and any(term in lower for term in bullish_terms):
+            warnings.append('تحذير: شرح Groq يحتوي دليلاً صعودياً ضمن إشارة SELL؛ اعتبره مخاطرة لا سبب دخول.')
+        if signal == 'BUY' and any(term in lower for term in bearish_terms):
+            warnings.append('تحذير: شرح Groq يحتوي دليلاً هبوطياً ضمن إشارة BUY؛ اعتبره مخاطرة لا سبب دخول.')
+        return warnings
+
     def _forced_observation_signal(self, context: Dict[str, Any]) -> Dict[str, Any] | None:
         """Create a clearly-labeled paper observation signal when all agents/Groq say WAIT.
 
@@ -1060,6 +1082,8 @@ Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
         reasons = [analysis.get('reasoning', '')]
         if signal_payload.get('risk_summary'):
             reasons.append(signal_payload.get('risk_summary'))
+        for warning in (analysis.get('ai', {}) or {}).get('ai_warnings', []) or []:
+            reasons.append(warning)
         for warning in analysis.get('warnings', []) or []:
             reasons.append(warning)
 
