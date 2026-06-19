@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -70,7 +71,7 @@ class DatabaseService:
 
     def save_trade(self, decision: Dict[str, Any]) -> str:
         """Save a new trade from a decision dictionary."""
-        trade_id = f"TRADE_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        trade_id = f"TRADE_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}_{uuid.uuid4().hex[:8]}"
         signal = decision.get("signal", {})
         entry = signal.get("entry", {})
         entry_price = float(entry.get("price") or ((float(entry.get("low", 0)) + float(entry.get("high", 0))) / 2) or 0)
@@ -303,39 +304,70 @@ class DatabaseService:
         rules = [r for r in load_trades(rules_path) if r.get("active", True)]
         return sorted(rules, key=lambda r: (float(r.get("confidence", 0) or 0), str(r.get("updated_at", ""))), reverse=True)[:limit]
 
+    def _missing_column(self, exc: Exception, column: str) -> bool:
+        """Return True for Supabase/PostgREST missing-column errors."""
+        text = str(exc).lower()
+        return "42703" in text and column.lower() in text and "does not exist" in text
+
+    def _trade_time_text(self, trade: Dict[str, Any]) -> str:
+        """Best available timestamp across current and legacy trade schemas."""
+        for key in ("created_at", "entry_time", "opened_at", "updated_at", "last_updated", "closed_at"):
+            value = trade.get(key)
+            if value:
+                return str(value)
+        return ""
+
     def get_today_signals_count(self) -> int:
         """Return number of trades created today UTC."""
         return len(self.get_today_trades())
 
     def get_today_trades(self) -> List[Dict[str, Any]]:
-        """Return trades created today UTC."""
+        """Return trades created/opened/updated today UTC, supporting legacy schemas."""
         today_text = date.today().isoformat()
         if self.use_supabase and self.client:
             try:
                 response = self.client.table("trades").select("*").gte("created_at", today_text).execute()
                 return list(response.data or [])
             except Exception as exc:  # noqa: BLE001
-                if self._strict_supabase():
+                if self._missing_column(exc, "created_at"):
+                    try:
+                        response = self.client.table("trades").select("*").gte("updated_at", today_text).execute()
+                        return list(response.data or [])
+                    except Exception as fallback_exc:  # noqa: BLE001
+                        if self._strict_supabase():
+                            raise RuntimeError(f"Failed to fetch today trades using legacy updated_at fallback: {fallback_exc}") from fallback_exc
+                        self.logger.error("Failed legacy today trades fallback from Supabase: %s", fallback_exc)
+                elif self._strict_supabase():
                     raise RuntimeError(f"Failed to fetch today trades from Supabase in production: {exc}") from exc
-                self.logger.error("Failed to fetch today trades from Supabase: %s", exc)
-        return [trade for trade in load_trades(self.local_path) if str(trade.get("created_at", "")).startswith(today_text)]
+                else:
+                    self.logger.error("Failed to fetch today trades from Supabase: %s", exc)
+        return [trade for trade in load_trades(self.local_path) if self._trade_time_text(trade).startswith(today_text)]
 
     def get_open_trades_count(self) -> int:
         """Return open trades count."""
         return len(self.get_open_trades())
 
     def get_recent_trades(self, limit: int = 20) -> List[Dict[str, Any]]:
-        """Return recent trades ordered newest first."""
+        """Return recent trades ordered newest first, supporting legacy schemas."""
         if self.use_supabase and self.client:
             try:
                 response = self.client.table("trades").select("*").order("created_at", desc=True).limit(limit).execute()
                 return list(response.data or [])
             except Exception as exc:  # noqa: BLE001
-                if self._strict_supabase():
+                if self._missing_column(exc, "created_at"):
+                    try:
+                        response = self.client.table("trades").select("*").order("updated_at", desc=True).limit(limit).execute()
+                        return list(response.data or [])
+                    except Exception as fallback_exc:  # noqa: BLE001
+                        if self._strict_supabase():
+                            raise RuntimeError(f"Failed to fetch recent trades using legacy updated_at fallback: {fallback_exc}") from fallback_exc
+                        self.logger.error("Failed legacy recent trades fallback from Supabase: %s", fallback_exc)
+                elif self._strict_supabase():
                     raise RuntimeError(f"Failed to fetch recent trades from Supabase in production: {exc}") from exc
-                self.logger.error("Failed to fetch recent trades from Supabase: %s", exc)
+                else:
+                    self.logger.error("Failed to fetch recent trades from Supabase: %s", exc)
         trades = load_trades(self.local_path)
-        return sorted(trades, key=lambda trade: str(trade.get("created_at", "")), reverse=True)[:limit]
+        return sorted(trades, key=self._trade_time_text, reverse=True)[:limit]
 
     def get_consecutive_losses(self, limit: int = 20) -> int:
         """Return consecutive losing closed trades, ignoring open trades."""
@@ -391,7 +423,6 @@ class DatabaseService:
             "status",
             "current_price",
             "current_pnl",
-            "created_at",
             "closed_at",
             "close_price",
             "final_pnl",
