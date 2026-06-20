@@ -350,7 +350,8 @@ gold-dashboard
 
 ```json
 "news_feed": {
-  "enabled": true,
+  "enabled": false,
+  "source": "forexfactory",
   "hours_before": 2,
   "hours_after": 1,
   "min_impact": "medium",
@@ -782,7 +783,7 @@ storage/groq_model_comparison.json
 تم تنفيذ إصلاحات P1 المهمة:
 
 1. **LearningService PnL fix**: التعلم يقرأ الآن `final_pnl` ثم `current_pnl_points/current_pnl` ثم الحقول القديمة.
-2. **Legacy news_feed disabled**: `services/news_feed.py` لا يولد بيانات mock في الإنتاج؛ الأخبار الحية تعتمد على `NewsRiskAgent` وملفات/متغيرات الأخبار اليدوية حتى ربط مزود حقيقي.
+2. **ForexFactory news feed (Fix Pack v1)**: تم حذف `services/news_feed.py` القديم (mock) واستُبدل بـ `services/news_feed_forexfactory.py` الذي يجلب التقويم الاقتصادي تلقائيًا من ForexFactory بدون حاجة لـ API key، ويُستخدم كـ fallback داخل `NewsRiskAgent`.
 3. **Timezone**: تم ضبط النظام إلى `Asia/Hebron`.
 4. **Groq max_tokens**: تم رفعه إلى `800` بعد تقليل حجم prompt.
 5. **Operation modes unified**:
