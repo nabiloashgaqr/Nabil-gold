@@ -1,4 +1,4 @@
-# 🏆 Gold AI Signals — نظام إشارات الذهب الذكي
+# 🏆 Gold AI Signals
 
 <div align="center">
 
@@ -7,1540 +7,195 @@
 ![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-Automated-orange)
 ![Telegram](https://img.shields.io/badge/Telegram-Signals-blue)
 ![Groq](https://img.shields.io/badge/AI-GroqCloud-purple)
-![Tests](https://img.shields.io/badge/Tests-207%20Passed-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-217%20Passed-brightgreen)
 ![Mode](https://img.shields.io/badge/Mode-Paper%20Trading-yellow)
 
 </div>
 
 ---
 
-## ⚠️ تنبيه مهم
+## ⚠️ تنبيه
 
-هذا المشروع تعليمي/تجريبي لإشارات الذهب **XAU/USD**، ولا يمثل توصية مالية أو تنفيذًا آليًا للصفقات. النظام يعمل حاليًا بوضع:
-
-```text
-Paper Trading
-```
-
-أي أنه يحفظ ويتابع الصفقات افتراضيًا لأغراض الاختبار والتحسين.
+المشروع **تعليمي/تجريبي** لإشارات الذهب **XAU/USD** — لا يُعد توصية مالية.
+الوضع الحالي: **Paper Trading** (صفقات افتراضية، بدون تنفيذ حقيقي).
 
 ---
 
-## 🎯 ما هو المشروع؟
+## 🎯 المشروع
 
-**Gold AI Signals** هو نظام آلي لتحليل الذهب وإرسال إشارات إلى Telegram، يعمل على GitHub Actions، ويستخدم:
+نظام آلي لتحليل الذهب وإرسال إشارات إلى **Telegram**، يعمل على **GitHub Actions** بوضع **One-Agent + Groq** (قرار Groq إجباري).
 
-- بيانات سوق XAU/USD
-- عدة وكلاء تحليل فني وسلوكي
-- Groq Cloud كذكاء اصطناعي إجباري لاتخاذ القرار النهائي
-- Supabase كذاكرة دائمة للصفقات والتعلم
-- Telegram لإرسال الإشارات والتقارير والتنبيهات
-- Backtesting وDashboard وذاكرة أخطاء لتحسين الأداء تدريجيًا
+**المكوّنات الأساسية:**
+- بيانات سوق XAU/USD (Twelve Data)
+- 5 وكلاء تحليل فني/سلوكي
+- Groq Cloud كبوّابة قرار نهائية
+- Supabase لتخزين الصفقات والتعلم
+- Telegram للإشعارات
+- Backtesting + Dashboard + AI Memory Rules
 
 ---
 
-## ✅ الحالة الحالية للنظام
+## ✅ الحالة الحالية
 
 | الجزء | الحالة |
 |---|---|
-| Telegram | ✅ يعمل |
-| Groq Smoke Test | ✅ يعمل |
-| GitHub Actions | ✅ يعمل |
-| Tests | ✅ 207 اختبار ناجح |
+| Telegram / Groq / GitHub Actions | ✅ يعمل |
+| الاختبارات | ✅ **217/217** ناجح |
+| تحذيرات `pyflakes` | ✅ **0** تحذير |
 | Paper Trading | ✅ مفعّل |
-| Groq إجباري | ✅ مفعّل |
-| منع الإشارات الضعيفة | ✅ مفعّل |
-| Dashboard | ✅ مضاف |
-| AI Memory Rules | ✅ مضافة |
-| Backtesting | ✅ مضاف |
+| Groq كقرار نهائي | ✅ إجباري |
+| AI Memory Rules / Backtesting / Dashboard | ✅ مضاف |
 
 ---
 
-## 🧠 الميزات الرئيسية
+## 🧠 كيف يعمل النظام
 
-### 1. 🤖 Groq Cloud إجباري لاتخاذ القرار
+### وضع التشغيل: One-Agent + Groq
+- وكيل واحد كافٍ لتوفير السياق
+- **Groq فقط** هو من يقرر BUY/SELL/WAIT
+- إذا Groq فاشل أو يقول WAIT ← الإشارة تُحجب
 
-النظام مضبوط لاستخدام Groq Cloud عبر:
-
-```text
-GROQ_API_KEY
-```
-
-إذا فشل Groq أو لم يكن المفتاح موجودًا، لا يرجع النظام لإشارة كلاسيكية عشوائية، بل يمنع الإشارة.
-
-**الفائدة:** القرار النهائي لا يخرج إلا بعد تحليل AI.
-
----
-
-### 2. 🧩 نظام وكلاء متعدد Agents
-
-يستخدم المشروع عدة وكلاء تحليل، منها:
-
+### الوكلاء (5 وكلاء)
 | الوكيل | الوظيفة |
 |---|---|
-| TechnicalAgent | مؤشرات فنية مثل RSI / MACD / EMA / ATR |
-| ClassicalAgent | أنماط كلاسيكية ودعم/مقاومة |
-| SMCAgent | Smart Money Concepts مثل Order Blocks وLiquidity |
-| PriceActionAgent | قراءة حركة السعر والشموع |
-| MultiTimeframeAgent | مقارنة الاتجاه عبر أكثر من فريم |
-| NewsRiskAgent | فحص مخاطر الأخبار |
-| RiskManagementAgent | حساب SL/TP/R:R وحجم الصفقة |
-| DecisionAgent | دمج كل النتائج واتخاذ القرار النهائي |
-| OpenTradesManager | متابعة الصفقات المفتوحة |
-| DailyReportAgent | توليد التقرير اليومي |
+| `TechnicalAgent` | RSI / MACD / EMA / ATR |
+| `ClassicalAgent` | أنماط كلاسيكية + دعم/مقاومة |
+| `SMCAgent` | Smart Money (Order Blocks / Liquidity) |
+| `PriceActionAgent` | قراءة حركة السعر |
+| `MultiTimeframeAgent` | مقارنة الاتجاه عبر الفريمات |
+
+### الفلاتر (يجب أن تجتاز الإشارة كلها)
+- ✅ Groq متاح ويقول BUY/SELL بثقة ≥ 60
+- ✅ لا توجد أخبار عالية الخطورة (ForexFactory)
+- ✅ لا توجد إشارة مكررة في آخر 90 دقيقة
+- ✅ داخل وقت التداول (09:00–22:59 Asia/Hebron)
+- ✅ Dynamic Risk Manager لا يحظر (بعد 3 خسائر متتالية ← HALT)
+
+### درجة جودة الإشارة (A+ / A / B / C / D)
+تظهر في Telegram بناءً على: الثقة + توافق الوكلاء + R:R + إدارة المخاطر + الجلسة.
 
 ---
 
-### 3. 📊 شروط إرسال الإشارة
+## ⏰ أوقات التشغيل (Asia/Hebron)
 
-لا يتم إرسال BUY/SELL إلا إذا تحققت الشروط الأساسية:
-
-```text
-- Groq يعمل
-- القرار BUY أو SELL
-- الثقة فوق الحد الأدنى
-- إدارة المخاطر وافقت
-- لا توجد أخبار خطيرة تمنع التداول
-- ليست إشارة مكررة
-- داخل وقت التداول التجريبي
-```
-
-الحد الأدنى الحالي للثقة:
-
-```json
-"min_confidence": 60
-```
-
----
-
-### 4. ⭐ Signal Quality Score
-
-كل إشارة تحصل على تقييم جودة:
-
-```text
-A+ / A / B / C / D
-```
-
-يعتمد التقييم على:
-
-- ثقة الإشارة
-- توافق الوكلاء
-- Risk/Reward
-- موافقة إدارة المخاطر
-- الأخبار
-- جودة الجلسة
-- التحذيرات
-
-ويظهر في Telegram مثل:
-
-```text
-⭐ جودة الإشارة: B / 72.5% (Good)
-```
-
----
-
-### 5. 🔁 Duplicate Signal Filter
-
-يمنع النظام تكرار نفس الإشارة إذا:
-
-- توجد صفقة مفتوحة بنفس الاتجاه
-- أو تم إرسال إشارة مشابهة حديثًا
-- أو السعر قريب جدًا من إشارة سابقة
-
-الإعدادات:
-
-```json
-"duplicate_signal_filter": {
-  "enabled": true,
-  "lookback_minutes": 90,
-  "price_tolerance_points": 3.0,
-  "price_tolerance_atr_multiplier": 0.75,
-  "block_if_open_same_direction": true
-}
-```
-
-**الفائدة:** تقليل التكرار والصفقات المتشابهة.
-
----
-
-### 6. 🧪 Paper Trading Mode
-
-النظام يعمل بوضع تجريبي:
-
-```json
-"trading_mode": "paper"
-```
-
-كل إشارة يتم حفظها كصفقة افتراضية، ويتم تتبعها دون تنفيذ حقيقي.
-
-يتم حفظ:
-
-- نوع الصفقة
-- الدخول
-- وقف الخسارة
-- الأهداف
-- الثقة
-- حالة الصفقة
-- الربح/الخسارة الافتراضية
-- وضع Paper Trading
-
----
-
-### 7. 🧠 AI Decision Explanation
-
-رسالة Telegram لا تعرض الأرقام فقط، بل تعرض شرح Groq:
-
-```text
-🤖 تحليل Groq:
-├ الاتجاه
-├ سبب الدخول
-├ خطر الاتجاه المعاكس
-├ ملاحظات المخاطر
-└ الخطة
-```
-
-**الفائدة:** تفهم لماذا تم إرسال الإشارة، وليس فقط أين تدخل وتخرج.
-
----
-
-### 8. 📱 Telegram Notifications
-
-النظام يرسل إلى Telegram:
-
-- إشارات BUY/SELL
-- تحديثات الصفقات المفتوحة
-- نتائج TP/SL
-- التقرير اليومي
-- مراجعات Groq للخسائر
-- نتائج اختبار Groq
-- نتائج Backtest
-- تحديث Dashboard
-
-يوجد أيضًا Workflow لاختبار Telegram:
-
-```text
-📱 Telegram Smoke Test
-```
-
----
-
-### 9. 🧪 Groq Smoke Test
-
-تمت إضافة Workflow مستقل لاختبار Groq:
-
-```text
-🤖 Groq Smoke Test
-```
-
-يتأكد من:
-
-- وجود `GROQ_API_KEY`
-- صحة الاتصال بـ Groq
-- صحة الموديل
-- قدرة Groq على إرجاع JSON
-
----
-
-### 10. 🧪 Backtesting
-
-تمت إضافة Backtesting خفيف:
-
-```text
-🧪 Backtest
-```
-
-الملفات:
-
-```text
-services/backtesting.py
-scripts/run_backtest.py
-.github/workflows/backtest.yml
-```
-
-يقيس:
-
-- عدد الصفقات
-- Win Rate
-- Net Points
-- Profit Factor
-- Max Drawdown
-- أداء BUY مقابل SELL
-- متوسط جودة الإشارات
-
-> ملاحظة: Backtesting يعمل Classic/offline ولا يستخدم Groq افتراضيًا حتى لا يستهلك API بكثرة.
-
----
-
-### 11. 🧠 AI Trade Review للخسائر
-
-عند إغلاق صفقة بخسارة، يقوم Groq بمراجعتها واستخراج سبب الخسارة.
-
-يحفظ في جدول:
-
-```text
-ai_trade_reviews
-```
-
-يحاول تحديد:
-
-- سبب الخسارة
-- هل الدخول مبكر؟
-- هل الاتجاه خطأ؟
-- هل وقف الخسارة ضيق؟
-- هل الأخبار أثرت؟
-- ما القواعد المقترحة للتحسين؟
-
----
-
-### 12. 🧠 AI Memory Rules Engine
-
-هذه من أهم التطويرات.
-
-النظام يحوّل مراجعات Groq للخسائر إلى قواعد ذاكرة دائمة في Supabase:
-
-```text
-ai_memory_rules
-```
-
-مثال قاعدة:
-
-```text
-لا تدخل SELL قرب دعم قوي دون تأكيد إغلاق شمعة 15m
-```
-
-ثم يقرأ النظام هذه القواعد في التحليل القادم ويضيفها إلى Prompt قرار Groq.
-
-**الفائدة:** النظام لا يراجع الخسائر فقط، بل يتذكر الدروس ويستخدمها لاحقًا.
-
----
-
-### 13. 📊 Dashboard HTML
-
-تمت إضافة لوحة تحكم HTML يتم إنشاؤها من GitHub Actions:
-
-```text
-📊 Dashboard
-```
-
-تعرض:
-
-- إجمالي الصفقات
-- الصفقات المفتوحة
-- Win Rate
-- Net Points
-- Profit Factor
-- متوسط الثقة
-- آخر الصفقات
-- AI Trade Reviews
-- Active Memory Rules
-
-ويتم رفعها كـ Artifact باسم:
-
-```text
-gold-dashboard
-```
-
----
-
-### 14. 📰 News Risk Filter
-
-يوجد وكيل أخبار يمنع أو يقلل الثقة حول الأخبار المؤثرة.
-
-الإعدادات تشمل:
-
-```json
-"news_feed": {
-  "enabled": false,
-  "source": "forexfactory",
-  "hours_before": 2,
-  "hours_after": 1,
-  "min_impact": "medium",
-  "auto_block_on_high": true
-}
-```
-
----
-
-### 15. 📈 Trailing Stop / إدارة الصفقة
-
-يدعم المشروع متابعة الصفقات المفتوحة:
-
-- TP1
-- TP2
-- SL
-- Break-even
-- Trailing stop
-- إغلاق جزئي افتراضيًا
-- تنبيهات Telegram عند الأحداث المهمة
-
----
-
-### 16. 🧭 Daily Bias Filter
-
-فلتر اتجاه أعلى يستخدم فريم 4H كمرجع عملي للاتجاه العام، ويمنع الصفقات الضعيفة عكس الاتجاه.
-
-مثال:
-
-```text
-Daily Bias = Bullish
-BUY مسموح طبيعيًا
-SELL يحتاج ثقة أعلى أو يتحول إلى WAIT
-```
-
-الإعدادات:
-
-```json
-"daily_bias_filter": {
-  "enabled": true,
-  "timeframe": "4H",
-  "contrarian_min_confidence": 80
-}
-```
-
----
-
-### 17. 📰 AI News Interpretation
-
-Groq لا يكتفي بقراءة وجود الأخبار، بل يفسر تأثيرها المحتمل على الذهب والدولار:
-
-- هل الخبر يدعم الذهب أم الدولار؟
-- هل يجب منع التداول؟
-- هل يُسمح باتجاه واحد فقط؟
-- كم يجب الانتظار؟
-
-ويظهر أثره في القرار النهائي ورسالة Telegram.
-
----
-
-### 18. 🛡️ Dynamic Risk Management
-
-إدارة مخاطرة ديناميكية ترفع شروط الإشارة أو توقف التداول مؤقتًا عند تدهور الأداء.
-
-تعمل حسب:
-
-- عدد الخسائر المتتالية
-- خسارة اليوم بالنقاط
-- أداء آخر الصفقات
-- جودة الإشارة
-- ثقة القرار
-
-مثال:
-
-```text
-بعد خسارتين متتاليتين → وضع STRICT
-مطلوب ثقة أعلى وجودة أعلى
-بعد 3 خسائر → HALT مؤقت
-```
-
-الإعدادات الأساسية:
-
-```json
-"dynamic_risk_management": {
-  "enabled": true,
-  "warn_after_losses": 2,
-  "halt_after_losses": 3,
-  "daily_loss_limit_points": 30,
-  "strict_min_confidence": 82,
-  "strict_min_quality_score": 80
-}
-```
-
----
-
-## ⏰ أوقات التشغيل الحالية
-
-تم ضبط النظام للتجربة حسب توقيت:
-
-```text
-Asia/Hebron
-```
-
-### التحليل
-
-```text
-كل 10 دقائق تقريبًا
-من 09:00 صباحًا إلى 22:59 مساءً بتوقيت Asia/Hebron
-الأحد إلى الخميس
-```
-
-### تحديث الصفقات المفتوحة
-
-```text
-كل ساعة
-من 09:00 صباحًا إلى 22:59 مساءً بتوقيت Asia/Hebron
-الأحد إلى الخميس
-```
-
-### جلسة نهاية اليوم
-
-```text
-23:00 بتوقيت Asia/Hebron
-```
-
-وتشمل:
-
-- تحديث آخر اليوم للصفقات المفتوحة
-- Learning Update
-- AI Trade Review للخسائر
-- التقرير اليومي
-- تقرير الصفقات المفتوحة
-
----
-
-## 🧾 GitHub Actions الحالية
-
-| Workflow | الوظيفة |
+| المهمة | التوقيت |
 |---|---|
-| ✅ Tests | تشغيل الاختبارات |
-| 📊 Gold Analysis Bot | التحليل وإرسال الإشارات |
-| 🔄 Update Open Trades | تحديث الصفقات المفتوحة |
-| 📊 Daily Report & Learning | التقرير اليومي والتعلم |
-| 📱 Telegram Smoke Test | اختبار Telegram |
-| 🤖 Groq Smoke Test | اختبار Groq |
-| 🧪 Backtest | اختبار تاريخي |
-| 📊 Dashboard | توليد لوحة التحكم |
+| التحليل وإرسال الإشارات | كل 10 دقائق، 09:00–22:59 (أحد–خميس) |
+| تحديث الصفقات المفتوحة | كل ساعة، 09:00–22:59 |
+| التقرير اليومي + Learning | 23:00 يوميًا |
 
 ---
 
-## 🔐 GitHub Secrets المطلوبة
+## 🚀 التشغيل السريع
 
-أضفها من:
-
-```text
-Repository → Settings → Secrets and variables → Actions
-```
+### 1) أضف GitHub Secrets
+من: `Repository → Settings → Secrets and variables → Actions`
 
 | Secret | الوصف |
 |---|---|
 | `TELEGRAM_BOT_TOKEN` | توكن بوت Telegram |
-| `TELEGRAM_CHAT_ID` | رقم القناة/المحادثة |
+| `TELEGRAM_CHAT_ID` | رقم القناة |
 | `SUPABASE_URL` | رابط مشروع Supabase |
-| `SUPABASE_KEY` | يفضل Service Role Key |
+| `SUPABASE_KEY` | Service Role Key |
 | `TWELVE_DATA_API_KEY` | مفتاح بيانات السوق |
 | `GROQ_API_KEY` | مفتاح Groq Cloud |
+
+### 2) شغّل مخطط قاعدة البيانات
+افتح `supabase_schema.sql` في **Supabase SQL Editor** ونفّذه.
+
+### 3) اختبر بالترتيب
+1. **📱 Telegram Smoke Test**
+2. **🤖 Groq Smoke Test**
+3. **✅ Tests**
+4. **📊 Gold Analysis Bot** (يدوي)
+
+---
+
+## 🧾 GitHub Actions (9 workflows)
+
+| Workflow | الوظيفة |
+|---|---|
+| ✅ Tests | تشغيل 217 اختبار |
+| 📊 Gold Analysis Bot | التحليل + إرسال الإشارات (كل 10 دقائق) |
+| 🔄 Update Open Trades | تحديث SL/TP/Trailing (كل ساعة) |
+| 📊 Daily Report & Learning | تقرير نهاية اليوم + تعلّم AI |
+| 📊 Dashboard | توليد HTML Dashboard |
+| 📱 Telegram Smoke Test | فحص Telegram |
+| 🤖 Groq Smoke Test | فحص Groq API |
+| 🧪 Backtest | اختبار تاريخي يدوي |
+| 🧪 Groq Model Compare | مقارنة نماذج Groq يدويًا |
 
 ---
 
 ## 🗄️ Supabase Tables
 
-الجداول الأساسية:
-
-```text
-trades
-signals
-agent_weights
-learning_history
-agent_evaluations
-ai_trade_reviews
-ai_memory_rules
-portfolio
-daily_reports
-news_log
-session_log
-risk_settings
-```
-
-ملف SQL:
-
-```text
-supabase_schema.sql
-```
-
-يمكن تشغيله من Supabase SQL Editor.
+`trades` · `signals` · `agent_weights` · `learning_history` · `agent_evaluations` · `ai_trade_reviews` · `ai_memory_rules` · `portfolio` · `daily_reports` · `news_log` · `session_log` · `risk_settings`
 
 ---
 
-## 🚀 طريقة التشغيل السريعة
+## 📁 هيكل المشروع
 
-1. أضف GitHub Secrets.
-2. شغل `supabase_schema.sql` في Supabase.
-3. اختبر Telegram:
-   ```text
-   📱 Telegram Smoke Test
-   ```
-4. اختبر Groq:
-   ```text
-   🤖 Groq Smoke Test
-   ```
-5. شغل Tests:
-   ```text
-   ✅ Tests
-   ```
-6. شغل التحليل يدويًا:
-   ```text
-   📊 Gold Analysis Bot
-   ```
-7. راقب Telegram وSupabase.
-
----
-
-## 📁 هيكل المشروع المختصر
-
-```text
+```
 Nabil-gold/
-├── .github/workflows/
-│   ├── analyze.yml
-│   ├── update_trades.yml
-│   ├── daily_report.yml
-│   ├── telegram_test.yml
-│   ├── groq_test.yml
-│   ├── backtest.yml
-│   ├── dashboard.yml
-│   └── tests.yml
-├── agents/
-│   ├── decision_agent.py
-│   ├── risk_management_agent.py
-│   ├── technical_agent.py
-│   ├── smc_agent.py
-│   └── ...
-├── services/
-│   ├── ai_service.py
-│   ├── database.py
-│   ├── market_data.py
-│   ├── telegram_bot.py
-│   ├── backtesting.py
-│   ├── trade_review.py
-│   ├── memory_rules.py
-│   ├── dashboard.py
-│   └── ...
-├── scripts/
-│   ├── run_analysis.py
-│   ├── run_trade_updates.py
-│   ├── run_daily_report.py
-│   ├── run_backtest.py
-│   ├── run_trade_review.py
-│   ├── generate_dashboard.py
-│   └── ...
-├── tests/
-├── config.json
-├── supabase_schema.sql
-└── requirements.txt
+├── .github/workflows/      9 workflows (analyze, tests, daily_report, ...)
+├── agents/                 13 ملف (decision, technical, classical, smc, ...)
+├── services/               16 ملف (ai_service, database, telegram_bot, ...)
+├── scripts/                11 ملف (run_analysis, run_trade_updates, ...)
+├── tests/                  18 ملف — 217 اختبار
+├── utils/                  helpers + indicators
+├── config.json             الإعدادات الرئيسية
+├── supabase_schema.sql     مخطط قاعدة البيانات
+├── requirements.txt        requests, pandas, supabase, httpx, pytest
+└── main.py                 نقطة دخول محلية
 ```
 
 ---
 
 ## 🧪 الاختبارات
 
-تشغيل محلي:
-
 ```bash
-python -m pytest -q
+# تشغيل محلي
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+python -m pytest tests/ -v
 ```
 
-الحالة الحالية:
-
-```text
-207 passed
-```
+**النتيجة:** `217 passed` في ~1 ثانية · تغطية ~63%
 
 ---
 
-## ✅ التطويرات التي تمت مؤخرًا
+## 🛠️ التطويرات الأخيرة
 
-### المرحلة الأولى — إصلاح التشغيل
+### Reliability (P0)
+- ✅ Groq retry/backoff (3 محاولات، exponential 1s/2s)
+- ✅ Synthetic data guard (يحجب الإنتاج على بيانات وهمية)
+- ✅ Supabase strict mode (لا fallback إلى JSON محلي)
+- ✅ Workflow concurrency (منع تداخل التشغيلات)
+- ✅ NEUTRAL/HOLD/NO_TRADE → WAIT (توحيد)
 
-- إصلاح ربط `DecisionAgent`
-- توحيد صيغة القرار النهائي
-- إصلاح `run_daily_report.py`
-- إصلاح `run_learning.py`
-- توحيد Supabase schema مع الكود
-- منع الإشارات على بيانات وهمية في الإنتاج
-- إصلاح مشاكل async tests
+### Quality (P1)
+- ✅ Groq Observation Mode: One-Agent + Groq إجباري
+- ✅ ForexFactory news feed (مجاني، بدون API key)
+- ✅ sanitize_rule_text() (منع prompt injection في AI Memory Rules)
+- ✅ Dynamic Risk Manager (HALT بعد 3 خسائر، CAUTION بعد 2)
+- ✅ Duplicate Signal Filter (نافذة 90 دقيقة)
+- ✅ AI Memory Rules من Trade Review (قواعد تحسّن القرارات القادمة)
+- ✅ Trailing Stop بعد TP1 + Partial Close 50%
 
-### المرحلة الثانية — تجهيز الإنتاج
-
-- إضافة `validate_setup.py`
-- إضافة Workflow للاختبارات
-- إضافة Telegram Smoke Test
-- إضافة Groq Smoke Test
-- جعل Groq إجباريًا
-- إصلاح فلتر الثقة
-- ضبط أوقات التشغيل حسب Asia/Hebron
-
-### مرحلة الذكاء والتحسين
-
-- Duplicate Signal Filter
-- Signal Quality Score
-- AI Decision Explanation
-- Paper Trading Mode
-- Backtesting
-- AI Trade Review للخسائر
-- AI Memory Rules Engine
-- HTML Dashboard
-- Daily Bias Filter
-- AI News Interpretation
-- Dynamic Risk Management
+### Code Quality
+- ✅ **217/217** اختبار ناجح
+- ✅ **0** تحذير `pyflakes` (كان 27)
+- ✅ NameError الحرج في `_final_decision` مُصلَح
+- ✅ الكود الميت في `decision_agent.py` محذوف
 
 ---
 
-
----
-
-
----
-
-
----
-
-
----
-
-
----
-
-## 🚀 تحديثات تشغيلية متقدمة بعد مراقبة الإشارات
-
-تم تنفيذ أربع تطويرات إضافية دفعة واحدة:
-
-### 1. OpenTradesManager v3.1
-
-أصبح يتابع الصفقة بعد الدخول بذكاء أكبر:
-
-- MFE: أفضل تحرك لصالح الصفقة
-- MAE: أسوأ تحرك ضد الصفقة
-- Management Phase: INITIAL / IN_PROFIT / DEFENSIVE / POST_TP1 / TRAILING
-- Exit Warning عند الاقتراب من منطقة خطر
-- تنبيه Telegram جديد: EXIT_WARNING
-
-### 2. LearningService + Memory Integration
-
-تم ربط التعلم بقواعد الذاكرة النشطة:
-
-- يقرأ `ai_memory_rules`
-- يضيف توصيات بناءً على أكثر أخطاء متكررة
-- يعرض قواعد ذاكرة مهمة داخل تقرير التعلم
-
-### 3. Daily / Weekly Reports v3.1
-
-تم تطوير التقارير لتشمل:
-
-- أداء BUY مقابل SELL
-- أداء مصادر الإشارات/الوكلاء
-- توصيات تلقائية
-- تقرير أسبوعي تلقائي مساء الجمعة
-- Profit Factor وWin Rate وNet Points بشكل أوضح
-
-### 4. Backtesting Advanced v2
-
-تم تطوير الباك تست ليشمل:
-
-- اختيار الفريم من GitHub Actions
-- تصدير JSON + CSV
-- تحليل النتائج حسب Grade
-- رفع الملفات كـ Artifacts
-- ملخص Telegram أكثر تفصيلاً
-
----
-
-
----
-
-
----
-
-## 🧪 مقارنة نماذج Groq قبل التبديل
-
-تمت إضافة Workflow يدوي لاختبار نموذجين من Groq على نفس سياق القرار قبل تغيير نموذج الإنتاج:
-
-```text
-🧪 Groq Model Compare
-```
-
-الافتراضي يقارن:
-
-```text
-llama-3.1-8b-instant
-vs
-llama-3.3-70b-versatile
-```
-
-ويعرض في Telegram:
-
-- قرار كل نموذج
-- الثقة
-- عدد التوكنات
-- عدد التحذيرات/التناقضات
-- هل النموذجان متفقان أم مختلفان
-
-ويحفظ تقرير JSON كـ Artifact:
-
-```text
-storage/groq_model_comparison.json
-```
-
-> الهدف: اختبار `70b-versatile` على نفس البيانات قبل أي قرار نهائي بتغيير نموذج الإنتاج.
-
----
-
-
----
-
-
----
-
-## 🟠 P1 Important Fixes
-
-تم تنفيذ إصلاحات P1 المهمة:
-
-1. **LearningService PnL fix**: التعلم يقرأ الآن `final_pnl` ثم `current_pnl_points/current_pnl` ثم الحقول القديمة.
-2. **ForexFactory news feed (Fix Pack v1)**: تم حذف `services/news_feed.py` القديم (mock) واستُبدل بـ `services/news_feed_forexfactory.py` الذي يجلب التقويم الاقتصادي تلقائيًا من ForexFactory بدون حاجة لـ API key، ويُستخدم كـ fallback داخل `NewsRiskAgent`.
-3. **Timezone**: تم ضبط النظام إلى `Asia/Hebron`.
-4. **Groq max_tokens**: تم رفعه إلى `800` بعد تقليل حجم prompt.
-5. **Operation modes unified**:
-   - `observation`: وكيل واحد أو أكثر + قرار Groq النهائي، بدون شرط 3 وكلاء.
-   - `production_strict`: نمط صارم يتطلب توافق وكلاء + Groq + فلاتر كاملة.
-
----
-
-## 🚨 P0 Reliability Fixes
-
-تم تنفيذ إصلاحات اعتمادية عالية الأولوية:
-
-1. **RiskManagement ATR/levels fix**: قراءة ATR والدعم/المقاومة أصبحت من عدة مصادر وليس من مسار واحد فقط.
-2. **Synthetic data production guard**: أي فريم `synthetic_demo` داخل GitHub Actions يمنع التحليل فورًا.
-3. **Supabase strict mode**: فشل Supabase داخل GitHub Actions يوقف التشغيل ولا يرجع إلى JSON محلي.
-4. **Workflow concurrency**: كل Workflows لديها concurrency لمنع تداخل التشغيلات.
-5. **NEUTRAL = WAIT**: تم توحيد NEUTRAL/HOLD/NO_TRADE مع WAIT داخل تصويت DecisionAgent.
-
----
-
-## 🤖 Groq Observation Mode
-
-> تم تفعيل إعادة تصحيح Groq مرة واحدة عند وجود تناقض في الأدلة المؤيدة قبل تحويل القرار إلى WAIT.
-
-
-تم تفعيل وضع مراقبة يعتمد على Groq فقط:
-
-```json
-"groq_observation_mode": {
-  "enabled": true,
-  "min_groq_confidence": 50,
-  "allow_single_agent_context": true,
-  "disable_forced_observation": true
-}
-```
-
-> ⚠️ **ملاحظة (Fix Pack v2):** مفتاح `disable_forced_observation` أصبح بلا تأثير فعلي — دالة Forced Observation Signal التي كان يتحكم بها هذا المفتاح تم حذفها نهائيًا من `DecisionAgent`. يمكن إزالة هذا المفتاح من `config.json` بأمان.
-
-### كيف يعمل؟
-
-- يمكن تمرير سياق أقوى وكيل واحد إلى Groq.
-- لا يشترط 3 وكلاء في هذا الوضع.
-- لا يتم إرسال BUY/SELL إلا إذا Groq نفسه قرر BUY أو SELL.
-- إذا Groq قال WAIT، لا يتم إنشاء Forced Observation Signal.
-- تظهر في Telegram عبارة:
-
-```text
-🤖 وضع القرار: Groq Observation - الإشارة صادرة من قرار Groq النهائي
-```
-
-ويظهر أيضًا اسم الوكيل الذي أعطى السياق ودرجة موثوقيته إن وجد.
-
----
-
-## 🛠️ تحديثات كود فعلية للوكلاء بعد ملف Arena
-
-بالإضافة إلى إدخال Agent Playbooks في Prompt قرار Groq، تم تنفيذ تطويرات فعلية داخل الكود:
-
-### NewsRiskAgent v3.1
-
-تمت إضافة تطويرات فعلية لمخاطر الأخبار:
-
-- Tier 1 / Tier 2 / Tier 3 event classification
-- نوافذ منع مختلفة حسب نوع الخبر
-- FOMC / Interest Rate / CPI / PCE / NFP special handling
-- High Risk Day إذا وُجدت 3 أحداث Tier 1 خلال 24 ساعة
-- tier_summary في المخرجات
-- special_handling لكل حدث
-- risk_score أدق حسب توقيت الخبر وقوته
-
-### RiskManagementAgent v3.1
-
-تمت إضافة تطويرات فعلية لإدارة المخاطر:
-
-- Trade Grade: A+ / A / B / C / D / F
-- Grade-based risk multiplier
-- رفض Grade D/F تلقائيًا
-- تقليل المخاطرة لصفقات C وB
-- فلتر max daily signals داخل RiskAgent
-- حساب risk percent وrisk amount وlot size بناءً على multiplier
-- تقييم R:R وSL/ATR وتوافق الوكلاء وMTF وDaily Bias داخل درجة المخاطرة
-- عرض Risk Grade في Telegram
-
-### MultiTimeframeAgent v3.1
-
-تمت إضافة تطويرات فعلية لتحليل الفريمات:
-
-- Timeframe hierarchy واضح: 4H → 1H → 15m → 5m
-- Alignment Score موزون حسب أهمية الفريم
-- Conflict Matrix بين الفريمات
-- Counter-trend penalty ضد الفريم الأعلى
-- Setup Type: TREND_CONTINUATION / PULLBACK_ENTRY / REVERSAL_ATTEMPT / INTRADAY_ALIGNMENT
-- Recommended Entry Timeframe
-- Pullback detection إلى EMA20/EMA50
-- تخفيض الثقة عند تعارض الفريمات أو محاولة انعكاس ضد الاتجاه الأعلى
-
-### ClassicalAgent v3.1
-
-تمت إضافة تطويرات فعلية للتحليل الكلاسيكي:
-
-- Double Top / Double Bottom
-- Triple Top / Triple Bottom
-- Ascending Triangle / Descending Triangle
-- Symmetrical Triangle
-- Rising Wedge / Falling Wedge
-- Ascending / Descending Channel
-- Pattern completion %
-- Pattern status: FORMING / COMPLETE / NONE
-- Level strength حسب عدد اللمسات
-- NO_CLEAR_PATTERN protection لمنع إجبار نمط غير واضح
-- أهداف كلاسيكية مبنية على عرض النمط أو neckline
-
-### SMCAgent v3.1
-
-تمت إضافة تحسينات مؤسسية فعلية داخل الكود:
-
-- Order Block mitigation status: FRESH / TESTED / MITIGATED / INVALIDATED
-- Displacement quality: STRONG / MODERATE / WEAK
-- Order Block equilibrium
-- FVG size وstrength وpartial fill
-- Liquidity Sweep confirmation: STRONG / MODERATE
-- Scoring أدق للـ OB/FVG/Sweep حسب القوة والحالة
-- تجاهل المناطق invalidated في scoring
-
-### TechnicalAgent v3.1
-
-أصبح يحسب المؤشرات من الشموع مباشرة إذا لم تكن جاهزة، ويضيف:
-
-- EMA Ribbon: 8 / 21 / 50 / 100 / 200
-- RSI-14 وRSI-7
-- RSI Divergence مبسط
-- MACD Histogram Slope
-- ATR Percentile وVolatility Regime
-- Bollinger Bands و%B وSqueeze
-- ADX proxy لقياس قوة الترند
-- Support/Resistance من الشموع
-- منع حالة WAIT من الظهور بثقة عالية
-
-### PriceActionAgent v3.1
-
-تمت إضافة نماذج شموع جديدة:
-
-- Bullish/Bearish Harami
-- Piercing Pattern
-- Dark Cloud Cover
-- Tweezer Top / Bottom
-- Bullish/Bearish Marubozu
-- Spinning Top
-- Dragonfly Doji
-- Gravestone Doji
-- Inverted Hammer
-- Hanging Man / Upper Rejection
-
-مع مراعاة:
-
-- موقع النموذج عند دعم/مقاومة
-- الترند السابق قبل النموذج
-- قوة الجسم والذيل
-- ATR tolerance للمستويات المتقاربة
-
----
-
-## 📘 Agent Playbooks v3.0 من ملف Arena
-
-تمت قراءة الملف المرفوع:
-
-```text
-Arena _ Benchmark & Compare the Best AI Models.html
-```
-
-واستخلاص قواعد تشغيل متقدمة للوكلاء، ثم تطبيقها داخل المشروع في ملف:
-
-```text
-services/agent_playbooks.py
-```
-
-هذه القواعد أصبحت تدخل مباشرة في Prompt قرار Groq النهائي عبر `DecisionAgent`، بحيث لا يكتفي Groq بأصوات الوكلاء فقط، بل يراجع أيضًا معايير كل وكيل حسب تخصصه قبل إصدار BUY/SELL/WAIT.
-
-### ماذا تحتوي Playbooks؟
-
-| الوكيل | أهم ما أضيف من ملف Arena |
-|---|---|
-| TechnicalAgent | RSI/MACD/EMA/ATR/Bollinger/ADX وفحص التعارض بين المؤشرات |
-| ClassicalAgent | H&S، Double/Triple Tops، Triangles، Flags، Wedges، S/R بشروط لمس تاريخية |
-| SMCAgent | Order Blocks، Liquidity Sweeps، FVG، BOS/CHoCH، Premium/Discount |
-| PriceActionAgent | شموع مفصلة مثل Hammer, Engulfing, Harami, Piercing, Dark Cloud, Doji variants |
-| MultiTimeframeAgent | قاعدة الاتجاه الأعلى أولًا والدخول من الفريم الأدنى |
-| NewsRiskAgent | Tier 1/2 events، FOMC، CPI، NFP، قرارات البنوك المركزية |
-| RiskManagementAgent | رأس المال أولًا، veto power، position sizing، drawdown/loss limits |
-| DecisionAgent | لا يتجاوز Veto، لا Grade D/F، جودة قبل الكمية، انتظار عند التعارض |
-| OpenTradesManager | متابعة TP/SL/BE/Trailing/long-running/expiry |
-| DailyReportAgent | تقرير أداء شامل وتوصيات تحسين مستمرة |
-
-### كيف تم التطبيق؟
-
-في كل تحليل، يرسل `DecisionAgent` إلى Groq:
-
-```text
-- أصوات الوكلاء
-- Daily Bias
-- AI News Interpretation
-- Dynamic Risk
-- Memory Rules
-- Agent Playbooks v3.0
-```
-
-وهذا يجعل قرار Groq النهائي ملتزمًا بقواعد كل وكيل ووظيفته.
-
----
-
-## 🤖 شروط التداول لكل وكيل Trading Conditions by Agent
-
-هذا القسم يوضح وظيفة كل وكيل داخل النظام، ومتى يعطي موافقة أو رفض أو انتظار. الهدف أن تكون شروط التداول واضحة ومكتوبة داخل README، بحيث يمكن مراجعة منطق كل وكيل قبل الاعتماد على الإشارات.
-
-> ملاحظة: القرار النهائي لا يعتمد على وكيل واحد فقط، بل على دمج أصوات الوكلاء + Groq + إدارة المخاطر + الأخبار + الذاكرة + Dynamic Risk.
-
----
-
-### 1. TechnicalAgent — وكيل التحليل الفني
-
-**الوظيفة:** قراءة المؤشرات الفنية الأساسية للذهب مثل EMA وRSI وMACD وATR ومستويات الدعم والمقاومة.
-
-**يعطي BUY عندما:**
-
-- السعر يميل أعلى المتوسطات المهمة.
-- الزخم إيجابي عبر MACD أو ميل المتوسطات.
-- RSI ليس في تشبع شراء مبالغ فيه.
-- يوجد دعم قريب أو بنية فنية تدعم الصعود.
-- ATR كافٍ لإعطاء مساحة حركة للصفقة.
-
-**يعطي SELL عندما:**
-
-- السعر يميل أسفل المتوسطات المهمة.
-- الزخم سلبي عبر MACD أو ميل المتوسطات.
-- RSI ليس في تشبع بيع مبالغ فيه.
-- توجد مقاومة قريبة أو بنية فنية تدعم الهبوط.
-- ATR كافٍ لتحرك الصفقة.
-
-**يعطي WAIT عندما:**
-
-- المؤشرات متضاربة.
-- RSI في منطقة تشبع خطيرة.
-- ATR ضعيف.
-- السعر في منتصف نطاق بدون دعم/مقاومة واضحة.
-
----
-
-### 2. ClassicalAgent — وكيل التحليل الكلاسيكي
-
-**الوظيفة:** تحليل النماذج الكلاسيكية، الترندات، الدعوم، المقاومات، والأنماط السعرية البسيطة.
-
-**يعطي BUY عندما:**
-
-- السعر فوق دعم مهم.
-- يوجد كسر أو ارتداد من مستوى كلاسيكي.
-- الميل العام أو خط الاتجاه يدعم الصعود.
-- النمط الكلاسيكي يميل للصعود.
-
-**يعطي SELL عندما:**
-
-- السعر تحت مقاومة مهمة.
-- يوجد كسر دعم أو رفض من مقاومة.
-- خط الاتجاه أو البنية الكلاسيكية تميل للهبوط.
-- النمط الكلاسيكي يميل للبيع.
-
-**يعطي WAIT عندما:**
-
-- السعر بين دعم ومقاومة بدون أفضلية.
-- النمط غير مكتمل.
-- لا توجد مستويات واضحة.
-
----
-
-### 3. SMCAgent — وكيل Smart Money Concepts
-
-**الوظيفة:** قراءة بنية السوق الذكية: Order Blocks، Liquidity Sweeps، Fair Value Gaps، Premium/Discount، Market Structure.
-
-**يعطي BUY عندما:**
-
-- البنية تميل لصعود أو حدث CHoCH/BOS صاعد.
-- السعر في Discount أو قرب Order Block صاعد.
-- حدث sweep للسيولة السفلية ثم رجوع السعر.
-- توجد FVG أو منطقة طلب تدعم الصعود.
-
-**يعطي SELL عندما:**
-
-- البنية تميل لهبوط أو حدث CHoCH/BOS هابط.
-- السعر في Premium أو قرب Order Block هابط.
-- حدث sweep للسيولة العلوية ثم رجوع السعر.
-- توجد FVG أو منطقة عرض تدعم الهبوط.
-
-**يعطي WAIT عندما:**
-
-- البنية غير واضحة.
-- السعر في منتصف النطاق.
-- لا توجد سيولة أو Order Block واضح.
-
----
-
-### 4. PriceActionAgent — وكيل حركة السعر والشموع
-
-**الوظيفة:** تحليل الشموع وحركة السعر مثل Engulfing، Pin Bar، Doji، Inside Bar، Morning/Evening Star، Three Soldiers/Crows، Breakouts، False Breakouts، Rejections.
-
-**يعطي BUY عندما:**
-
-- ظهور شمعة صعودية قوية بإغلاق قرب القمة.
-- Bullish Engulfing أو Hammer/Pin Bar عند دعم.
-- Morning Star أو Three White Soldiers.
-- اختراق مقاومة بجسم قوي أو false breakdown صاعد.
-- رفض سعري صاعد من دعم.
-
-**يعطي SELL عندما:**
-
-- ظهور شمعة هبوطية قوية بإغلاق قرب القاع.
-- Bearish Engulfing أو Shooting Star عند مقاومة.
-- Evening Star أو Three Black Crows.
-- كسر دعم بجسم قوي أو false breakout هابط.
-- رفض سعري هابط من مقاومة.
-
-**يعطي WAIT/REJECT عندما:**
-
-- شمعة Doji أو تردد في منتصف النطاق.
-- اختراق ضعيف بدون إغلاق واضح.
-- نموذج شموع بعيد عن دعم/مقاومة.
-- آخر 3 شموع تعطي سياقًا مختلطًا.
-
-**تطوير مقترح لهذا الوكيل:** إضافة Harami، Piercing، Dark Cloud، Tweezer، Marubozu، Dragonfly/Gravestone Doji، Hanging Man، Inverted Hammer، وفهم أعمق للترند السابق قبل النموذج.
-
----
-
-### 5. MultiTimeframeAgent — وكيل تعدد الأطر الزمنية
-
-**الوظيفة:** مقارنة الاتجاه بين أكثر من فريم مثل 5m و15m و1H و4H.
-
-**يعطي BUY عندما:**
-
-- أغلب الفريمات متوافقة صعودًا.
-- فريم الاتجاه الأكبر يدعم الشراء.
-- فريم الدخول لا يعاكس الاتجاه العام.
-- بنية القمم والقيعان تميل للصعود.
-
-**يعطي SELL عندما:**
-
-- أغلب الفريمات متوافقة هبوطًا.
-- فريم الاتجاه الأكبر يدعم البيع.
-- فريم الدخول لا يعاكس الاتجاه العام.
-- بنية القمم والقيعان تميل للهبوط.
-
-**يعطي WAIT عندما:**
-
-- الفريمات متضاربة.
-- 15m يعاكس 4H بقوة.
-- لا توجد محاذاة كافية.
-
----
-
-### 6. DailyBiasAgent — وكيل الاتجاه الأعلى
-
-**الوظيفة:** تحديد الميل الأعلى باستخدام فريم 4H كمرجع عملي للاتجاه الأكبر.
-
-**يعطي BULLISH عندما:**
-
-- السعر أعلى EMA البطيء.
-- EMA السريع أعلى EMA البطيء.
-- ميل السعر على الفريم الأعلى إيجابي.
-- RSI يميل للصعود.
-
-**يعطي BEARISH عندما:**
-
-- السعر أسفل EMA البطيء.
-- EMA السريع أسفل EMA البطيء.
-- ميل السعر على الفريم الأعلى سلبي.
-- RSI يميل للهبوط.
-
-**التأثير على التداول:**
-
-- إذا كان الاتجاه BULLISH، صفقات SELL تحتاج ثقة أعلى.
-- إذا كان الاتجاه BEARISH، صفقات BUY تحتاج ثقة أعلى.
-- إذا كان الاتجاه NEUTRAL، لا يتم منع الإشارة بسبب الاتجاه.
-
-الإعداد الحالي:
-
-```json
-"contrarian_min_confidence": 80
-```
-
----
-
-### 7. NewsRiskAgent — وكيل مخاطر الأخبار
-
-**الوظيفة:** فحص الأخبار المؤثرة على الذهب والعملات المرتبطة به مثل USD وEUR وGBP وJPY وغيرها.
-
-**يسمح بالتداول عندما:**
-
-- لا توجد أخبار عالية التأثير قريبة.
-- الأخبار منخفضة أو متوسطة ولا تفرض منعًا مباشرًا.
-- فترة السوق ليست عالية الخطورة.
-
-**يمنع أو يحذر عندما:**
-
-- توجد أخبار HIGH قريبة.
-- الخبر مرتبط بالدولار أو بيانات مؤثرة على الذهب.
-- المخاطر الزمنية قبل/بعد الخبر داخل نافذة المنع.
-
-**المخرجات المهمة:**
-
-```text
-SAFE / CAUTION / DANGER / HIGH_VOLATILITY
-```
-
----
-
-### 8. NewsInterpreter — تفسير الأخبار بالذكاء الاصطناعي
-
-**الوظيفة:** استخدام Groq لتفسير الخبر اقتصاديًا، وليس فقط معرفة وجوده.
-
-**قد يسمح فقط بـ BUY أو SELL عندما:**
-
-- الخبر يدعم الدولار أو يضعفه.
-- التأثير المتوقع على الذهب واضح.
-- اتجاه واحد أكثر أمانًا من الآخر.
-
-**يمنع التداول عندما:**
-
-- Groq يعتبر المخاطر HIGH/EXTREME.
-- `block_trading = true`.
-- `allowed_direction = NONE`.
-
-**مثال:**
-
-```text
-CPI أعلى من المتوقع → الدولار قوي → الذهب سلبي → السماح SELL فقط أو منع التداول مؤقتًا.
-```
-
----
-
-### 9. RiskManagementAgent — وكيل إدارة المخاطر
-
-**الوظيفة:** حساب الدخول، وقف الخسارة، الأهداف، R:R، حجم الصفقة، وتطبيق فلاتر المخاطر.
-
-**يعتمد الصفقة عندما:**
-
-- الاتجاه واضح من الوكلاء.
-- ATR مناسب.
-- السبريد ضمن الحد.
-- R:R يحقق الحد الأدنى.
-- وقف الخسارة ليس واسعًا جدًا.
-- الهدف الأول ليس قريبًا جدًا.
-- عدد الصفقات المفتوحة أقل من الحد.
-- لا توجد خسائر متتالية تتجاوز الحد.
-
-**يرفض الصفقة عندما:**
-
-- ATR منخفض.
-- السبريد عالي.
-- R:R منخفض.
-- SL واسع جدًا.
-- الهدف قريب جدًا.
-- وصلنا للحد الأقصى للصفقات.
-- توجد خسائر متتالية تتطلب التهدئة.
-
----
-
-### 10. DynamicRiskManager — إدارة المخاطر الديناميكية
-
-**الوظيفة:** رفع شروط التداول أو إيقاف الإشارات حسب الأداء الأخير.
-
-**الحالات:**
-
-| الحالة | المعنى |
-|---|---|
-| NORMAL | تداول طبيعي |
-| CAUTION | خسائر حديثة أكثر من الأرباح، رفع شروط الثقة والجودة |
-| STRICT | خسارتان متتاليتان، مطلوب ثقة وجودة أعلى |
-| HALT | 3 خسائر متتالية، إيقاف مؤقت |
-| DAILY_HALT | خسارة يومية تجاوزت الحد |
-
-**يمنع الإشارة عندما:**
-
-- `can_trade = false`.
-- ثقة الإشارة أقل من المطلوب ديناميكيًا.
-- جودة الإشارة أقل من المطلوب ديناميكيًا.
-
----
-
-### 11. DecisionAgent — وكيل القرار النهائي
-
-**الوظيفة:** دمج كل الوكلاء وإرسال القرار النهائي إلى Groq، ثم تطبيق الفلاتر النهائية.
-
-**لا يرسل BUY/SELL إلا إذا:**
-
-- Groq متاح ويعمل.
-- الإشارة ليست WAIT.
-- الثقة فوق الحد الأدنى.
-- إدارة المخاطر وافقت.
-- الأخبار لا تمنع.
-- AI News لا يمنع.
-- Daily Bias لا يمنع.
-- Dynamic Risk لا يمنع.
-- الإشارة ليست مكررة.
-- لا توجد قواعد ذاكرة تمنع ضمنيًا القرار عبر Prompt Groq.
-
-**يتحول إلى WAIT عندما:**
-
-- Groq فشل.
-- Groq أعطى ثقة منخفضة.
-- الأخبار أو الاتجاه أو المخاطر منعت الصفقة.
-- القرار عكس Daily Bias بدون ثقة كافية.
-
----
-
-### 12. TradingSessionAgent — وكيل جلسات التداول
-
-**الوظيفة:** تحديد هل الوقت الحالي داخل نافذة التداول المسموحة.
-
-**الإعداد الحالي:**
-
-```text
-الاثنين إلى الجمعة
-07:59 صباحًا إلى 18:01 مساءً
-Asia/Hebron
-```
-
-**يسمح بالإشارات عندما:**
-
-- اليوم من الاثنين إلى الجمعة.
-- الوقت بين 07:59 و18:01.
-- الجلسة تسمح بـ `allow_signals = true`.
-- جودة الجلسة لا تقل عن الحد المطلوب.
-
-**يمنع الإشارات عندما:**
-
-- خارج الوقت.
-- السبت أو الأحد.
-- جلسة تقارير وليست جلسة إشارات.
-
----
-
-### 13. OpenTradesManager — وكيل متابعة الصفقات المفتوحة
-
-**الوظيفة:** متابعة الصفقات المحفوظة في Supabase/JSON.
-
-**يتابع:**
-
-- الوصول إلى TP1.
-- الوصول إلى TP2.
-- ضرب SL.
-- نقل الوقف إلى Break-even بعد TP1.
-- تنبيه قرب TP1.
-- انتهاء صلاحية الصفقة.
-- الصفقات الطويلة بدون حسم.
-
-**يرسل Telegram عند:**
-
-- تحقق TP1.
-- تحقق TP2.
-- ضرب SL.
-- اقتراب الصفقة من الهدف.
-- انتهاء صلاحية الصفقة.
-
----
-
-### 14. DailyReportAgent — وكيل التقرير اليومي
-
-**الوظيفة:** تلخيص أداء اليوم.
-
-**يعرض:**
-
-- عدد الصفقات.
-- الرابحة والخاسرة.
-- المفتوحة.
-- Net Points.
-- Win Rate.
-- Profit Factor.
-
-ويعمل ضمن جلسة نهاية اليوم الساعة 23:00 بتوقيتك.
-
----
-
-### 15. LearningService — وكيل/خدمة التعلم
-
-**الوظيفة:** تحليل أداء الوكلاء وتحديث أوزانهم.
-
-**يتعلم من:**
-
-- الصفقات المغلقة.
-- أداء كل وكيل.
-- سلسلة الأرباح والخسائر.
-- الذاكرة السابقة.
-
-**يحدث:**
-
-```text
-agent_weights
-learning_history
-```
-
----
-
-### 16. TradeReviewService — مراجعة الخسائر
-
-**الوظيفة:** مراجعة الصفقات الخاسرة بواسطة Groq.
-
-**ينتج:**
-
-- سبب الخسارة.
-- تصنيف الخطأ.
-- ماذا حدث بشكل خاطئ.
-- ماذا كان جيدًا.
-- ملاحظات على الوكلاء.
-- قواعد مقترحة للتحسين.
-
-ويحفظ النتائج في:
-
-```text
-ai_trade_reviews
-```
-
----
-
-### 17. MemoryRules Engine — ذاكرة قواعد التعلم
-
-**الوظيفة:** تحويل مراجعات الخسائر إلى قواعد دائمة.
-
-**مثال قاعدة:**
-
-```text
-لا تدخل SELL قرب دعم قوي دون تأكيد إغلاق شمعة 15m.
-```
-
-تحفظ في:
-
-```text
-ai_memory_rules
-```
-
-وتدخل لاحقًا في Prompt قرار Groq.
-
----
-
-### 18. Dashboard Generator — لوحة المتابعة
-
-**الوظيفة:** إنشاء لوحة HTML تعرض حالة النظام.
-
-تعرض:
-
-- الصفقات.
-- Win Rate.
-- Net Points.
-- Profit Factor.
-- مراجعات Groq.
-- قواعد الذاكرة النشطة.
-
----
-
-### 19. Backtesting Engine — الاختبار التاريخي
-
-**الوظيفة:** اختبار الاستراتيجية على بيانات سابقة.
-
-يقيس:
-
-- عدد الصفقات.
-- Win Rate.
-- Net Points.
-- Profit Factor.
-- Max Drawdown.
-- أداء BUY/SELL.
-
-> لا يستخدم Groq افتراضيًا حتى لا يستهلك API بكثرة.
-
----
-
-### قاعدة القرار النهائي المختصرة
-
-حتى يتم إرسال إشارة، يجب أن تمر عبر هذه السلسلة:
-
-```text
-TradingSession ✅
-MarketData ✅
-Technical/Classical/SMC/PA/MTF ✅
-DailyBias ✅
-NewsRisk + AI News ✅
-RiskManagement ✅
-DynamicRisk ✅
-MemoryRules داخل Groq ✅
-Groq Decision ✅
-Duplicate Filter ✅
-Telegram + Supabase ✅
-```
-
-إذا فشل شرط مهم، تكون النتيجة:
-
-```text
-WAIT
-```
-
-أو لا يتم إرسال الإشارة.
-
----
-
-## 🧭 ما تبقى من المقترحات القادمة
-
-## 2. Weekly AI Performance Report
-
-تقرير أسبوعي يكتبه Groq يوضح:
-
-- أفضل يوم تداول
-- أسوأ يوم
-- أفضل وكيل
-- أسباب الخسائر
-- توصيات الأسبوع القادم
-
----
-
-### 2. Telegram Commands
-
-أوامر مثل:
-
-```text
-/status
-/open
-/report
-/performance
-/pause
-/resume
-/last
-```
-
-> ملاحظة: هذه تحتاج آلية تشغيل مستمرة أو Webhook، لذلك هي أصعب من باقي التحسينات على GitHub Actions فقط.
-
----
-
-### 3. GitHub Pages Dashboard
-
-تحويل Dashboard من Artifact إلى رابط دائم مثل:
-
-```text
-https://nabiloashgaqr.github.io/Nabil-gold/dashboard.html
-```
-
----
-
-### 4. Backtest متقدم بـ Groq اختياريًا
-
-تشغيل Groq على عدد محدود من نقاط الاختبار فقط لتحليل جودة قراراته تاريخيًا بدون استهلاك كبير.
-
----
-
-## 📌 أفضل خطوة تالية مقترحة
-
-بعد إضافة Dynamic Risk Management، أفضل خطوة تالية هي:
-
-```text
-Weekly AI Performance Report
-```
-
-لأنه يلخص أداء الأسبوع ويعطي توصيات استراتيجية لتحسين النظام.
+## 🧭 خارطة الطريق القادمة
+
+1. **Weekly AI Performance Report** — تقرير أسبوعي يكتبه Groq
+2. **Telegram Commands** — `/status`, `/open`, `/report`, `/pause`
+3. **GitHub Pages Dashboard** — رابط دائم بدل Artifact
+4. **Backtest مع Groq اختياريًا** — تحليل جودة قرارات Groq تاريخيًا
 
 ---
 
