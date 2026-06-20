@@ -1,23 +1,24 @@
 -- ============================================================
 --  Weekly AI Performance Report — جدول جديد
---  يُضاف إلى supabase_schema.sql الموجود في نهاية الملف
+--  هذا الملف عبارة عن snippet توضيحي. تعريف الجدول الفعلي موجود الآن في supabase_schema.sql
+--  تم نقل CREATE TABLE الخاص بـ weekly_reports إلى supabase_schema.sql لمنع التكرار.
 -- ============================================================
 
-CREATE TABLE IF NOT EXISTS weekly_reports (
-    id BIGSERIAL PRIMARY KEY,
-    week_start DATE NOT NULL,
-    week_end DATE NOT NULL,
-    stats_json JSONB NOT NULL,
-    report_text TEXT NOT NULL,
-    recommendations JSONB,
-    tokens_used INTEGER DEFAULT 0,
-    cost NUMERIC(10, 6) DEFAULT 0.0,
-    status TEXT NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
+-- CREATE TABLE IF NOT EXISTS weekly_reports (
+--     id BIGSERIAL PRIMARY KEY,
+--     week_start DATE NOT NULL,
+--     week_end DATE NOT NULL,
+--     stats_json JSONB NOT NULL,
+--     report_text TEXT NOT NULL,
+--     recommendations JSONB,
+--     tokens_used INTEGER DEFAULT 0,
+--     cost NUMERIC(10, 6) DEFAULT 0.0,
+--     status TEXT NOT NULL,
+--     created_at TIMESTAMPTZ DEFAULT NOW()
+-- );
 
-CREATE INDEX IF NOT EXISTS idx_weekly_reports_week_start
-    ON weekly_reports (week_start DESC);
+-- CREATE INDEX IF NOT EXISTS idx_weekly_reports_week_start
+--     ON weekly_reports (week_start DESC);
 
 -- ============================================================
 --  عدّاد HALT/CAUTION (اختياري — للـ Weekly Report)
