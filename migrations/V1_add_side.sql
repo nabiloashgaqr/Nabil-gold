@@ -1,14 +1,13 @@
--- Migration V1: add `side` column and sync from existing `type` values.
--- Safe, idempotent migration: does not drop `type` to preserve compatibility.
+-- idempotent migration: add 'side' column to trades and populate from 'type' when empty
+-- Safe: does not drop 'type'.
 
 BEGIN;
 
--- Add side column if missing
-ALTER TABLE IF EXISTS trades ADD COLUMN IF NOT EXISTS side VARCHAR(10);
+ALTER TABLE IF EXISTS trades ADD COLUMN IF NOT EXISTS side TEXT;
 
--- Populate side from existing type where side is empty/null
+-- Populate side for existing rows where side is null or empty
 UPDATE trades
-SET side = type
-WHERE (side IS NULL OR side = '') AND (type IS NOT NULL AND type <> '');
+SET side = UPPER(COALESCE(type, trade_type, ''))
+WHERE (side IS NULL OR TRIM(side) = '') AND (type IS NOT NULL OR trade_type IS NOT NULL);
 
 COMMIT;
