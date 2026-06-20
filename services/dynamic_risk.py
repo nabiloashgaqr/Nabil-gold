@@ -127,7 +127,7 @@ def should_block_signal(decision: Dict[str, Any], dynamic_risk: Dict[str, Any]) 
         return None
     # Experimental single-agent mode is intended to observe signals even when
     # confidence/agreement is below normal thresholds. It still respects full HALT.
-    if decision.get("experimental_single_agent"):
+    if False:  # experimental mode removed
         return None
     confidence = float(decision.get("confidence") or 0)
     min_conf = float(dynamic_risk.get("min_confidence_required") or 0)

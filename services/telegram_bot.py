@@ -126,21 +126,15 @@ class TelegramService:
         quality_line = f"⭐ <b>Signal Quality:</b> {html.escape(str(quality.get('grade', 'N/A')))} / {float(quality.get('score', 0)):.1f}% ({html.escape(str(quality.get('label', '')))} )\n" if quality else ""
         risk_grade = ((decision.get("risk", {}) or {}).get("trade_grade", {}) or {})
         risk_grade_line = f"🛡️ <b>Risk Grade:</b> {html.escape(str(risk_grade.get('grade', 'N/A')))} / {float(risk_grade.get('score', 0)):.1f}% ({html.escape(str(risk_grade.get('label', '')))} )\n" if risk_grade else ""
-        experimental = decision.get("experimental_single_agent") or {}
-        agent_context = decision.get("agent_context") or experimental or {}
-        experimental_line = ""
+        agent_context = decision.get("agent_context") or {}
+        agent_context_line = ""
         if agent_context:
-            label = "One-agent context" if decision.get("one_agent_groq_mode") or str(decision_mode) == "One-Agent + Groq" else "Agent context"
-            experimental_line = (
-                f"🧩 <b>{label}:</b> {html.escape(str(agent_context.get('agent', 'N/A')))} | "
+            agent_context_line = (
+                f"🧩 <b>Agent context:</b> {html.escape(str(agent_context.get('agent', 'N/A')))} | "
                 f"{html.escape(str(agent_context.get('signal', '')))} | "
-                f"reliability {html.escape(str(agent_context.get('reliability_grade', 'N/A')))} "
-                f"({float(agent_context.get('adjusted_confidence', agent_context.get('confidence', 0))):.1f}%)\n"
+                f"{float(agent_context.get('adjusted_confidence', agent_context.get('confidence', 0))):.1f}%\n"
             )
-        if str(decision_mode) == "One-Agent + Groq":
-            groq_observation_line = "🤖 <b>Decision:</b> One-agent context + Groq final approval. Groq is the final gate.\n"
-        else:
-            groq_observation_line = "🤖 <b>Decision:</b> Groq Observation - final signal is from Groq\n" if str(decision.get("summary", "")).startswith("Groq Observation") else ""
+        groq_observation_line = "🤖 <b>Decision:</b> Groq Observation - final signal is from Groq\n" if str(decision.get("summary", "")).startswith("Groq Observation") else ""
         daily_bias = decision.get("daily_bias", {}) or {}
         bias_line = f"🧭 <b>Daily Bias:</b> {html.escape(str(daily_bias.get('bias', 'NEUTRAL')))} ({float(daily_bias.get('confidence', 0)):.1f}%)\n" if daily_bias else ""
         dynamic_risk = decision.get("dynamic_risk", {}) or {}
@@ -170,7 +164,7 @@ class TelegramService:
 🎯 <b>Take Profit 2:</b> {format_price(signal.get('tp2'))}
 📊 <b>R:R =</b> 1:{float(signal.get('rr_ratio', 0)):.2f}
 🔒 <b>Confidence:</b> {int(decision.get('confidence', 0))}%
-{quality_line}{risk_grade_line}{experimental_line}{groq_observation_line}{bias_line}{dynamic_risk_line}
+{quality_line}{risk_grade_line}{agent_context_line}{groq_observation_line}{bias_line}{dynamic_risk_line}
 {ai_text}📋 <b>Reasons:</b>
 {reasons_text}
 

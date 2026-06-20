@@ -235,48 +235,23 @@ class DecisionAgent(BaseAgent):
         
         return votes
     
-    def _reliability_grade(self, confidence: float, weight: float, agent_name: str) -> str:
-        """Human-readable reliability grade for a single agent experimental signal."""
-        weighted = confidence * max(weight, 0.01)
-        if confidence >= 80 and weighted >= 15:
-            return "A"
-        if confidence >= 70:
-            return "B"
-        if confidence >= 60:
-            return "C"
-        if confidence >= 45:
-            return "D"
-        return "E"
 
     def _classic_decision(self, votes: Dict) -> Dict:
         """
-        📊 القرار الكلاسيكي (بدون AI)
-        
-        🔥 المتطلبات الجديدة:
-        - 3 وكلاء كحد أدنى يوافقون
-        - نسبة توافق فوق 60%
+        📊 القرار الكلاسيكي (One-Agent + Groq Observation)
         """
-        
-        # حساب مجموع النقاط لكل إشارة
         buy_score = sum(v['score'] for v in votes['BUY'])
         sell_score = sum(v['score'] for v in votes['SELL'])
-        
-        # عدد الوكلاء لكل إشارة
         buy_count = len(votes['BUY'])
         sell_count = len(votes['SELL'])
-        
-        # حساب نسبة التوافق
-        total_agents = buy_count + sell_count + len(votes['WAIT'])
-        total_voting = buy_count + sell_count  # فقط من صوتوا BUY أو SELL
-        
+        total_voting = buy_count + sell_count
         buy_agreement_pct = (buy_count / total_voting * 100) if total_voting > 0 else 0
         sell_agreement_pct = (sell_count / total_voting * 100) if total_voting > 0 else 0
-        
-        # 🔥 المنطق الجديد: 3 وكلاء + 60% توافق
+
         decision = 'WAIT'
         confidence = 50
         rejection_reason = None
-        
+
         buy_valid = buy_count >= self.min_agents_agree and buy_agreement_pct >= self.min_agreement_pct
         sell_valid = sell_count >= self.min_agents_agree and sell_agreement_pct >= self.min_agreement_pct
 
@@ -293,9 +268,8 @@ class DecisionAgent(BaseAgent):
                 max_agreement = max(buy_count, sell_count)
                 rejection_reason = f"نسبة التوافق منخفضة ({max_agreement}/{total_voting} = {max(buy_agreement_pct, sell_agreement_pct):.0f}% < {self.min_agreement_pct}%)"
             else:
-                rejection_reason = "تعارض بين BUY و SELL بدون أفضلية واضحة في الوزن"
-        
-        # تحديد أقوى وكيل
+                rejection_reason = "تعارض بين BUY و SELL بدون أفضلية واضحة"
+
         all_votes = votes['BUY'] + votes['SELL'] + votes['WAIT']
         strongest_agent = max(all_votes, key=lambda x: x['score'], default=None)
         directional_votes = votes['BUY'] + votes['SELL']
@@ -310,40 +284,9 @@ class DecisionAgent(BaseAgent):
                 'adjusted_confidence': round(float(strongest_directional.get('adjusted_confidence', strongest_directional.get('confidence', 0))), 1),
                 'weight': strongest_directional.get('weight'),
                 'score': round(float(strongest_directional.get('score', 0)), 3),
-                'reliability_grade': self._reliability_grade(
-                    float(strongest_directional.get('adjusted_confidence', strongest_directional.get('confidence', 0))),
-                    float(strongest_directional.get('weight', 0.0)),
-                    str(strongest_directional.get('agent', 'unknown')),
-                ),
                 'mode': 'one_agent_context',
             }
 
-        experimental_source = None
-        exp_cfg = self.config.get('signal_requirements', {}).get('experimental_single_agent', {}) or {}
-        exp_enabled = bool(exp_cfg.get('enabled', False))
-        min_single_conf = float(exp_cfg.get('min_confidence', 1) or 1)
-        if exp_enabled and decision == 'WAIT' and strongest_directional and float(strongest_directional.get('adjusted_confidence', 0)) >= min_single_conf:
-            experimental_signal = 'BUY' if strongest_directional in votes['BUY'] else 'SELL'
-            reliability = self._reliability_grade(
-                float(strongest_directional.get('adjusted_confidence', strongest_directional.get('confidence', 0))),
-                float(strongest_directional.get('weight', 0.0)),
-                str(strongest_directional.get('agent', 'unknown')),
-            )
-            decision = experimental_signal
-            confidence = float(strongest_directional.get('adjusted_confidence', strongest_directional.get('confidence', 50)))
-            rejection_reason = f"EXPERIMENTAL_SINGLE_AGENT: {strongest_directional.get('agent')}"
-            experimental_source = {
-                'enabled': True,
-                'agent': strongest_directional.get('agent'),
-                'signal': experimental_signal,
-                'confidence': round(float(strongest_directional.get('confidence', 0)), 1),
-                'adjusted_confidence': round(float(strongest_directional.get('adjusted_confidence', strongest_directional.get('confidence', 0))), 1),
-                'weight': strongest_directional.get('weight'),
-                'score': round(float(strongest_directional.get('score', 0)), 3),
-                'reliability_grade': reliability,
-                'reason': 'تم تفعيل وضع التجربة: إشارة من أقوى وكيل واحد بغض النظر عن نسبة التوافق',
-            }
-        
         return {
             'decision': decision,
             'confidence': confidence,
@@ -356,10 +299,10 @@ class DecisionAgent(BaseAgent):
             'total_voting_agents': total_voting,
             'strongest_agent': strongest_agent['agent'] if strongest_agent else None,
             'strongest_directional': strongest_directional_context,
-            'experimental_single_agent': experimental_source,
             'rejection_reason': rejection_reason
         }
-    
+
+
     def _format_agent_context_for_ai(self, agents_results: Dict[str, Any]) -> str:
         """Format compact, high-signal agent outputs for Groq under token limits."""
         def short(value: Any, limit: int = 550) -> str:
@@ -677,17 +620,7 @@ Return JSON only, no Markdown:
 
         min_conf = self.min_confidence * quality_multipliers.get(str(session_quality).upper(), 1.20)
 
-        exp_source = classic.get('experimental_single_agent') or {}
-        exp_cfg = self.config.get('signal_requirements', {}).get('experimental_single_agent', {}) or {}
-        operation_mode = str(self.config.get('operation_mode', 'observation')).lower()
-        groq_obs = self.config.get('groq_observation_mode', {}) or {}
-        groq_observation_enabled = bool(groq_obs.get('enabled', False)) and operation_mode == 'observation'
-        observation_min_conf = float(groq_obs.get('min_groq_confidence', min_conf) or min_conf)
-        if exp_source and exp_cfg.get('bypass_groq_min_confidence', True) and not groq_observation_enabled:
-            return classic.get('decision', 'WAIT'), round(float(classic.get('confidence', 0)), 1), (
-                f"وضع تجريبي: إشارة {classic.get('decision')} من وكيل واحد "
-                f"({exp_source.get('agent')}) بدرجة reliability {exp_source.get('reliability_grade')}"
-            )
+        # One-Agent + Groq mode – Groq is final gate
 
         ai_config = self.config.get('ai_service', {})
         ai_required = bool(ai_config.get('enabled', False)) and not bool(ai_config.get('fallback_to_classic', True))
@@ -724,8 +657,7 @@ Return JSON only, no Markdown:
                 final_signal = ai_signal
                 if groq_observation_enabled:
                     final_confidence = ai_conf
-                    source_text = f" | agent context: {exp_source.get('agent')} reliability {exp_source.get('reliability_grade')}" if exp_source else ""
-                    reasoning = f"Groq Observation: Groq decision = {ai_signal} with confidence {ai_conf:.0f}%{source_text}. {ai.get('reasoning', '')}"
+                    reasoning = f"Groq Observation: Groq decision = {ai_signal} with confidence {ai_conf:.0f}%. {ai.get('reasoning', '')}"
                 else:
                     final_confidence = (ai_conf * 0.7) + (classic.get('confidence', 50) * 0.3)
                     reasoning = ai.get('reasoning', classic.get('decision', 'N/A'))
@@ -831,14 +763,8 @@ Return JSON only, no Markdown:
             warnings.append(f"News blocked: {news.get('summary', news.get('market_status', 'DANGER'))}")
             signal = 'WAIT'
 
-        exp_source = (result.get('classic', {}) or {}).get('experimental_single_agent') or {}
-        exp_cfg = self.config.get('signal_requirements', {}).get('experimental_single_agent', {}) or {}
-        experimental_mode = bool(exp_source)
-
-        # في الوضع التجريبي نبقي فقط: الوقت + الأخبار الخطيرة الأساسية + منع التكرار لاحقاً.
-        # لذلك لا نجعل AI News directional أو Daily Bias أو RiskManagement يمنعون الإشارة التجريبية.
         news_ai = agents_results.get('news_ai', {}) or news.get('ai_interpretation', {}) or {}
-        if not experimental_mode and news_ai and news_ai.get('available'):
+        if news_ai and news_ai.get('available'):
             risk_level = str(news_ai.get('risk_level', '')).upper()
             allowed_direction = str(news_ai.get('allowed_direction', 'BOTH')).upper()
             block_trading = bool(news_ai.get('block_trading', False))
@@ -850,7 +776,7 @@ Return JSON only, no Markdown:
                 signal = 'WAIT'
 
         daily_bias = agents_results.get('daily_bias', {}) or {}
-        if not experimental_mode and signal in {'BUY', 'SELL'} and daily_bias.get('enabled', True):
+        if signal in {'BUY', 'SELL'} and daily_bias.get('enabled', True):
             bias = str(daily_bias.get('bias', 'NEUTRAL')).upper()
             bias_conf = float(daily_bias.get('confidence') or 0)
             db_settings = self.config.get('daily_bias_filter', {}) or {}
@@ -864,11 +790,8 @@ Return JSON only, no Markdown:
 
         risk = agents_results.get('risk', {}) or {}
         if signal in {'BUY', 'SELL'} and risk and not risk.get('approved', False):
-            if experimental_mode and exp_cfg.get('bypass_risk_rejection', False):
-                warnings.append(f"تجريبي: تم تجاوز رفض RiskManagement للمراقبة فقط: {risk.get('rejection_reason', 'not approved')}")
-            else:
-                warnings.append(f"Risk rejected: {risk.get('rejection_reason', 'not approved')}")
-                signal = 'WAIT'
+            warnings.append(f"Risk rejected: {risk.get('rejection_reason', 'not approved')}")
+            signal = 'WAIT'
 
         if signal != result.get('signal'):
             reason = '; '.join(warnings[-3:]) or 'Safety filter blocked signal'
@@ -972,92 +895,6 @@ Return JSON only, no Markdown:
             warnings.append('تحذير: Groq لم يقدم مستوى سعرياً واضحاً للإلغاء أو السيناريو البديل.')
         return warnings
 
-    def _forced_observation_signal(self, context: Dict[str, Any]) -> Dict[str, Any] | None:
-        """Create a clearly-labeled paper observation signal when all agents/Groq say WAIT.
-
-        This is for monitoring only. It still respects session/news/halt safety because
-        it is called after safety filters and checks warnings before forcing.
-        """
-        exp_cfg = self.config.get('signal_requirements', {}).get('experimental_single_agent', {}) or {}
-        groq_obs = self.config.get('groq_observation_mode', {}) or {}
-        if groq_obs.get('disable_forced_observation', False):
-            return None
-        if not exp_cfg.get('force_signal_on_wait', False):
-            return None
-
-        session = context.get('session', {}) or {}
-        news = context.get('news', {}) or {}
-        if session and not session.get('trading_allowed', True):
-            return None
-        if news and (news.get('can_trade') is False or str(news.get('market_status', '')).upper() == 'DANGER'):
-            return None
-
-        source = None
-        direction = None
-        reliability = 'E'
-        confidence = float(exp_cfg.get('force_signal_confidence', 45) or 45)
-
-        daily_bias = context.get('daily_bias', {}) or {}
-        bias = str(daily_bias.get('bias', '')).upper()
-        if bias == 'BULLISH':
-            direction, source, reliability = 'BUY', 'daily_bias', 'D'
-            confidence = max(confidence, min(float(daily_bias.get('confidence') or confidence), 60))
-        elif bias == 'BEARISH':
-            direction, source, reliability = 'SELL', 'daily_bias', 'D'
-            confidence = max(confidence, min(float(daily_bias.get('confidence') or confidence), 60))
-
-        if direction is None:
-            mtf = context.get('multitimeframe', {}) or {}
-            mtf_dir = str((mtf.get('weighted_bias', {}) or {}).get('direction') or mtf.get('direction') or '').upper()
-            if mtf_dir in {'BUY', 'SELL'}:
-                direction, source, reliability = mtf_dir, 'multitimeframe', 'D'
-                confidence = max(confidence, min(float(mtf.get('confidence') or confidence), 58))
-
-        if direction is None:
-            tech = context.get('technical', {}) or {}
-            trend = str((tech.get('technical', {}) or {}).get('trend') or '').upper()
-            if trend == 'UP':
-                direction, source, reliability = 'BUY', 'technical_trend', 'E'
-            elif trend == 'DOWN':
-                direction, source, reliability = 'SELL', 'technical_trend', 'E'
-
-        if direction is None:
-            # Last-resort observation from current candle body.
-            data = context.get('price_data') or context
-            candles = data.get('data', []) if isinstance(data, dict) else []
-            if candles:
-                last = candles[-1]
-                try:
-                    direction = 'BUY' if float(last.get('close', 0)) >= float(last.get('open', 0)) else 'SELL'
-                    source, reliability = 'last_candle', 'E'
-                except Exception:
-                    return None
-
-        if direction not in {'BUY', 'SELL'}:
-            return None
-
-        return {
-            'enabled': True,
-            'forced': True,
-            'agent': source or 'observation_fallback',
-            'signal': direction,
-            'confidence': round(confidence, 1),
-            'adjusted_confidence': round(confidence, 1),
-            'weight': 0.0,
-            'score': 0.0,
-            'reliability_grade': reliability,
-            'reason': 'وضع مراقبة قسري: كل الوكلاء/Groq أعطوا WAIT، وتم إنشاء إشارة Paper لمراقبة النظام فقط',
-        }
-
-    def _levels_match_signal(self, signal: str, entry: float, stop_loss: float, tp1: float, tp2: float) -> bool:
-        """Validate that SL/TP are on the correct side of entry for signal."""
-        try:
-            entry = float(entry)
-            stop_loss = float(stop_loss)
-            tp1 = float(tp1)
-            tp2 = float(tp2)
-        except (TypeError, ValueError):
-            return False
         if entry <= 0 or stop_loss <= 0 or tp1 <= 0 or tp2 <= 0:
             return False
         if signal == 'BUY':
@@ -1066,35 +903,6 @@ Return JSON only, no Markdown:
             return stop_loss > entry > tp1 >= tp2
         return False
 
-    def _build_fallback_levels(self, signal: str, entry_price: float, context: Dict[str, Any], exp_cfg: Dict[str, Any]) -> Dict[str, float]:
-        """Build ATR-based levels guaranteed to match signal direction."""
-        try:
-            atr = float(((context.get('technical', {}) or {}).get('technical', {}) or {}).get('atr') or 0)
-        except Exception:
-            atr = 0.0
-        atr = atr or float(exp_cfg.get('fallback_atr', 2.0) or 2.0)
-        tp1_mult = float(exp_cfg.get('fallback_rr_tp1', 2.0) or 2.0)
-        tp2_mult = float(exp_cfg.get('fallback_rr_tp2', 3.5) or 3.5)
-        entry = float(entry_price or context.get('current_price') or 0)
-        if signal == 'BUY':
-            stop_loss = entry - atr * 1.5
-            tp1_price = entry + atr * tp1_mult
-            tp2_price = entry + atr * tp2_mult
-        else:
-            stop_loss = entry + atr * 1.5
-            tp1_price = entry - atr * tp1_mult
-            tp2_price = entry - atr * tp2_mult
-        rr_ratio = round(abs(tp2_price - entry) / max(abs(entry - stop_loss), 0.01), 2)
-        return {
-            'entry': entry,
-            'stop_loss': stop_loss,
-            'tp1': tp1_price,
-            'tp2': tp2_price,
-            'rr_ratio': rr_ratio,
-            'atr': atr,
-            'zone_low': entry - max(0.2, atr * 0.05),
-            'zone_high': entry + max(0.2, atr * 0.05),
-        }
 
     def _order_type(self, signal: str, entry: float, current_price: float | None) -> str:
         """Classify paper order type from entry vs current price."""
@@ -1118,15 +926,6 @@ Return JSON only, no Markdown:
         risk = context.get('risk', {}) or {}
         current_price = context.get('current_price')
         signal_payload: Dict[str, Any] = {}
-        forced_source = None
-        if final_signal == 'WAIT' and not (analysis.get('warnings') or []):
-            forced_source = self._forced_observation_signal(context)
-            if forced_source:
-                final_signal = forced_source['signal']
-                analysis['confidence'] = forced_source['confidence']
-                analysis['reasoning'] = forced_source['reason']
-                analysis.setdefault('classic', {})['experimental_single_agent'] = forced_source
-
         if final_signal in {'BUY', 'SELL'}:
             entry_info = risk.get('entry', {}) or {}
             entry_zone = entry_info.get('zone', {}) or {}
@@ -1142,25 +941,6 @@ Return JSON only, no Markdown:
             levels_corrected = False
             corrected_risk_summary = ''
 
-            exp_cfg = self.config.get('signal_requirements', {}).get('experimental_single_agent', {}) or {}
-            exp_source = (analysis.get('classic', {}) or {}).get('experimental_single_agent') or {}
-            risk_direction = str(risk.get('direction', '')).upper()
-            levels_invalid = not self._levels_match_signal(final_signal, float(entry_price or current_price or 0), stop_loss, tp1_price, tp2_price)
-            direction_mismatch = risk_direction in {'BUY', 'SELL'} and risk_direction != final_signal
-            if exp_source and exp_cfg.get('fallback_levels_enabled', True) and (levels_invalid or direction_mismatch):
-                fallback = self._build_fallback_levels(final_signal, float(entry_price or current_price or 0), context, exp_cfg)
-                entry_price = fallback['entry']
-                stop_loss = fallback['stop_loss']
-                tp1_price = fallback['tp1']
-                tp2_price = fallback['tp2']
-                rr_ratio = fallback['rr_ratio']
-                entry_zone = {'low': fallback['zone_low'], 'high': fallback['zone_high']}
-                levels_corrected = True
-                corrected_risk_summary = f"مستويات تجريبية مصححة لاتجاه {final_signal}: SL={stop_loss:.2f}, TP1={tp1_price:.2f}, TP2={tp2_price:.2f}, R:R={rr_ratio}"
-                analysis.setdefault('warnings', []).append(
-                    f"تجريبي: تم تصحيح SL/TP لتتوافق مع اتجاه {final_signal} لأن مستويات Risk كانت {'باتجاه ' + risk_direction if risk_direction else 'غير صالحة'}"
-                )
-
             signal_payload = {
                 'type': final_signal,
                 'entry': {
@@ -1174,7 +954,7 @@ Return JSON only, no Markdown:
                 'rr_ratio': rr_ratio,
                 'order_type': self._order_type(final_signal, float(entry_price or 0), current_price),
                 'position_size': risk.get('position_size', {}),
-                'risk_summary': corrected_risk_summary if levels_corrected else risk.get('summary', ''),
+                'risk_summary': risk.get('summary', ''),
             }
 
         reasons = [analysis.get('reasoning', '')]
@@ -1198,9 +978,8 @@ Return JSON only, no Markdown:
             'votes': analysis.get('votes', {}),
             'weights': analysis.get('weights', {}),
             'classic': analysis.get('classic', {}),
-            'experimental_single_agent': (analysis.get('classic', {}) or {}).get('experimental_single_agent'),
             'agent_context': (analysis.get('classic', {}) or {}).get('strongest_directional'),
-            'one_agent_groq_mode': bool(self.config.get('groq_observation_mode', {}).get('allow_single_agent_context', False)),
+            'one_agent_groq_mode': True,
             'ai': analysis.get('ai', {}),
             'learning': analysis.get('learning', {}),
             'risk': risk,

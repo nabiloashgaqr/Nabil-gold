@@ -118,7 +118,7 @@ class DailyReportAgent(BaseAgent):
         out: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"count": 0, "wins": 0, "losses": 0, "net": 0.0})
         for trade in trades:
             snapshot = trade.get("signal_snapshot") or {}
-            source = (snapshot.get("experimental_single_agent") or {}).get("agent") or "consensus"
+            source = (snapshot.get("agent_context") or {}).get("agent") or "consensus"
             pnl = self._pnl(trade)
             out[source]["count"] += 1
             out[source]["net"] = round(out[source]["net"] + pnl, 1)
