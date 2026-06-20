@@ -10,13 +10,11 @@ import os
 import json
 import logging
 import asyncio
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional
 from dataclasses import dataclass
 from enum import Enum
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
-
 
 class AIProvider(Enum):
     """مزودي AI المدعومين"""
@@ -25,7 +23,6 @@ class AIProvider(Enum):
     GROK = "grok"  # xAI / Grok
     GROQ = "groq"  # GroqCloud
     GEMINI = "gemini"
-
 
 @dataclass
 class AIResponse:
@@ -37,7 +34,6 @@ class AIResponse:
     model: str = ""
     tokens_used: int = 0
     cost: float = 0.0
-
 
 class AIService:
     """
@@ -692,10 +688,8 @@ class AIService:
             logger.debug(f"المحتوى: {content[:200]}")
             return None
 
-
 # Singleton instance
 _ai_service: Optional[AIService] = None
-
 
 def get_ai_service(config: Dict) -> AIService:
     """الحصول على instance خدمة AI"""

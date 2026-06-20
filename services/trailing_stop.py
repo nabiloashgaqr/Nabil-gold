@@ -5,12 +5,11 @@
 
 import logging
 from datetime import datetime
-from typing import Dict, Optional, List, Any
+from typing import Dict, Optional, List
 from dataclasses import dataclass
 from enum import Enum
 
 logger = logging.getLogger(__name__)
-
 
 class TrailingState(Enum):
     """حالات التتبع"""
@@ -20,7 +19,6 @@ class TrailingState(Enum):
     TRAILING_TO_TP2 = "trailing_to_tp2"
     CLOSED_AT_TP2 = "closed_at_tp2"
     STOPPED_OUT = "stopped_out"
-
 
 @dataclass
 class TrailingConfig:
@@ -42,7 +40,6 @@ class TrailingConfig:
     # Safety
     min_profit_lock: float = 0.0  # الحد الأدنى للربح المؤكد
 
-
 @dataclass
 class TrailingStatus:
     """حالة التتبع"""
@@ -59,7 +56,6 @@ class TrailingStatus:
     locked_profit: float
     last_updated: str
     actions_log: List[str]
-
 
 class TrailingStopManager:
     """
@@ -310,8 +306,7 @@ class TrailingStopManager:
     def format_trailing_message(self, result: Dict) -> str:
         """تنسيق رسالة التتبع لتيليجرام"""
         action = result.get('action', '')
-        messages = result.get('messages', [])
-        
+
         lines = [
             "━━━━━━━━━━━━━━━━━━━━",
             "📈 *Trailing Stop激活*",
@@ -336,10 +331,8 @@ class TrailingStopManager:
         
         return "\n".join(lines)
 
-
 # Singleton instance
 _trailing_manager: Optional[TrailingStopManager] = None
-
 
 def get_trailing_stop_manager(db, config: Dict) -> TrailingStopManager:
     """الحصول على instance مدير التتبع"""
