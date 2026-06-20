@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from agents.base_agent import BaseAgent
-from utils.helpers import get_current_session, load_config
+from utils.helpers import get_current_session, load_config, sanitize_prompt_text
 
 
 class NewsRiskAgent(BaseAgent):
@@ -248,7 +248,22 @@ class NewsRiskAgent(BaseAgent):
                 events.extend(ff_events)
         except Exception:
             pass
-        return [event for event in events if isinstance(event, dict)]
+
+        sanitized: List[Dict[str, Any]] = []
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            clean = dict(event)
+            # Event titles/forecast/previous may originate from a third-party
+            # feed (ForexFactory) or operator-supplied NEWS_EVENTS_JSON. Both
+            # eventually get embedded into Groq prompts (news_interpreter,
+            # DecisionAgent), so they are sanitized once here for every
+            # source rather than relying on each downstream consumer to do it.
+            for text_field in ("event", "name", "forecast", "previous"):
+                if text_field in clean and clean[text_field]:
+                    clean[text_field] = sanitize_prompt_text(clean[text_field], max_len=160)
+            sanitized.append(clean)
+        return sanitized
 
 
     def _classify_tier(self, event: Dict[str, Any], impact: str) -> str:

@@ -12,6 +12,8 @@ import hashlib
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
+from utils.helpers import sanitize_prompt_text
+
 
 DEFAULT_CATEGORY = "AI_REVIEW_LESSON"
 
@@ -94,14 +96,14 @@ def build_memory_rules_from_review(review_item: Dict[str, Any], trade: Dict[str,
 
 
 def sanitize_rule_text(text: str, max_len: int = 240) -> str:
-    """Strip prompt-injection risky chars for Groq prompt safety."""
-    if not text: return ""
-    s = str(text).replace("`","'").replace("{","(").replace("}"," )")
-    # remove common prompt injection markers
-    for bad in ["SYSTEM:", "Ignore previous", "###", "<|", "PROMPT:", "ASSISTANT:"]:
-        s = s.replace(bad, "")
-    s = " ".join(s.split())
-    return s[:max_len]
+    """Strip prompt-injection risky chars for Groq prompt safety.
+
+    Thin wrapper kept for backward compatibility; the canonical
+    implementation now lives in utils.helpers.sanitize_prompt_text so the
+    same protection can be reused for other semi-external text (e.g. news
+    event titles) without duplicating the logic.
+    """
+    return sanitize_prompt_text(text, max_len)
 
 def format_memory_rules_for_prompt(rules: List[Dict[str, Any]], max_rules: int = 8) -> str:
     """Format active rules for Groq's decision prompt."""

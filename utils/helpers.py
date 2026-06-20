@@ -15,6 +15,27 @@ DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.json"
 DEFAULT_TRADES_PATH = PROJECT_ROOT / "storage" / "trades.json"
 
 
+_PROMPT_INJECTION_MARKERS = ["SYSTEM:", "Ignore previous", "###", "<|", "PROMPT:", "ASSISTANT:"]
+
+
+def sanitize_prompt_text(text: Any, max_len: int = 240) -> str:
+    """Strip characters/phrases commonly used for prompt injection before any
+    semi-external text (news event titles, memory rules, AI-generated
+    reasoning, etc.) is embedded into an AI prompt.
+
+    This is a defensive measure, not a guarantee: it removes a known set of
+    injection markers and structural characters (backticks, braces) and caps
+    length, but cannot catch every possible injection phrasing.
+    """
+    if not text:
+        return ""
+    s = str(text).replace("`", "'").replace("{", "(").replace("}", " )")
+    for marker in _PROMPT_INJECTION_MARKERS:
+        s = s.replace(marker, "")
+    s = " ".join(s.split())
+    return s[:max_len]
+
+
 def setup_logging(level: int = logging.INFO) -> None:
     """Configure console logging for GitHub Actions."""
     logging.basicConfig(
