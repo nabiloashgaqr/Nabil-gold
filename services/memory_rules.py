@@ -93,6 +93,16 @@ def build_memory_rules_from_review(review_item: Dict[str, Any], trade: Dict[str,
     return rules
 
 
+def sanitize_rule_text(text: str, max_len: int = 240) -> str:
+    """Strip prompt-injection risky chars for Groq prompt safety."""
+    if not text: return ""
+    s = str(text).replace("`","'").replace("{","(").replace("}"," )")
+    # remove common prompt injection markers
+    for bad in ["SYSTEM:", "Ignore previous", "###", "<|", "PROMPT:", "ASSISTANT:"]:
+        s = s.replace(bad, "")
+    s = " ".join(s.split())
+    return s[:max_len]
+
 def format_memory_rules_for_prompt(rules: List[Dict[str, Any]], max_rules: int = 8) -> str:
     """Format active rules for Groq's decision prompt."""
     active = [r for r in rules if r.get("active", True)]
@@ -103,6 +113,6 @@ def format_memory_rules_for_prompt(rules: List[Dict[str, Any]], max_rules: int =
     for idx, rule in enumerate(active[:max_rules], start=1):
         lines.append(
             f"{idx}. [{rule.get('category', DEFAULT_CATEGORY)} | {rule.get('applies_to', 'BOTH')} | "
-            f"ثقة {rule.get('confidence', 0)}%] {rule.get('rule_text', '')}"
+            f"ثقة {rule.get('confidence', 0)}%] {sanitize_rule_text(rule.get('rule_text', ''))}"
         )
     return "\n".join(lines)

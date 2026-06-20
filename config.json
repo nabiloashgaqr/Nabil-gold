@@ -347,11 +347,11 @@
     "min_groq_confidence": 60,
     "allow_single_agent_context": true,
     "disable_forced_observation": true,
-    "description": "One-Agent + Groq mode: strongest/available agent context may be used, but Groq remains the final decision gate. No forced signals.",
     "block_on_ai_contradiction": true,
     "min_supportive_evidence_items": 2,
     "retry_on_contradiction": true,
-    "max_retry": 1
+    "max_retry": 1,
+    "description": "One-Agent + Groq mode: strongest agent context may be used, Groq is final gate. No forced signals."
   },
   "order_execution": {
     "enabled": true,

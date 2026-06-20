@@ -1,15 +1,15 @@
 # Core dependencies
 requests==2.31.0
-# python-telegram-bot removed: TelegramService uses requests directly
 pandas>=2.2.3,<3.0.0
 numpy>=1.26.4,<3.0.0
 supabase>=2.10.0,<3.0.0
 python-dotenv==1.0.0
-httpx==0.27.2  # required by Supabase/gotrue proxy kwarg compatibility
+httpx==0.27.2
 
-# AI Providers
-openai>=1.10.0
-anthropic>=0.18.0
+# AI - Groq is primary (requests-based, no SDK needed)
+# Optional providers (install manually if needed):
+# openai>=1.10.0
+# anthropic>=0.18.0
 
 # Testing
 pytest>=8.0.0

@@ -240,6 +240,14 @@ class NewsRiskAgent(BaseAgent):
                     events.extend(data.get("events", []))
             except json.JSONDecodeError as exc:
                 self.logger.warning("Invalid news events file: %s", exc)
+        # Auto ForexFactory feed (free, no key)
+        try:
+            from services.news_feed_forexfactory import fetch_forexfactory_events
+            ff_events = fetch_forexfactory_events()
+            if ff_events:
+                events.extend(ff_events)
+        except Exception:
+            pass
         return [event for event in events if isinstance(event, dict)]
 
 
