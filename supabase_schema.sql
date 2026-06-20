@@ -327,6 +327,18 @@ ALTER TABLE learning_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_evaluations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_trade_reviews ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_memory_rules ENABLE ROW LEVEL SECURITY;
+CREATE TABLE IF NOT EXISTS weekly_reports (
+    id BIGSERIAL PRIMARY KEY,
+    week_start DATE NOT NULL,
+    week_end DATE NOT NULL,
+    stats_json JSONB NOT NULL,
+    report_text TEXT NOT NULL,
+    recommendations JSONB,
+    tokens_used INTEGER DEFAULT 0,
+    cost NUMERIC(10, 6) DEFAULT 0.0,
+    status TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
 
 -- If you intentionally use anon key for a private bot, create restricted policies manually.
 -- Recommended GitHub Secret: SUPABASE_KEY = service_role key, not anon key.
