@@ -132,3 +132,31 @@ def get_today_trades(path: str | Path | None = None) -> List[Dict[str, Any]]:
         if created_at.startswith(today):
             results.append(trade)
     return results
+
+
+# New helper: unified trade side accessor
+def get_trade_side(obj: Any) -> str:
+    """Return the trade side (BUY/SELL) from a trade, decision, or signal structure.
+
+    Checks multiple possible keys in priority: side, trade_type, type, decision,
+    and nested signal.side or signal.type. Returns uppercase string or empty.
+    """
+    try:
+        if not obj:
+            return ""
+        if isinstance(obj, dict):
+            # direct fields
+            for key in ("side", "trade_type", "type", "decision"):
+                val = obj.get(key)
+                if val:
+                    return str(val).upper()
+            # nested signal
+            signal = obj.get("signal") or {}
+            if isinstance(signal, dict):
+                for key in ("side", "type"):
+                    val = signal.get(key)
+                    if val:
+                        return str(val).upper()
+    except Exception:
+        pass
+    return ""
