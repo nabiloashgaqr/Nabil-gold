@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from pathlib import Path
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -16,7 +15,6 @@ from utils.helpers import load_config, setup_logging
 
 setup_logging()
 logger = logging.getLogger(__name__)
-
 
 def main() -> None:
     config = load_config()
@@ -39,7 +37,6 @@ def main() -> None:
 
     if os.environ.get("SEND_TELEGRAM", "true").lower() in {"1", "true", "yes"}:
         telegram.send_message(format_dashboard_telegram(summary))
-
 
 if __name__ == "__main__":
     main()

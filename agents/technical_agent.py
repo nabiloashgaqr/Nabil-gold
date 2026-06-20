@@ -4,12 +4,11 @@
 """
 
 import logging
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, List, Tuple
 from .base_agent import BaseAgent
 from utils.indicators import calculate_ema, calculate_rsi, calculate_macd, calculate_atr, calculate_bollinger_bands, detect_support_resistance, detect_swing_points
 
 logger = logging.getLogger(__name__)
-
 
 class TechnicalAgent(BaseAgent):
     """
@@ -484,7 +483,7 @@ class TechnicalAgent(BaseAgent):
         ai = result.get('ai', {})
         
         lines = [
-            f"📊 *التحليل الفني*",
+            "📊 *التحليل الفني*",
             f"├ الاتجاه: {technical.get('trend', 'N/A')}",
             f"├ RSI: {technical.get('rsi', 'N/A')}",
             f"├ MACD: {technical.get('macd', 'N/A')}",

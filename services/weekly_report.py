@@ -1,0 +1,514 @@
+"""Weekly AI Performance Report service.
+
+Generates a structured weekly performance report using Groq.
+
+Pipeline:
+  1. Collect last 7 days of trades, agent stats, risk events, memory rules
+  2. Build a structured prompt with real numbers only
+  3. Call Groq to produce a markdown report
+  4. Split long messages for Telegram (4096 char limit)
+  5. Save report as JSON in storage/weekly_report.json
+"""
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
+
+logger = logging.getLogger(__name__)
+
+# Telegram hard limit (https://core.telegram.org/bots/api#sendmessage)
+TELEGRAM_MAX_CHARS = 4096
+
+# Statuses considered as a closed (resolved) trade
+CLOSED_STATUSES = {"CLOSED_TP1", "CLOSED_TP2", "CLOSED_SL", "EXPIRED", "BE_HIT",
+                   "TP2_HIT", "SL_HIT", "MANUAL_CLOSE"}
+
+
+@dataclass
+class WeeklyStats:
+    """Aggregated weekly numbers fed into the Groq prompt."""
+    lookback_days: int = 7
+    week_start: str = ""
+    week_end: str = ""
+    total_trades: int = 0
+    closed_trades: int = 0
+    open_trades: int = 0
+    wins: int = 0
+    losses: int = 0
+    break_even: int = 0
+    win_rate: float = 0.0
+    net_pnl_points: float = 0.0
+    avg_win_points: float = 0.0
+    avg_loss_points: float = 0.0
+    largest_win_points: float = 0.0
+    largest_loss_points: float = 0.0
+    best_day: str = "—"
+    best_day_pnl: float = 0.0
+    worst_day: str = "—"
+    worst_day_pnl: float = 0.0
+    by_day: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    by_agent: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    by_session: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    halt_activations: int = 0
+    caution_activations: int = 0
+    new_memory_rules: int = 0
+    applied_memory_rules: int = 0
+    news_blocked_signals: int = 0
+    duplicate_blocked_signals: int = 0
+
+    def to_prompt_dict(self) -> Dict[str, Any]:
+        return {
+            "week": f"{self.week_start} → {self.week_end}",
+            "lookback_days": self.lookback_days,
+            "total_trades": self.total_trades,
+            "closed_trades": self.closed_trades,
+            "open_trades": self.open_trades,
+            "wins": self.wins,
+            "losses": self.losses,
+            "break_even": self.break_even,
+            "win_rate_pct": round(self.win_rate, 1),
+            "net_pnl_points": round(self.net_pnl_points, 1),
+            "avg_win_points": round(self.avg_win_points, 2),
+            "avg_loss_points": round(self.avg_loss_points, 2),
+            "largest_win_points": round(self.largest_win_points, 2),
+            "largest_loss_points": round(self.largest_loss_points, 2),
+            "best_day": self.best_day,
+            "best_day_pnl": round(self.best_day_pnl, 2),
+            "worst_day": self.worst_day,
+            "worst_day_pnl": round(self.worst_day_pnl, 2),
+            "by_day": self.by_day,
+            "by_agent": self.by_agent,
+            "by_session": self.by_session,
+            "halt_activations": self.halt_activations,
+            "caution_activations": self.caution_activations,
+            "new_memory_rules": self.new_memory_rules,
+            "applied_memory_rules": self.applied_memory_rules,
+            "news_blocked_signals": self.news_blocked_signals,
+            "duplicate_blocked_signals": self.duplicate_blocked_signals,
+        }
+
+
+class WeeklyReportService:
+    """Build and send the weekly AI performance report."""
+
+    def __init__(self, config: Dict[str, Any], database: Any, ai_service: Any = None,
+                 telegram: Any = None) -> None:
+        self.config = config
+        self.database = database
+        self.ai_service = ai_service
+        self.telegram = telegram
+        wr_cfg = (config.get("weekly_report") or {})
+        self.enabled = bool(wr_cfg.get("enabled", False))
+        self.lookback_days = int(wr_cfg.get("lookback_days", 7) or 7)
+        # Handle explicit 0 vs missing key correctly (don't fall back to 5).
+        _min_trades_raw = wr_cfg.get("min_trades_for_report")
+        self.min_trades = int(_min_trades_raw) if _min_trades_raw is not None else 5
+        self.max_chars = int(wr_cfg.get("max_chars", 3500) or 3500)
+        self.send_telegram = bool(wr_cfg.get("send_telegram", True))
+        self.storage_path = Path(wr_cfg.get("storage_path", "storage/weekly_report.json"))
+        self.tz_name = str(wr_cfg.get("timezone") or config.get("schedule", {}).get("timezone") or "Asia/Hebron")
+        try:
+            self.tz = ZoneInfo(self.tz_name)
+        except Exception:  # noqa: BLE001
+            self.tz = timezone.utc
+
+    # ------------------------------------------------------------------ #
+    # 1) Data collection
+    # ------------------------------------------------------------------ #
+    def collect_stats(self, *, now: Optional[datetime] = None) -> WeeklyStats:
+        """Collect and aggregate last N days of data."""
+        now = now or datetime.now(self.tz)
+        week_start = (now - timedelta(days=self.lookback_days)).date()
+        week_end = now.date()
+        start_iso = datetime.combine(week_start, datetime.min.time()).astimezone(self.tz).isoformat()
+
+        stats = WeeklyStats(lookback_days=self.lookback_days,
+                            week_start=week_start.isoformat(),
+                            week_end=week_end.isoformat())
+
+        # ---- Trades ---------------------------------------------------- #
+        all_trades = self._fetch_trades_since(start_iso)
+        closed = []
+        open_trades: List[Dict[str, Any]] = []
+        for trade in all_trades:
+            status = str(trade.get("status", "")).upper()
+            if status in CLOSED_STATUSES:
+                closed.append(trade)
+            elif status in {"OPEN", "TP1_HIT"}:
+                open_trades.append(trade)
+
+        stats.total_trades = len(all_trades)
+        stats.closed_trades = len(closed)
+        stats.open_trades = len(open_trades)
+
+        wins, losses, be = [], [], []
+        pnl_total = 0.0
+        largest_win = 0.0
+        largest_loss = 0.0
+        for trade in closed:
+            pnl = self._trade_pnl(trade)
+            pnl_total += pnl
+            status = str(trade.get("status", "")).upper()
+            is_loss = status == "SL_HIT" or pnl < 0
+            is_be = status in {"BE_HIT", "EXPIRED"} and abs(pnl) < 0.5
+            if is_loss:
+                losses.append(pnl)
+                largest_loss = min(largest_loss, pnl)
+            elif is_be:
+                be.append(pnl)
+            else:
+                wins.append(pnl)
+                largest_win = max(largest_win, pnl)
+
+        stats.wins = len(wins)
+        stats.losses = len(losses)
+        stats.break_even = len(be)
+        stats.net_pnl_points = pnl_total
+        stats.avg_win_points = (sum(wins) / len(wins)) if wins else 0.0
+        stats.avg_loss_points = (sum(losses) / len(losses)) if losses else 0.0
+        stats.largest_win_points = largest_win
+        stats.largest_loss_points = largest_loss
+        total_resolved = stats.wins + stats.losses + stats.break_even
+        stats.win_rate = (stats.wins / total_resolved * 100.0) if total_resolved else 0.0
+
+        # ---- Per day ---------------------------------------------------- #
+        day_buckets: Dict[str, Dict[str, Any]] = {}
+        for trade in closed:
+            day = self._trade_day(trade)
+            bucket = day_buckets.setdefault(day, {"pnl": 0.0, "count": 0, "wins": 0, "losses": 0})
+            pnl = self._trade_pnl(trade)
+            bucket["pnl"] += pnl
+            bucket["count"] += 1
+            status = str(trade.get("status", "")).upper()
+            if status == "SL_HIT" or pnl < 0:
+                bucket["losses"] += 1
+            elif status not in {"BE_HIT", "EXPIRED"} or pnl >= 0:
+                bucket["wins"] += 1
+        stats.by_day = {d: {**v, "pnl": round(v["pnl"], 2)} for d, v in day_buckets.items()}
+        if day_buckets:
+            best = max(day_buckets.items(), key=lambda kv: kv[1]["pnl"])
+            worst = min(day_buckets.items(), key=lambda kv: kv[1]["pnl"])
+            stats.best_day, stats.best_day_pnl = best[0], best[1]["pnl"]
+            stats.worst_day, stats.worst_day_pnl = worst[0], worst[1]["pnl"]
+
+        # ---- Per agent -------------------------------------------------- #
+        agent_buckets: Dict[str, Dict[str, Any]] = {}
+        for trade in closed:
+            agents = self._trade_agents(trade)
+            pnl = self._trade_pnl(trade)
+            status = str(trade.get("status", "")).upper()
+            is_win = status not in {"SL_HIT"} and pnl >= 0
+            for agent in agents:
+                bucket = agent_buckets.setdefault(
+                    agent, {"count": 0, "wins": 0, "losses": 0, "pnl": 0.0})
+                bucket["count"] += 1
+                bucket["pnl"] += pnl
+                if is_win:
+                    bucket["wins"] += 1
+                else:
+                    bucket["losses"] += 1
+        stats.by_agent = {
+            a: {**v, "pnl": round(v["pnl"], 2),
+                "win_rate_pct": round(v["wins"] / v["count"] * 100.0, 1) if v["count"] else 0.0}
+            for a, v in agent_buckets.items()
+        }
+
+        # ---- Per session ------------------------------------------------ #
+        session_buckets: Dict[str, Dict[str, Any]] = {}
+        for trade in closed:
+            session = self._trade_session(trade)
+            pnl = self._trade_pnl(trade)
+            bucket = session_buckets.setdefault(session, {"count": 0, "pnl": 0.0, "wins": 0})
+            bucket["count"] += 1
+            bucket["pnl"] += pnl
+            status = str(trade.get("status", "")).upper()
+            if status not in {"SL_HIT"} and pnl >= 0:
+                bucket["wins"] += 1
+        stats.by_session = {
+            s: {**v, "pnl": round(v["pnl"], 2),
+                "win_rate_pct": round(v["wins"] / v["count"] * 100.0, 1) if v["count"] else 0.0}
+            for s, v in session_buckets.items()
+        }
+
+        # ---- Risk / memory / news counters (best-effort) ---------------- #
+        stats.halt_activations = self._safe_count("session_log",
+                                                   {"event": "HALT_ACTIVATED", "since": start_iso})
+        stats.caution_activations = self._safe_count("session_log",
+                                                      {"event": "CAUTION_ACTIVATED", "since": start_iso})
+        stats.new_memory_rules = self._safe_count("ai_memory_rules",
+                                                   {"since": start_iso})
+        stats.news_blocked_signals = self._safe_count("signals",
+                                                       {"blocked_by": "news", "since": start_iso})
+        stats.duplicate_blocked_signals = self._safe_count("signals",
+                                                             {"blocked_by": "duplicate", "since": start_iso})
+        return stats
+
+    # ------------------------------------------------------------------ #
+    # 2) Prompt
+    # ------------------------------------------------------------------ #
+    def build_prompt(self, stats: WeeklyStats) -> str:
+        data = json.dumps(stats.to_prompt_dict(), ensure_ascii=False, indent=2)
+        return (
+            "أنت محلل أداء أسبوعي لنظام إشارات الذهب (XAU/USD، Paper Trading).\n\n"
+            "📊 البيانات الفعلية للأسبوع الماضي (لا تخترع أرقامًا، استخدم البيانات فقط):\n"
+            f"```json\n{data}\n```\n\n"
+            "✍️ اكتب تقريرًا مختصرًا بالعربية يتضمن الأقسام التالية بالترتيب:\n"
+            "1) 📈 ملخص الأداء (5 نقاط: إجمالي، فوز، صافي، أكبر ربح، أكبر خسارة)\n"
+            "2) 🤖 أداء الوكلاء (لكل وكيل: اسم + win rate + pnl + توصية وزن)\n"
+            "3) 📅 أفضل وأسوأ يوم (يوم + pnl + عدد صفقات)\n"
+            "4) 🌍 أداء الجلسات (London / NY / Asian بأفضل/أسوأ)\n"
+            "5) ⚠️ المخاطر (HALT/CAUTION count)\n"
+            "6) 🧠 قواعد ذاكرة جديدة (عددها فقط)\n"
+            "7) 🎯 3-5 توصيات محددة قابلة للتنفيذ في config.json الأسبوع القادم\n\n"
+            f"⚠️ شروط صارمة:\n"
+            f"- لا تتجاوز {self.max_chars} حرف\n"
+            "- استخدم emojis في بداية كل قسم\n"
+            "- التوصيات يجب أن تكون قابلة للتنفيذ فورًا (مثل: 'قلّل weight classical_agent من 0.20 إلى 0.15')\n"
+            "- اكتب بالعربية الفصحى المبسّطة\n"
+            "- ابدأ بسطر '═══════════════════════════════════' وانهِ بنفس السطر\n"
+        )
+
+    # ------------------------------------------------------------------ #
+    # 3) Generate (calls Groq)
+    # ------------------------------------------------------------------ #
+    async def generate_report(self, *, now: Optional[datetime] = None) -> Dict[str, Any]:
+        stats = self.collect_stats(now=now)
+        prompt = self.build_prompt(stats)
+
+        # Gracefully handle weeks with too few trades
+        if stats.total_trades < self.min_trades:
+            message = (
+                "═══════════════════════════════════\n"
+                "📊 التقرير الأسبوعي\n"
+                f"الأسبوع: {stats.week_start} → {stats.week_end}\n"
+                "═══════════════════════════════════\n\n"
+                f"⚪ الأسبوع هادئ: إجمالي {stats.total_trades} صفقات فقط "
+                f"(الحد الأدنى {self.min_trades}).\n"
+                "لا توجد توصيات هذا الأسبوع.\n"
+            )
+            result = {
+                "status": "ok_too_few_trades",
+                "stats": stats.to_prompt_dict(),
+                "report_text": message,
+                "recommendations": [],
+            }
+            self._save(result)
+            return result
+
+        if self.ai_service is None:
+            message = self._fallback_message(stats)
+            result = {
+                "status": "ok_no_ai",
+                "stats": stats.to_prompt_dict(),
+                "report_text": message,
+                "recommendations": [],
+            }
+            self._save(result)
+            return result
+
+        try:
+            response = await self.ai_service._call_ai(prompt, agent_type="weekly_report")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Groq call failed for weekly report: %s", exc)
+            response = None
+
+        if response is None or not getattr(response, "success", False):
+            message = self._fallback_message(stats)
+            result = {
+                "status": "ok_groq_failed",
+                "stats": stats.to_prompt_dict(),
+                "report_text": message,
+                "recommendations": [],
+                "error": getattr(response, "error", "unknown") if response else "no_response",
+            }
+            self._save(result)
+            return result
+
+        text = (response.content or "").strip()
+        if not text:
+            text = self._fallback_message(stats)
+
+        result = {
+            "status": "ok",
+            "stats": stats.to_prompt_dict(),
+            "report_text": text,
+            "recommendations": self._extract_recommendations(text),
+            "tokens_used": getattr(response, "tokens_used", 0) or 0,
+            "cost": getattr(response, "cost", 0.0) or 0.0,
+        }
+        self._save(result)
+        return result
+
+    # ------------------------------------------------------------------ #
+    # 4) Send to Telegram (split if needed)
+    # ------------------------------------------------------------------ #
+    def send_to_telegram(self, report_text: str) -> bool:
+        if not self.telegram or not self.send_telegram:
+            logger.info("Telegram disabled or unavailable; skipping send.")
+            return False
+        chunks = self.split_message(report_text)
+        all_ok = True
+        for idx, chunk in enumerate(chunks, 1):
+            if len(chunks) > 1:
+                prefix = f"📄 (Part {idx}/{len(chunks)})\n\n"
+                chunk = prefix + chunk
+            ok = self.telegram.send_message(chunk, urgent=False)
+            all_ok = all_ok and ok
+        return all_ok
+
+    @staticmethod
+    def split_message(text: str, max_chars: int = TELEGRAM_MAX_CHARS) -> List[str]:
+        """Split text into chunks <= max_chars, breaking at line boundaries."""
+        if len(text) <= max_chars:
+            return [text]
+        chunks: List[str] = []
+        remaining = text
+        while remaining:
+            if len(remaining) <= max_chars:
+                chunks.append(remaining)
+                break
+            # Try to break at the last newline before the limit
+            cut = remaining.rfind("\n", 0, max_chars)
+            if cut == -1 or cut < max_chars // 2:
+                cut = max_chars
+            chunks.append(remaining[:cut].rstrip())
+            remaining = remaining[cut:].lstrip("\n")
+        return chunks
+
+    # ------------------------------------------------------------------ #
+    # Internals
+    # ------------------------------------------------------------------ #
+    def _fallback_message(self, stats: WeeklyStats) -> str:
+        """Used when Groq is not available; a simple text-only summary."""
+        lines = [
+            "═══════════════════════════════════",
+            "📊 التقرير الأسبوعي",
+            f"الأسبوع: {stats.week_start} → {stats.week_end}",
+            "═══════════════════════════════════",
+            "",
+            f"📈 إجمالي الصفقات: {stats.total_trades}",
+            f"✅ فوز: {stats.wins}    ❌ خسارة: {stats.losses}    ⚪ تعادل: {stats.break_even}",
+            f"🎯 نسبة الفوز: {stats.win_rate:.1f}%",
+            f"💰 صافي النقاط: {stats.net_pnl_points:+.2f}",
+            f"🏆 أكبر ربح: {stats.largest_win_points:+.2f}",
+            f"💔 أكبر خسارة: {stats.largest_loss_points:+.2f}",
+            "",
+            "⚠️ (Groq غير متاح — هذا ملخص آلي بدون توصيات)",
+        ]
+        return "\n".join(lines)
+
+    @staticmethod
+    def _extract_recommendations(text: str) -> List[str]:
+        """Pull numbered recommendations out of the report (best-effort).
+
+        Supports patterns: "1)", "1.", "1-", "-", "•"
+        """
+        lines = text.splitlines()
+        recs: List[str] = []
+        in_recs = False
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if any(kw in stripped for kw in ("التوصيات", "توصيات", "Recommendations")):
+                in_recs = True
+                continue
+            if not in_recs:
+                continue
+            # Patterns: "1)", "1.", "1-", "1:", "- ", "• "
+            first_char = stripped[0]
+            if first_char in {"-", "•", "‣", "◦"}:
+                recs.append(stripped)
+                continue
+            if first_char.isdigit():
+                # Look at first 3 chars for digit + separator
+                head = stripped[:3]
+                if any(sep in head for sep in (")", ".", "-", ":", " ")):
+                    recs.append(stripped)
+        return recs[:10]
+
+    def _save(self, payload: Dict[str, Any]) -> None:
+        try:
+            self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+            payload_to_save = dict(payload)
+            payload_to_save["saved_at"] = datetime.now(self.tz).isoformat()
+            with self.storage_path.open("w", encoding="utf-8") as fh:
+                json.dump(payload_to_save, fh, ensure_ascii=False, indent=2)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to save weekly report JSON: %s", exc)
+
+    # ---------------- helpers for trade extraction ---------------- #
+    def _fetch_trades_since(self, start_iso: str) -> List[Dict[str, Any]]:
+        """Fetch all trades created on/after start_iso using public DB methods only."""
+        try:
+            recent = self.database.get_recent_trades(limit=500) or []
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("get_recent_trades failed: %s", exc)
+            return []
+        return [t for t in recent if self._trade_time_text(t) >= start_iso]
+
+    @staticmethod
+    def _trade_time_text(trade: Dict[str, Any]) -> str:
+        for key in ("created_at", "opened_at", "entry_time", "updated_at"):
+            value = trade.get(key)
+            if value:
+                return str(value)
+        return ""
+
+    @staticmethod
+    def _trade_pnl(trade: Dict[str, Any]) -> float:
+        for key in ("final_pnl", "current_pnl_points", "current_pnl", "pnl_points", "pnl"):
+            value = trade.get(key)
+            try:
+                if value is not None:
+                    return float(value)
+            except (TypeError, ValueError):
+                continue
+        return 0.0
+
+    @staticmethod
+    def _trade_day(trade: Dict[str, Any]) -> str:
+        ts = WeeklyReportService._trade_time_text(trade)
+        if not ts:
+            return "unknown"
+        return ts[:10]
+
+    @staticmethod
+    def _trade_agents(trade: Dict[str, Any]) -> List[str]:
+        agents = trade.get("agents") or trade.get("signals_agents") or []
+        if isinstance(agents, str):
+            return [a.strip() for a in agents.split(",") if a.strip()]
+        if isinstance(agents, list):
+            return [str(a) for a in agents if a]
+        return ["unknown"]
+
+    @staticmethod
+    def _trade_session(trade: Dict[str, Any]) -> str:
+        return str(trade.get("session") or trade.get("current_session") or "unknown")
+
+    def _safe_count(self, table: str, filters: Dict[str, Any]) -> int:
+        """Best-effort count; never raises."""
+        try:
+            since = filters.get("since")
+            event = filters.get("event")
+            blocked_by = filters.get("blocked_by")
+            client = getattr(self.database, "client", None)
+            use_sb = getattr(self.database, "use_supabase", False)
+            if not (use_sb and client):
+                return 0
+            q = client.table(table).select("id")
+            if since:
+                q = q.gte("created_at", since)
+            if event:
+                q = q.eq("event", event)
+            if blocked_by:
+                q = q.eq("blocked_by", blocked_by)
+            response = q.execute()
+            return len(response.data or [])
+        except Exception:  # noqa: BLE001
+            return 0

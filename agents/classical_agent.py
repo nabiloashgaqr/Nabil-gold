@@ -7,11 +7,10 @@
 from __future__ import annotations
 
 from statistics import mean
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 from agents.base_agent import BaseAgent
 from utils.indicators import calculate_fibonacci_levels, calculate_pivot_points, detect_support_resistance, detect_swing_points
-
 
 class ClassicalAgent(BaseAgent):
     """Analyze support/resistance, pivots, Fibonacci and simple trendlines."""

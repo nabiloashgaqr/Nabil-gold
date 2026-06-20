@@ -13,11 +13,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
-from collections import defaultdict
-import json
 
 logger = logging.getLogger(__name__)
-
 
 @dataclass
 class AgentPerformanceRecord:
@@ -39,7 +36,6 @@ class AgentPerformanceRecord:
     consecutive_losses: int = 0
     accuracy_trend: List[float] = field(default_factory=list)  # آخر 10 نسبة
 
-
 @dataclass
 class LearningConfig:
     """إعدادات التعلم المحسّنة"""
@@ -54,7 +50,6 @@ class LearningConfig:
     streak_bonus: float = 0.10  # مكافأة التتابع
     recent_trades_weight: float = 0.6  # 60% للصفقات الأخيرة
 
-
 @dataclass
 class LearningReport:
     """تقرير التعلم"""
@@ -68,7 +63,6 @@ class LearningReport:
     changes_summary: str
     top_performers: List[str] = field(default_factory=list)
     bottom_performers: List[str] = field(default_factory=list)
-
 
 class LearningService:
     """
@@ -156,7 +150,7 @@ class LearningService:
             self.learning_history.append(report)
             self.current_weights = adjusted_weights
             
-            logger.info(f"✅ تم تحديث الأوزان بنجاح")
+            logger.info("✅ تم تحديث الأوزان بنجاح")
             self._log_weight_changes(adjusted_weights)
             
             return report
@@ -231,8 +225,7 @@ class LearningService:
                 record = agent_records[name]
                 record.total_predictions += 1
                 
-                # حساب win rate مع noise
-                variance = 0.1
+                # حساب win rate
                 agent_wr = config['base_rate'] + (pnl / 100 if is_win else -0.05)
                 agent_wr = max(0.3, min(0.9, agent_wr))  # حدود
                 
@@ -576,10 +569,8 @@ class LearningService:
         """🚀 الحصول على رؤى من الصفقات الفاشلة"""
         return self.failed_signals_memory[-10:]  # آخر 10 صفقات فاشلة
 
-
 # Singleton instance
 _learning_service: Optional['LearningService'] = None
-
 
 def get_learning_service(db, config: Dict) -> LearningService:
     """الحصول على instance خدمة التعلم"""

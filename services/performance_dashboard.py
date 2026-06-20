@@ -4,20 +4,18 @@
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 
 logger = logging.getLogger(__name__)
 
-
 class AlertLevel(Enum):
     """مستويات التنبيه"""
     INFO = "ℹ️"
     WARNING = "⚠️"
     CRITICAL = "🚨"
-
 
 @dataclass
 class AgentPerformance:
@@ -40,7 +38,6 @@ class AgentPerformance:
             return 0.0
         return (self.winning_trades / total_trades) * 100
 
-
 @dataclass
 class SessionPerformance:
     """أداء الجلسة"""
@@ -52,7 +49,6 @@ class SessionPerformance:
     total_pnl: float = 0.0
     trades_count: int = 0
 
-
 @dataclass
 class DrawdownAlert:
     """تنبيه السحب"""
@@ -61,7 +57,6 @@ class DrawdownAlert:
     max_allowed: float
     message: str
     recommendations: List[str] = field(default_factory=list)
-
 
 class PerformanceDashboard:
     """
@@ -530,10 +525,8 @@ class PerformanceDashboard:
         
         return "\n".join(lines)
 
-
 # Singleton instance
 _dashboard_instance: Optional[PerformanceDashboard] = None
-
 
 def get_performance_dashboard(db, config: Dict) -> PerformanceDashboard:
     """الحصول على instance لوحة الأداء"""

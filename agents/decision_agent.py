@@ -4,14 +4,12 @@
 """
 
 import logging
-from typing import Dict, List, Any, Optional
-from collections import Counter
+from typing import Dict, List, Any
 from .base_agent import BaseAgent
 from services.memory_rules import format_memory_rules_for_prompt
 from services.agent_playbooks import format_agent_playbooks_for_prompt
 
 logger = logging.getLogger(__name__)
-
 
 class DecisionAgent(BaseAgent):
     """
@@ -102,13 +100,8 @@ class DecisionAgent(BaseAgent):
         """
         
         agents_results = data.get('all_agents_results', data)
-        price_data = data.get('price_data') or data
         indicators = data.get('indicators', {})
         session_info = data.get('session', data.get('session_info', {}))
-        memory_rules = agents_results.get('memory_rules', []) if isinstance(agents_results, dict) else []
-        daily_bias = agents_results.get('daily_bias', {}) if isinstance(agents_results, dict) else {}
-        news_ai = agents_results.get('news_ai', {}) if isinstance(agents_results, dict) else {}
-        dynamic_risk = agents_results.get('dynamic_risk', {}) if isinstance(agents_results, dict) else {}
         
         # 1️⃣ تجميع أصوات الوكلاء (مع weights متعلمة)
         votes = self._collect_votes(agents_results)
@@ -302,7 +295,6 @@ class DecisionAgent(BaseAgent):
             'rejection_reason': rejection_reason
         }
 
-
     def _format_agent_context_for_ai(self, agents_results: Dict[str, Any]) -> str:
         """Format compact, high-signal agent outputs for Groq under token limits."""
         def short(value: Any, limit: int = 550) -> str:
@@ -401,8 +393,6 @@ class DecisionAgent(BaseAgent):
         
         try:
             # بناء prompt مع كل البيانات
-            votes_summary = self._format_votes_for_ai(votes)
-            
             session_quality = session_info.get('quality', session_info.get('session_quality', 'UNKNOWN'))
             trading_allowed = session_info.get('trading_allowed', False)
             
@@ -620,6 +610,14 @@ Return JSON only, no Markdown:
 
         min_conf = self.min_confidence * quality_multipliers.get(str(session_quality).upper(), 1.20)
 
+        # Read Groq Observation Mode config (was previously only inside _ai_decision,
+        # causing NameError when _final_decision ran after a successful AI call).
+        groq_obs = self.config.get('groq_observation_mode', {}) or {}
+        groq_observation_enabled = bool(groq_obs.get('enabled', False))
+        observation_min_conf = float(
+            groq_obs.get('min_groq_confidence', self.min_confidence) or self.min_confidence
+        )
+
         # One-Agent + Groq mode – Groq is final gate
 
         ai_config = self.config.get('ai_service', {})
@@ -627,7 +625,7 @@ Return JSON only, no Markdown:
         if ai_required and (not ai.get('available') or ai.get('error')):
             error = ai.get('error') or 'AI unavailable'
             return 'WAIT', 0, f"Groq required but AI failed: {error}"
-        
+
         # دمج الكلاسيكي مع AI / Groq Observation Mode
         if ai.get('available'):
             ai_signal = str(ai.get('signal', 'WAIT')).upper()
@@ -669,7 +667,7 @@ Return JSON only, no Markdown:
                 else:
                     final_signal = classic.get('decision', 'WAIT')
                     final_confidence = classic.get('confidence', 50)
-                    reasoning = f"قرار كلاسيكي - AI غير متوفر أو ثقة منخفضة"
+                    reasoning = "قرار كلاسيكي - AI غير متوفر أو ثقة منخفضة"
         else:
             if ai_required:
                 final_signal = 'WAIT'
@@ -803,7 +801,6 @@ Return JSON only, no Markdown:
         result['warnings'] = warnings
         return result
 
-
     def _calculate_quality_score(self, analysis: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
         """Calculate a human-friendly signal quality score (0-100 + grade)."""
         confidence = float(analysis.get('confidence') or 0)
@@ -895,15 +892,6 @@ Return JSON only, no Markdown:
             warnings.append('تحذير: Groq لم يقدم مستوى سعرياً واضحاً للإلغاء أو السيناريو البديل.')
         return warnings
 
-        if entry <= 0 or stop_loss <= 0 or tp1 <= 0 or tp2 <= 0:
-            return False
-        if signal == 'BUY':
-            return stop_loss < entry < tp1 <= tp2
-        if signal == 'SELL':
-            return stop_loss > entry > tp1 >= tp2
-        return False
-
-
     def _order_type(self, signal: str, entry: float, current_price: float | None) -> str:
         """Classify paper order type from entry vs current price."""
         try:
@@ -938,8 +926,6 @@ Return JSON only, no Markdown:
             tp1_price = tp1.get('price', 0)
             tp2_price = tp2.get('price', 0)
             rr_ratio = tp2.get('rr_ratio', tp1.get('rr_ratio', 0))
-            levels_corrected = False
-            corrected_risk_summary = ''
 
             signal_payload = {
                 'type': final_signal,

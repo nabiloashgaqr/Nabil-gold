@@ -114,6 +114,9 @@ class DatabaseService:
             "last_updated": now_iso,
         }
 
+        # Backwards-compatible: set 'side' alongside 'type' for clearer naming
+        trade_data["side"] = trade_data.get("type")
+
         if self.use_supabase and self.client:
             try:
                 self._insert_trade_supabase(trade_data)
@@ -204,7 +207,13 @@ class DatabaseService:
         trades = load_trades(self.local_path)
         for trade in trades:
             if str(trade.get("id")) == trade_id:
+                # Apply updates
                 trade.update(updates)
+                # Keep type/side in sync for backward compatibility
+                if "type" in updates and "side" not in updates:
+                    trade["side"] = updates.get("type")
+                if "side" in updates and "type" not in updates:
+                    trade["type"] = updates.get("side")
                 break
         save_trades(trades, self.local_path)
 
@@ -420,6 +429,7 @@ class DatabaseService:
         legacy_fields = {
             "id",
             "type",
+            "side",
             "entry_price",
             "stop_loss",
             "tp1",

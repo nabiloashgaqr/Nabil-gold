@@ -83,27 +83,9 @@ CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_created ON trades(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_trades_open ON trades(status) WHERE status IN ('OPEN', 'PARTIAL', 'TP1_HIT');
 
--- Safe migrations for existing tables
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_time TIMESTAMPTZ;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS close_time TIMESTAMPTZ;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS close_price DECIMAL(18, 4);
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS current_pnl_points DECIMAL(18, 4) DEFAULT 0;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS final_pnl DECIMAL(18, 4);
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS initial_stop_loss DECIMAL(18, 4);
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS sl_moved_to_entry BOOLEAN DEFAULT FALSE;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS partial_close BOOLEAN DEFAULT FALSE;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS updates_sent JSONB DEFAULT '[]'::jsonb;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS signal_snapshot JSONB DEFAULT '{}'::jsonb;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS last_updated TIMESTAMPTZ DEFAULT NOW();
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS trading_mode VARCHAR(20) DEFAULT 'paper';
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS paper_trading BOOLEAN DEFAULT TRUE;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS paper_balance_start DECIMAL(18, 4);
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS paper_lot_size DECIMAL(18, 6);
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS ai_reviewed BOOLEAN DEFAULT FALSE;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS ai_review JSONB;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS memory_rule_ids TEXT[] DEFAULT ARRAY[]::TEXT[];
+-- NOTE: Previously there was a block of ALTER TABLE ... ADD COLUMN IF NOT EXISTS for trades
+-- that duplicated columns already defined above. That block has been removed for clarity.
+-- For safe online schema changes, use dedicated migration scripts under /migrations.
 
 -- AI Memory Rules table
 CREATE TABLE IF NOT EXISTS ai_memory_rules (
@@ -327,6 +309,18 @@ ALTER TABLE learning_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_evaluations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_trade_reviews ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_memory_rules ENABLE ROW LEVEL SECURITY;
+CREATE TABLE IF NOT EXISTS weekly_reports (
+    id BIGSERIAL PRIMARY KEY,
+    week_start DATE NOT NULL,
+    week_end DATE NOT NULL,
+    stats_json JSONB NOT NULL,
+    report_text TEXT NOT NULL,
+    recommendations JSONB,
+    tokens_used INTEGER DEFAULT 0,
+    cost NUMERIC(10, 6) DEFAULT 0.0,
+    status TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
 
 -- If you intentionally use anon key for a private bot, create restricted policies manually.
 -- Recommended GitHub Secret: SUPABASE_KEY = service_role key, not anon key.

@@ -10,8 +10,7 @@ from __future__ import annotations
 import logging
 from abc import ABC
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
-
+from typing import Any, Dict
 
 class BaseAgent(ABC):
     """قاعدة مشتركة لكل الوكلاء / Shared base class for all agents."""
