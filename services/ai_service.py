@@ -9,6 +9,7 @@
 import os
 import json
 import logging
+import asyncio
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
@@ -477,67 +478,98 @@ class AIService:
             )
     
     async def _call_groq(self, prompt: str, agent_type: str) -> AIResponse:
-        """استدعاء GroqCloud API (OpenAI-compatible)."""
+        """استدعاء GroqCloud API (OpenAI-compatible).
 
-        try:
-            import requests
+        Groq is the final decision gate in One-Agent + Groq mode, so a single
+        transient failure here means a missed trading signal entirely. Retries
+        with exponential backoff on timeouts/connection errors/429/5xx, the
+        same pattern MarketDataService uses for Twelve Data. Auth/bad-request
+        errors (401/403/400) are not retried since retrying cannot fix them.
+        """
 
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            }
+        import requests
 
-            system_prompt = self.system_prompts.get(agent_type, self.system_prompts['technical'])
-            data = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt},
-                ],
-                "max_tokens": self.max_tokens,
-                "temperature": self.temperature,
-                "response_format": {"type": "json_object"},
-            }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
 
-            response = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers=headers,
-                json=data,
-                timeout=35,
-            )
-            result = response.json()
+        system_prompt = self.system_prompts.get(agent_type, self.system_prompts['technical'])
+        data = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+            "response_format": {"type": "json_object"},
+        }
 
-            if not response.ok:
-                return AIResponse(
-                    success=False,
-                    content="",
-                    error=result.get("error", {}).get("message", str(result)),
-                    provider="groq",
-                    model=self.model,
+        max_attempts = 3
+        last_error = ""
+
+        for attempt in range(max_attempts):
+            try:
+                response = requests.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers=headers,
+                    json=data,
+                    timeout=35,
                 )
 
-            content = result['choices'][0]['message']['content']
-            tokens = int(result.get('usage', {}).get('total_tokens', 0) or 0)
-            cost = (tokens / 1000) * self.token_costs['groq']['input']
+                if response.status_code in (429, 500, 502, 503, 504):
+                    last_error = f"HTTP {response.status_code}"
+                    logger.warning(
+                        f"⚠️ Groq محاولة {attempt + 1}/{max_attempts} فشلت ({last_error}), إعادة محاولة..."
+                    )
+                    if attempt < max_attempts - 1:
+                        await asyncio.sleep(2 ** attempt)
+                        continue
+                    return AIResponse(success=False, content="", error=last_error, provider="groq", model=self.model)
 
-            return AIResponse(
-                success=True,
-                content=content,
-                provider="groq",
-                model=self.model,
-                tokens_used=tokens,
-                cost=cost,
-            )
+                result = response.json()
 
-        except Exception as e:
-            logger.error(f"❌ خطأ Groq: {e}")
-            return AIResponse(
-                success=False,
-                content="",
-                error=str(e),
-                provider="groq",
-                model=self.model,
-            )
+                if not response.ok:
+                    # Non-retryable client error (401/403/400/...): fail fast.
+                    return AIResponse(
+                        success=False,
+                        content="",
+                        error=result.get("error", {}).get("message", str(result)),
+                        provider="groq",
+                        model=self.model,
+                    )
+
+                content = result['choices'][0]['message']['content']
+                tokens = int(result.get('usage', {}).get('total_tokens', 0) or 0)
+                cost = (tokens / 1000) * self.token_costs['groq']['input']
+
+                return AIResponse(
+                    success=True,
+                    content=content,
+                    provider="groq",
+                    model=self.model,
+                    tokens_used=tokens,
+                    cost=cost,
+                )
+
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                last_error = str(e)
+                logger.warning(
+                    f"⚠️ Groq محاولة {attempt + 1}/{max_attempts} فشلت (timeout/connection): {e}"
+                )
+                if attempt < max_attempts - 1:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                logger.error(f"❌ خطأ Groq بعد {max_attempts} محاولات: {e}")
+                return AIResponse(success=False, content="", error=last_error, provider="groq", model=self.model)
+
+            except Exception as e:
+                # Non-network errors (bad JSON, unexpected shape, etc.) are not retried.
+                logger.error(f"❌ خطأ Groq: {e}")
+                return AIResponse(success=False, content="", error=str(e), provider="groq", model=self.model)
+
+        return AIResponse(success=False, content="", error=last_error or "unknown error", provider="groq", model=self.model)
 
     async def _call_grok(self, prompt: str, agent_type: str) -> AIResponse:
         """استدعاء Grok API (xAI)"""

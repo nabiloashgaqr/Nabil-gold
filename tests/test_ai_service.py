@@ -333,5 +333,97 @@ class TestAIIntegration:
         assert response.cost == 0.0225
 
 
+class TestCallGroqRetry:
+    """Groq is the final decision gate in One-Agent + Groq mode, so a single
+    transient failure used to mean a missed signal entirely. These tests
+    cover the retry/backoff behavior added to _call_groq."""
+
+    def make_service(self):
+        config = {
+            'ai_service': {
+                'enabled': True,
+                'provider': 'groq',
+                'model': 'llama-3.3-70b-versatile',
+                'api_key': 'test-groq-key',
+            }
+        }
+        return AIService(config)
+
+    def _ok_response(self):
+        resp = MagicMock()
+        resp.ok = True
+        resp.status_code = 200
+        resp.json.return_value = {
+            'choices': [{'message': {'content': '{"signal": "BUY"}'}}],
+            'usage': {'total_tokens': 100},
+        }
+        return resp
+
+    def _error_response(self, status_code, message="error"):
+        resp = MagicMock()
+        resp.ok = False
+        resp.status_code = status_code
+        resp.json.return_value = {'error': {'message': message}}
+        return resp
+
+    @pytest.mark.asyncio
+    async def test_succeeds_on_first_attempt_no_retry_needed(self):
+        service = self.make_service()
+        with patch('requests.post', return_value=self._ok_response()) as mock_post, \
+             patch('asyncio.sleep', new=AsyncMock()) as mock_sleep:
+            result = await service._call_groq("prompt", "technical")
+        assert result.success is True
+        assert mock_post.call_count == 1
+        mock_sleep.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_retries_on_connection_error_then_succeeds(self):
+        import requests as requests_module
+        service = self.make_service()
+        with patch(
+            'requests.post',
+            side_effect=[requests_module.exceptions.ConnectionError("boom"), self._ok_response()],
+        ) as mock_post, patch('asyncio.sleep', new=AsyncMock()) as mock_sleep:
+            result = await service._call_groq("prompt", "technical")
+        assert result.success is True
+        assert mock_post.call_count == 2
+        mock_sleep.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_retries_on_503_then_succeeds(self):
+        service = self.make_service()
+        with patch(
+            'requests.post',
+            side_effect=[self._error_response(503), self._ok_response()],
+        ) as mock_post, patch('asyncio.sleep', new=AsyncMock()):
+            result = await service._call_groq("prompt", "technical")
+        assert result.success is True
+        assert mock_post.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_does_not_retry_on_401_auth_error(self):
+        """Auth errors can't be fixed by retrying - should fail fast, not burn 3 attempts."""
+        service = self.make_service()
+        with patch('requests.post', return_value=self._error_response(401, "invalid api key")) as mock_post, \
+             patch('asyncio.sleep', new=AsyncMock()) as mock_sleep:
+            result = await service._call_groq("prompt", "technical")
+        assert result.success is False
+        assert "invalid api key" in result.error
+        assert mock_post.call_count == 1
+        mock_sleep.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_exhausts_all_retries_and_returns_failure(self):
+        import requests as requests_module
+        service = self.make_service()
+        with patch(
+            'requests.post',
+            side_effect=requests_module.exceptions.Timeout("too slow"),
+        ) as mock_post, patch('asyncio.sleep', new=AsyncMock()):
+            result = await service._call_groq("prompt", "technical")
+        assert result.success is False
+        assert mock_post.call_count == 3  # max_attempts
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
