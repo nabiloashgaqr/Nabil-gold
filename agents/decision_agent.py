@@ -4,14 +4,12 @@
 """
 
 import logging
-from typing import Dict, List, Any, Optional
-from collections import Counter
+from typing import Dict, List, Any
 from .base_agent import BaseAgent
 from services.memory_rules import format_memory_rules_for_prompt
 from services.agent_playbooks import format_agent_playbooks_for_prompt
 
 logger = logging.getLogger(__name__)
-
 
 class DecisionAgent(BaseAgent):
     """
@@ -102,13 +100,8 @@ class DecisionAgent(BaseAgent):
         """
         
         agents_results = data.get('all_agents_results', data)
-        price_data = data.get('price_data') or data
         indicators = data.get('indicators', {})
         session_info = data.get('session', data.get('session_info', {}))
-        memory_rules = agents_results.get('memory_rules', []) if isinstance(agents_results, dict) else []
-        daily_bias = agents_results.get('daily_bias', {}) if isinstance(agents_results, dict) else {}
-        news_ai = agents_results.get('news_ai', {}) if isinstance(agents_results, dict) else {}
-        dynamic_risk = agents_results.get('dynamic_risk', {}) if isinstance(agents_results, dict) else {}
         
         # 1️⃣ تجميع أصوات الوكلاء (مع weights متعلمة)
         votes = self._collect_votes(agents_results)
@@ -302,7 +295,6 @@ class DecisionAgent(BaseAgent):
             'rejection_reason': rejection_reason
         }
 
-
     def _format_agent_context_for_ai(self, agents_results: Dict[str, Any]) -> str:
         """Format compact, high-signal agent outputs for Groq under token limits."""
         def short(value: Any, limit: int = 550) -> str:
@@ -401,8 +393,6 @@ class DecisionAgent(BaseAgent):
         
         try:
             # بناء prompt مع كل البيانات
-            votes_summary = self._format_votes_for_ai(votes)
-            
             session_quality = session_info.get('quality', session_info.get('session_quality', 'UNKNOWN'))
             trading_allowed = session_info.get('trading_allowed', False)
             
@@ -677,7 +667,7 @@ Return JSON only, no Markdown:
                 else:
                     final_signal = classic.get('decision', 'WAIT')
                     final_confidence = classic.get('confidence', 50)
-                    reasoning = f"قرار كلاسيكي - AI غير متوفر أو ثقة منخفضة"
+                    reasoning = "قرار كلاسيكي - AI غير متوفر أو ثقة منخفضة"
         else:
             if ai_required:
                 final_signal = 'WAIT'
@@ -811,7 +801,6 @@ Return JSON only, no Markdown:
         result['warnings'] = warnings
         return result
 
-
     def _calculate_quality_score(self, analysis: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
         """Calculate a human-friendly signal quality score (0-100 + grade)."""
         confidence = float(analysis.get('confidence') or 0)
@@ -937,8 +926,6 @@ Return JSON only, no Markdown:
             tp1_price = tp1.get('price', 0)
             tp2_price = tp2.get('price', 0)
             rr_ratio = tp2.get('rr_ratio', tp1.get('rr_ratio', 0))
-            levels_corrected = False
-            corrected_risk_summary = ''
 
             signal_payload = {
                 'type': final_signal,
