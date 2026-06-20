@@ -31,6 +31,7 @@ from services.market_data import MarketDataService
 from services.news_interpreter import NewsInterpreter
 from services.telegram_bot import TelegramService
 from services.ai_service import get_ai_service
+from services.learning_service import get_learning_service
 from utils.helpers import load_config, setup_logging
 
 setup_logging()
@@ -267,7 +268,13 @@ async def run_analysis_async() -> None:
         # ── تشغيل وكيل القرار (مع AI) ──
         logger.info("تشغيل وكيل القرار (AI-enabled)...")
 
-        decision = await DecisionAgent(config, ai_service).decide_async(all_results)
+        # --- 1) LearningService wired ---
+        learning_service = None
+        try:
+            learning_service = get_learning_service(database, config)
+        except Exception:
+            learning_service = None
+        decision = await DecisionAgent(config, ai_service, learning_service).decide_async(all_results)
 
         decision["dynamic_risk"] = all_results.get("dynamic_risk", {})
         logger.info(
