@@ -620,6 +620,14 @@ Return JSON only, no Markdown:
 
         min_conf = self.min_confidence * quality_multipliers.get(str(session_quality).upper(), 1.20)
 
+        # Read Groq Observation Mode config (was previously only inside _ai_decision,
+        # causing NameError when _final_decision ran after a successful AI call).
+        groq_obs = self.config.get('groq_observation_mode', {}) or {}
+        groq_observation_enabled = bool(groq_obs.get('enabled', False))
+        observation_min_conf = float(
+            groq_obs.get('min_groq_confidence', self.min_confidence) or self.min_confidence
+        )
+
         # One-Agent + Groq mode – Groq is final gate
 
         ai_config = self.config.get('ai_service', {})
@@ -627,7 +635,7 @@ Return JSON only, no Markdown:
         if ai_required and (not ai.get('available') or ai.get('error')):
             error = ai.get('error') or 'AI unavailable'
             return 'WAIT', 0, f"Groq required but AI failed: {error}"
-        
+
         # دمج الكلاسيكي مع AI / Groq Observation Mode
         if ai.get('available'):
             ai_signal = str(ai.get('signal', 'WAIT')).upper()
@@ -894,15 +902,6 @@ Return JSON only, no Markdown:
         if signal in {'BUY', 'SELL'} and not any(ch.isdigit() for ch in inv_alt):
             warnings.append('تحذير: Groq لم يقدم مستوى سعرياً واضحاً للإلغاء أو السيناريو البديل.')
         return warnings
-
-        if entry <= 0 or stop_loss <= 0 or tp1 <= 0 or tp2 <= 0:
-            return False
-        if signal == 'BUY':
-            return stop_loss < entry < tp1 <= tp2
-        if signal == 'SELL':
-            return stop_loss > entry > tp1 >= tp2
-        return False
-
 
     def _order_type(self, signal: str, entry: float, current_price: float | None) -> str:
         """Classify paper order type from entry vs current price."""
