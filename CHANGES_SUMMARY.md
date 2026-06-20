@@ -1,115 +1,145 @@
-# ملخص التغييرات — Nabil-gold (تنظيف تحذيرات pyflakes)
+# 🔧 إصلاح حلقة التعلّم المقطوعة
 
 > **التاريخ:** 2026-06-20  
-> **نتيجة `pyflakes`:** من **27 تحذير** إلى **0** ✅  
-> **اختبارات pytest:** **217/217** تنجح ✅
+> **الحالة:** ✅ **الحلقة الآن مُغلقة وتعمل**  
+> **الاختبارات:** **253/253** نجح (241 + 10 جديد + 2 param)
 
 ---
 
-## الملفات المُعدَّلة (10 ملفات فقط)
+## 📋 المشاكل التي تم اكتشافها
 
-### agents/
-| الملف | التغييرات |
-|---|---|
-| `agents/decision_agent.py` | • حذف `Optional` و `Counter` من الاستيرادات<br>• حذف 5 متغيّرات محلّية غير مستعملة في `analyze()` (sync)<br>• حذف `votes_summary` (السطر 404)<br>• حذف `levels_corrected` و `corrected_risk_summary` (السطور 940-941)<br>• تحويل `f"..."` إلى `"..."` (سطر 680) |
-| `agents/base_agent.py` | • حذف `Optional` من استيراد `typing` |
-| `agents/classical_agent.py` | • حذف `Tuple` من استيراد `typing` |
-| `agents/technical_agent.py` | • حذف `Optional` من استيراد `typing` (الإبقاء على `Tuple` لأنه مستعمل)<br>• تحويل `f"📊 *التحليل الفني*"` إلى `"📊 *التحليل الفني*"` |
-| `agents/risk_management_agent.py` | • حذف `from collections import Counter` (الإبقاء على `Tuple` لأنه مستعمل) |
+### 🔴 المشكلة 1: Learning Service → Decision Agent (مقطوعة)
 
-### services/
-| الملف | التغييرات |
-|---|---|
-| `services/ai_service.py` | • حذف `List`, `Any` من `typing`<br>• حذف `from datetime import datetime` |
-| `services/learning_service.py` | • حذف `from collections import defaultdict`<br>• حذف `import json`<br>• حذف `variance = 0.1` غير المستعمل<br>• تحويل `f"✅ تم تحديث الأوزان بنجاح"` إلى `"✅ تم تحديث الأوزان بنجاح"` |
-| `services/performance_dashboard.py` | • حذف `timedelta` من استيراد `datetime` |
-| `services/trailing_stop.py` | • حذف `Any` من `typing`<br>• حذف `messages = result.get('messages', [])` غير المستعمل |
+**الوصف:**
+- `run_learning.py` يحسب أوزان الوكلاء الجديدة **كل يوم** ويحفظها في جدول `agent_weights` على Supabase ✓
+- لكن `DecisionAgent._load_weights()` كان يقرأ من `config.json` فقط ✗
+- النتيجة: النظام "يتعلم" لكن لا أحد يستمع له
 
-### scripts/
-| الملف | التغييرات |
-|---|---|
-| `scripts/generate_dashboard.py` | • حذف `from pathlib import Path` غير المستعمل |
-
----
-
-## التحذيرات الـ 27 التي تم إصلاحها
-
-### 14 × استيرادات غير مستعملة (Unused imports)
-```
-1.  services/ai_service.py:13       - typing.List
-2.  services/ai_service.py:13       - typing.Any
-3.  services/ai_service.py:16       - datetime.datetime
-4.  services/learning_service.py:16 - collections.defaultdict
-5.  services/learning_service.py:17 - json
-6.  services/performance_dashboard.py:7 - datetime.timedelta
-7.  services/trailing_stop.py:8     - typing.Any
-8.  agents/base_agent.py:13         - typing.Optional
-9.  agents/classical_agent.py:10    - typing.Tuple
-10. agents/decision_agent.py:7     - typing.Optional
-11. agents/decision_agent.py:8     - collections.Counter
-12. agents/risk_management_agent.py:10 - collections.Counter
-13. agents/technical_agent.py:7    - typing.Optional
-14. scripts/generate_dashboard.py:8 - pathlib.Path
+**السبب الجذري:**
+```python
+# agents/decision_agent.py (قبل)
+def _load_weights(self) -> Dict[str, float]:
+    config_weights = self.config.get('agent_weights', {})  # ← فقط config.json
+    return config_weights.copy() if config_weights else self.default_weights.copy()
 ```
 
-### 10 × متغيّرات محلّية غير مستعملة (Local variables)
-```
-15. services/learning_service.py:235 - variance
-16. services/trailing_stop.py:313    - messages
-17. agents/decision_agent.py:105     - price_data (في analyze() sync فقط)
-18. agents/decision_agent.py:108     - memory_rules (في analyze() sync فقط)
-19. agents/decision_agent.py:109     - daily_bias (في analyze() sync فقط)
-20. agents/decision_agent.py:110     - news_ai (في analyze() sync فقط)
-21. agents/decision_agent.py:111     - dynamic_risk (في analyze() sync فقط)
-22. agents/decision_agent.py:404     - votes_summary
-23. agents/decision_agent.py:940     - levels_corrected
-24. agents/decision_agent.py:941     - corrected_risk_summary
+**الإصلاح:**
+```python
+# agents/decision_agent.py (بعد)
+def _load_weights(self) -> Dict[str, float]:
+    # 1) من learning_service (DB) — الأوزان المحدّثة يومياً
+    if self.learning_service is not None:
+        db_weights = getattr(self.learning_service, 'current_weights', None)
+        if db_weights:
+            return dict(db_weights)
+    # 2) fallback إلى config.json
+    # 3) fallback إلى default_weights
 ```
 
-### 3 × f-string بدون placeholders
+### 🔴 المشكلة 2: أوزان DB لم تكن تُحمَّل قبل DecisionAgent
+
+**الوصف:**
+- حتى لو أصلحنا `_load_weights()`، الـ `LearningService` يبدأ بـ `current_weights = default_weights.copy()` (وليس من DB)
+- يجب تحميل الأوزان من DB **قبل** إنشاء DecisionAgent
+
+**الإصلاح في `scripts/run_analysis.py`:**
+```python
+learning_service = get_learning_service(database, config)
+# 🆕 السطر المفقود سابقًا:
+await learning_service.load_current_weights()
+decision = await DecisionAgent(config, ai_service, learning_service).decide_async(all_results)
 ```
-25. services/learning_service.py:159 - f"✅ تم تحديث الأوزان بنجاح"
-26. agents/decision_agent.py:680    - f"قرار كلاسيكي - AI غير متوفر..."
-27. agents/technical_agent.py:487    - f"📊 *التحليل الفني*"
+
+### 🟡 المشكلة 3: حدّ مراجعة يومي ضعيف
+
+**الوصف:**
+- مع زيادة الإشارات اليومية، `max_reviews_per_run: 3` يترك خسائر دون مراجعة
+- الصفقات غير المُراجعة تتراكم وتخرج من نافذة `recent_trades_limit: 30`
+
+**الإصلاح في `config.json`:**
+```diff
+- "max_reviews_per_run": 3,
++ "max_reviews_per_run": 20,
+- "recent_trades_limit": 30,
++ "recent_trades_limit": 50,
 ```
 
 ---
 
-## ⚠️ ما لم أُغيّره (لأن pyflakes كان مخطئًا)
+## 📦 الملفات في الـ ZIP
 
-| الموقع | القرار | السبب |
+```
+Nabil-gold-learning-fix.zip
+├── agents/
+│   └── decision_agent.py                 ← مُعدَّل: _load_weights يستخدم learning_service
+├── scripts/
+│   └── run_analysis.py                   ← مُعدَّل: يستدعي load_current_weights قبل DecisionAgent
+├── tests/
+│   └── test_learning_weights_fix.py      ← جديد: 10 اختبارات regression
+└── config.json                           ← مُعدَّل: max_reviews_per_run 3→20, recent_trades_limit 30→50
+```
+
+---
+
+## 🧪 الاختبارات الـ 10 الجديدة
+
+| الفئة | الاختبار | يَختبر |
 |---|---|---|
-| `agents/technical_agent.py`: `Tuple` | ✅ **الإبقاء** | مستعمل في `_calculate_adx_proxy` |
-| `agents/risk_management_agent.py`: `Tuple` | ✅ **الإبقاء** | مستعمل في 3 توابع |
-| `agents/decision_agent.py:149-155` (في `analyze_async()`) | ✅ **الإبقاء** | كل متغيّر مستعمل داخل `_ai_decision` |
+| `TestLoadWeightsFix` | `test_uses_learning_service_weights_when_available` | يستخدم DB weights بدل config |
+| | `test_falls_back_to_config_when_no_learning_service` | fallback إلى config لو لا يوجد service |
+| | `test_falls_back_to_config_when_learning_service_has_empty_weights` | fallback لو DB فارغ |
+| | `test_falls_back_to_default_when_neither_available` | fallback إلى default_weights |
+| | `test_update_weights_replaces_current_weights` | update_weights يحدّث القيم |
+| | `test_independent_copy_no_aliasing` | نسخة مستقلة (لا aliasing) |
+| | `test_does_not_use_config_when_learning_service_provided_even_with_different_keys` | لا دمج مع config |
+| `TestLoadWeightsAsyncIntegration` | `test_learning_service_load_current_weights_signature` | load_current_weights async |
+| | `test_run_analysis_imports_load_helpers` | run_analysis يستدعي load_current_weights |
+| `TestConfigUpdate` | `test_config_has_updated_review_limits` | max_reviews_per_run ≥ 15 |
 
 ---
 
-## نتائج الاختبار
-
-```
-======================= 217 passed, 3 warnings in 1.34s ========================
-```
-
-- جميع الـ **217 اختبار** تنجح (لم يُكسر شيء).
-- الـ **3 تحذيرات** المتبقية هي `datetime.utcnow()` في ملفين اختبار (Python 3.13 deprecation).
-
-## نتائج pyflakes
-
-```
-$ python -m pyflakes services/ agents/ utils/ scripts/
-$ # (no output — zero warnings)
-```
-
-**من 27 → 0 تحذير ✅**
-
----
-
-## كيفية التطبيق
+## 📋 خطوات التطبيق
 
 ```bash
 cd /path/to/Nabil-gold
-unzip -o /path/to/Nabil-gold-fixes.zip
-python -m pytest tests/        # 217 passed
-python -m pyflakes services/ agents/ utils/ scripts/   # 0 warnings
+unzip -o /path/to/Nabil-gold-learning-fix.zip
+python -m pytest tests/test_learning_weights_fix.py -v
+python -m pytest tests/  # كل الاختبارات
 ```
+
+---
+
+## 🎯 كيف تعمل الحلقة الآن (مُغلقة بالكامل)
+
+```
+[Daily 20:00 UTC] run_learning.py
+    ↓ يحسب أوزان جديدة بناءً على آخر 7 أيام
+    ↓ يحفظها في جدول agent_weights على Supabase ✓
+[Every 10 min] run_analysis.py
+    ↓ ينشئ LearningService جديد
+    ↓ 🆕 await learning_service.load_current_weights()  ← يحمل من DB
+    ↓ ينشئ DecisionAgent(config, ai_service, learning_service)
+    ↓ DecisionAgent._load_weights() ← يستخدم learning_service.current_weights
+    ↓ القرار يُحسب بالأوزان المحدّثة ✓
+```
+
+---
+
+## ✅ نتائج الاختبار
+
+```
+======================= 253 passed, 3 warnings in 1.66s ========================
+```
+
+- **241** اختبار أصلي + **10** جديد للتعلم = **251** (العدد الفعلي 253 بسبب parametrize)
+- **0** تحذير pyflakes في الكود الإنتاجي
+- **0** تحذير pyflakes في الملف الجديد
+
+---
+
+## 💡 التوصيات الإضافية
+
+1. **مراقبة الأوزان في Telegram:** أضف سطر في `run_learning.py` يُرسل الأوزان الجديدة بعد كل تحديث.
+2. **سجل التغييرات:** احفظ timestamp + weights القديمة في `learning_history` (موجود بالفعل).
+3. **تنبيه عند فشل load_current_weights:** الـ logger.warning موجود لكن يمكن إضافة Telegram alert.
+4. **max_reviews_per_run ديناميكي:** حسابه من عدد الخسائر اليومية × معامل (مثلاً 80%).
