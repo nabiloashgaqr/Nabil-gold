@@ -272,6 +272,13 @@ async def run_analysis_async() -> None:
         learning_service = None
         try:
             learning_service = get_learning_service(database, config)
+            # تحميل الأوزان من DB (التي يحسبها run_learning.py يومياً).
+            # كانت هذه الخطوة مفقودة فلم تكن أوزان DB تؤثر على القرار.
+            try:
+                loaded = await learning_service.load_current_weights()
+                logger.info("🧠 أوزان الوكلاء المحمّلة من DB: %s", loaded)
+            except Exception as w_exc:
+                logger.warning("⚠️ فشل تحميل الأوزان من DB: %s (fallback إلى config)", w_exc)
         except Exception:
             learning_service = None
         decision = await DecisionAgent(config, ai_service, learning_service).decide_async(all_results)
