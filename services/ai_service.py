@@ -87,6 +87,12 @@ class AIService:
         
         if not api_key:
             api_key = self.ai_config.get('api_key')
+            # config.json may store a pointer like "ENV:GROQ_API_KEY" instead of
+            # a literal key (same convention as database.py / market_data.py).
+            # Without this, a missing real secret would silently fall through
+            # to using the literal "ENV:..." string as the API key itself.
+            if isinstance(api_key, str) and api_key.startswith('ENV:'):
+                api_key = os.environ.get(api_key.replace('ENV:', '', 1))
         
         return api_key or ""
     

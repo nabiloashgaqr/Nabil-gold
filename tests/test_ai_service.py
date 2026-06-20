@@ -105,6 +105,38 @@ class TestAIService:
         
         # يجب أن يكون API Key فارغ أو None
         assert service.api_key == ""
+
+    def test_resolves_env_prefix_when_real_env_var_missing(self, monkeypatch):
+        """config.json قد يخزن مؤشر 'ENV:VAR_NAME' بدل مفتاح حرفي.
+        يجب أن يُحلّ هذا المؤشر إلى القيمة الفعلية من البيئة، لا أن يُستخدم
+        السطر 'ENV:VAR_NAME' نفسه كمفتاح API."""
+        monkeypatch.delenv('GROQ_API_KEY', raising=False)
+        monkeypatch.setenv('MY_REAL_GROQ_SECRET', 'real-secret-value')
+        config = {
+            'ai_service': {
+                'enabled': True,
+                'provider': 'groq',
+                'api_key': 'ENV:MY_REAL_GROQ_SECRET',
+            }
+        }
+        service = AIService(config)
+        assert service.api_key == 'real-secret-value'
+
+    def test_env_prefix_unresolved_var_returns_empty_not_literal(self, monkeypatch):
+        """إذا كان متغير البيئة المُشار إليه بعد 'ENV:' غير موجود أصلاً،
+        يجب أن تكون النتيجة فارغة، وليس السلسلة الحرفية 'ENV:...'."""
+        monkeypatch.delenv('GROQ_API_KEY', raising=False)
+        monkeypatch.delenv('MISSING_SECRET', raising=False)
+        config = {
+            'ai_service': {
+                'enabled': True,
+                'provider': 'groq',
+                'api_key': 'ENV:MISSING_SECRET',
+            }
+        }
+        service = AIService(config)
+        assert service.api_key == ""
+        assert not service.api_key.startswith('ENV:')
     
     def test_token_costs(self, ai_service):
         """اختبار تكاليف الـ tokens"""
