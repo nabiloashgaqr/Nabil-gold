@@ -71,7 +71,8 @@ class TelegramService:
     def send_signal(self, decision: Dict[str, Any]) -> bool:
         """Format and send a new trade signal in English."""
         signal = decision.get("signal", {})
-        trade_type = decision.get("decision", signal.get("type", "WAIT"))
+        # Prefer explicit decision, then signal.side then signal.type
+        trade_type = decision.get("decision", signal.get("side") or signal.get("type", "WAIT"))
         emoji = "🟢" if trade_type == "BUY" else "🔴" if trade_type == "SELL" else "🟡"
         direction_text = "BUY" if trade_type == "BUY" else "SELL" if trade_type == "SELL" else "WAIT"
         entry = signal.get("entry", {})
@@ -138,7 +139,7 @@ class TelegramService:
         daily_bias = decision.get("daily_bias", {}) or {}
         bias_line = f"🧭 <b>Daily Bias:</b> {html.escape(str(daily_bias.get('bias', 'NEUTRAL')))} ({float(daily_bias.get('confidence', 0)):.1f}%)\n" if daily_bias else ""
         dynamic_risk = decision.get("dynamic_risk", {}) or {}
-        dynamic_risk_line = f"🛡️ <b>Dynamic Risk:</b> {html.escape(str(dynamic_risk.get('level', 'NORMAL')))} | min conf {html.escape(str(dynamic_risk.get('min_confidence_required', '')))}% | quality {html.escape(str(dynamic_risk.get('min_quality_score', '')))}%\n" if dynamic_risk else ""
+        dynamic_risk_line = f"🛡️ <b>Dynamic Risk:</b> {html.escape(str(dynamic_risk.get('level', 'NORMAL')))} | min conf {html.escape(str(dynamic_risk.get('min_confidence_required', '')))}% " if dynamic_risk else ""
 
         session_info = decision.get("session_info", {})
         session_text = ""
@@ -149,28 +150,28 @@ class TelegramService:
 
         order_type = signal.get('order_type', f'{trade_type}_MARKET')
         text = f"""
-📊 <b>XAU/USD Signal</b>
-━━━━━━━━━━━━━━━━━━━━━
-
-{emoji} <b>Decision:</b> {direction_text}
-📌 <b>Order Type:</b> {html.escape(str(order_type))}
-⏰ <b>Time:</b> {self._now_text()}
-💰 <b>Current Price:</b> {format_price(current_price)}
-{mode_text}{run_line}{session_text}
-
-📍 <b>Entry Zone:</b> {format_price(entry_low)} - {format_price(entry_high)}
-🛑 <b>Stop Loss:</b> {format_price(signal.get('stop_loss'))}
-🎯 <b>Take Profit 1:</b> {format_price(signal.get('tp1'))}
-🎯 <b>Take Profit 2:</b> {format_price(signal.get('tp2'))}
-📊 <b>R:R =</b> 1:{float(signal.get('rr_ratio', 0)):.2f}
-🔒 <b>Confidence:</b> {int(decision.get('confidence', 0))}%
-{quality_line}{risk_grade_line}{agent_context_line}{groq_observation_line}{bias_line}{dynamic_risk_line}
-{ai_text}📋 <b>Reasons:</b>
-{reasons_text}
-
-⚠️ <b>Disclaimer:</b> Educational paper-trading signal only. Not financial advice. No automated execution.
-🆔 <b>Trade ID:</b> <code>{html.escape(str(trade_id))}</code>
-""".strip()
+ 📊 <b>XAU/USD Signal</b>
+ ━━━━━━━━━━━━━━━━━━━━━
+ 
+ {emoji} <b>Decision:</b> {direction_text}
+ 📌 <b>Order Type:</b> {html.escape(str(order_type))}
+ ⏰ <b>Time:</b> {self._now_text()}
+ 💰 <b>Current Price:</b> {format_price(current_price)}
+ {mode_text}{run_line}{session_text}
+ 
+ 📍 <b>Entry Zone:</b> {format_price(entry_low)} - {format_price(entry_high)}
+ 🛑 <b>Stop Loss:</b> {format_price(signal.get('stop_loss'))}
+ 🎯 <b>Take Profit 1:</b> {format_price(signal.get('tp1'))}
+ 🎯 <b>Take Profit 2:</b> {format_price(signal.get('tp2'))}
+ 📊 <b>R:R =</b> 1:{float(signal.get('rr_ratio', 0)):.2f}
+ 🔒 <b>Confidence:</b> {int(decision.get('confidence', 0))}%
+ {quality_line}{risk_grade_line}{agent_context_line}{groq_observation_line}{bias_line}{dynamic_risk_line}
+ {ai_text}📋 <b>Reasons:</b>
+ {reasons_text}
+ 
+ ⚠️ <b>Disclaimer:</b> Educational paper-trading signal only. Not financial advice. No automated execution.
+ 🆔 <b>Trade ID:</b> <code>{html.escape(str(trade_id))}</code>
+ """.strip()
         return self.send_message(text, urgent=True)
 
     def send_trade_event(
@@ -209,25 +210,28 @@ class TelegramService:
             extra_lines.append(f"⏱ <b>مدة الصفقة:</b> {float(hours_open):.1f} ساعة")
         extra_text = "\n".join(extra_lines)
 
+        # Friendly display for trade type/side with fallbacks
+        display_type = trade.get('side') or trade.get('trade_type') or trade.get('type') or ""
+
         text = f"""
-{title} - <b>XAU/USD</b>
-━━━━━━━━━━━━━━━━━━━━━
-
-🆔 <b>ID:</b> <code>{html.escape(str(trade.get('id')))}</code>
-📊 <b>Type:</b> {html.escape(str(trade.get('type')))}
-📍 <b>Entry:</b> {format_price(trade.get('entry_price'))}
-🛑 <b>Stop Loss:</b> {format_price(trade.get('stop_loss'))}
-🎯 <b>TP1:</b> {format_price(trade.get('tp1'))}
-🎯 <b>TP2:</b> {format_price(trade.get('tp2'))}
-💰 <b>Current Price:</b> {format_price(current_price)}
-📈 <b>Current PnL:</b> {pnl_points:+.1f} نقطة {pnl_emoji}
-📌 <b>Status:</b> {html.escape(str(old_status))} → {html.escape(str(new_status))}
-{extra_text}
-
-{note}
-
-⚠️ Educational paper-trading update only. Not financial advice.
-""".strip()
+ {title} - <b>XAU/USD</b>
+ ━━━━━━━━━━━━━━━━━━━━━
+ 
+ 🆔 <b>ID:</b> <code>{html.escape(str(trade.get('id')))}</code>
+ 📊 <b>Type:</b> {html.escape(str(display_type))}
+ 📍 <b>Entry:</b> {format_price(trade.get('entry_price'))}
+ 🛑 <b>Stop Loss:</b> {format_price(trade.get('stop_loss'))}
+ 🎯 <b>TP1:</b> {format_price(trade.get('tp1'))}
+ 🎯 <b>TP2:</b> {format_price(trade.get('tp2'))}
+ 💰 <b>Current Price:</b> {format_price(current_price)}
+ 📈 <b>Current PnL:</b> {pnl_points:+.1f} نقطة {pnl_emoji}
+ 📌 <b>Status:</b> {html.escape(str(old_status))} → {html.escape(str(new_status))}
+ {extra_text}
+ 
+ {note}
+ 
+ ⚠️ Educational paper-trading update only. Not financial advice.
+ """.strip()
         return self.send_message(text, urgent=event_type in {"TP1_HIT", "TP2_HIT", "SL_HIT", "BE_HIT", "EXPIRED"})
 
     def send_trade_update(self, trade: Dict[str, Any], new_status: str, current_price: float, pnl_points: float) -> bool:
@@ -263,10 +267,10 @@ class TelegramService:
     def send_error_alert(self, error_message: str) -> bool:
         """Send a compact error alert to Telegram."""
         text = f"""
-🚨 <b>Gold AI Signals Error</b>
-━━━━━━━━━━━━━━━━━━━━━
-<code>{html.escape(error_message[:3500])}</code>
-""".strip()
+ 🚨 <b>Gold AI Signals Error</b>
+ ━━━━━━━━━━━━━━━━━━━━━
+ <code>{html.escape(error_message[:3500])}</code>
+ """.strip()
         return self.send_message(text, urgent=True)
 
     def _rate_limit(self) -> None:
