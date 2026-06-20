@@ -382,9 +382,7 @@
       "groq_observation": false,
       "paper_only": true
     }
-  }
-}
-{
+  },
   "weekly_report": {
     "enabled": true,
     "day_of_week": 6,
