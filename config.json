@@ -44,6 +44,9 @@
     "atr_multiplier_tp2": 3.5,
     "account_capital": 10000,
     "max_rr_ratio": 4.0,
+    "max_open_trades": 50,
+    "max_daily_signals": 50,
+    "description_max_open_trades_daily_signals": "مرحلة تعلّم: رُفعت من الافتراضي (3 / 8) مؤقتاً للسماح بخروج كل الإشارات دون عداد يومي/متزامن، إلى أن نُشدد بعد جمع بيانات كافية.",
     "description_max_rr_ratio": "سقف R:R لتجنب أهداف TP2 غير واقعية في الإشارات التجريبية/الحية"
   },
   "signal_requirements": {
@@ -82,7 +85,7 @@
     "no_signal_after_news_minutes": 15,
     "max_spread_points": 5,
     "min_atr_for_entry": 1.0,
-    "max_consecutive_losses": 3
+    "max_consecutive_losses": 999
   },
   "trading_hours": {
     "enabled": true,
@@ -318,7 +321,7 @@
     "description": "Groq يفسر الأخبار ويحدد هل نمنع التداول أو نسمح باتجاه معين فقط"
   },
   "dynamic_risk_management": {
-    "enabled": true,
+    "enabled": false,
     "warn_after_losses": 2,
     "halt_after_losses": 3,
     "daily_loss_limit_points": 30,
@@ -331,7 +334,8 @@
     "strict_min_quality_score": 80,
     "caution_risk_multiplier": 0.75,
     "strict_risk_multiplier": 0.5,
-    "description": "يرفع شروط الثقة والجودة أو يوقف التداول بعد خسائر متتالية/خسارة يومية"
+    "description": "يرفع شروط الثقة والجودة أو يوقف التداول بعد خسائر متتالية/خسارة يومية",
+    "description_disabled": "معطّل مؤقتاً (enabled:false) في مرحلة التعلّم لترك كل الإشارات تخرج بغض النظر عن نتائج الصفقات السابقة؛ يُعاد تفعيله بعد جمع بيانات كافية."
   },
   "news_risk": {
     "tier1_before_minutes": 60,
