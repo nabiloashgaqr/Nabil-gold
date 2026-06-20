@@ -15,6 +15,7 @@ from typing import Any, Dict, List
 
 from services.ai_service import get_ai_service
 from services.memory_rules import build_memory_rules_from_review
+from utils.helpers import get_trade_side
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +76,12 @@ class TradeReviewService:
         return selected
 
     def _build_prompt(self, trade: Dict[str, Any]) -> str:
+        # Use unified accessor for side (BUY/SELL) while keeping legacy `type` for compatibility.
+        side = get_trade_side(trade)
         safe_trade = {
             "id": trade.get("id"),
-            "type": trade.get("type") or trade.get("trade_type"),
+            "side": side,
+            "type": trade.get("type") or trade.get("trade_type") or side,
             "status": trade.get("status"),
             "entry_price": trade.get("entry_price"),
             "stop_loss": trade.get("stop_loss"),
