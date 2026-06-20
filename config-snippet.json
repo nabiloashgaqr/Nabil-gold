@@ -1,0 +1,13 @@
+{
+  "weekly_report": {
+    "enabled": true,
+    "day_of_week": 6,
+    "lookback_days": 7,
+    "min_trades_for_report": 5,
+    "max_chars": 3500,
+    "send_telegram": true,
+    "storage_path": "storage/weekly_report.json",
+    "timezone": "Asia/Hebron",
+    "description": "Weekly AI Performance Report — يكتبه Groq كل أحد 23:30 Asia/Hebron"
+  }
+}
