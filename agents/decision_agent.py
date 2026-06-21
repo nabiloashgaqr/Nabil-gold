@@ -56,14 +56,28 @@ class DecisionAgent(BaseAgent):
         self.voting_agents = {"technical", "classical", "smc", "price_action", "multitimeframe"}
         
     def _load_weights(self) -> Dict[str, float]:
-        """تحميل الأوزان (من learning service أو config)"""
-        
-        # محاولة تحميل من config
+        """تحميل الأوزان (من learning service أولاً، ثم config).
+
+        الترتيب:
+        1. learning_service.current_weights (من DB بعد run_learning.py)
+        2. config['agent_weights'] (الثابت في config.json)
+        3. self.default_weights (الاحتياطي الأخير)
+
+        كانت هذه الدالة تقرأ من config.json فقط، فكانت أوزان
+        run_learning.py المحفوظة في DB تُحسب ولا تُستخدم فعلاً.
+        """
+        # 1) الأوزان من learning service (من Supabase بعد تحليل يومي)
+        if self.learning_service is not None:
+            db_weights = getattr(self.learning_service, 'current_weights', None)
+            if db_weights:
+                return dict(db_weights)
+
+        # 2) الأوزان الثابتة من config.json
         config_weights = self.config.get('agent_weights', {})
-        
         if config_weights:
             return config_weights.copy()
-        
+
+        # 3) الافتراضي الأخير
         return self.default_weights.copy()
     
     def update_weights(self, new_weights: Dict[str, float]):
