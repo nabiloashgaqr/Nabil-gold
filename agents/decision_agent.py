@@ -146,7 +146,21 @@ class DecisionAgent(BaseAgent):
         daily_bias = agents_results.get('daily_bias', {}) if isinstance(agents_results, dict) else {}
         news_ai = agents_results.get('news_ai', {}) if isinstance(agents_results, dict) else {}
         dynamic_risk = agents_results.get('dynamic_risk', {}) if isinstance(agents_results, dict) else {}
-        
+
+        # run_learning.py computes and saves new agent_weights to the DB daily,
+        # but nothing ever read them back before this - _load_weights() only ever
+        # returned the static config.json value, so the learning loop had no
+        # effect on live decisions. Refresh from the DB here, falling back to
+        # the config/default weights already in self.current_weights if the
+        # learning service is unavailable or the DB has no rows yet.
+        if self.learning_service is not None:
+            try:
+                learned_weights = await self.learning_service.load_current_weights()
+                if learned_weights:
+                    self.current_weights = learned_weights
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"⚠️ تعذر تحميل الأوزان المتعلمة من قاعدة البيانات، استخدام أوزان config: {exc}")
+
         # 1️⃣ تجميع أصوات الوكلاء (مع weights متعلمة)
         votes = self._collect_votes(agents_results)
         
