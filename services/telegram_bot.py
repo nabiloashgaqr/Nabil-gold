@@ -194,6 +194,8 @@ class TelegramService:
             "EXIT_WARNING": "⚠️ Exit / Risk Warning",
             "EXPIRED": "⌛ Trade Expired",
             "MANUAL_CLOSE": "📌 Manual Close",
+            "TRAILING_SL_UPDATED": "📈 Trailing Stop Moved",
+            "TRAILING_SL_HIT": "🔒 Trailing Stop Hit (Profit Locked)",
         }
         title = event_titles.get(event_type, "🔄 تحديث صفقة")
         pnl_emoji = "✅" if pnl_points > 0 else "➖" if pnl_points == 0 else "❌"
@@ -228,7 +230,7 @@ class TelegramService:
 
 ⚠️ Educational paper-trading update only. Not financial advice.
 """.strip()
-        return self.send_message(text, urgent=event_type in {"TP1_HIT", "TP2_HIT", "SL_HIT", "BE_HIT", "EXPIRED"})
+        return self.send_message(text, urgent=event_type in {"TP1_HIT", "TP2_HIT", "SL_HIT", "BE_HIT", "EXPIRED", "TRAILING_SL_HIT"})
 
     def send_trade_update(self, trade: Dict[str, Any], new_status: str, current_price: float, pnl_points: float) -> bool:
         """Backward-compatible wrapper for status-change updates."""
@@ -254,6 +256,11 @@ class TelegramService:
             return "⚠️ Exit/risk warning: trade is near a danger zone or adverse move is deep."
         if event_type == "EXPIRED":
             return "⌛ Trade expired according to trade-management rules."
+        if event_type == "TRAILING_SL_UPDATED":
+            new_sl = evaluation.get("updates", {}).get("stop_loss")
+            return f"📈 Trailing stop moved to {format_price(new_sl)} to lock in more profit as price advances."
+        if event_type == "TRAILING_SL_HIT":
+            return "🔒 Price pulled back to the trailed stop - the locked-in profit beyond breakeven has been secured."
         return "🔄 New trade update."
 
     def send_daily_report(self, report_text: str) -> bool:

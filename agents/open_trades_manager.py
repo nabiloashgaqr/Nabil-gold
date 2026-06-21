@@ -30,6 +30,19 @@ class OpenTradesManager(BaseAgent):
         self.expire_after_hours = float(self.management.get("expire_after_hours", 8))
         self.auto_be = bool(self.management.get("auto_move_sl_to_entry_after_tp1", True))
 
+        # Genuine progressive trailing stop (beyond the initial breakeven lock).
+        # Note: services/trailing_stop.py (TrailingStopManager) was written against
+        # fields that don't exist in the actual trades schema (take_profit,
+        # quantity, trailing_active) and re-triggers on every run with no
+        # persisted activation guard, so it's not used here. This implements
+        # the same trailing_distance/trailing_step config correctly against the
+        # real schema (tp1/tp2, status, sl_moved_to_entry) instead.
+        ts_config = self.config.get("trailing_stop", {})
+        self.trailing_enabled = bool(ts_config.get("enabled", False))
+        self.trailing_distance = float(ts_config.get("trailing_distance", 20.0))
+        self.trailing_step = float(ts_config.get("trailing_step", 5.0))
+        self.trailing_min_profit_lock = float(ts_config.get("min_profit_lock", 0.0))
+
     def update_trades(
         self,
         open_trades: List[Dict[str, Any]],
@@ -77,6 +90,7 @@ class OpenTradesManager(BaseAgent):
         result: str | None = trade.get("result")
         close_price = None
         final_pnl = None
+        new_stop_loss: float | None = None
 
         if old_status not in self.OPEN_STATUSES:
             return {
@@ -103,6 +117,22 @@ class OpenTradesManager(BaseAgent):
             result = "WIN"
             close_price = current_price
             final_pnl = pnl_points
+        elif (
+            old_status == "TP1_HIT"
+            and sl_moved_to_entry
+            and self._beyond_breakeven(trade_type, stop_loss, entry)
+            and self._hit_sl(trade_type, current_price, stop_loss)
+        ):
+            # The persisted stop_loss has been trailed past breakeven (see the
+            # progressive-trailing branch below) and price has now pulled back
+            # to it - this locks in the trailed profit rather than a plain
+            # breakeven exit, and rather than the original far-away hard SL.
+            new_status = "SL_HIT"
+            events.append("TRAILING_SL_HIT")
+            trailing_exit_pnl = calculate_pips(entry, stop_loss, trade_type)
+            result = "WIN" if trailing_exit_pnl > 0 else "BREAKEVEN"
+            close_price = stop_loss
+            final_pnl = round(trailing_exit_pnl, 1)
         elif sl_moved_to_entry and old_status == "TP1_HIT" and self._hit_break_even(trade_type, current_price, entry):
             new_status = "BE_HIT"
             events.append("BE_HIT")
@@ -121,6 +151,7 @@ class OpenTradesManager(BaseAgent):
             partial_close = True
             if self.auto_be:
                 sl_moved_to_entry = True
+                new_stop_loss = entry  # actually persist breakeven, not just the flag
                 events.append("MOVE_SL_TO_BE")
         else:
             # 2) Informational events only if no status-changing event happened.
@@ -138,6 +169,14 @@ class OpenTradesManager(BaseAgent):
                 result = "EXPIRED"
                 close_price = current_price
                 final_pnl = pnl_points
+
+            # 3) Progressive trailing (only once breakeven is already locked, and
+            # only when nothing status-changing happened above this run).
+            if self.trailing_enabled and old_status == "TP1_HIT" and sl_moved_to_entry and new_status == "TP1_HIT":
+                trailing_candidate = self._compute_trailing_stop(trade_type, current_price, stop_loss, entry)
+                if trailing_candidate is not None:
+                    new_stop_loss = trailing_candidate
+                    events.append("TRAILING_SL_UPDATED")
 
         # Avoid repeating informational events already sent. Status events are naturally one-time after status changes.
         filtered_events: List[str] = []
@@ -163,6 +202,8 @@ class OpenTradesManager(BaseAgent):
             "updates_sent": updates_sent,
             "last_updated": self._iso(now),
         }
+        if new_stop_loss is not None:
+            updates["stop_loss"] = round(new_stop_loss, 2)
         if result is not None:
             updates["result"] = result
         if close_price is not None:
@@ -268,6 +309,44 @@ class OpenTradesManager(BaseAgent):
 
     def _hit_break_even(self, trade_type: str, current_price: float, entry: float) -> bool:
         return current_price <= entry if trade_type == "BUY" else current_price >= entry
+
+    def _beyond_breakeven(self, trade_type: str, stop_loss: float, entry: float) -> bool:
+        """True once the persisted stop_loss has been trailed past pure breakeven
+        (i.e. progressive trailing has actually locked in extra profit, not just
+        the initial entry-level break-even move)."""
+        epsilon = 1e-6
+        if trade_type == "BUY":
+            return stop_loss > entry + epsilon
+        return stop_loss < entry - epsilon
+
+    def _compute_trailing_stop(
+        self, trade_type: str, current_price: float, current_stop_loss: float, entry: float
+    ) -> float | None:
+        """Progressive trailing stop, only ever moving in the profitable direction.
+
+        trailing_distance/trailing_step/min_profit_lock are configured in
+        points (matching calculate_pips' convention: 10 points = $1.0 on
+        XAU/USD), so they're converted to price units here before use.
+
+        Only returns a new value once price has moved favorably by at least
+        trailing_step beyond the current stop_loss, to avoid near-constant
+        tiny updates every run. Never moves the stop below the configured
+        min_profit_lock above/below entry.
+        """
+        distance = self.trailing_distance / 10.0
+        step = self.trailing_step / 10.0
+        min_lock = self.trailing_min_profit_lock / 10.0
+        if trade_type == "BUY":
+            candidate = current_price - distance
+            candidate = max(candidate, entry + min_lock)
+            if candidate > current_stop_loss + step:
+                return candidate
+        else:
+            candidate = current_price + distance
+            candidate = min(candidate, entry - min_lock)
+            if candidate < current_stop_loss - step:
+                return candidate
+        return None
 
     def _progress_to_tp1(self, trade_type: str, entry: float, tp1: float, current_price: float) -> float:
         target_distance = abs(tp1 - entry)

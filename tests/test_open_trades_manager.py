@@ -75,3 +75,84 @@ def test_long_running_and_expired() -> None:
     assert "LONG_RUNNING" in result["events"]
     assert "EXPIRED" in result["events"]
     assert result["new_status"] == "EXPIRED"
+
+
+def test_tp1_persists_actual_breakeven_stop_loss() -> None:
+    """Before this fix, sl_moved_to_entry was set as a flag but the stop_loss
+    column itself was never actually updated in the DB."""
+    manager = OpenTradesManager({"trade_management": {"auto_move_sl_to_entry_after_tp1": True}})
+    result = manager.evaluate_trade(base_trade(), 2356.1)
+    assert result["updates"]["stop_loss"] == 2350.0  # == entry_price
+
+
+def test_trailing_disabled_via_config_no_progressive_movement() -> None:
+    manager = OpenTradesManager({"trailing_stop": {"enabled": False}})
+    assert manager.trailing_enabled is False
+    trade = base_trade(status="TP1_HIT", sl_moved_to_entry=True, stop_loss=2350.0)
+    result = manager.evaluate_trade(trade, 2359.0)  # well past breakeven
+    assert "stop_loss" not in result["updates"]
+
+
+def test_trailing_moves_stop_loss_forward_for_buy() -> None:
+    manager = OpenTradesManager(
+        {"trailing_stop": {"enabled": True, "trailing_distance": 20.0, "trailing_step": 5.0}}
+    )
+    # price is 2356.1 in points -> entry 2350, current_price 2350 + 9.0 = 2359.0 (90 points up)
+    trade = base_trade(status="TP1_HIT", sl_moved_to_entry=True, stop_loss=2350.0)
+    result = manager.evaluate_trade(trade, 2359.0)
+    assert result["new_status"] == "TP1_HIT"  # still open, not closed
+    assert "TRAILING_SL_UPDATED" in result["events"]
+    # new SL = current_price - trailing_distance(in price units: 20 points = 2.0 price)
+    assert result["updates"]["stop_loss"] == 2357.0
+    assert result["updates"]["stop_loss"] > 2350.0  # moved forward from breakeven
+
+
+def test_trailing_never_moves_backward_on_pullback() -> None:
+    manager = OpenTradesManager(
+        {"trailing_stop": {"enabled": True, "trailing_distance": 20.0, "trailing_step": 5.0}}
+    )
+    # Stop already trailed to 2357.0 from a previous run; price pulls back a bit
+    # but not enough to justify moving the stop further forward.
+    trade = base_trade(status="TP1_HIT", sl_moved_to_entry=True, stop_loss=2357.0)
+    result = manager.evaluate_trade(trade, 2358.0)
+    assert "stop_loss" not in result["updates"]  # not enough favorable movement yet
+    assert "TRAILING_SL_UPDATED" not in result["events"]
+
+
+def test_trailing_respects_min_profit_lock_floor() -> None:
+    manager = OpenTradesManager(
+        {"trailing_stop": {"enabled": True, "trailing_distance": 20.0, "trailing_step": 1.0, "min_profit_lock": 10.0}}
+    )
+    # Price has only moved marginally past breakeven; raw current_price - distance
+    # would land BELOW entry + min_profit_lock, so it must be floored there instead.
+    trade = base_trade(status="TP1_HIT", sl_moved_to_entry=True, stop_loss=2350.0)
+    result = manager.evaluate_trade(trade, 2351.0)
+    assert result["updates"]["stop_loss"] == 2351.0  # entry(2350) + min_profit_lock(10pts=1.0)
+
+
+def test_trailing_stop_hit_closes_as_win_with_locked_profit() -> None:
+    manager = OpenTradesManager(
+        {"trailing_stop": {"enabled": True, "trailing_distance": 20.0, "trailing_step": 5.0}}
+    )
+    # Stop has already been trailed to 2357.0 (beyond entry 2350) by a previous run.
+    trade = base_trade(status="TP1_HIT", sl_moved_to_entry=True, stop_loss=2357.0)
+    result = manager.evaluate_trade(trade, 2357.0)  # price pulls back exactly onto the trailed stop
+    assert result["new_status"] == "SL_HIT"
+    assert "TRAILING_SL_HIT" in result["events"]
+    assert result["updates"]["result"] == "WIN"
+    assert result["updates"]["final_pnl"] == 70.0  # (2357-2350)*10 points
+    assert result["updates"]["close_price"] == 2357.0
+
+
+def test_plain_breakeven_hit_still_works_when_stop_not_yet_trailed() -> None:
+    """Regression guard: when stop_loss is still at literal breakeven (not yet
+    trailed forward), a pullback to entry must still classify as BE_HIT/BREAKEVEN,
+    not as a TRAILING_SL_HIT/WIN."""
+    manager = OpenTradesManager(
+        {"trailing_stop": {"enabled": True, "trailing_distance": 20.0, "trailing_step": 5.0}}
+    )
+    trade = base_trade(status="TP1_HIT", sl_moved_to_entry=True, stop_loss=2350.0)  # == entry
+    result = manager.evaluate_trade(trade, 2350.0)
+    assert result["new_status"] == "BE_HIT"
+    assert result["updates"]["result"] == "BREAKEVEN"
+    assert "TRAILING_SL_HIT" not in result["events"]
