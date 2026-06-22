@@ -79,26 +79,26 @@ class DynamicRiskManager:
             min_conf = 100
             min_quality = 100
             risk_multiplier = 0.0
-            warnings.append(f"إيقاف مؤقت: {consecutive_losses} خسائر متتالية")
+            warnings.append(f"Halt: {consecutive_losses} consecutive losses")
         elif daily_pnl <= -abs(daily_loss_limit):
             can_trade = False
             level = "DAILY_HALT"
             min_conf = 100
             min_quality = 100
             risk_multiplier = 0.0
-            warnings.append(f"إيقاف يومي: الخسارة اليومية {daily_pnl:.1f} نقطة تجاوزت الحد {daily_loss_limit:.1f}")
+            warnings.append(f"Daily halt: daily loss {daily_pnl:.1f} pts exceeded limit {daily_loss_limit:.1f}")
         elif consecutive_losses >= warn_after:
             level = "STRICT"
             min_conf = max(self.base_min_confidence, strict_min_conf)
             min_quality = strict_min_quality
             risk_multiplier = float(self.settings.get("strict_risk_multiplier", 0.5) or 0.5)
-            warnings.append(f"وضع صارم: {consecutive_losses} خسائر متتالية، مطلوب ثقة/جودة أعلى")
+            warnings.append(f"Strict mode: {consecutive_losses} consecutive losses, higher confidence/quality required")
         elif recent_losses >= int(self.settings.get("recent_losses_caution", 2) or 2) and recent_losses > recent_wins:
             level = "CAUTION"
             min_conf = max(self.base_min_confidence, caution_min_conf)
             min_quality = caution_min_quality
             risk_multiplier = float(self.settings.get("caution_risk_multiplier", 0.75) or 0.75)
-            warnings.append(f"حذر: الخسائر الأخيرة ({recent_losses}) أعلى من الأرباح ({recent_wins})")
+            warnings.append(f"Caution: recent losses ({recent_losses}) exceed wins ({recent_wins})")
 
         return {
             "enabled": True,
@@ -128,10 +128,10 @@ def should_block_signal(decision: Dict[str, Any], dynamic_risk: Dict[str, Any]) 
     confidence = float(decision.get("confidence") or 0)
     min_conf = float(dynamic_risk.get("min_confidence_required") or 0)
     if confidence < min_conf:
-        return f"الثقة {confidence:.1f}% أقل من متطلب Dynamic Risk {min_conf:.1f}%"
+        return f"Confidence {confidence:.1f}% below Dynamic Risk requirement {min_conf:.1f}%"
     quality = decision.get("quality", {}) or {}
     quality_score = float(quality.get("score") or 0)
     min_quality = float(dynamic_risk.get("min_quality_score") or 0)
     if quality_score < min_quality:
-        return f"جودة الإشارة {quality_score:.1f}% أقل من متطلب Dynamic Risk {min_quality:.1f}%"
+        return f"Signal quality {quality_score:.1f}% below Dynamic Risk requirement {min_quality:.1f}%"
     return None

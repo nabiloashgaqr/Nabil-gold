@@ -436,20 +436,20 @@ class LearningService:
             logger.warning("Could not load memory rules for learning report: %s", exc)
         for name, record in agent_stats.items():
             if record.trend == "IMPROVING":
-                recommendations.append(f"✅ {name}: أداء جيد (+{record.win_rate:.0f}%)")
+                recommendations.append(f"✅ {name}: good performance (+{record.win_rate:.0f}%)")
             elif record.trend == "DECLINING":
-                recommendations.append(f"⚠️ {name}: تراجع (-{record.win_rate:.0f}%)")
+                recommendations.append(f"⚠️ {name}: declining (-{record.win_rate:.0f}%)")
             if record.consecutive_wins >= 3:
-                recommendations.append(f"🔥 {name}: {record.consecutive_wins} نجاح متتالي!")
+                recommendations.append(f"🔥 {name}: {record.consecutive_wins} consecutive wins!")
         if memory_rules:
             categories = {}
             for rule in memory_rules:
                 cat = str(rule.get("category", "MEMORY"))
                 categories[cat] = categories.get(cat, 0) + 1
             top_category = max(categories.items(), key=lambda item: item[1])[0]
-            recommendations.append(f"🧠 الذاكرة النشطة تشير إلى تكرار مشكلة: {top_category} ({categories[top_category]} قواعد)")
+            recommendations.append(f"🧠 Active memory shows a recurring issue: {top_category} ({categories[top_category]} rules)")
             for rule in memory_rules[:2]:
-                recommendations.append(f"📌 قاعدة ذاكرة: {str(rule.get('rule_text', ''))[:90]}")
+                recommendations.append(f"📌 Memory rule: {str(rule.get('rule_text', ''))[:90]}")
         
         # ملخص التغييرات
         changes = []
@@ -468,7 +468,7 @@ class LearningService:
             overall_win_rate=overall_wr,
             recommendations=recommendations,
             previous_weights=self.current_weights.copy(),
-            changes_summary=", ".join(changes) if changes else "لا تغييرات كبيرة",
+            changes_summary=", ".join(changes) if changes else "No major changes",
             top_performers=top_performers,
             bottom_performers=bottom_performers
         )
@@ -490,34 +490,34 @@ class LearningService:
             adjusted_weights=self.default_weights.copy(),
             total_trades_analyzed=0,
             overall_win_rate=0,
-            recommendations=["لا توجد بيانات كافية"],
+            recommendations=["Not enough data"],
             previous_weights=self.default_weights.copy(),
-            changes_summary="لا تغييرات"
+            changes_summary="No changes"
         )
     
     def get_learning_summary(self) -> str:
         """ملخص التعلم لتيليجرام - محسّن"""
         
         if not self.learning_history:
-            return "📊 لا يوجد سجل تعلم بعد"
+            return "📊 No learning history yet"
         
         last_report = self.learning_history[-1]
         
         lines = [
             "━━━━━━━━━━━━━━━━━━━━",
-            "🧠 *تقرير التعلم الذكي v2.0*",
-            f"📅 التاريخ: {last_report.report_date[:10]}",
+            "🧠 *Smart Learning Report v2.0*",
+            f"📅 Date: {last_report.report_date[:10]}",
             "━━━━━━━━━━━━━━━━━━━━",
-            f"📊 الصفقات: {last_report.total_trades_analyzed}",
-            f"📈 نسبة الربح: {last_report.overall_win_rate:.1f}%",
+            f"📊 Trades: {last_report.total_trades_analyzed}",
+            f"📈 Win rate: {last_report.overall_win_rate:.1f}%",
             ""
         ]
         
         if last_report.top_performers:
-            lines.append(f"🏆 الأفضل: {', '.join(last_report.top_performers)}")
+            lines.append(f"🏆 Top: {', '.join(last_report.top_performers)}")
         
         lines.append("")
-        lines.append("🤖 *أداء الوكلاء:*")
+        lines.append("🤖 *Agent performance:*")
         
         for name, record in sorted(last_report.agents_performance.items(), key=lambda x: -x[1].win_rate):
             emoji = "🟢" if record.trend == "IMPROVING" else "🔴" if record.trend == "DECLINING" else "🟡"

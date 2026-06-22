@@ -96,14 +96,14 @@ class AIService:
     def _load_system_prompts(self) -> Dict[str, str]:
         """تحميل System Prompts للوكلاء المختلفين"""
         return {
-            'technical': """أنت محلل فني محترف للذهب. أجب بـ JSON فقط. حافظ على الدقة في مستويات SL/TP.""",
-            'smc': """أنت محلل SMC محترف. حدد البنية السوقية وكتل الطلب/العرض بدقة.""",
-            'classical': """أنت خبير أنماط الشموع اليابانية. قيّم موثوقية النمط قبل التوصية.""",
-            'price_action': """أنت محلل Price Action محترف. حدد مناطق العرض والطلب بوضوح.""",
-            'multitimeframe': """أنت محلل متعدد الإطارات. قارن بين الإطارات واختر الأفضل للدخول.""",
-            'news_risk': """أنت محلل مخاطر جيوسياسية. قيّم تأثير الأخبار على الذهب.""",
-            'risk_management': """أنت خبير إدارة مخاطر. احسب حجم الصفقة الأمثل.""",
-            'decision': """أنت خبير اتخاذ القرارات. ادمج كل التحليلات وقرر بحكمة."""
+            'technical': """You are a professional gold technical analyst. Reply in JSON only and in English. Keep SL/TP levels accurate.""",
+            'smc': """You are a professional SMC analyst. Identify market structure and supply/demand blocks precisely. Reply in English.""",
+            'classical': """You are an expert in Japanese candlestick patterns. Assess pattern reliability before recommending. Reply in English.""",
+            'price_action': """You are a professional Price Action analyst. Identify supply and demand zones clearly. Reply in English.""",
+            'multitimeframe': """You are a multi-timeframe analyst. Compare timeframes and pick the best entry. Reply in English.""",
+            'news_risk': """You are a geopolitical risk analyst. Assess the impact of news on gold. Reply in English.""",
+            'risk_management': """You are a risk-management expert. Compute the optimal position size. Reply in English.""",
+            'decision': """You are a decision-making expert. Integrate all analyses and decide wisely. Reply in English."""
         }
     
     async def analyze_chart(
@@ -134,15 +134,15 @@ class AIService:
         
         # تنسيق بيانات السعر
         current_price = price_data.get('current_price', price_data.get('close', 'N/A'))
-        price_info = f"""💰 بيانات السعر:
-- السعر الحالي: {current_price}
+        price_info = f"""💰 Price data:
+- Current price: {current_price}
 - Open: {price_data.get('open', 'N/A')}
 - High: {price_data.get('high', 'N/A')}
 - Low: {price_data.get('low', 'N/A')}
 - Close: {price_data.get('close', 'N/A')}
-- التغيير: {price_data.get('change_pct', 'N/A')}%
+- Change: {price_data.get('change_pct', 'N/A')}%
 
-📊 المؤشرات الفنية:
+📊 Technical indicators:
 - EMA 20: {indicators.get('ema_20', indicators.get('ema_50', 'N/A'))}
 - EMA 50: {indicators.get('ema_50', 'N/A')}
 - EMA 200: {indicators.get('ema_200', 'N/A')}
@@ -151,33 +151,33 @@ class AIService:
 - MACD Signal: {indicators.get('macd_signal', 'N/A')}
 - MACD Histogram: {indicators.get('macd_histogram', 'N/A')}
 - ATR: {indicators.get('atr', 'N/A')}
-- الدعم: {indicators.get('support', 'N/A')}
-- المقاومة: {indicators.get('resistance', 'N/A')}
-- الاتجاه: {indicators.get('trend', 'N/A')}
+- Support: {indicators.get('support', 'N/A')}
+- Resistance: {indicators.get('resistance', 'N/A')}
+- Trend: {indicators.get('trend', 'N/A')}
 - Volatility: {indicators.get('volatility', 'N/A')}
 
-⏰ الإطار الزمني: {timeframe}"""
+⏰ Timeframe: {timeframe}"""
         
         # 🚀 PROMPTS محسّنة حسب نوع الوكيل
         
         prompts = {
             'technical': f"""
-🎯 أنت محلل فني محترف للذهب (XAU/USD).
+🎯 You are a professional gold (XAU/USD) technical analyst.
 
 {price_info}
 
-🔍 تحليل شامل:
-- القوة النسبية (RSI, MACD)
-- اتجاه الترند (EMAs)
-- مستويات الدعم والمقاومة
-- التذبذب (ATR)
+🔍 Full analysis:
+- Relative strength (RSI, MACD)
+- Trend direction (EMAs)
+- Support and resistance levels
+- Volatility (ATR)
 
-📋 أجب بـ JSON فقط (دقيق ومختصر):
+📋 Reply in JSON only (accurate and concise), in English:
 {{
     "signal": "BUY|SELL|WAIT",
     "confidence": 0-100,
-    "reasoning": "سبب التوصية",
-    "entry_zone": "منطقة الدخول",
+    "reasoning": "reason for the recommendation",
+    "entry_zone": "entry zone",
     "stop_loss": "SL (ATR-based)",
     "take_profit_1": "TP1 (ATR × 2)",
     "take_profit_2": "TP2 (ATR × 3.5)",
@@ -186,81 +186,81 @@ class AIService:
 """,
             
             'smc': f"""
-🎯 أنت محلل Smart Money Concepts محترف.
+🎯 You are a professional Smart Money Concepts analyst.
 
 {price_info}
 
-🔍 تحليل SMC:
+🔍 SMC analysis:
 - Higher Highs / Higher Lows
-- Order Blocks (كتل الطلب/العرض)
-- Liquidity Zones (مناطق السيولة)
-- Break of Structure (كسر البنية)
+- Order Blocks (supply/demand blocks)
+- Liquidity Zones
+- Break of Structure
 
-📋 أجب بـ JSON فقط:
+📋 Reply in JSON only, in English:
 {{
     "structure": "Bullish|Bearish|Neutral",
     "trend_stage": "Accumulation|Distribution|Continuation",
-    "order_blocks": ["كتلة الطلب", "كتلة العرض"],
-    "liquidity_zones": ["منطقة السيولة"],
+    "order_blocks": ["demand block", "supply block"],
+    "liquidity_zones": ["liquidity zone"],
     "signal": "BUY|SELL|WAIT",
     "confidence": 0-100,
-    "reasoning": "سبب التحليل"
+    "reasoning": "reason for the analysis"
 }}
 """,
             
             'classical': f"""
-🎯 أنت محلل أنماط الشموع اليابانية محترف.
+🎯 You are a professional Japanese candlestick-pattern analyst.
 
 {price_info}
 
-🔍 أنماط الانعكاس:
+🔍 Reversal patterns:
 - Hammer, Engulfing, Morning Star
 - Shooting Star, Dark Cloud, Evening Star
 
-📋 أجب بـ JSON فقط:
+📋 Reply in JSON only, in English:
 {{
-    "candlestick_pattern": "اسم النمط",
+    "candlestick_pattern": "pattern name",
     "pattern_direction": "Bullish|Bearish|Neutral",
     "reliability": "High|Medium|Low",
     "signal": "BUY|SELL|WAIT",
     "confidence": 0-100,
-    "reasoning": "تفسير النمط"
+    "reasoning": "pattern explanation"
 }}
 """,
             
             'price_action': f"""
-🎯 أنت محلل Price Action محترف.
+🎯 You are a professional Price Action analyst.
 
 {price_info}
 
-🔍 تحليل حركة السعر:
+🔍 Price action analysis:
 - Supply & Demand Zones
 - Swing Highs/Lows
 - Fair Value Gaps
 - Break of Candle Structure
 
-📋 أجب بـ JSON فقط:
+📋 Reply in JSON only, in English:
 {{
     "key_zones": {{"demand": "##", "supply": "##"}},
-    "swing_analysis": "تحليل التأرجح",
+    "swing_analysis": "swing analysis",
     "signal": "BUY|SELL|WAIT",
     "confidence": 0-100,
-    "reasoning": "سبب التوصية",
-    "entry_trigger": "محفز الدخول"
+    "reasoning": "reason for the recommendation",
+    "entry_trigger": "entry trigger"
 }}
 """,
             
             'multitimeframe': f"""
-🎯 أنت محلل متعدد الإطارات الزمنية.
+🎯 You are a multi-timeframe analyst.
 
 {price_info}
 
-🔍 مقارنة الإطارات:
-- 4H: الاتجاه العام
-- 1H: الاتجاه المتوسط
-- 15m/5m: نقطة الدخول
+🔍 Timeframe comparison:
+- 4H: overall trend
+- 1H: intermediate trend
+- 15m/5m: entry point
 
-📋 أجب بـ JSON فقط:
+📋 Reply in JSON only, in English:
 {{
     "h4_trend": "Bullish|Bearish|Neutral",
     "h1_trend": "Bullish|Bearish|Neutral",
@@ -268,68 +268,68 @@ class AIService:
     "alignment": "Fully_Aligned|Not_Aligned",
     "signal": "BUY|SELL|WAIT",
     "confidence": 0-100,
-    "reasoning": "سبب التوافق/الاختلاف"
+    "reasoning": "reason for alignment/divergence"
 }}
 """,
             
             'news_risk': f"""
-🎯 أنت محلل مخاطر جيوسياسية محترف.
+🎯 You are a professional geopolitical risk analyst.
 
 {price_info}
 
-🔍 العوامل المؤثرة:
-- أخبار USD والـ Fed
-- التضخم والبيانات الاقتصادية
-- الأحداث الجيوسياسية
+🔍 Influencing factors:
+- USD and Fed news
+- Inflation and economic data
+- Geopolitical events
 
-📋 أجب بـ JSON فقط:
+📋 Reply in JSON only, in English:
 {{
     "risk_level": "High|Medium|Low",
-    "key_factors": ["عامل 1", "عامل 2"],
+    "key_factors": ["factor 1", "factor 2"],
     "gold_sentiment": "Bullish|Bearish|Neutral",
-    "confidence_adjustment": -20 إلى +20,
+    "confidence_adjustment": "-20 to +20",
     "recommendation": "BUY|SELL|WAIT"
 }}
 """,
             
             'risk_management': f"""
-🎯 أنت خبير إدارة المخاطر.
+🎯 You are a risk-management expert.
 
 {price_info}
 
-📋 الإعدادات:
-- حساب: 10,000 دولار
-- مخاطرة: 1-2%
+📋 Settings:
+- Account: $10,000
+- Risk: 1-2%
 - ATR: {indicators.get('atr', 'N/A')}
 
-📋 أجب بـ JSON فقط:
+📋 Reply in JSON only, in English:
 {{
-    "risk_per_trade_percent": "1% أو 2%",
-    "position_size": "حجم الصفقة",
-    "stop_loss_pips": "نقاط SL",
-    "take_profit_1_pips": "نقاط TP1",
+    "risk_per_trade_percent": "1% or 2%",
+    "position_size": "position size",
+    "stop_loss_pips": "SL points",
+    "take_profit_1_pips": "TP1 points",
     "risk_reward_ratio": "1:X",
     "assessment": "Safe|Moderate|High_Risk"
 }}
 """,
             
             'decision': f"""
-🎯 أنت خبير اتخاذ القرارات النهائية.
+🎯 You are a final-decision expert.
 
 {price_info}
 
-🎯 المتطلبات:
-- 3 وكلاء كحد أدنى يوافقون
-- 60% نسبة توافق
+🎯 Requirements:
+- At least 3 agents agree
+- 60% agreement
 
-📋 أجب بـ JSON فقط (دقيق):
+📋 Reply in JSON only (accurate), in English:
 {{
     "final_signal": "BUY|SELL|WAIT",
     "confidence": 0-100,
     "consensus_strength": "Strong|Moderate|Weak",
-    "reasoning": "سبب القرار",
-    "risk_assessment": "مقبول|عالي|مرفوض",
-    "entry_zone": "منطقة الدخول",
+    "reasoning": "reason for the decision",
+    "risk_assessment": "Acceptable|High|Rejected",
+    "entry_zone": "entry zone",
     "stop_loss": "SL",
     "take_profits": {{"tp1": "##", "tp2": "##"}},
     "trade_quality": "High|Medium|Low"
@@ -517,7 +517,7 @@ class AIService:
                 if response.status_code in (429, 500, 502, 503, 504):
                     last_error = f"HTTP {response.status_code}"
                     logger.warning(
-                        f"⚠️ Groq محاولة {attempt + 1}/{max_attempts} فشلت ({last_error}), إعادة محاولة..."
+                        f"⚠️ Groq attempt {attempt + 1}/{max_attempts} failed ({last_error}), retrying..."
                     )
                     if attempt < max_attempts - 1:
                         await asyncio.sleep(2 ** attempt)
@@ -552,7 +552,7 @@ class AIService:
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                 last_error = str(e)
                 logger.warning(
-                    f"⚠️ Groq محاولة {attempt + 1}/{max_attempts} فشلت (timeout/connection): {e}"
+                    f"⚠️ Groq attempt {attempt + 1}/{max_attempts} failed (timeout/connection): {e}"
                 )
                 if attempt < max_attempts - 1:
                     await asyncio.sleep(2 ** attempt)

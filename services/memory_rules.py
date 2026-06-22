@@ -110,11 +110,11 @@ def format_memory_rules_for_prompt(rules: List[Dict[str, Any]], max_rules: int =
     active = [r for r in rules if r.get("active", True)]
     active.sort(key=lambda r: (float(r.get("confidence") or 0), str(r.get("updated_at", ""))), reverse=True)
     if not active:
-        return "لا توجد قواعد ذاكرة نشطة حالياً."
+        return "No active memory rules right now."
     lines = []
     for idx, rule in enumerate(active[:max_rules], start=1):
         lines.append(
             f"{idx}. [{rule.get('category', DEFAULT_CATEGORY)} | {rule.get('applies_to', 'BOTH')} | "
-            f"ثقة {rule.get('confidence', 0)}%] {sanitize_rule_text(rule.get('rule_text', ''))}"
+            f"conf {rule.get('confidence', 0)}%] {sanitize_rule_text(rule.get('rule_text', ''))}"
         )
     return "\n".join(lines)

@@ -93,27 +93,28 @@ class TradeReviewService:
             "signal_snapshot": trade.get("signal_snapshot", {}),
         }
         return f"""
-أنت مدقق تداول محترف لنظام Gold AI Signals.
-حلل الصفقة الخاسرة التالية بهدف التعلم فقط، وليس لوم المستخدم.
+You are a professional trade auditor for the Gold AI Signals system.
+Analyse the following losing trade for learning purposes only, not to blame the user.
+Respond in concise professional English.
 
-بيانات الصفقة JSON:
+Trade data JSON:
 {json.dumps(safe_trade, ensure_ascii=False, default=str)[:12000]}
 
-أجب JSON فقط بدون Markdown:
+Reply in JSON only, no Markdown:
 {{
   "failure_category": "ENTRY_EARLY|WRONG_DIRECTION|NEWS_RISK|LOW_QUALITY|SL_TOO_TIGHT|MARKET_REVERSAL|RISK_MANAGEMENT|OTHER",
-  "root_cause": "السبب الجذري المختصر",
-  "what_went_wrong": ["نقطة 1", "نقطة 2"],
-  "what_worked": ["نقطة إيجابية إن وجدت"],
+  "root_cause": "brief root cause",
+  "what_went_wrong": ["point 1", "point 2"],
+  "what_worked": ["a positive point if any"],
   "agent_feedback": {{
-    "technical": "ملاحظة قصيرة",
-    "smc": "ملاحظة قصيرة",
-    "price_action": "ملاحظة قصيرة",
-    "multitimeframe": "ملاحظة قصيرة",
-    "risk": "ملاحظة قصيرة"
+    "technical": "short note",
+    "smc": "short note",
+    "price_action": "short note",
+    "multitimeframe": "short note",
+    "risk": "short note"
   }},
-  "rule_suggestions": ["قاعدة عملية قابلة للتطبيق 1", "قاعدة 2"],
-  "avoid_next_time": "ما الذي يجب تجنبه مستقبلاً",
+  "rule_suggestions": ["actionable rule 1", "rule 2"],
+  "avoid_next_time": "what to avoid next time",
   "confidence_in_review": 0-100
 }}
 """.strip()
@@ -167,21 +168,21 @@ class TradeReviewService:
 def format_trade_review_summary(result: Dict[str, Any]) -> str:
     """Format review result for Telegram."""
     if not result.get("enabled", True):
-        return "🧠 <b>AI Trade Review</b>\n━━━━━━━━━━━━━━━━━━━━\nالنظام معطل حالياً."
+        return "🧠 <b>AI Trade Review</b>\n━━━━━━━━━━━━━━━━━━━━\nThe system is currently disabled."
     reviewed = result.get("reviewed", []) or []
     errors = result.get("errors", []) or []
     if not reviewed and not errors:
         return (
             "🧠 <b>AI Trade Review</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "لا توجد صفقات خاسرة جديدة تحتاج مراجعة.\n"
+            "No new losing trades need review.\n"
             "━━━━━━━━━━━━━━━━━━━━"
         )
 
     lines = [
-        "🧠 <b>AI Trade Review للخسائر</b>",
+        "🧠 <b>AI Trade Review (Losses)</b>",
         "━━━━━━━━━━━━━━━━━━━━",
-        f"تمت مراجعة: {len(reviewed)} صفقة",
+        f"Reviewed: {len(reviewed)} trade(s)",
     ]
     for item in reviewed:
         review = item.get("review", {}) or {}
@@ -193,19 +194,19 @@ def format_trade_review_summary(result: Dict[str, Any]) -> str:
         lines.extend(
             [
                 "",
-                f"🔻 الصفقة: <code>{item.get('trade_id')}</code>",
-                f"├ التصنيف: {review.get('failure_category', 'OTHER')}",
-                f"├ السبب: {review.get('root_cause', 'غير محدد')}",
-                f"└ الثقة بالمراجعة: {review.get('confidence_in_review', 'N/A')}%",
-                f"🧠 قواعد ذاكرة جديدة: {len(item.get('memory_rule_ids', []) or [])}",
+                f"🔻 Trade: <code>{item.get('trade_id')}</code>",
+                f"├ Category: {review.get('failure_category', 'OTHER')}",
+                f"├ Cause: {review.get('root_cause', 'N/A')}",
+                f"└ Review confidence: {review.get('confidence_in_review', 'N/A')}%",
+                f"🧠 New memory rules: {len(item.get('memory_rule_ids', []) or [])}",
             ]
         )
         if suggestions_text:
-            lines.append("\nاقتراحات:")
+            lines.append("\nSuggestions:")
             lines.append(suggestions_text)
     if errors:
         lines.append("")
-        lines.append(f"⚠️ أخطاء مراجعة: {len(errors)}")
+        lines.append(f"⚠️ Review errors: {len(errors)}")
         for error in errors[:2]:
             lines.append(f"• {error.get('trade_id')}: {error.get('error')}")
     lines.append("━━━━━━━━━━━━━━━━━━━━")

@@ -34,27 +34,28 @@ class NewsInterpreter:
             return {"enabled": True, "available": False, "skipped": True, "summary": "No relevant news to interpret"}
 
         prompt = f"""
-أنت محلل أخبار اقتصادي متخصص في الذهب XAU/USD.
-فسر تأثير الأخبار التالية على الذهب والدولار، وقدم قيود تداول عملية.
+You are an economic-news analyst specialised in gold (XAU/USD).
+Interpret how the following news affects gold and the US dollar, and give
+practical trading restrictions. Respond in concise professional English only.
 
-حالة الأخبار الحالية:
+Current news state:
 {news}
 
-سياق السوق المختصر:
+Brief market context:
 {market_context or {}}
 
-أجب JSON فقط بدون Markdown:
+Return JSON only, no Markdown:
 {{
   "risk_level": "LOW|MEDIUM|HIGH|EXTREME",
   "gold_bias": "BULLISH|BEARISH|NEUTRAL",
   "usd_bias": "BULLISH|BEARISH|NEUTRAL",
-  "block_trading": true أو false,
+  "block_trading": true or false,
   "allowed_direction": "BUY|SELL|BOTH|NONE",
-  "confidence_adjustment": رقم بين -30 و +10,
-  "minutes_to_wait": رقم,
-  "reasoning": "تفسير مختصر",
-  "key_events": ["اسم أو وصف أهم حدث"],
-  "risk_notes": ["ملاحظة 1", "ملاحظة 2"]
+  "confidence_adjustment": number between -30 and +10,
+  "minutes_to_wait": number,
+  "reasoning": "brief explanation in English",
+  "key_events": ["name or description of the most important event"],
+  "risk_notes": ["note 1", "note 2"]
 }}
 """.strip()
         try:

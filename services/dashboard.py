@@ -256,11 +256,11 @@ def format_dashboard_telegram(summary: Dict[str, Any]) -> str:
         [
             "📊 <b>Dashboard Updated</b>",
             "━━━━━━━━━━━━━━━━━━━━",
-            f"الصفقات: {summary.get('total', 0)} | المفتوحة: {summary.get('open', 0)}",
+            f"Trades: {summary.get('total', 0)} | Open: {summary.get('open', 0)}",
             f"Win Rate: {summary.get('win_rate', 0)}%",
             f"Net Points: {summary.get('net_points', 0):+}",
             f"Profit Factor: {summary.get('profit_factor', 0)}",
-            "تم إنشاء dashboard.html كـ Artifact في GitHub Actions.",
+            "dashboard.html was generated as a GitHub Actions artifact.",
             "━━━━━━━━━━━━━━━━━━━━",
         ]
     )

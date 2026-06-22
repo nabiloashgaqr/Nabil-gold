@@ -314,19 +314,19 @@ class PerformanceDashboard:
                 recommendations = []
                 
                 if current_drawdown >= self.max_drawdown_threshold * 0.75:
-                    recommendations.append("🛑 إيقاف التداول فوراً")
-                    recommendations.append("📋 مراجعة الصفقات الخاسرة")
+                    recommendations.append("🛑 Stop trading immediately")
+                    recommendations.append("📋 Review losing trades")
                     
                 if current_drawdown >= self.max_drawdown_threshold * 0.5:
-                    recommendations.append("⚠️ تقليل حجم الصفقات 50%")
-                    recommendations.append("📉 التركيز على الإشارات عالية الجودة فقط")
-                    recommendations.append("🔍 مراجعة إدارة المخاطر")
+                    recommendations.append("⚠️ Reduce position size by 50%")
+                    recommendations.append("📉 Focus on high-quality signals only")
+                    recommendations.append("🔍 Review risk management")
                 
                 alerts.append(DrawdownAlert(
                     level=level,
                     current_drawdown=current_drawdown,
                     max_allowed=self.max_drawdown_threshold,
-                    message=f"⚠️ السحب الحالي: {current_drawdown:.2f}% (الحد: {self.max_drawdown_threshold}%)",
+                    message=f"⚠️ Current drawdown: {current_drawdown:.2f}% (limit: {self.max_drawdown_threshold}%)",
                     recommendations=recommendations
                 ))
             
@@ -463,8 +463,8 @@ class PerformanceDashboard:
         """
         lines = [
             "━━━━━━━━━━━━━━━━━━━━",
-            "📊 *تقرير الأداء الشامل*",
-            f"📅 الفترة: آخر {report['period_days']} أيام",
+            "📊 *Comprehensive Performance Report*",
+            f"📅 Period: last {report['period_days']} days",
             "━━━━━━━━━━━━━━━━━━━━",
             ""
         ]
@@ -472,29 +472,29 @@ class PerformanceDashboard:
         # المحفظة
         portfolio = report.get('portfolio', {})
         lines.extend([
-            "💰 *المحفظة*",
-            f"├ الرصيد: ${portfolio.get('balance', 0):.2f}",
-            f"├ إجمالي الربح/الخسارة: ${portfolio.get('total_pnl', 0):.2f}",
-            f"├ نسبة الربح: {portfolio.get('win_rate', 0):.1f}%",
-            f"└ إجمالي الصفقات: {portfolio.get('total_trades', 0)}",
+            "💰 *Portfolio*",
+            f"├ Balance: ${portfolio.get('balance', 0):.2f}",
+            f"├ Total PnL: ${portfolio.get('total_pnl', 0):.2f}",
+            f"├ Win rate: {portfolio.get('win_rate', 0):.1f}%",
+            f"└ Total trades: {portfolio.get('total_trades', 0)}",
             ""
         ])
         
         # الوكلاء
         if report.get('agents'):
             lines.extend([
-                "🤖 *أداء الوكلاء*",
+                "🤖 *Agent performance*",
             ])
             for name, data in sorted(report['agents'].items(), key=lambda x: -x[1].get('total_signals', 0)):
                 lines.append(
-                    f"├ {name}: {data['win_rate']} ({data['total_signals']} إشارة)"
+                    f"├ {name}: {data['win_rate']} ({data['total_signals']} signals)"
                 )
             lines.append("")
         
         # الجلسات
         if report.get('sessions'):
             lines.extend([
-                "🕐 *أداء الجلسات*",
+                "🕐 *Session performance*",
             ])
             for session in report['sessions'][:3]:
                 lines.append(
@@ -505,7 +505,7 @@ class PerformanceDashboard:
         # التنبيهات
         if report.get('alerts'):
             lines.extend([
-                "🚨 *التنبيهات*",
+                "🚨 *Alerts*",
             ])
             for alert in report['alerts']:
                 lines.append(f"{alert['level']} {alert['message']}")
@@ -515,11 +515,11 @@ class PerformanceDashboard:
         summary = report.get('summary', {})
         lines.extend([
             "━━━━━━━━━━━━━━━━━━━━",
-            "📈 *الملخص*",
-            f"├ إجمالي الإشارات: {summary.get('total_signals', 0)}",
-            f"├ إجمالي الصفقات: {summary.get('total_trades', 0)}",
-            f"├ نسبة الربح الإجمالية: {summary.get('overall_win_rate', '0%')}",
-            f"└ الربح/الخسارة: {summary.get('total_pnl', '$0')}",
+            "📈 *Summary*",
+            f"├ Total signals: {summary.get('total_signals', 0)}",
+            f"├ Total trades: {summary.get('total_trades', 0)}",
+            f"├ Overall win rate: {summary.get('overall_win_rate', '0%')}",
+            f"└ PnL: {summary.get('total_pnl', '$0')}",
             "━━━━━━━━━━━━━━━━━━━━"
         ])
         

@@ -291,8 +291,8 @@ def format_backtest_telegram(report: Dict[str, Any]) -> str:
         [
             "🧪 <b>Backtesting Report - XAU/USD</b>",
             "━━━━━━━━━━━━━━━━━━━━",
-            f"📊 الصفقات: {s.get('total_trades', 0)}",
-            f"✅ الرابحة: {s.get('wins', 0)} | ❌ الخاسرة: {s.get('losses', 0)}",
+            f"📊 Trades: {s.get('total_trades', 0)}",
+            f"✅ Wins: {s.get('wins', 0)} | ❌ Losses: {s.get('losses', 0)}",
             f"📈 Win Rate: {s.get('win_rate', 0)}%",
             f"💰 Net Points: {s.get('net_points', 0):+}",
             f"⚖️ Profit Factor: {s.get('profit_factor', 0)}",
@@ -303,7 +303,7 @@ def format_backtest_telegram(report: Dict[str, Any]) -> str:
             f"SELL: {by_signal.get('SELL', {}).get('count', 0)} | Net {by_signal.get('SELL', {}).get('net_points', 0):+}",
             f"Grades: {report.get('summary', {}).get('by_grade', {})}",
             "━━━━━━━━━━━━━━━━━━━━",
-            "ملاحظة: الاختبار التاريخي Classic/offline ولا يستخدم Groq افتراضياً لتجنب استهلاك API.",
-            "إذا كان عدد الصفقات 0 فهذا يعني أن الشروط الحالية لم تنتج إشارات مؤهلة على العينة المختبرة.",
+            "Note: backtesting is Classic/offline and does not use Groq by default to avoid API usage.",
+            "If the trade count is 0, the current conditions produced no qualified signals on the tested sample.",
         ]
     )
