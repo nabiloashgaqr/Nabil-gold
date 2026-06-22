@@ -150,9 +150,9 @@ class TestBuildPrompt:
         svc = WeeklyReportService(_make_config(), database_mock, telegram=None)
         stats = svc.collect_stats(now=datetime(2026, 6, 21, tzinfo=timezone.utc))
         prompt = svc.build_prompt(stats)
-        assert "محلل أداء أسبوعي" in prompt
+        assert "weekly performance analyst" in prompt
         assert "```json" in prompt
-        assert "3500 حرف" in prompt
+        assert "3500 characters" in prompt
         assert "config.json" in prompt
 
     def test_respects_max_chars_config(self):
@@ -160,7 +160,7 @@ class TestBuildPrompt:
         svc = WeeklyReportService(cfg, MagicMock(get_recent_trades=MagicMock(return_value=[])),
                                   telegram=None)
         prompt = svc.build_prompt(WeeklyStats())
-        assert "1000 حرف" in prompt
+        assert "1000 characters" in prompt
 
 
 # -------------------- split_message -------------------- #
@@ -221,7 +221,7 @@ class TestGenerateReport:
                                   ai_service=None)
         result = await svc.generate_report(now=datetime(2026, 6, 21, tzinfo=timezone.utc))
         assert result["status"] == "ok_too_few_trades"
-        assert "هادئ" in result["report_text"]
+        assert "Quiet week" in result["report_text"]
 
     @pytest.mark.asyncio
     async def test_uses_fallback_when_no_ai_service(self, database_mock, telegram_mock):
@@ -230,7 +230,7 @@ class TestGenerateReport:
                                   ai_service=None)
         result = await svc.generate_report(now=datetime(2026, 6, 21, tzinfo=timezone.utc))
         assert result["status"] == "ok_no_ai"
-        assert "إجمالي الصفقات" in result["report_text"]
+        assert "Total trades" in result["report_text"]
 
     @pytest.mark.asyncio
     async def test_calls_groq_and_uses_response(self, database_mock, telegram_mock):
