@@ -148,6 +148,40 @@ def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService,
 
     return None
 
+def _dedupe_warnings(warnings: list) -> list:
+    """Collapse duplicate / overlapping warnings before showing them in Telegram.
+
+    The decision pipeline can raise two near-identical warnings for the same
+    cause - e.g. the rule-based NewsRiskAgent ("News blocked: ...") AND the Groq
+    news interpreter ("AI News blocked trading: ...") both fire for the same
+    upcoming event. Showing both is noise. This:
+      * drops exact duplicates,
+      * keeps only the FIRST news-block warning (rule-based, most concise) and
+        drops the later AI-news one when both are present,
+      * preserves the order of all other warnings.
+    """
+    seen: set = set()
+    result: list = []
+    news_block_kept = False
+    for w in warnings:
+        text = str(w).strip()
+        if not text:
+            continue
+        key = " ".join(text.lower().split())
+        if key in seen:
+            continue
+        lower = text.lower()
+        is_news_block = lower.startswith("news blocked") or lower.startswith("ai news blocked")
+        if is_news_block:
+            if news_block_kept:
+                # A news block was already shown; skip the redundant duplicate.
+                continue
+            news_block_kept = True
+        seen.add(key)
+        result.append(text)
+    return result
+
+
 def run_agent(agent_name: str, agent: Any, data: Dict[str, Any]) -> Dict[str, Any]:
     """Run one agent safely so one failure does not stop the workflow."""
     try:
@@ -374,7 +408,7 @@ async def run_analysis_async() -> None:
                 decision.get("warnings"),
             )
             if should_send_status(config):
-                warnings = decision.get("warnings") or []
+                warnings = _dedupe_warnings(decision.get("warnings") or [])
                 # Escape dynamic values: summaries/warnings can contain '<', '>', '&'
                 # (e.g. "confidence 40% < 60%"), which break parse_mode=HTML (400).
                 warnings_text = "\n".join(f"• {html.escape(str(w))}" for w in warnings[:6]) or "• No warnings; current decision is simply WAIT"
