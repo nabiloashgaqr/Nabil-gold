@@ -19,13 +19,13 @@ class DailyReportAgent(BaseAgent):
 
     name = "daily_report"
 
-    def generate(self, trades: List[Dict[str, Any]], title: str = "التقرير اليومي") -> Dict[str, Any]:
+    def generate(self, trades: List[Dict[str, Any]], title: str = "Daily Report") -> Dict[str, Any]:
         stats = self._stats(trades)
         return {"agent": self.name, "date": date.today().isoformat(), "stats": stats, "text": self._format_report(stats, title=title)}
 
     def generate_weekly(self, trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         stats = self._stats(trades)
-        return {"agent": self.name, "date": date.today().isoformat(), "stats": stats, "text": self._format_report(stats, title="التقرير الأسبوعي")}
+        return {"agent": self.name, "date": date.today().isoformat(), "stats": stats, "text": self._format_report(stats, title="Weekly Report")}
 
     def _stats(self, trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         total = len(trades)
@@ -143,21 +143,21 @@ class DailyReportAgent(BaseAgent):
     def _recommendations(self, total: int, win_rate: float, net: float, profit_factor: float, by_agent: Dict[str, Any], by_direction: Dict[str, Any]) -> List[str]:
         recs: List[str] = []
         if total < 5:
-            recs.append("البيانات قليلة؛ استمر في Paper Trading قبل الحكم على الأداء.")
+            recs.append("Sample is small; keep paper trading before judging performance.")
         if win_rate < 45 and total >= 5:
-            recs.append("نسبة النجاح منخفضة؛ ارفع شروط الثقة/الموثوقية أو امنع إشارات D/E.")
+            recs.append("Low win rate; raise confidence/quality thresholds or block D/E signals.")
         if net < 0:
-            recs.append("صافي النقاط سلبي؛ راجع AI Trade Reviews وMemory Rules قبل زيادة المخاطرة.")
+            recs.append("Net points negative; review AI Trade Reviews and Memory Rules before adding risk.")
         if profit_factor and profit_factor < 1:
-            recs.append("Profit Factor أقل من 1؛ خفّض عدد الإشارات التجريبية أو شدد Risk Grade.")
+            recs.append("Profit Factor below 1; reduce experimental signals or tighten Risk Grade.")
         if by_agent:
             worst = sorted(by_agent.items(), key=lambda x: x[1].get("net", 0))[0]
             best = sorted(by_agent.items(), key=lambda x: x[1].get("net", 0), reverse=True)[0]
-            recs.append(f"أفضل مصدر حتى الآن: {best[0]} | Net {best[1].get('net', 0):+}")
+            recs.append(f"Best source so far: {best[0]} | Net {best[1].get('net', 0):+}")
             if worst[1].get("count", 0) >= 2 and worst[1].get("net", 0) < 0:
-                recs.append(f"راقب المصدر الضعيف: {worst[0]} | Net {worst[1].get('net', 0):+}")
+                recs.append(f"Watch the weak source: {worst[0]} | Net {worst[1].get('net', 0):+}")
         if by_direction.get("BUY", {}).get("net", 0) < 0 and by_direction.get("SELL", {}).get("net", 0) > 0:
-            recs.append("SELL يتفوق على BUY في العينة الحالية؛ راقب Daily Bias قبل الشراء.")
+            recs.append("SELL outperforms BUY in the current sample; check Daily Bias before buying.")
         return recs[:8]
 
     def _format_ranked(self, data: Dict[str, Dict[str, Any]], empty: str) -> str:
