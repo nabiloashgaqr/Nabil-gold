@@ -483,20 +483,20 @@ class TechnicalAgent(BaseAgent):
         ai = result.get('ai', {})
         
         lines = [
-            "📊 *التحليل الفني*",
-            f"├ الاتجاه: {technical.get('trend', 'N/A')}",
+            "📊 *Technical Analysis*",
+            f"├ Trend: {technical.get('trend', 'N/A')}",
             f"├ RSI: {technical.get('rsi', 'N/A')}",
             f"├ MACD: {technical.get('macd', 'N/A')}",
-            f"├ الدعم: {technical.get('support', 'N/A')}",
-            f"└ المقاومة: {technical.get('resistance', 'N/A')}"
+            f"├ Support: {technical.get('support', 'N/A')}",
+            f"└ Resistance: {technical.get('resistance', 'N/A')}"
         ]
         
         if ai.get('available'):
             lines.extend([
                 "",
-                f"🤖 *تحليل AI ({ai.get('provider', 'AI')})*",
-                f"├ الإشارة: {ai.get('signal', 'N/A')}",
-                f"├ الثقة: {ai.get('confidence', 'N/A')}%",
+                f"🤖 *AI Analysis ({ai.get('provider', 'AI')})*",
+                f"├ Signal: {ai.get('signal', 'N/A')}",
+                f"├ Confidence: {ai.get('confidence', 'N/A')}%",
                 f"├ SL: {ai.get('stop_loss', 'N/A')}",
                 f"├ TP1: {ai.get('take_profit_1', 'N/A')}",
                 f"└ R/R: {ai.get('risk_reward', 'N/A')}"

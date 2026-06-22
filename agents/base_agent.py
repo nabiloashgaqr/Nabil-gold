@@ -26,7 +26,7 @@ class BaseAgent(ABC):
         """Return current UTC timestamp in ISO format."""
         return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
-    def neutral_result(self, reason: str = "لا توجد بيانات كافية") -> Dict[str, Any]:
+    def neutral_result(self, reason: str = "Not enough data") -> Dict[str, Any]:
         """Return a safe neutral result used when an agent cannot decide."""
         return {
             "agent": self.name,

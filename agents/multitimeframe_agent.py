@@ -50,7 +50,7 @@ class MultiTimeframeAgent(BaseAgent):
             htf_bias = htf.get("bias", "NEUTRAL")
             counter_trend = direction in {"BUY", "SELL"} and htf_bias not in {direction, "NEUTRAL"}
             if counter_trend:
-                warnings.append(f"Counter-trend vs HTF: {direction} ضد {htf_bias}")
+                warnings.append(f"Counter-trend vs HTF: {direction} against {htf_bias}")
             confidence = self._confidence(timeframe_analysis, direction, alignment_score, conflicts, counter_trend, setup_type)
 
             return {
@@ -69,16 +69,16 @@ class MultiTimeframeAgent(BaseAgent):
                 "conflict_matrix": conflict_matrix,
                 "conflicts": conflicts,
                 "warnings": warnings,
-                "summary": f"توافق الفريمات {alignment} بدرجة {alignment_score}%، setup={setup_type}، اتجاه الفريم الأعلى {htf.get('trend')}، القرار {direction}",
+                "summary": f"Timeframe alignment {alignment} at {alignment_score}%, setup={setup_type}, HTF trend {htf.get('trend')}, decision {direction}",
             }
         except Exception as exc:  # noqa: BLE001
             self.logger.exception("MTF analysis failed")
-            return self._empty(f"فشل تحليل الفريمات: {exc}")
+            return self._empty(f"Multi-timeframe analysis failed: {exc}")
 
     def _analyze_timeframe(self, timeframe: str, candles: List[Candle]) -> Dict[str, Any]:
         """Analyze one timeframe bias using EMA, SMA and swing structure."""
         if len(candles) < 50:
-            return {"trend": "SIDEWAYS", "strength": "WEAK", "key_level": 0.0, "bias": "NEUTRAL", "score": 0, "signals": ["بيانات غير كافية"]}
+            return {"trend": "SIDEWAYS", "strength": "WEAK", "key_level": 0.0, "bias": "NEUTRAL", "score": 0, "signals": ["Not enough data"]}
 
         close = self._f(candles[-1].get("close"))
         closes = [self._f(c.get("close")) for c in candles]
@@ -95,30 +95,30 @@ class MultiTimeframeAgent(BaseAgent):
         signals: List[str] = []
         if close > ema20 > ema50:
             score += 2.0
-            signals.append("السعر فوق EMA20/EMA50")
+            signals.append("Price above EMA20/EMA50")
         elif close < ema20 < ema50:
             score -= 2.0
-            signals.append("السعر تحت EMA20/EMA50")
+            signals.append("Price below EMA20/EMA50")
         elif close > ema50:
             score += 0.8
-            signals.append("السعر فوق EMA50")
+            signals.append("Price above EMA50")
         elif close < ema50:
             score -= 0.8
-            signals.append("السعر تحت EMA50")
+            signals.append("Price below EMA50")
 
         if ema20 > ema20_prev:
             score += 0.8
-            signals.append("ميل EMA20 صاعد")
+            signals.append("EMA20 slope rising")
         elif ema20 < ema20_prev:
             score -= 0.8
-            signals.append("ميل EMA20 هابط")
+            signals.append("EMA20 slope falling")
 
         if close > sma_long:
             score += 0.8
-            signals.append("السعر فوق المتوسط الطويل")
+            signals.append("Price above long MA")
         elif close < sma_long:
             score -= 0.8
-            signals.append("السعر تحت المتوسط الطويل")
+            signals.append("Price below long MA")
 
         swing_signal, swing_score = self._swing_structure(candles[-120:])
         score += swing_score
@@ -126,10 +126,10 @@ class MultiTimeframeAgent(BaseAgent):
 
         if price_slope > 1.0:
             score += 0.6
-            signals.append("زخم سعري صاعد آخر 10 شموع")
+            signals.append("Bullish momentum over last 10 candles")
         elif price_slope < -1.0:
             score -= 0.6
-            signals.append("زخم سعري هابط آخر 10 شموع")
+            signals.append("Bearish momentum over last 10 candles")
 
         if score >= 2.2:
             trend, bias = "BULLISH", "BUY"
@@ -206,11 +206,11 @@ class MultiTimeframeAgent(BaseAgent):
         entry_bias = (analysis.get("15m") or {}).get("bias", "NEUTRAL")
 
         if direction in {"BUY", "SELL"} and htf_bias not in {direction, "NEUTRAL"}:
-            conflicts.append(f"الاتجاه {direction} عكس فريم 4H ({htf_bias})")
+            conflicts.append(f"Direction {direction} against 4H timeframe ({htf_bias})")
         if direction in {"BUY", "SELL"} and one_h_bias not in {direction, "NEUTRAL"}:
-            conflicts.append(f"الاتجاه {direction} عكس فريم 1H ({one_h_bias})")
+            conflicts.append(f"Direction {direction} against 1H timeframe ({one_h_bias})")
         if direction in {"BUY", "SELL"} and entry_bias not in {direction, "NEUTRAL"}:
-            warnings.append(f"فريم الدخول 15m غير متوافق ({entry_bias})")
+            warnings.append(f"15m entry timeframe not aligned ({entry_bias})")
 
         if non_neutral and all(bias == non_neutral[0] for bias in non_neutral) and len(non_neutral) == len(biases):
             alignment = "FULL"
@@ -229,9 +229,9 @@ class MultiTimeframeAgent(BaseAgent):
             alignment_score = int((counts.get("NEUTRAL", 0) / max(len(biases), 1)) * 100)
 
         if alignment == "CONFLICT":
-            warnings.append("تعارض واضح بين الفريمات - لا يفضل الدخول إلا بتأكيد قوي")
+            warnings.append("Clear timeframe conflict - avoid entry without strong confirmation")
         if htf_bias == "NEUTRAL":
-            warnings.append("الفريم الأعلى محايد، جودة الاتجاه أقل")
+            warnings.append("Higher timeframe neutral, lower trend quality")
         return alignment, alignment_score, conflicts, warnings
 
 
@@ -318,10 +318,10 @@ class MultiTimeframeAgent(BaseAgent):
         lows = swings.get("lows", [])[-2:]
         if len(highs) >= 2 and len(lows) >= 2:
             if self._f(highs[-1].get("price")) > self._f(highs[-2].get("price")) and self._f(lows[-1].get("price")) > self._f(lows[-2].get("price")):
-                return "بنية قمم/قيعان صاعدة HH/HL", 1.2
+                return "Bullish HH/HL structure", 1.2
             if self._f(highs[-1].get("price")) < self._f(highs[-2].get("price")) and self._f(lows[-1].get("price")) < self._f(lows[-2].get("price")):
-                return "بنية قمم/قيعان هابطة LH/LL", -1.2
-        return "بنية سعرية جانبية/غير واضحة", 0.0
+                return "Bearish LH/LL structure", -1.2
+        return "Sideways/unclear structure", 0.0
 
     def _key_level(self, candles: List[Candle], close: float, bias: str, fallback: float) -> float:
         levels = detect_support_resistance(candles[-100:], lookback=80)

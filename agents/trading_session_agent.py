@@ -218,7 +218,7 @@ class TradingSessionAgent(BaseAgent):
             "allow_reports": allow_reports,
             "session_details": session_details,
             "is_trading_hours": trading_allowed,
-            "summary": f"{'✅' if allow_signals else '🚫'} الجلسة: {current_session or 'غير محدد'} | الجودة: {session_quality} | {reason}",
+            "summary": f"{'✅' if allow_signals else '🚫'} Session: {current_session or 'N/A'} | Quality: {session_quality} | {reason}",
         }
 
     def _blocked(
@@ -241,5 +241,5 @@ class TradingSessionAgent(BaseAgent):
             "session_details": None,
             "is_trading_hours": False,
             "next_session": next_session,
-            "summary": f"🚫 خارج ساعات التداول - {reason}",
+            "summary": f"🚫 Outside trading hours - {reason}",
         }

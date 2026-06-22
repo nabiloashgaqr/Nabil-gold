@@ -21,7 +21,7 @@ class ClassicalAgent(BaseAgent):
         try:
             candles = market_data.get("data", [])
             if len(candles) < 30:
-                return self._empty_result("بيانات غير كافية للتحليل الكلاسيكي")
+                return self._empty_result("Not enough data for classical analysis")
 
             current_price = float(candles[-1]["close"])
             recent = candles[-80:] if len(candles) >= 80 else candles
@@ -109,22 +109,22 @@ class ClassicalAgent(BaseAgent):
                 "no_clear_pattern": not any(p.get("pattern") != "NO_CLEAR_PATTERN" for p in patterns),
                 "scenarios": {
                     "bullish": {
-                        "condition": f"كسر وإغلاق فوق {nearest_resistance:.2f}",
+                        "condition": f"Break and close above {nearest_resistance:.2f}",
                         "target": round(nearest_resistance + (nearest_resistance - nearest_support), 2),
                         "probability": bullish_probability,
                     },
                     "bearish": {
-                        "condition": f"كسر وإغلاق تحت {nearest_support:.2f}",
+                        "condition": f"Break and close below {nearest_support:.2f}",
                         "target": round(nearest_support - (nearest_resistance - nearest_support), 2),
                         "probability": bearish_probability,
                     },
                 },
                 "signals": reasons,
-                "summary": f"أقرب دعم {nearest_support:.2f} وأقرب مقاومة {nearest_resistance:.2f}. القرار الكلاسيكي: {direction}",
+                "summary": f"Nearest support {nearest_support:.2f}, nearest resistance {nearest_resistance:.2f}. Classical decision: {direction}",
             }
         except Exception as exc:  # noqa: BLE001
             self.logger.exception("Classical analysis failed")
-            return self._empty_result(f"فشل التحليل الكلاسيكي: {exc}")
+            return self._empty_result(f"Classical analysis failed: {exc}")
 
     def _build_trendline(self, swings: Dict[str, List[Dict[str, Any]]], current_price: float) -> Dict[str, Any]:
         lows = swings.get("lows", [])[-3:]

@@ -265,7 +265,7 @@ class OpenTradesManager(BaseAgent):
         trades = data.get("open_trades", [])
         current_price = self._f(data.get("current_price"))
         evaluations = [self.evaluate_trade(trade, current_price) for trade in trades]
-        return {"agent": self.name, "evaluated": len(evaluations), "results": evaluations, "summary": f"تم تقييم {len(evaluations)} صفقة مفتوحة"}
+        return {"agent": self.name, "evaluated": len(evaluations), "results": evaluations, "summary": f"Evaluated {len(evaluations)} open trade(s)"}
 
     def _management_phase(self, status: str, sl_moved_to_entry: bool, partial_close: bool, pnl_points: float) -> str:
         if status == "TP1_HIT" or partial_close:

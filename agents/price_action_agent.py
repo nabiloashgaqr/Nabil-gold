@@ -25,7 +25,7 @@ class PriceActionAgent(BaseAgent):
         try:
             candles = market_data.get("data", [])
             if len(candles) < 20:
-                return self._empty("بيانات غير كافية لحركة السعر")
+                return self._empty("Not enough data for price action")
 
             timeframe = str(market_data.get("timeframe", "15m"))
             current = candles[-1]
@@ -70,11 +70,11 @@ class PriceActionAgent(BaseAgent):
                 "rejection": rejection,
                 "role": role,
                 "signals": self._signals_from_components(candle_patterns, breakout_analysis, rejection, candle_text, context_text),
-                "summary": f"Price Action: {direction} بثقة {confidence}% — {candle_text}، {context_text}",
+                "summary": f"Price Action: {direction} at {confidence}% confidence — {candle_text}, {context_text}",
             }
         except Exception as exc:  # noqa: BLE001
             self.logger.exception("Price action failed")
-            return self._empty(f"فشل Price Action: {exc}")
+            return self._empty(f"Price Action failed: {exc}")
 
     def _detect_patterns(
         self,
@@ -233,21 +233,21 @@ class PriceActionAgent(BaseAgent):
 
         if candle_type == "bullish" and body_ratio >= 0.55 and close_position >= 0.70:
             score += 1.6 if size_vs_atr >= 0.70 else 1.0
-            text = "شمعة صعودية قوية بإغلاق قريب من القمة"
+            text = "Strong bullish candle closing near the high"
         elif candle_type == "bearish" and body_ratio >= 0.55 and close_position <= 0.30:
             score -= 1.6 if size_vs_atr >= 0.70 else 1.0
-            text = "شمعة هبوطية قوية بإغلاق قريب من القاع"
+            text = "Strong bearish candle closing near the low"
         elif body_ratio <= 0.15:
-            text = "شمعة تردد/دوجي تقلل جودة الإشارة"
+            text = "Indecision/doji candle lowers signal quality"
             score += 0.0
         elif candle_type == "bullish":
             score += 0.5
-            text = "شمعة صعودية متوسطة"
+            text = "Moderate bullish candle"
         elif candle_type == "bearish":
             score -= 0.5
-            text = "شمعة هبوطية متوسطة"
+            text = "Moderate bearish candle"
         else:
-            text = "شمعة محايدة"
+            text = "Neutral candle"
         return score, text
 
     def _breakout_analysis(
@@ -370,12 +370,12 @@ class PriceActionAgent(BaseAgent):
         avg_body = mean(float(m["body_ratio"]) for m in metrics)
         avg_size = mean(float(m["size_vs_atr"]) for m in metrics)
         if bullish == 3 and avg_body >= 0.45:
-            return (1.2 if avg_size >= 0.55 else 0.8, "صعود متسارع مع أجسام صاعدة")
+            return (1.2 if avg_size >= 0.55 else 0.8, "Accelerating uptrend with bullish bodies")
         if bearish == 3 and avg_body >= 0.45:
-            return (-1.2 if avg_size >= 0.55 else -0.8, "هبوط متسارع مع أجسام هابطة")
+            return (-1.2 if avg_size >= 0.55 else -0.8, "Accelerating downtrend with bearish bodies")
         if avg_body <= 0.20:
-            return (0.0, "تباطؤ/تردد واضح في آخر 3 شموع")
-        return (0.0, "سياق شموع مختلط")
+            return (0.0, "Clear slowdown/indecision over last 3 candles")
+        return (0.0, "Mixed candle context")
 
     def _candle_metrics(self, candle: Candle, atr: float) -> Dict[str, float | str]:
         """Return normalized candle anatomy metrics."""

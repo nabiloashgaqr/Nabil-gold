@@ -116,57 +116,57 @@ class NewsRiskAgent(BaseAgent):
                     market_status = "DANGER"
                     can_trade = False
                     risk_score = max(risk_score, 98)
-                    restrictions.append(f"لا تداول - Tier 1 {event_name} خلال {minutes_until} دقيقة")
+                    restrictions.append(f"No trading - Tier 1 {event_name} in {minutes_until} min")
                 elif tier == "TIER_1" and -tier1_after <= minutes_until < 0:
                     market_status = "HIGH_VOLATILITY"
                     can_trade = False
                     risk_score = max(risk_score, 92)
-                    restrictions.append(f"لا تداول - Tier 1 {event_name} صدر منذ {abs(minutes_until)} دقيقة")
+                    restrictions.append(f"No trading - Tier 1 {event_name} released {abs(minutes_until)} min ago")
                 elif tier == "TIER_1" and tier1_before < minutes_until <= warning_before:
                     if market_status == "SAFE":
                         market_status = "CAUTION"
                     risk_score = max(risk_score, 65)
-                    warnings.append(f"تحذير قوي - Tier 1 {event_name} خلال {minutes_until} دقيقة")
+                    warnings.append(f"Strong warning - Tier 1 {event_name} in {minutes_until} min")
 
                 elif tier == "TIER_2" and 0 <= minutes_until <= tier2_before:
                     if market_status == "SAFE":
                         market_status = "CAUTION"
                     risk_score = max(risk_score, 70 if impact == "HIGH" else 60)
-                    warnings.append(f"حذر - Tier 2 {event_name} خلال {minutes_until} دقيقة")
+                    warnings.append(f"Caution - Tier 2 {event_name} in {minutes_until} min")
                 elif tier == "TIER_2" and -tier2_after <= minutes_until < 0:
                     if market_status == "SAFE":
                         market_status = "CAUTION"
                     risk_score = max(risk_score, 62)
-                    warnings.append(f"حذر - Tier 2 {event_name} صدر منذ {abs(minutes_until)} دقيقة")
+                    warnings.append(f"Caution - Tier 2 {event_name} released {abs(minutes_until)} min ago")
 
                 elif impact == "HIGH" and 0 <= minutes_until <= before_high:
                     market_status = "DANGER"
                     can_trade = False
                     risk_score = max(risk_score, 90)
-                    restrictions.append(f"لا تداول - خبر عالي التأثير {event_name} خلال {minutes_until} دقيقة")
+                    restrictions.append(f"No trading - high-impact news {event_name} in {minutes_until} min")
                 elif impact == "HIGH" and -after_high <= minutes_until < 0:
                     market_status = "HIGH_VOLATILITY"
                     can_trade = False
                     risk_score = max(risk_score, 86)
-                    restrictions.append(f"لا تداول - خبر عالي التأثير {event_name} صدر منذ {abs(minutes_until)} دقيقة")
+                    restrictions.append(f"No trading - high-impact news {event_name} released {abs(minutes_until)} min ago")
                 elif impact == "HIGH" and before_high < minutes_until <= warning_before:
                     if market_status == "SAFE":
                         market_status = "CAUTION"
                     risk_score = max(risk_score, 55)
-                    warnings.append(f"تحذير - خبر عالي التأثير خلال {minutes_until} دقيقة")
+                    warnings.append(f"Warning - high-impact news in {minutes_until} min")
 
                 if impact == "MEDIUM" and -tier2_after <= minutes_until <= medium_window:
                     if market_status == "SAFE":
                         market_status = "CAUTION"
                     risk_score = max(risk_score, 60)
-                    warnings.append(f"حذر - خبر متوسط التأثير {event_name} قريب")
+                    warnings.append(f"Caution - medium-impact news {event_name} nearby")
 
             high_risk_day = tier1_events_24h >= int(self.config.get("news_risk", {}).get("high_risk_day_tier1_count", 3))
             if high_risk_day:
                 if market_status == "SAFE":
                     market_status = "CAUTION"
                 risk_score = max(risk_score, 75)
-                warnings.append(f"High Risk Day: {tier1_events_24h} أحداث Tier 1 خلال 24 ساعة")
+                warnings.append(f"High Risk Day: {tier1_events_24h} Tier 1 events in 24h")
 
             session_status, session_risk, session_warning = self._session_risk(now)
             risk_score = max(risk_score, session_risk)
@@ -205,11 +205,11 @@ class NewsRiskAgent(BaseAgent):
                 "market_status": "CAUTION",
                 "can_trade": True,
                 "upcoming_events": [],
-                "active_restrictions": [f"فشل فحص الأخبار: {exc}"],
+                "active_restrictions": [f"News check failed: {exc}"],
                 "session_info": {"current_session": get_current_session(), "volatility_expected": "UNKNOWN", "best_for_gold": False},
                 "tier_summary": {"tier1_24h": 0, "tier2_24h": 0, "high_risk_day": False},
                 "risk_score": 50,
-                "summary": "فشل فحص الأخبار - تشغيل بحذر",
+                "summary": "News check failed - proceed with caution",
             }
 
     def _load_events(self) -> List[Dict[str, Any]]:
@@ -332,7 +332,7 @@ class NewsRiskAgent(BaseAgent):
     def _session_risk(self, now: datetime) -> Tuple[str, int, str | None]:
         session = get_current_session(now)
         if session == "Late NY / Rollover":
-            return "CAUTION", 35, "حذر - فترة rollover/liquidity منخفضة"
+            return "CAUTION", 35, "Caution - rollover / low-liquidity period"
         if session == "Asian":
             return "SAFE", 18, None
         if session == "London-NY Overlap":
@@ -350,14 +350,14 @@ class NewsRiskAgent(BaseAgent):
 
     def _summary(self, market_status: str, can_trade: bool, upcoming: List[Dict[str, Any]], restrictions: List[str]) -> str:
         if not can_trade:
-            return restrictions[0] if restrictions else "السوق خطر حالياً - لا تداول"
+            return restrictions[0] if restrictions else "Market is risky right now - no trading"
         if market_status == "CAUTION":
-            return restrictions[0] if restrictions else "السوق يحتاج حذراً بسبب أخبار/جلسة تداول"
+            return restrictions[0] if restrictions else "Market needs caution due to news / trading session"
         high_events = [event for event in upcoming if event.get("impact") == "HIGH" and event.get("minutes_until", 9999) >= 0]
         if high_events:
             first = high_events[0]
-            return f"سوق آمن حالياً، أقرب خبر عالي التأثير خلال {first.get('minutes_until')} دقيقة"
-        return "سوق آمن حالياً، لا أخبار عالية التأثير قريبة"
+            return f"Market is safe now; nearest high-impact news in {first.get('minutes_until')} min"
+        return "Market is safe now; no high-impact news nearby"
 
     def _parse_time(self, value: str) -> datetime | None:
         try:

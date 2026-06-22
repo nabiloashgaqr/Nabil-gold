@@ -284,12 +284,12 @@ class DecisionAgent(BaseAgent):
             confidence = min(sell_score * 100, 95)
         else:
             if total_voting < self.min_agents_agree:
-                rejection_reason = f"لا يوجد عدد كافٍ من الوكلاء ({total_voting}/{self.min_agents_agree})"
+                rejection_reason = f"Not enough agents ({total_voting}/{self.min_agents_agree})"
             elif max(buy_agreement_pct, sell_agreement_pct) < self.min_agreement_pct:
                 max_agreement = max(buy_count, sell_count)
-                rejection_reason = f"نسبة التوافق منخفضة ({max_agreement}/{total_voting} = {max(buy_agreement_pct, sell_agreement_pct):.0f}% < {self.min_agreement_pct}%)"
+                rejection_reason = f"Low agreement ({max_agreement}/{total_voting} = {max(buy_agreement_pct, sell_agreement_pct):.0f}% below {self.min_agreement_pct}%)"
             else:
-                rejection_reason = "تعارض بين BUY و SELL بدون أفضلية واضحة"
+                rejection_reason = "Conflict between BUY and SELL with no clear edge"
 
         all_votes = votes['BUY'] + votes['SELL'] + votes['WAIT']
         strongest_agent = max(all_votes, key=lambda x: x['score'], default=None)
@@ -395,6 +395,10 @@ class DecisionAgent(BaseAgent):
         """Detect weak/generic Groq explanations."""
         text = " ".join(str(ai.get(k, '')) for k in ['reasoning', 'entry_reason', 'opposite_risk', 'risk_notes', 'action_plan'])
         generic_phrases = [
+            # English generic phrases (Groq now replies in English)
+            'agents recommend', 'no specific reason', 'no risks', 'no clear strength', 'no clear weakness',
+            'enter now', 'the opposite direction',
+            # Arabic fallbacks (in case of legacy/mixed output)
             'الوكلاء يوصون', 'لا يوجد سبب', 'لا يوجد مخاطر', 'مخاطر بيع الذهب',
             'الدخول الآن', 'الاتجاه المعاكس', 'لا يوجد قوة محددة', 'لا يوجد ضعف'
         ]
@@ -437,12 +441,12 @@ class DecisionAgent(BaseAgent):
 You are the final Groq decision engine for Gold AI Signals.
 Respond in concise professional English only. Integrate all agent outputs and decide BUY, SELL, or WAIT.
 
-إحصائيات الوكلاء:
-- شراء: {len(votes['BUY'])} وكلاء
-- بيع: {len(votes['SELL'])} وكلاء
-- انتظار: {len(votes['WAIT'])} وكلاء
+Agent statistics:
+- BUY: {len(votes['BUY'])} agents
+- SELL: {len(votes['SELL'])} agents
+- WAIT: {len(votes['WAIT'])} agents
 
-تفاصيل الأصوات:
+Vote details:
 {self._format_votes_for_ai(votes)}
 
 Detailed agent context. Use actual numbers/levels. Do not say generic phrases like "agents recommend":
@@ -450,23 +454,23 @@ Detailed agent context. Use actual numbers/levels. Do not say generic phrases li
 
 {learning_summary}
 
-معلومات الجلسة:
-- الجودة: {session_quality}
-- مسموح بالتداول: {trading_allowed}
+Session info:
+- Quality: {session_quality}
+- Trading allowed: {trading_allowed}
 
-Daily Bias / الاتجاه الأعلى:
+Daily Bias / higher-timeframe direction:
 {daily_bias or {}}
 
-تفسير Groq للأخبار:
+Groq news interpretation:
 {news_ai or {}}
 
-Dynamic Risk Management / قيود المخاطرة الديناميكية:
+Dynamic Risk Management / dynamic risk constraints:
 {dynamic_risk or {}}
 
-Agent Playbooks v3.0 / قواعد عمل كل وكيل حسب تخصصه:
+Agent Playbooks v3.0 / per-agent rules by specialty:
 {format_agent_playbooks_for_prompt(max_items_per_agent=2)}
 
-قواعد الذاكرة من أخطاء سابقة (التزم بها قدر الإمكان، وإذا خالفتها اجعل القرار WAIT أو اخفض الثقة):
+Memory rules from past mistakes (follow them as much as possible; if you must violate one, set the decision to WAIT or lower confidence):
 {format_memory_rules_for_prompt(memory_rules or [], max_rules=4)}
 
 Strict reasoning rules:
@@ -522,12 +526,12 @@ Return JSON only, no Markdown:
                     if result.get('ai_warnings') and groq_obs.get('retry_on_contradiction', True):
                         correction_prompt = prompt + f"""
 
-تصحيح إلزامي: تحليلك السابق يحتوي تناقضات في الأدلة المؤيدة:
+Mandatory correction: your previous analysis has contradictions in the supportive evidence:
 {result.get('ai_warnings')}
 
-أعد الإجابة JSON فقط. إذا كان القرار SELL فلا تضع أدلة صعودية في supportive_evidence.
-إذا كان القرار BUY فلا تضع أدلة هبوطية في supportive_evidence.
-انقل الأدلة المخالفة إلى opposing_evidence أو اجعل final_signal = WAIT.
+Respond JSON only. If the decision is SELL, do not put bullish evidence in supportive_evidence.
+If the decision is BUY, do not put bearish evidence in supportive_evidence.
+Move conflicting evidence into opposing_evidence, or set final_signal = WAIT.
 """
                         retry_response = await self.ai_service._call_ai(correction_prompt, 'decision')
                         if retry_response.success:
@@ -585,11 +589,11 @@ Return JSON only, no Markdown:
                 for agent in agents:
                     lines.append(
                         f"  - {agent['agent']}: "
-                        f"ثقة {agent['confidence']}% "
-                        f"(وزن {agent['weight']*100:.0f}%)"
+                        f"confidence {agent['confidence']}% "
+                        f"(weight {agent['weight']*100:.0f}%)"
                     )
         
-        return "\n".join(lines) if lines else "لا توجد أصوات"
+        return "\n".join(lines) if lines else "No votes"
     
     def _format_weights_for_ai(self, weights: Dict) -> str:
         """تنسيق الأوزان لـ AI"""
@@ -615,13 +619,13 @@ Return JSON only, no Markdown:
         allow_signals = session_info.get('allow_signals', True)
         current_session = session_info.get('current_session', 'Unknown')
         
-        # إذا الجلسة不允许 الإشارات (جلسة التقارير مثلاً)
+        # If the session does not allow signals (e.g. the reports session)
         if not allow_signals:
-            return 'WAIT', 0, f"جلسة التقارير ({current_session}) - لا إرسال إشارات"
+            return 'WAIT', 0, f"Reports session ({current_session}) - no signals sent"
         
-        # التحقق من جلسة التداول
+        # Check trading session
         if not session_info.get('trading_allowed'):
-            return 'WAIT', 0, "خارج ساعات التداول"
+            return 'WAIT', 0, "Outside trading hours"
         
         session_quality = session_info.get('quality', session_info.get('session_quality', 'LOW'))
 
@@ -665,7 +669,7 @@ Return JSON only, no Markdown:
             if groq_observation_enabled and groq_obs.get('block_on_ai_contradiction', True) and ai_warnings:
                 return 'WAIT', ai_conf, 'Groq Observation blocked: contradictory supportive evidence: ' + '; '.join(ai_warnings)
             if groq_observation_enabled and min_supportive and supportive_count < min_supportive:
-                return 'WAIT', ai_conf, f'Groq Observation: تم منع الإشارة لأن Groq قدم {supportive_count} أدلة مؤيدة فقط والمطلوب {min_supportive}'
+                return 'WAIT', ai_conf, f'Groq Observation: signal blocked because Groq provided only {supportive_count} supportive evidence item(s), {min_supportive} required'
             if (
                 groq_observation_enabled
                 and not bool(groq_obs.get('allow_single_agent_context', True))
@@ -695,22 +699,22 @@ Return JSON only, no Markdown:
                 else:
                     final_signal = classic.get('decision', 'WAIT')
                     final_confidence = classic.get('confidence', 50)
-                    reasoning = "قرار كلاسيكي - AI غير متوفر أو ثقة منخفضة"
+                    reasoning = "Classical decision - AI unavailable or low confidence"
         else:
             if ai_required:
                 final_signal = 'WAIT'
                 final_confidence = 0
-                reasoning = "Groq إجباري لكن AI غير مفعّل أو غير متاح"
+                reasoning = "Groq is required but AI is disabled or unavailable"
             else:
                 final_signal = classic.get('decision', 'WAIT')
                 final_confidence = classic.get('confidence', 50)
-                reasoning = "قرار كلاسيكي - AI غير مفعّل"
+                reasoning = "Classical decision - AI disabled"
         
         # التحقق من الحد الأدنى للثقة
         final_required_conf = observation_min_conf if groq_observation_enabled else min_conf
         if final_confidence < final_required_conf:
             final_signal = 'WAIT'
-            reasoning += f" (ثقة منخفضة: {final_confidence:.0f}% < {final_required_conf:.0f}%)"
+            reasoning += f" (low confidence: {final_confidence:.0f}% below {final_required_conf:.0f}%)"
         
         return final_signal, round(final_confidence, 1), reasoning
     
@@ -741,28 +745,28 @@ Return JSON only, no Markdown:
         # RSI
         rsi = indicators.get('rsi', 50)
         if rsi > 75 or rsi < 25:
-            risk_factors.append("RSI في منطقة ذروة")
+            risk_factors.append("RSI in extreme zone")
             risk_score += 1
         
-        # السبريد
+        # Spread
         spread = indicators.get('spread', 0)
         if spread > 5:
-            risk_factors.append(f"سبريد عالي: {spread}")
+            risk_factors.append(f"High spread: {spread}")
             risk_score += 1
         
-        # ATR منخفض
+        # Low ATR
         atr = indicators.get('atr', 0)
         if atr < 1.0:
-            risk_factors.append("ATR منخفض - تقلب ضعيف")
+            risk_factors.append("Low ATR - weak volatility")
             risk_score += 1
         
-        # تقييم المخاطر
+        # Risk assessment
         if risk_score == 0:
-            assessment = "مقبول ✅"
+            assessment = "Acceptable ✅"
         elif risk_score == 1:
-            assessment = "محتمل ⚠️"
+            assessment = "Moderate ⚠️"
         else:
-            assessment = "عالي ❌"
+            assessment = "High ❌"
         
         return {
             'score': risk_score,
@@ -810,7 +814,7 @@ Return JSON only, no Markdown:
             is_contrarian = (bias == 'BULLISH' and signal == 'SELL') or (bias == 'BEARISH' and signal == 'BUY')
             if is_contrarian and float(result.get('confidence') or 0) < contrarian_min:
                 warnings.append(
-                    f"Daily Bias يمنع صفقة عكس الاتجاه: bias={bias} ({bias_conf}%), signal={signal}, required_conf={contrarian_min}%"
+                    f"Daily Bias blocks counter-trend trade: bias={bias} ({bias_conf}%), signal={signal}, required_conf={contrarian_min}%"
                 )
                 signal = 'WAIT'
 
@@ -907,17 +911,17 @@ Return JSON only, no Markdown:
         bullish_terms = ['macd bullish', 'bullish and improving', 'ema bullish', 'صاعد', 'شرائي', 'hidden_bullish']
         bearish_terms = ['macd bearish', 'ema bearish', 'هابط', 'بيعي', 'hidden_bearish']
         if signal == 'SELL' and any(term in lower for term in bullish_terms):
-            warnings.append('تحذير: شرح Groq يحتوي دليلاً صعودياً ضمن أدلة SELL المؤيدة؛ يجب نقله للمخاطر أو جعل القرار WAIT.')
+            warnings.append('Warning: Groq explanation contains bullish evidence inside SELL supportive evidence; move it to risks or set the decision to WAIT.')
         if signal == 'BUY' and any(term in lower for term in bearish_terms):
-            warnings.append('تحذير: شرح Groq يحتوي دليلاً هبوطياً ضمن أدلة BUY المؤيدة؛ يجب نقله للمخاطر أو جعل القرار WAIT.')
+            warnings.append('Warning: Groq explanation contains bearish evidence inside BUY supportive evidence; move it to risks or set the decision to WAIT.')
         # Support/resistance misuse: support below is not a SELL reason unless it is being broken; resistance above is not a BUY reason unless it is being broken.
         if signal == 'SELL' and ('دعم' in lower or 'support' in lower) and not any(x in lower for x in ['كسر', 'تحت', 'break', 'below', 'target', 'هدف']):
-            warnings.append('تحذير: Groq استخدم وجود دعم كدليل مؤيد للبيع دون ذكر كسره؛ هذا يجب أن يكون مخاطرة/هدف لا سبب دخول.')
+            warnings.append('Warning: Groq used the presence of support as supportive evidence for SELL without mentioning a break; this should be a risk/target, not an entry reason.')
         if signal == 'BUY' and ('مقاومة' in lower or 'resistance' in lower) and not any(x in lower for x in ['اختراق', 'فوق', 'break', 'above', 'target', 'هدف']):
-            warnings.append('تحذير: Groq استخدم وجود مقاومة كدليل مؤيد للشراء دون ذكر اختراقها؛ هذا يجب أن يكون مخاطرة/هدف لا سبب دخول.')
+            warnings.append('Warning: Groq used the presence of resistance as supportive evidence for BUY without mentioning a breakout; this should be a risk/target, not an entry reason.')
         inv_alt = str(ai.get('invalidation', '')) + ' ' + str(ai.get('alternative_scenario', ''))
         if signal in {'BUY', 'SELL'} and not any(ch.isdigit() for ch in inv_alt):
-            warnings.append('تحذير: Groq لم يقدم مستوى سعرياً واضحاً للإلغاء أو السيناريو البديل.')
+            warnings.append('Warning: Groq did not provide a clear price level for invalidation or the alternative scenario.')
         return warnings
 
     def _order_type(self, signal: str, entry: float, current_price: float | None) -> str:
@@ -1038,19 +1042,19 @@ Return JSON only, no Markdown:
         
         lines = [
             "━━━━━━━━━━━━━━━━━━━━",
-            f"{signal_emoji} *القرار النهائي*",
+            f"{signal_emoji} *Final Decision*",
             "━━━━━━━━━━━━━━━━━━━━",
-            f"📊 الإشارة: *{signal}*",
-            f"🎯 الثقة: *{confidence}%*",
+            f"📊 Signal: *{signal}*",
+            f"🎯 Confidence: *{confidence}%*",
             ""
         ]
         
-        # 🔥 الإحصائيات الجديدة
+        # New statistics
         buy_count = len(votes.get('BUY', []))
         sell_count = len(votes.get('SELL', []))
         total_voting = classic.get('total_voting_agents', buy_count + sell_count)
         
-        # حساب نسبة التوافق
+        # Compute agreement percentage
         if signal == 'BUY':
             agreement_pct = classic.get('buy_agreement_pct', 0)
         elif signal == 'SELL':
@@ -1058,52 +1062,52 @@ Return JSON only, no Markdown:
         else:
             agreement_pct = max(classic.get('buy_agreement_pct', 0), classic.get('sell_agreement_pct', 0))
         
-        lines.append("🔥 متطلبات التوافق:")
-        lines.append(f"├ الوكلاء: {total_voting}/{self.min_agents_agree} ✅")
-        lines.append(f"├ التوافق: {agreement_pct:.0f}% ✅")
+        lines.append("🔥 Agreement requirements:")
+        lines.append(f"├ Agents: {total_voting}/{self.min_agents_agree} ✅")
+        lines.append(f"├ Agreement: {agreement_pct:.0f}% ✅")
         lines.append("")
         
-        # الأوزان (متعلمة)
+        # Learned weights
         if weights:
-            lines.append("⚙️ الأوزان المتعلمة:")
+            lines.append("⚙️ Learned weights:")
             for name, w in sorted(weights.items(), key=lambda x: -x[1])[:5]:
                 lines.append(f"├ {name}: {w*100:.0f}%")
             lines.append("")
         
-        # الأصوات التفصيلية
-        lines.append("🗳️ أصوات الوكلاء:")
-        lines.append(f"├ شراء: {buy_count} ({classic.get('buy_agreement_pct', 0):.0f}%)")
-        lines.append(f"├ بيع: {sell_count} ({classic.get('sell_agreement_pct', 0):.0f}%)")
-        lines.append(f"└ انتظار: {len(votes.get('WAIT', []))}")
+        # Detailed votes
+        lines.append("🗳️ Agent votes:")
+        lines.append(f"├ BUY: {buy_count} ({classic.get('buy_agreement_pct', 0):.0f}%)")
+        lines.append(f"├ SELL: {sell_count} ({classic.get('sell_agreement_pct', 0):.0f}%)")
+        lines.append(f"└ WAIT: {len(votes.get('WAIT', []))}")
         lines.append("")
         
         # AI
         if ai.get('available'):
             lines.extend([
                 f"🤖 AI: {ai.get('provider', 'AI')}",
-                f"├ القوة: {ai.get('consensus_strength', 'N/A')}",
+                f"├ Strength: {ai.get('consensus_strength', 'N/A')}",
                 f"└ R/R: {ai.get('risk_reward', 'N/A')}",
                 ""
             ])
         
-        # التعلم
+        # Learning
         if learning.get('enabled'):
-            lines.append("🧠 التعلم الذكي: ✅ مفعّل")
+            lines.append("🧠 Smart learning: ✅ enabled")
             if learning.get('overall_win_rate'):
                 lines.append(f"├ Win Rate: {learning['overall_win_rate']:.1f}%")
             lines.append("")
         
-        # المخاطر
+        # Risk
         lines.extend([
-            f"⚠️ المخاطر: {risk.get('assessment', 'N/A')}",
-            f"📝 السبب: {reasoning[:80]}..."
-            if len(reasoning) > 80 else f"📝 السبب: {reasoning}"
+            f"⚠️ Risk: {risk.get('assessment', 'N/A')}",
+            f"📝 Reason: {reasoning[:80]}..."
+            if len(reasoning) > 80 else f"📝 Reason: {reasoning}"
         ])
         
-        # 🔥 سبب الرفض إن وجد
+        # Rejection reason if any
         rejection = classic.get('rejection_reason')
         if rejection and signal == 'WAIT':
-            lines.append(f"❌ سبب الانتظار: {rejection}")
+            lines.append(f"❌ Wait reason: {rejection}")
         
         lines.append("━━━━━━━━━━━━━━━━━━━━")
         

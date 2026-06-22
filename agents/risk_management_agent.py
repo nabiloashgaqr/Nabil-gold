@@ -402,47 +402,47 @@ class RiskManagementAgent(BaseAgent):
         score = 0.0
         notes: List[str] = []
         if rr_tp2 >= 3.0:
-            score += 25; notes.append("R:R ممتاز")
+            score += 25; notes.append("Excellent R:R")
         elif rr_tp2 >= 2.0:
-            score += 20; notes.append("R:R جيد")
+            score += 20; notes.append("Good R:R")
         elif rr_tp2 >= self._f(self.settings.get("min_rr_ratio"), 1.5):
-            score += 12; notes.append("R:R مقبول")
+            score += 12; notes.append("Acceptable R:R")
         else:
-            score -= 15; notes.append("R:R ضعيف")
+            score -= 15; notes.append("Weak R:R")
 
         if risk_distance <= atr * 1.6:
-            score += 20; notes.append("وقف منطقي مقارنة بالـ ATR")
+            score += 20; notes.append("Sensible stop vs ATR")
         elif risk_distance <= atr * 2.4:
-            score += 12; notes.append("وقف متوسط")
+            score += 12; notes.append("Moderate stop")
         else:
-            score -= 10; notes.append("وقف واسع")
+            score -= 10; notes.append("Wide stop")
 
         total_voting = int(direction_details.get("buy_count", 0) or 0) + int(direction_details.get("sell_count", 0) or 0)
         side_count = int(direction_details.get("buy_count" if direction == "BUY" else "sell_count", 0) or 0)
         if total_voting and side_count / total_voting >= 0.75:
-            score += 20; notes.append("توافق وكلاء قوي")
+            score += 20; notes.append("Strong agent agreement")
         elif side_count >= 3:
-            score += 14; notes.append("توافق وكلاء مقبول")
+            score += 14; notes.append("Acceptable agent agreement")
         else:
-            score -= 8; notes.append("توافق وكلاء ضعيف")
+            score -= 8; notes.append("Weak agent agreement")
 
         mtf = results.get("multitimeframe", {}) or {}
         if mtf.get("direction") == direction and mtf.get("alignment") in {"FULL", "PARTIAL"}:
-            score += 15; notes.append("الفريمات متوافقة")
+            score += 15; notes.append("Timeframes aligned")
         elif mtf.get("counter_trend"):
-            score -= 15; notes.append("عكس الفريم الأعلى")
+            score -= 15; notes.append("Against higher timeframe")
 
         daily_bias = results.get("daily_bias", {}) or {}
         bias = str(daily_bias.get("bias", "NEUTRAL")).upper()
         if (direction == "BUY" and bias == "BULLISH") or (direction == "SELL" and bias == "BEARISH"):
-            score += 10; notes.append("متوافق مع Daily Bias")
+            score += 10; notes.append("Aligned with Daily Bias")
         elif (direction == "BUY" and bias == "BEARISH") or (direction == "SELL" and bias == "BULLISH"):
-            score -= 10; notes.append("عكس Daily Bias")
+            score -= 10; notes.append("Against Daily Bias")
 
         if all(checks.values()):
-            score += 10; notes.append("كل فلاتر المخاطر الأساسية ناجحة")
+            score += 10; notes.append("All core risk filters passed")
         else:
-            score -= 20; notes.append("بعض فلاتر المخاطر فشلت")
+            score -= 20; notes.append("Some risk filters failed")
 
         if score >= 85:
             grade, label, risk_multiplier = "A+", "Elite", 1.0
@@ -491,8 +491,8 @@ class RiskManagementAgent(BaseAgent):
 
     def _summary(self, approved: bool, rejection_reason: str | None, stop_loss: float, tp1: float, tp2: float, rr_tp2: float) -> str:
         if approved:
-            return f"صفقة معتمدة: SL={stop_loss:.2f}, TP1={tp1:.2f}, TP2={tp2:.2f}, R:R={rr_tp2:.2f}"
-        return f"صفقة مرفوضة: {rejection_reason} | SL={stop_loss:.2f}, TP2={tp2:.2f}, R:R={rr_tp2:.2f}"
+            return f"Trade approved: SL={stop_loss:.2f}, TP1={tp1:.2f}, TP2={tp2:.2f}, R:R={rr_tp2:.2f}"
+        return f"Trade rejected: {rejection_reason} | SL={stop_loss:.2f}, TP2={tp2:.2f}, R:R={rr_tp2:.2f}"
 
     def _rejected(self, reason: str, price: float, direction_details: Dict[str, Any] | None = None) -> Dict[str, Any]:
         return {
@@ -512,7 +512,7 @@ class RiskManagementAgent(BaseAgent):
             "trade_grade": {"grade": "F", "score": 0, "label": "Rejected", "risk_multiplier": 0},
             "position_size": {"recommended_lots": None, "risk_amount": None, "based_on_capital": None},
             "trailing_stop": {},
-            "summary": f"مرفوض: {reason}",
+            "summary": f"Rejected: {reason}",
         }
 
     def _f(self, value: Any, default: float = 0.0) -> float:

@@ -26,7 +26,7 @@ class SMCAgent(BaseAgent):
         try:
             candles = market_data.get("data", [])
             if len(candles) < 60:
-                return self._empty("بيانات غير كافية لتحليل SMC")
+                return self._empty("Not enough data for SMC analysis")
 
             timeframe = str(market_data.get("timeframe", "15m"))
             current_price = self._f(candles[-1].get("close"))
@@ -71,7 +71,7 @@ class SMCAgent(BaseAgent):
             }
         except Exception as exc:  # noqa: BLE001
             self.logger.exception("SMC analysis failed")
-            return self._empty(f"فشل SMC: {exc}")
+            return self._empty(f"SMC failed: {exc}")
 
     def _market_structure(self, candles: List[Candle], swings: Dict[str, List[Dict[str, Any]]], timeframe: str) -> Dict[str, Any]:
         """Classify HH/HL/LH/LL and detect latest BOS/CHoCH."""
@@ -353,7 +353,7 @@ class SMCAgent(BaseAgent):
         if direction not in {"BUY", "SELL"}:
             return {
                 "type": "NEUTRAL",
-                "reason": "انتظار سحب سيولة واضح أو عودة إلى Order Block/FVG",
+                "reason": "Wait for a clear liquidity sweep or a return to an Order Block/FVG",
                 "entry": round(current_price, 2),
                 "sl": None,
                 "tp": None,
@@ -371,7 +371,7 @@ class SMCAgent(BaseAgent):
                 sl = self._f(zone.get("bottom")) - buffer
             targets = [x for x in liquidity.get("buy_side", []) if x > current_price]
             tp = min(targets) if targets else current_price + atr * 2.8
-            reason = "شراء بعد سحب سيولة/بنية صاعدة من Discount أو Order Block"
+            reason = "Buy after liquidity sweep / bullish structure from Discount or Order Block"
         else:
             entry = current_price
             sl = dealing_range.get("high", current_price + atr * 1.8) + buffer
@@ -381,7 +381,7 @@ class SMCAgent(BaseAgent):
                 sl = self._f(zone.get("top")) + buffer
             targets = [x for x in liquidity.get("sell_side", []) if x < current_price]
             tp = max(targets) if targets else current_price - atr * 2.8
-            reason = "بيع بعد سحب سيولة/بنية هابطة من Premium أو Order Block"
+            reason = "Sell after liquidity sweep / bearish structure from Premium or Order Block"
 
         return {"type": direction, "reason": reason, "entry": round(entry, 2), "sl": round(sl, 2), "tp": round(tp, 2)}
 
@@ -500,9 +500,9 @@ class SMCAgent(BaseAgent):
         signals: List[str],
     ) -> str:
         sweep = liquidity.get("recent_sweep", {})
-        sweep_text = "مع سحب سيولة حديث" if sweep.get("occurred") else "بدون سحب سيولة حديث واضح"
-        reasons = "، ".join(signals[:3]) if signals else "لا توجد إشارات SMC كافية"
-        return f"SMC: الهيكل {market_structure.get('trend')} والمنطقة {zone}، {sweep_text}. القرار {direction} بثقة {confidence}% — {reasons}"
+        sweep_text = "with a recent liquidity sweep" if sweep.get("occurred") else "without a clear recent liquidity sweep"
+        reasons = ", ".join(signals[:3]) if signals else "No sufficient SMC signals"
+        return f"SMC: structure {market_structure.get('trend')}, zone {zone}, {sweep_text}. Decision {direction} at {confidence}% — {reasons}"
 
     def _last(self, values: List[float | None], default: float) -> float:
         for value in reversed(values):
