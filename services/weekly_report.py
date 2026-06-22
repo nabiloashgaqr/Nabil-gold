@@ -254,23 +254,25 @@ class WeeklyReportService:
     def build_prompt(self, stats: WeeklyStats) -> str:
         data = json.dumps(stats.to_prompt_dict(), ensure_ascii=False, indent=2)
         return (
-            "أنت محلل أداء أسبوعي لنظام إشارات الذهب (XAU/USD، Paper Trading).\n\n"
-            "📊 البيانات الفعلية للأسبوع الماضي (لا تخترع أرقامًا، استخدم البيانات فقط):\n"
+            "You are the weekly performance analyst for a Gold AI Signals system "
+            "(XAU/USD, Paper Trading).\n\n"
+            "📊 Real data for the past week (do NOT invent numbers, use only this data):\n"
             f"```json\n{data}\n```\n\n"
-            "✍️ اكتب تقريرًا مختصرًا بالعربية يتضمن الأقسام التالية بالترتيب:\n"
-            "1) 📈 ملخص الأداء (5 نقاط: إجمالي، فوز، صافي، أكبر ربح، أكبر خسارة)\n"
-            "2) 🤖 أداء الوكلاء (لكل وكيل: اسم + win rate + pnl + توصية وزن)\n"
-            "3) 📅 أفضل وأسوأ يوم (يوم + pnl + عدد صفقات)\n"
-            "4) 🌍 أداء الجلسات (London / NY / Asian بأفضل/أسوأ)\n"
-            "5) ⚠️ المخاطر (HALT/CAUTION count)\n"
-            "6) 🧠 قواعد ذاكرة جديدة (عددها فقط)\n"
-            "7) 🎯 3-5 توصيات محددة قابلة للتنفيذ في config.json الأسبوع القادم\n\n"
-            f"⚠️ شروط صارمة:\n"
-            f"- لا تتجاوز {self.max_chars} حرف\n"
-            "- استخدم emojis في بداية كل قسم\n"
-            "- التوصيات يجب أن تكون قابلة للتنفيذ فورًا (مثل: 'قلّل weight classical_agent من 0.20 إلى 0.15')\n"
-            "- اكتب بالعربية الفصحى المبسّطة\n"
-            "- ابدأ بسطر '═══════════════════════════════════' وانهِ بنفس السطر\n"
+            "✍️ Write a concise report in English with the following sections, in order:\n"
+            "1) 📈 Performance summary (5 points: total, wins, net, largest win, largest loss)\n"
+            "2) 🤖 Agent performance (per agent: name + win rate + pnl + weight recommendation)\n"
+            "3) 📅 Best and worst day (day + pnl + trade count)\n"
+            "4) 🌍 Session performance (London / NY / Asian, best/worst)\n"
+            "5) ⚠️ Risk (HALT/CAUTION count)\n"
+            "6) 🧠 New memory rules (count only)\n"
+            "7) 🎯 3-5 specific, actionable recommendations for config.json next week\n\n"
+            f"⚠️ Strict rules:\n"
+            f"- Do not exceed {self.max_chars} characters\n"
+            "- Start each section with an emoji\n"
+            "- Recommendations must be immediately actionable "
+            "(e.g. 'lower classical_agent weight from 0.20 to 0.15')\n"
+            "- Write in clear, plain English only\n"
+            "- Start with a line '═══════════════════════════════════' and end with the same line\n"
         )
 
     # ------------------------------------------------------------------ #
@@ -284,12 +286,12 @@ class WeeklyReportService:
         if stats.total_trades < self.min_trades:
             message = (
                 "═══════════════════════════════════\n"
-                "📊 التقرير الأسبوعي\n"
-                f"الأسبوع: {stats.week_start} → {stats.week_end}\n"
+                "📊 Weekly Report\n"
+                f"Week: {stats.week_start} → {stats.week_end}\n"
                 "═══════════════════════════════════\n\n"
-                f"⚪ الأسبوع هادئ: إجمالي {stats.total_trades} صفقات فقط "
-                f"(الحد الأدنى {self.min_trades}).\n"
-                "لا توجد توصيات هذا الأسبوع.\n"
+                f"⚪ Quiet week: only {stats.total_trades} trades total "
+                f"(minimum {self.min_trades}).\n"
+                "No recommendations this week.\n"
             )
             result = {
                 "status": "ok_too_few_trades",
@@ -387,18 +389,18 @@ class WeeklyReportService:
         """Used when Groq is not available; a simple text-only summary."""
         lines = [
             "═══════════════════════════════════",
-            "📊 التقرير الأسبوعي",
-            f"الأسبوع: {stats.week_start} → {stats.week_end}",
+            "📊 Weekly Report",
+            f"Week: {stats.week_start} → {stats.week_end}",
             "═══════════════════════════════════",
             "",
-            f"📈 إجمالي الصفقات: {stats.total_trades}",
-            f"✅ فوز: {stats.wins}    ❌ خسارة: {stats.losses}    ⚪ تعادل: {stats.break_even}",
-            f"🎯 نسبة الفوز: {stats.win_rate:.1f}%",
-            f"💰 صافي النقاط: {stats.net_pnl_points:+.2f}",
-            f"🏆 أكبر ربح: {stats.largest_win_points:+.2f}",
-            f"💔 أكبر خسارة: {stats.largest_loss_points:+.2f}",
+            f"📈 Total trades: {stats.total_trades}",
+            f"✅ Wins: {stats.wins}    ❌ Losses: {stats.losses}    ⚪ Break-even: {stats.break_even}",
+            f"🎯 Win rate: {stats.win_rate:.1f}%",
+            f"💰 Net points: {stats.net_pnl_points:+.2f}",
+            f"🏆 Largest win: {stats.largest_win_points:+.2f}",
+            f"💔 Largest loss: {stats.largest_loss_points:+.2f}",
             "",
-            "⚠️ (Groq غير متاح — هذا ملخص آلي بدون توصيات)",
+            "⚠️ (Groq unavailable — automated summary with no recommendations)",
         ]
         return "\n".join(lines)
 
@@ -415,7 +417,7 @@ class WeeklyReportService:
             stripped = line.strip()
             if not stripped:
                 continue
-            if any(kw in stripped for kw in ("التوصيات", "توصيات", "Recommendations")):
+            if any(kw in stripped for kw in ("التوصيات", "توصيات")) or "recommendation" in stripped.lower():
                 in_recs = True
                 continue
             if not in_recs:
