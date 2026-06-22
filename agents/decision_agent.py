@@ -55,6 +55,11 @@ class DecisionAgent(BaseAgent):
         self.current_weights = self._load_weights()
         self.voting_agents = {"technical", "classical", "smc", "price_action", "multitimeframe"}
         
+        # === NEW RULE (User request): Each agent must be >=60%, Groq only needs >=51% direction match ===
+        groq_obs = config.get('groq_observation_mode', {}) or {}
+        self.agent_min_confidence = int(groq_obs.get('agent_min_confidence', 60))
+        self.groq_min_confidence = int(groq_obs.get('min_groq_confidence', 51))
+        
     def _load_weights(self) -> Dict[str, float]:
         """تحميل الأوزان (من learning service أولاً، ثم config).
 
@@ -226,13 +231,16 @@ class DecisionAgent(BaseAgent):
         for agent_name, result in agents_results.items():
             if agent_name not in self.voting_agents:
                 continue
-            # دعم 'signal' و 'direction'
             if isinstance(result, dict):
                 signal = str(result.get('signal') or result.get('direction') or 'WAIT').upper()
                 if signal in {"NEUTRAL", "HOLD", "NO_TRADE", "NONE", ""}:
                     signal = "WAIT"
                 confidence = result.get('confidence', 50)
             else:
+                continue
+
+            # === NEW RULE: Skip agents below agent_min_confidence (default 60%) ===
+            if confidence < self.agent_min_confidence:
                 continue
             
             # الحصول على weight (متعلم أو افتراضي)
@@ -475,8 +483,11 @@ Memory rules from past mistakes (follow them as much as possible; if you must vi
 
 Strict reasoning rules:
 - English only. Be specific with numbers (price levels, RSI, ATR, OB, FVG, EMA, volume profile, etc.).
+- IMPORTANT RULE CHANGE: Only agents with ≥60% confidence are passed to you. 
+  Agents below 60% are already filtered out and ignored.
+- Groq (you) only needs ≥51% confidence to approve a direction (BUY or SELL).
 - When final_signal = WAIT, you MUST explain in "reasoning" and "opposing_evidence":
-  - Which agents are against the trade and their exact numeric reasons (e.g. "Technical: RSI 72 + resistance at 4205", "SMC: unmitigated supply block at 4198", "MTF: 4H bearish bias").
+  - Which QUALIFIED agents (≥60%) are against the trade and their exact numeric reasons.
   - Key levels: nearest support / resistance / liquidity pool / FVG.
   - Why the current setup is not high-probability right now.
 - Do NOT use bullish evidence as supportive for SELL (and vice versa).
@@ -683,11 +694,14 @@ Move conflicting evidence into opposing_evidence, or set final_signal = WAIT.
                         f'Production strict: Groq returned {ai_signal}, but agent agreement context is {classic_signal}. Required {self.min_agents_agree} agents and {self.min_agreement_pct}% agreement.',
                     )
 
-            if ai_signal != 'WAIT' and ai_conf >= required_conf:
+            # === NEW RULE: Groq only needs >=51% (groq_min_confidence) in the matching direction ===
+            groq_threshold = self.groq_min_confidence if groq_observation_enabled else required_conf
+            
+            if ai_signal != 'WAIT' and ai_conf >= groq_threshold:
                 final_signal = ai_signal
                 if groq_observation_enabled:
                     final_confidence = ai_conf
-                    reasoning = f"Groq Observation: Groq decision = {ai_signal} with confidence {ai_conf:.0f}%. {ai.get('reasoning', '')}"
+                    reasoning = f"Groq Observation: Groq decision = {ai_signal} with confidence {ai_conf:.0f}% (threshold {groq_threshold}%). {ai.get('reasoning', '')}"
                 else:
                     final_confidence = (ai_conf * 0.7) + (classic.get('confidence', 50) * 0.3)
                     reasoning = ai.get('reasoning', classic.get('decision', 'N/A'))
@@ -702,7 +716,7 @@ Move conflicting evidence into opposing_evidence, or set final_signal = WAIT.
                     opp_agent = strongest.get('agent', 'agents')
                     opp_conf = strongest.get('confidence', 0)
                     
-                    base = f"Groq did not approve ({ai_conf:.0f}% < {required_conf:.0f}%)"
+                    base = f"Groq did not approve ({ai_conf:.0f}% < {groq_threshold:.0f}%)"
                     if groq_reason:
                         base += f" — {groq_reason[:140]}"
                     if opp_agent and opp_conf:
@@ -723,7 +737,8 @@ Move conflicting evidence into opposing_evidence, or set final_signal = WAIT.
                 reasoning = "Classical decision - AI disabled"
         
         # التحقق من الحد الأدنى للثقة
-        final_required_conf = observation_min_conf if groq_observation_enabled else min_conf
+        # For Groq: use the lower groq_min_confidence (51%), agents already filtered at 60%
+        final_required_conf = self.groq_min_confidence if groq_observation_enabled else min_conf
         if final_confidence < final_required_conf:
             final_signal = 'WAIT'
             reasoning += f" (low confidence: {final_confidence:.0f}% below {final_required_conf:.0f}%)"

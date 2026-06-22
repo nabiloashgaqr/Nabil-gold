@@ -424,13 +424,23 @@ async def run_analysis_async() -> None:
                 opp_conf = strongest.get("confidence", 0)
 
                 parts = []
-                parts.append(f"Groq did not approve (confidence {ai.get('confidence', decision.get('confidence', 0)):.0f}% < 60%)")
+                agent_thr = decision.get("agent_min_confidence", 60)
+                groq_thr = decision.get("groq_min_confidence", 51)
+                groq_c = ai.get('confidence', decision.get('confidence', 0))
+                
+                parts.append(f"Agents required ≥{agent_thr}% (only agents ≥{agent_thr}% are considered)")
+                parts.append(f"Groq threshold: ≥{groq_thr}% (direction match only)")
+
+                if groq_c < groq_thr:
+                    parts.append(f"Groq returned {groq_c:.0f}% — below {groq_thr}% threshold")
+                else:
+                    parts.append(f"Groq returned {groq_c:.0f}% (direction match)")
 
                 if groq_reason:
-                    parts.append(groq_reason[:160])
+                    parts.append(groq_reason[:140])
 
                 if opp_agent and opp_conf:
-                    parts.append(f"Strongest opposing view: {opp_agent} ({opp_conf}%)")
+                    parts.append(f"Strongest qualifying agent: {opp_agent} ({opp_conf}%)")
 
                 # Pull key technical context if available
                 tech = all_results.get("technical", {}) or {}
@@ -448,7 +458,7 @@ async def run_analysis_async() -> None:
                     "━━━━━━━━━━━━━━━━━━━━\n"
                     f"📈 Price: {price_text}\n"
                     f"🎯 Decision: WAIT\n"
-                    f"📊 Groq Confidence: {ai.get('confidence', decision.get('confidence', 0)):.0f}%\n\n"
+                    f"📊 Groq: {ai.get('confidence', decision.get('confidence', 0)):.0f}% (min {decision.get('groq_min_confidence', 51)}%) | Agents min: {decision.get('agent_min_confidence', 60)}%\n\n"
                     f"<b>Reason:</b>\n{html.escape(reason_text)}\n\n"
                     f"<b>Notes:</b>\n{warnings_text}\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
