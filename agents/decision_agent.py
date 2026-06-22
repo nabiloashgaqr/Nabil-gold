@@ -474,16 +474,16 @@ Memory rules from past mistakes (follow them as much as possible; if you must vi
 {format_memory_rules_for_prompt(memory_rules or [], max_rules=4)}
 
 Strict reasoning rules:
-- English only.
-- Do NOT use bullish evidence (e.g., MACD bullish) as supportive evidence for SELL; put it in opposing_evidence/risk_notes.
-- Do NOT use bearish evidence as supportive evidence for BUY.
+- English only. Be specific with numbers (price levels, RSI, ATR, OB, FVG, EMA, volume profile, etc.).
+- When final_signal = WAIT, you MUST explain in "reasoning" and "opposing_evidence":
+  - Which agents are against the trade and their exact numeric reasons (e.g. "Technical: RSI 72 + resistance at 4205", "SMC: unmitigated supply block at 4198", "MTF: 4H bearish bias").
+  - Key levels: nearest support / resistance / liquidity pool / FVG.
+  - Why the current setup is not high-probability right now.
+- Do NOT use bullish evidence as supportive for SELL (and vice versa).
 - supportive_evidence must support final_signal only.
-- risk_reward must match RiskManagement numbers; do not invent a different R:R.
-- If evidence conflicts, choose WAIT or lower confidence clearly.
-- For SELL: a strong support below price is NOT supportive unless it is broken or explicitly a target/risk.
-- For BUY: a strong resistance above price is NOT supportive unless it is broken or explicitly a target/risk.
-- invalidation must be a clear price level or candle close condition, not indicator confidence.
-- alternative_scenario must be a clear price condition.
+- risk_reward must match RiskManagement numbers.
+- If evidence conflicts, choose WAIT and explain the conflict with numbers.
+- invalidation must be a clear price level or candle-close condition.
 
 Return JSON only, no Markdown:
 {{
@@ -695,7 +695,19 @@ Move conflicting evidence into opposing_evidence, or set final_signal = WAIT.
                 if ai_required or groq_observation_enabled:
                     final_signal = 'WAIT'
                     final_confidence = ai_conf
-                    reasoning = f"Groq Observation: no signal because Groq returned {ai_signal} or confidence {ai_conf:.0f}% is below {required_conf:.0f}%"
+                    
+                    # Build rich professional reason
+                    groq_reason = ai.get('reasoning') or ai.get('opposite_risk') or ai.get('risk_notes') or ''
+                    strongest = classic.get('strongest_directional') or {}
+                    opp_agent = strongest.get('agent', 'agents')
+                    opp_conf = strongest.get('confidence', 0)
+                    
+                    base = f"Groq did not approve ({ai_conf:.0f}% < {required_conf:.0f}%)"
+                    if groq_reason:
+                        base += f" — {groq_reason[:140]}"
+                    if opp_agent and opp_conf:
+                        base += f" | Strongest opposing: {opp_agent} ({opp_conf}%)"
+                    reasoning = base
                 else:
                     final_signal = classic.get('decision', 'WAIT')
                     final_confidence = classic.get('confidence', 50)

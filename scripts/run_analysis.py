@@ -412,25 +412,47 @@ async def run_analysis_async() -> None:
                 # Escape dynamic values: summaries/warnings can contain '<', '>', '&'
                 # (e.g. "confidence 40% < 60%"), which break parse_mode=HTML (400).
                 warnings_text = "\n".join(f"• {html.escape(str(w))}" for w in warnings[:6]) or "• No warnings; current decision is simply WAIT"
-                reason_text = html.escape(str(decision.get("summary", decision.get("reasoning", "N/A"))))
                 price_text = html.escape(str(decision.get("current_price", all_results.get("current_price"))))
+                ai = decision.get("ai", {}) or {}
+                classic = decision.get("classic", {}) or {}
+                votes = decision.get("votes", {}) or {}
 
-                # Clean redundant Groq Observation phrasing (e.g. "48% below 60% (low confidence: 48% below 60%)")
-                if "Groq Observation" in reason_text or "low confidence" in reason_text.lower():
-                    import re
-                    reason_text = re.sub(r'\s*\(low confidence:?\s*[^)]*\)', '', reason_text, flags=re.IGNORECASE)
-                    reason_text = re.sub(r'\s*or confidence\s*\d+%?\s*is below\s*\d+%?', '', reason_text, flags=re.IGNORECASE)
-                    reason_text = re.sub(r'\s+', ' ', reason_text).strip()
+                # Build rich professional WAIT reason
+                groq_reason = ai.get("reasoning") or ai.get("opposite_risk") or ai.get("risk_notes") or ""
+                strongest = classic.get("strongest_directional") or {}
+                opp_agent = strongest.get("agent")
+                opp_conf = strongest.get("confidence", 0)
+
+                parts = []
+                parts.append(f"Groq did not approve (confidence {ai.get('confidence', decision.get('confidence', 0)):.0f}% < 60%)")
+
+                if groq_reason:
+                    parts.append(groq_reason[:160])
+
+                if opp_agent and opp_conf:
+                    parts.append(f"Strongest opposing view: {opp_agent} ({opp_conf}%)")
+
+                # Pull key technical context if available
+                tech = all_results.get("technical", {}) or {}
+                if tech.get("signal") == "WAIT":
+                    t = tech.get("technical", {}) or {}
+                    if t.get("rsi"):
+                        parts.append(f"RSI {t['rsi']}")
+                    if t.get("key_levels"):
+                        parts.append(f"Key levels: {str(t.get('key_levels'))[:80]}")
+
+                reason_text = " | ".join(parts)
 
                 telegram.send_message(
                     "🟡 <b>Gold AI Signals — No qualified signal</b>\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
-                    f"Current price: {price_text}\n"
-                    f"Decision: {html.escape(str(decision.get('decision', 'WAIT')))}\n"
-                    f"Confidence: {html.escape(str(decision.get('confidence', 0)))}%\n"
-                    f"Reason: {reason_text}\n\n"
+                    f"📈 Price: {price_text}\n"
+                    f"🎯 Decision: WAIT\n"
+                    f"📊 Groq Confidence: {ai.get('confidence', decision.get('confidence', 0)):.0f}%\n\n"
+                    f"<b>Reason:</b>\n{html.escape(reason_text)}\n\n"
                     f"<b>Notes:</b>\n{warnings_text}\n"
-                    "━━━━━━━━━━━━━━━━━━━━"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    "<i>Next analysis in ~10 min</i>"
                 )
 
         logger.info("✅ اكتمل التحليل بنجاح")
