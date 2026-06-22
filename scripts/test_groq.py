@@ -39,7 +39,7 @@ def _notify_telegram(title: str, details: str, success: bool) -> None:
             f"{emoji} <b>{title}</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"{details}\n"
-            f"⏰ الوقت: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n"
+            f"⏰ Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n"
             "━━━━━━━━━━━━━━━━━━━━"
         )
         telegram.send_message(text, urgent=not success)
@@ -71,7 +71,7 @@ def main() -> int:
     if not token:
         message = "GROQ_API_KEY is missing or empty in GitHub Secrets."
         print(f"❌ {message}")
-        _notify_telegram("Groq Smoke Test فشل", message, success=False)
+        _notify_telegram("Groq Smoke Test failed", message, success=False)
         return 1
 
     payload = {
@@ -105,7 +105,7 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001
         message = f"Groq request failed before response: {exc}"
         print(f"❌ {message}")
-        _notify_telegram("Groq Smoke Test فشل", message, success=False)
+        _notify_telegram("Groq Smoke Test failed", message, success=False)
         return 1
 
     try:
@@ -113,13 +113,13 @@ def main() -> int:
     except Exception:  # noqa: BLE001
         message = f"Groq returned non-JSON response. HTTP {response.status_code}: {response.text[:500]}"
         print(f"❌ {message}")
-        _notify_telegram("Groq Smoke Test فشل", message, success=False)
+        _notify_telegram("Groq Smoke Test failed", message, success=False)
         return 1
 
     if not response.ok:
         message = f"Groq API error. HTTP {response.status_code}: {_extract_error(data)}"
         print(f"❌ {message}")
-        _notify_telegram("Groq Smoke Test فشل", message, success=False)
+        _notify_telegram("Groq Smoke Test failed", message, success=False)
         return 1
 
     try:
@@ -128,19 +128,19 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001
         message = f"Groq responded but content was not valid JSON: {exc}; raw={data}"
         print(f"❌ {message}")
-        _notify_telegram("Groq Smoke Test فشل", message[:1200], success=False)
+        _notify_telegram("Groq Smoke Test failed", message[:1200], success=False)
         return 1
 
     usage = data.get("usage", {}) or {}
     details = (
-        "Groq يعمل بنجاح.\n"
-        f"الموديل: {model}\n"
-        f"الرد: {parsed}\n"
+        "Groq is working.\n"
+        f"Model: {model}\n"
+        f"Response: {parsed}\n"
         f"Tokens: {usage.get('total_tokens', 'N/A')}"
     )
     print("✅ Groq API is working")
     print(details)
-    _notify_telegram("Groq Smoke Test ناجح", details, success=True)
+    _notify_telegram("Groq Smoke Test successful", details, success=True)
     return 0
 
 

@@ -127,7 +127,7 @@ def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService,
     if filt.get('block_if_open_same_direction', True):
         for trade in open_trades:
             if _trade_direction(trade) == direction:
-                return f"توجد صفقة {direction} مفتوحة بالفعل: {trade.get('id', 'unknown')}"
+                return f"A {direction} trade is already open: {trade.get('id', 'unknown')}"
 
     lookback_minutes = int(filt.get('lookback_minutes', 90) or 90)
     cutoff = now - timedelta(minutes=lookback_minutes)
@@ -139,10 +139,10 @@ def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService,
             continue
         previous_entry = _trade_entry_price(trade)
         if previous_entry is None or entry_price <= 0:
-            return f"إشارة {direction} مشابهة أرسلت خلال آخر {lookback_minutes} دقيقة: {trade.get('id', 'unknown')}"
+            return f"A similar {direction} signal was sent within the last {lookback_minutes} min: {trade.get('id', 'unknown')}"
         if abs(entry_price - previous_entry) <= tolerance:
             return (
-                f"إشارة مكررة {direction}: السعر قريب من إشارة حديثة "
+                f"Duplicate {direction} signal: price close to a recent signal "
                 f"({previous_entry:.2f} vs {entry_price:.2f}, tolerance={tolerance:.2f})"
             )
 
@@ -155,7 +155,7 @@ def run_agent(agent_name: str, agent: Any, data: Dict[str, Any]) -> Dict[str, An
         return agent.analyze(data)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Agent %s failed", agent_name)
-        return {"agent": agent_name, "signal": "WAIT", "confidence": 0, "reasoning": f"فشل الوكيل: {exc}"}
+        return {"agent": agent_name, "signal": "WAIT", "confidence": 0, "reasoning": f"Agent failed: {exc}"}
 
 
 async def run_analysis_async() -> None:
@@ -206,7 +206,7 @@ async def run_analysis_async() -> None:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("⚠️ فشل تهيئة AI: %s", exc)
                 if not bool(ai_config.get("fallback_to_classic", True)):
-                    telegram.send_error_alert(f"Groq إجباري لكن فشلت تهيئة AI: {exc}")
+                    telegram.send_error_alert(f"Groq is required but AI initialization failed: {exc}")
                     return
 
         logger.info("جلب بيانات السوق...")

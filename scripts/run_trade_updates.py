@@ -65,7 +65,7 @@ def main() -> None:
         allow_synthetic = bool(config.get("data_source", {}).get("allow_synthetic_in_production", False))
         if os.environ.get("GITHUB_ACTIONS") == "true" and price_payload.get("source") == "synthetic_demo" and not allow_synthetic:
             logger.error("تم إيقاف تحديث الصفقات: السعر من synthetic_demo. راجع TWELVE_DATA_API_KEY.")
-            telegram.send_error_alert("تم إيقاف تحديث الصفقات: السعر من synthetic_demo. راجع TWELVE_DATA_API_KEY.")
+            telegram.send_error_alert("Trade updates stopped: price is from synthetic_demo. Check TWELVE_DATA_API_KEY.")
             return
         current_price = price_payload.get("current_price")
         if not current_price:

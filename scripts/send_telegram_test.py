@@ -79,10 +79,10 @@ def main() -> None:
 
     # 2) Try to send message.
     text = (
-        "✅ <b>اختبار Telegram ناجح</b>\n"
+        "✅ <b>Telegram test successful</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "📌 البوت متصل بالمحادثة بشكل صحيح.\n"
-        f"⏰ الوقت: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n"
+        "📌 The bot is connected to the chat correctly.\n"
+        f"⏰ Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n"
         "━━━━━━━━━━━━━━━━━━━━"
     )
     print("📨 Sending test message...")

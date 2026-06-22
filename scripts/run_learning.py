@@ -65,7 +65,7 @@ def main() -> None:
         
     except Exception as e:
         logger.error("❌ خطأ في التعلم: %s", e)
-        telegram.send_error_alert(f"خطأ في التعلم الذكي: {e}")
+        telegram.send_error_alert(f"Smart learning error: {e}")
 
 
 if __name__ == "__main__":

@@ -115,12 +115,12 @@ def format_telegram(report: Dict[str, Any]) -> str:
     return "\n".join([
         "🧪 <b>Groq Model Comparison</b>",
         "━━━━━━━━━━━━━━━━━━━━",
-        f"السعر: {report.get('current_price')}",
+        f"Price: {report.get('current_price')}",
         line(a),
         line(b),
         "",
-        f"الاتفاق: {'✅' if a.get('decision') == b.get('decision') else '⚠️ مختلف'}",
-        "تم حفظ JSON كـ Artifact في GitHub Actions.",
+        f"Agreement: {'✅' if a.get('decision') == b.get('decision') else '⚠️ different'}",
+        "JSON saved as a GitHub Actions artifact.",
         "━━━━━━━━━━━━━━━━━━━━",
     ])
 
