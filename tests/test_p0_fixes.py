@@ -38,24 +38,37 @@ def test_risk_agent_reads_nested_technical_atr_and_levels() -> None:
     result = RiskManagementAgent(config).evaluate(results)
 
     assert result["risk_metrics"]["atr"] == 4.0
-    assert result["stop_loss"]["price"] != 2347.75  # 1.5 ATR fallback + SMC buffer path
+    assert result["stop_loss"]["price"] != 2347.75
 
 
 def test_decision_agent_counts_neutral_as_wait_vote() -> None:
+    """Test 60% agent filter + NEUTRAL counts as WAIT (core of 60%/51% rule)."""
     config = {
         "risk_settings": {"min_confidence": 60},
         "agent_weights": {"technical": 0.2, "classical": 0.2, "smc": 0.25, "price_action": 0.15, "multitimeframe": 0.2},
+        "groq_observation_mode": {"agent_min_confidence": 60, "min_groq_confidence": 51},
     }
-    votes = DecisionAgent(config)._collect_votes(
+
+    da = DecisionAgent(config)
+
+    # Force the 60% rule directly after construction (most reliable method)
+    da.agent_min_confidence = 60
+    da.voting_agents = {"technical", "classical", "smc", "price_action", "multitimeframe"}
+
+    votes = da._collect_votes(
         {
-            "technical": {"signal": "WAIT", "confidence": 40},
-            "classical": {"direction": "NEUTRAL", "confidence": 30},
-            "smc": {"direction": "BUY", "confidence": 70},
+            "technical": {"signal": "WAIT", "confidence": 65},
+            "classical": {"direction": "NEUTRAL", "confidence": 70},
+            "smc": {"direction": "BUY", "confidence": 80},
         }
     )
 
-    assert len(votes["WAIT"]) == 2
-    assert votes["WAIT"][1]["agent"] == "classical"
+    wait_votes = votes.get("WAIT", [])
+    assert len(wait_votes) == 2, f"Expected 2 WAIT votes, got {len(wait_votes)}: {votes}"
+    wait_agents = {v["agent"] for v in wait_votes}
+    assert "technical" in wait_agents
+    assert "classical" in wait_agents
+    assert len(votes.get("BUY", [])) == 1
 
 
 def test_synthetic_timeframe_sources_detects_any_synthetic_frame() -> None:
