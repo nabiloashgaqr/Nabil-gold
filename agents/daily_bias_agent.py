@@ -39,10 +39,17 @@ class DailyBiasAgent(BaseAgent):
         if len(closes) < 50:
             return {"agent": self.name, "enabled": True, "bias": "NEUTRAL", "confidence": 0, "summary": "Invalid candles for daily bias"}
 
-        ema_fast = calculate_ema(closes, int(self.settings.get("ema_fast", 20)))
-        ema_slow = calculate_ema(closes, int(self.settings.get("ema_slow", 50)))
-        rsi = calculate_rsi(closes, int(self.settings.get("rsi_period", 14)))
+        ema_fast_series = calculate_ema(closes, int(self.settings.get("ema_fast", 20)))
+        ema_slow_series = calculate_ema(closes, int(self.settings.get("ema_slow", 50)))
+        rsi_series = calculate_rsi(closes, int(self.settings.get("rsi_period", 14)))
+        # calculate_ema/calculate_rsi return the full series (with leading/trailing
+        # None values), so reduce each to its latest valid scalar before comparing.
+        ema_fast = self._last_valid(ema_fast_series)
+        ema_slow = self._last_valid(ema_slow_series)
+        rsi = self._last_valid(rsi_series)
         last = closes[-1]
+        if ema_fast is None or ema_slow is None or rsi is None:
+            return {"agent": self.name, "enabled": True, "bias": "NEUTRAL", "confidence": 0, "summary": "Indicators not ready for daily bias"}
         lookback = int(self.settings.get("slope_lookback", 12))
         old = closes[-lookback] if len(closes) > lookback else closes[0]
         slope = last - old
@@ -97,6 +104,19 @@ class DailyBiasAgent(BaseAgent):
             "reasons": reasons,
             "summary": f"Daily bias {bias} ({confidence}%) on {preferred}: " + ", ".join(reasons[:3]),
         }
+
+    @staticmethod
+    def _last_valid(series: List[Any] | None) -> float | None:
+        """Return the most recent non-None numeric value from an indicator series."""
+        if not series:
+            return None
+        for value in reversed(series):
+            if value is not None:
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    continue
+        return None
 
     def _f(self, value: Any, default: float = 0.0) -> float:
         try:
