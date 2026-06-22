@@ -295,13 +295,25 @@ BEGIN
     END IF;
 END $$;
 
-INSERT INTO risk_settings (setting_key, setting_value, description) VALUES
-('max_risk_per_trade', '{"value": 2, "unit": "percent"}', 'الحد الأقصى للمخاطرة لكل صفقة'),
-('daily_risk_limit', '{"value": 6, "unit": "percent"}', 'الحد الأقصى للمخاطرة اليومية'),
-('max_open_positions', '{"value": 3, "unit": "count"}', 'الحد الأقصى للصفقات المفتوحة'),
-('min_confidence_threshold', '{"value": 60, "unit": "percent"}', 'الحد الأدنى للثقة'),
-('max_drawdown_stop', '{"value": 10, "unit": "percent"}', 'وقف السحب الأقصى')
-ON CONFLICT (setting_key) DO NOTHING;
+-- Seed default risk settings (OPTIONAL / cosmetic only).
+-- NOTE: the Python code does NOT read this table — risk settings come from
+-- config.json. An older risk_settings table may use a different column layout
+-- (e.g. a NOT NULL 'setting_name' instead of 'setting_key'), which would make
+-- this seed fail. Since the seed is non-essential, it is wrapped so that ANY
+-- failure here is ignored and the rest of the schema script still completes.
+DO $$
+BEGIN
+    INSERT INTO risk_settings (setting_key, setting_value, description) VALUES
+    ('max_risk_per_trade', '{"value": 2, "unit": "percent"}', 'الحد الأقصى للمخاطرة لكل صفقة'),
+    ('daily_risk_limit', '{"value": 6, "unit": "percent"}', 'الحد الأقصى للمخاطرة اليومية'),
+    ('max_open_positions', '{"value": 3, "unit": "count"}', 'الحد الأقصى للصفقات المفتوحة'),
+    ('min_confidence_threshold', '{"value": 60, "unit": "percent"}', 'الحد الأدنى للثقة'),
+    ('max_drawdown_stop', '{"value": 10, "unit": "percent"}', 'وقف السحب الأقصى')
+    ON CONFLICT (setting_key) DO NOTHING;
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE NOTICE 'Skipped risk_settings seed (table has a different/legacy layout): %', SQLERRM;
+END $$;
 
 -- 7) Sessions
 CREATE TABLE IF NOT EXISTS session_log (
@@ -394,13 +406,21 @@ CREATE INDEX IF NOT EXISTS idx_learning_history_date ON learning_history(report_
 CREATE INDEX IF NOT EXISTS idx_agent_evaluations_agent ON agent_evaluations(agent_name);
 CREATE INDEX IF NOT EXISTS idx_agent_evaluations_trade ON agent_evaluations(trade_closed_at DESC);
 
-INSERT INTO agent_weights (agent_name, weight) VALUES
-('technical', 0.20),
-('classical', 0.20),
-('smc', 0.25),
-('price_action', 0.15),
-('multitimeframe', 0.20)
-ON CONFLICT (agent_name) DO NOTHING;
+-- Seed default agent weights. Wrapped so a legacy agent_weights layout never
+-- aborts the whole script; the learning loop will recreate/refresh weights anyway.
+DO $$
+BEGIN
+    INSERT INTO agent_weights (agent_name, weight) VALUES
+    ('technical', 0.20),
+    ('classical', 0.20),
+    ('smc', 0.25),
+    ('price_action', 0.15),
+    ('multitimeframe', 0.20)
+    ON CONFLICT (agent_name) DO NOTHING;
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE NOTICE 'Skipped agent_weights seed (table has a different/legacy layout): %', SQLERRM;
+END $$;
 
 -- 9) Timestamp trigger
 CREATE OR REPLACE FUNCTION update_updated_at()
