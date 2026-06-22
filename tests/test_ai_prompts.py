@@ -72,7 +72,7 @@ class TestAIPrompts:
         )
         
         # التحقق من وجود العناصر الأساسية
-        assert 'XAUUSD' in prompt or 'السعر الحالي' in prompt
+        assert 'XAU/USD' in prompt or 'XAUUSD' in prompt or 'Current price' in prompt
         assert '2350' in prompt  # قد يظهر كـ 2350.5 أو 2350.50
         assert 'EMA' in prompt or 'ema' in prompt
         assert 'RSI' in prompt or 'rsi' in prompt
@@ -156,7 +156,7 @@ class TestAIPrompts:
             agent_type='risk_management'
         )
         
-        assert '10000' in prompt or 'حساب' in prompt
+        assert '10,000' in prompt or '10000' in prompt or 'Account' in prompt
         assert '1%' in prompt or '2%' in prompt or 'مخاطرة' in prompt
         assert 'stop_loss' in prompt.lower() or 'SL' in prompt
         assert 'take_profit' in prompt.lower() or 'TP' in prompt
@@ -177,7 +177,7 @@ class TestSystemPrompts:
         """اختبار: وجود prompt القرار"""
         
         assert 'decision' in ai_service.system_prompts
-        assert 'decisions' in ai_service.system_prompts['decision'].lower() or 'القرارات' in ai_service.system_prompts['decision']
+        assert 'decision' in ai_service.system_prompts['decision'].lower() or 'القرارات' in ai_service.system_prompts['decision']
 
 
 class TestAIServiceConfig:

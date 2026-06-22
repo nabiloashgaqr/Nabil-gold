@@ -213,7 +213,7 @@ class TestShouldBlockSignal:
         }
         reason = should_block_signal(decision, dynamic_risk)
         assert reason is not None
-        assert "الثقة" in reason
+        assert "Confidence" in reason
 
     def test_quality_below_requirement_blocks_signal(self):
         decision = {"decision": "SELL", "confidence": 90, "quality": {"score": 50}}
@@ -225,7 +225,7 @@ class TestShouldBlockSignal:
         }
         reason = should_block_signal(decision, dynamic_risk)
         assert reason is not None
-        assert "جودة" in reason
+        assert "quality" in reason
 
     def test_signal_passing_all_thresholds_is_not_blocked(self):
         decision = {"decision": "BUY", "confidence": 90, "quality": {"score": 90}}

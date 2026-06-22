@@ -182,11 +182,11 @@ def test_signal_message_format(agent):
         'classic': {'buy_count': 3, 'sell_count': 0, 'buy_agreement_pct': 100.0, 'sell_agreement_pct': 0, 'total_voting_agents': 3, 'decision': 'BUY', 'confidence': 85, 'rejection_reason': None},
         'ai': {'available': True, 'provider': 'groq', 'consensus_strength': 'Strong'},
         'learning': {'enabled': True, 'overall_win_rate': 65.5},
-        'risk_assessment': {'score': 0, 'assessment': 'مقبول ✅', 'factors': []},
+        'risk_assessment': {'score': 0, 'assessment': 'Acceptable ✅', 'factors': []},
         'weights': {'technical': 0.20, 'classical': 0.20, 'smc': 0.25, 'price_action': 0.15, 'multitimeframe': 0.20}
     }
     message = agent.get_decision_message(result)
-    assert '🔥 متطلبات التوافق:' in message
+    assert '🔥 Agreement requirements:' in message
     assert 'BUY' in message
 
 
@@ -196,11 +196,11 @@ def test_wait_signal_message(agent):
         'votes': {'BUY': [], 'SELL': [], 'WAIT': [
                 {'agent': 'technical', 'confidence': 40, 'weight': 0.2, 'score': 0.08, 'adjusted_confidence': 40},
             ]},
-        'classic': {'buy_count': 0, 'sell_count': 0, 'buy_agreement_pct': 0, 'sell_agreement_pct': 0, 'total_voting_agents': 0, 'decision': 'WAIT', 'confidence': 50, 'rejection_reason': 'لا يوجد عدد كافٍ من الوكلاء (0/1)'},
+        'classic': {'buy_count': 0, 'sell_count': 0, 'buy_agreement_pct': 0, 'sell_agreement_pct': 0, 'total_voting_agents': 0, 'decision': 'WAIT', 'confidence': 50, 'rejection_reason': 'Not enough agents (0/1)'},
         'ai': {'available': False}, 'learning': {'enabled': True},
-        'risk_assessment': {'score': 1, 'assessment': 'محتمل ⚠️', 'factors': ['RSI في منطقة ذروة']},
+        'risk_assessment': {'score': 1, 'assessment': 'Moderate ⚠️', 'factors': ['RSI in extreme zone']},
         'weights': {}
     }
     message = agent.get_decision_message(result)
-    assert '❌ سبب الانتظار:' in message
-    assert 'لا يوجد عدد كافٍ' in message
+    assert '❌ Wait reason:' in message
+    assert 'Not enough agents' in message
