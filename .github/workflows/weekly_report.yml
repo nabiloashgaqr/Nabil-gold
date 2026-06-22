@@ -6,8 +6,8 @@ concurrency:
 
 on:
   schedule:
-    # Sunday 23:30 Asia/Hebron (≈ 20:30 UTC)
-    - cron: "30 20 * * 0"
+    # Friday 23:30 Asia/Hebron (≈ 20:30 UTC) — Weekly report on Friday
+    - cron: "30 20 * * 5"  # 23:30 Asia/Hebron, Friday only
   workflow_dispatch:
 
 jobs:

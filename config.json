@@ -391,7 +391,7 @@
   },
   "weekly_report": {
     "enabled": true,
-    "day_of_week": 6,
+    "day_of_week": 5,
     "lookback_days": 7,
     "min_trades_for_report": 5,
     "max_chars": 3500,

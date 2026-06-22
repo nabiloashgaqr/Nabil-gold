@@ -6,7 +6,9 @@ concurrency:
 
 on:
   schedule:
-    - cron: "0 20 * * *"  # 23:00 Asia/Hebron تقريباً (20:00 UTC حالياً)
+    # Daily Report at 23:00 Asia/Hebron (20:00 UTC in summer)
+    # Monday to Friday only (1-5)
+    - cron: "0 20 * * 1-5"  # 23:00 Asia/Hebron, Mon-Fri
   workflow_dispatch:
 
 jobs:
