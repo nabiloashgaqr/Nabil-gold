@@ -57,10 +57,29 @@ class TelegramService:
         for attempt in range(3):
             try:
                 response = self.session.post(url, json=payload, timeout=20)
-                response.raise_for_status()
-                result = response.json()
-                if not result.get("ok", False):
-                    raise RuntimeError(str(result))
+                # Telegram returns a JSON body with a useful "description" even on
+                # 4xx errors; surface it instead of a bare "400 Bad Request".
+                try:
+                    result = response.json()
+                except ValueError:
+                    result = {}
+                if response.status_code >= 400 or not result.get("ok", False):
+                    description = result.get("description", "") if isinstance(result, dict) else ""
+                    error_code = result.get("error_code", response.status_code) if isinstance(result, dict) else response.status_code
+                    # A 400 caused by malformed HTML entities is recoverable:
+                    # retry once as plain text so the message still gets delivered.
+                    if (
+                        response.status_code == 400
+                        and payload.get("parse_mode")
+                        and ("parse" in description.lower() or "ent\u200bities" in description.lower() or "entities" in description.lower() or "tag" in description.lower())
+                    ):
+                        self.logger.warning("Telegram HTML parse error (%s); retrying as plain text.", description)
+                        plain = dict(payload)
+                        plain.pop("parse_mode", None)
+                        retry = self.session.post(url, json=plain, timeout=20)
+                        if retry.ok and retry.json().get("ok", False):
+                            return True
+                    raise RuntimeError(f"Telegram API error {error_code}: {description or response.text[:300]}")
                 return True
             except Exception as exc:  # noqa: BLE001
                 wait = 2**attempt
