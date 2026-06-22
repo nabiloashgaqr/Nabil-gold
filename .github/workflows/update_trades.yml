@@ -6,9 +6,11 @@ concurrency:
 
 on:
   schedule:
-    # Asia/Hebron regular update window: hourly 09:00 → 22:00, Monday-Friday.
-    # End-of-day update runs at 23:00 in daily_report.yml with FORCE_TRADE_UPDATE.
-    - cron: "0 6-19 * * 1,2,3,4,5"
+    # Update trades during signal window: 02:00 → 22:00 Asia/Hebron (Mon-Fri)
+    # 02:00 local = 23:00 UTC previous day
+    # 22:00 local = 19:00 UTC
+    - cron: "0 23 * * 0,1,2,3,4"      # 23:00 UTC (Sun-Thu)
+    - cron: "0 0-19 * * 1,2,3,4,5"    # 00:00-19:59 UTC (Mon-Fri)
   workflow_dispatch:
 
 jobs:

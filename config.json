@@ -94,8 +94,8 @@
     "timezone": "Asia/Hebron",
     "sessions": [
       {
-        "name": "London-NY Trading",
-        "start_hour": 9,
+        "name": "Early Asia to Late NY",
+        "start_hour": 2,
         "end_hour": 22,
         "days": [
           0,
@@ -107,13 +107,13 @@
         "quality": "HIGH",
         "allow_signals": true,
         "allow_reports": false,
-        "description": "Trading session: 09:00 - 22:59 Asia/Hebron (Monday-Friday)",
+        "description": "Signals window: 02:00 - 22:00 Asia/Hebron (Monday-Friday)",
         "start_minute": 0,
         "end_minute": 59
       },
       {
         "name": "Daily Report Session",
-        "start_hour": 23,
+        "start_hour": 22,
         "end_hour": 23,
         "days": [
           0,
@@ -125,7 +125,7 @@
         "quality": "LOW",
         "allow_signals": false,
         "allow_reports": true,
-        "description": "End-of-day reports: 23:00 - 23:59 Asia/Hebron (Monday-Friday)",
+        "description": "End-of-day reports: 22:00 - 23:00 Asia/Hebron (Monday-Friday)",
         "start_minute": 0,
         "end_minute": 59
       }

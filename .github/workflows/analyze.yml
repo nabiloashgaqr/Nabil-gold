@@ -6,10 +6,12 @@ concurrency:
 
 on:
   schedule:
-    # Asia/Hebron trading window: 09:00 → 22:59, Monday-Friday.
-    # During UTC+3 this is 06:00 → 19:59 UTC.
+    # Signals window: 02:00 → 22:00 Asia/Hebron, Monday-Friday
     # Runs every 10 minutes. Internal session filter enforces exact local time.
-    - cron: "*/10 6-19 * * 1,2,3,4,5"
+    # 02:00 local = 23:00 UTC (previous day)
+    # 22:00 local = 19:00 UTC
+    - cron: "*/10 23 * * 0,1,2,3,4"      # 23:00 UTC (Sun-Thu) → 02:00 local Mon-Fri
+    - cron: "*/10 0-19 * * 1,2,3,4,5"    # 00:00-19:59 UTC (Mon-Fri) → 03:00-22:59 local
   workflow_dispatch:
 
 jobs:
