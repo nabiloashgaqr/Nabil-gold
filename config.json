@@ -266,8 +266,13 @@
     "description": "\u0646\u0638\u0627\u0645 \u0627\u0644\u062a\u0639\u0644\u0645 \u0627\u0644\u0630\u0643\u064a \u0644\u062a\u062d\u062f\u064a\u062b \u0623\u0648\u0632\u0627\u0646 \u0627\u0644\u0648\u0643\u0644\u0627\u0621"
   },
   "notifications": {
-    "send_no_signal_updates": false,
-    "manual_run_status_updates": true
+    "send_no_signal_updates": true,
+    "manual_run_status_updates": true,
+    "hourly_status": true,
+    "hourly_status_interval_minutes": 60,
+    "market_status_title": "Market Status",
+    "status_every_analysis": true,
+    "hourly_market_status": true
   },
   "duplicate_signal_filter": {
     "enabled": true,

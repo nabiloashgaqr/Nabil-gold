@@ -53,15 +53,20 @@ def synthetic_timeframe_sources(data: Dict[str, Any]) -> list[str]:
 
 
 def should_send_status(config: Dict[str, Any]) -> bool:
-    """Send status/no-signal Telegram messages only on manual runs or if enabled.
-
-    Scheduled analysis runs every 15 minutes, so no-signal notifications are off by
-    default to avoid Telegram spam. Manual workflow_dispatch runs always get a
-    status message so you can confirm the bot is alive.
+    """Always send status updates during trading hours.
+    The user wants at least one informative message every hour (even if just "waiting").
     """
-    if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
-        return True
-    return bool(config.get("notifications", {}).get("send_no_signal_updates", False))
+    # Always send during trading hours so user gets regular market status
+    return True
+
+
+def should_send_hourly_status(config: Dict[str, Any]) -> bool:
+    """Send a clean market status update roughly once per hour (user preference).
+    Runs every 10 min, so we only send when minute < 10.
+    """
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    return now.minute < 10
 
 
 
@@ -407,11 +412,9 @@ async def run_analysis_async() -> None:
                 "لا توجد إشارة مؤهلة حالياً. الأسباب/التحذيرات: %s",
                 decision.get("warnings"),
             )
-            if should_send_status(config):
+            if should_send_hourly_status(config):
                 warnings = _dedupe_warnings(decision.get("warnings") or [])
-                # Escape dynamic values: summaries/warnings can contain '<', '>', '&'
-                # (e.g. "confidence 40% < 60%"), which break parse_mode=HTML (400).
-                warnings_text = "\n".join(f"• {html.escape(str(w))}" for w in warnings[:6]) or "• No warnings; current decision is simply WAIT"
+                warnings_text = "\n".join(f"• {html.escape(str(w))}" for w in warnings[:6]) or "• No special context"
                 price_text = f"{float(decision.get('current_price', all_results.get('current_price', 0))):.2f}"
                 ai = decision.get("ai", {}) or {}
                 classic = decision.get("classic", {}) or {}
@@ -462,7 +465,7 @@ async def run_analysis_async() -> None:
                 reason_text = "\n".join(reason_lines)
 
                 telegram.send_message(
-                    "🟡 <b>Gold AI Signals — No qualified signal</b>\n"
+                    "🟡 <b>Gold AI Signals — Market Status</b>\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
                     f"📈 Price: {price_text}
 "
@@ -471,7 +474,7 @@ async def run_analysis_async() -> None:
                     f"<b>Reason:</b>\n{html.escape(reason_text)}\n\n"
                     f"<b>Notes:</b>\n{warnings_text}\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
-                    "<i>Next analysis in ~10 min</i>"
+                    "<i>Periodic market status • Next check in ~10 min</i>"
                 )
 
         logger.info("✅ اكتمل التحليل بنجاح")
