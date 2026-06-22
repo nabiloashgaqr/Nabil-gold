@@ -829,8 +829,8 @@ Move conflicting evidence into opposing_evidence, or set final_signal = WAIT.
                 warnings.append(f"AI News blocked trading: {news_ai.get('reasoning', risk_level)}")
                 signal = 'WAIT'
             elif signal in {'BUY', 'SELL'} and allowed_direction in {'BUY', 'SELL'} and signal != allowed_direction:
-                warnings.append(f"AI News allows only {allowed_direction}: {news_ai.get('reasoning', '')}")
-                signal = 'WAIT'
+                warnings.append(f"⚠️ News Advisory — AI recommends only {allowed_direction}: {news_ai.get('reasoning', '')[:115]}")
+                # Advisory mode — signal proceeds
 
         daily_bias = agents_results.get('daily_bias', {}) or {}
         if signal in {'BUY', 'SELL'} and daily_bias.get('enabled', True):

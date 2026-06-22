@@ -412,7 +412,7 @@ async def run_analysis_async() -> None:
                 # Escape dynamic values: summaries/warnings can contain '<', '>', '&'
                 # (e.g. "confidence 40% < 60%"), which break parse_mode=HTML (400).
                 warnings_text = "\n".join(f"• {html.escape(str(w))}" for w in warnings[:6]) or "• No warnings; current decision is simply WAIT"
-                price_text = html.escape(str(decision.get("current_price", all_results.get("current_price"))))
+                price_text = f"{float(decision.get('current_price', all_results.get('current_price', 0))):.2f}"
                 ai = decision.get("ai", {}) or {}
                 classic = decision.get("classic", {}) or {}
                 votes = decision.get("votes", {}) or {}
@@ -423,42 +423,51 @@ async def run_analysis_async() -> None:
                 opp_agent = strongest.get("agent")
                 opp_conf = strongest.get("confidence", 0)
 
-                parts = []
                 agent_thr = decision.get("agent_min_confidence", 60)
                 groq_thr = decision.get("groq_min_confidence", 51)
                 groq_c = ai.get('confidence', decision.get('confidence', 0))
-                
-                parts.append(f"Agents required ≥{agent_thr}% (only agents ≥{agent_thr}% are considered)")
-                parts.append(f"Groq threshold: ≥{groq_thr}% (direction match only)")
 
+                # Clean professional bullet list
+                reason_lines = []
+
+                # Thresholds already shown in header — start with substance
+
+                # Groq status
                 if groq_c < groq_thr:
-                    parts.append(f"Groq returned {groq_c:.0f}% — below {groq_thr}% threshold")
+                    reason_lines.append(f"• Groq returned {groq_c:.0f}% — below threshold")
                 else:
-                    parts.append(f"Groq returned {groq_c:.0f}% (direction match)")
+                    reason_lines.append(f"• Groq accepted direction at {groq_c:.0f}%")
 
+                # Main Groq reasoning
                 if groq_reason:
-                    parts.append(groq_reason[:140])
+                    reason_lines.append(f"• {groq_reason[:155]}")
 
+                # Strongest agent
                 if opp_agent and opp_conf:
-                    parts.append(f"Strongest qualifying agent: {opp_agent} ({opp_conf}%)")
+                    reason_lines.append(f"• Strongest qualifying agent: {opp_agent} ({opp_conf}%)")
 
-                # Pull key technical context if available
+                # Technical details (clean)
                 tech = all_results.get("technical", {}) or {}
-                if tech.get("signal") == "WAIT":
-                    t = tech.get("technical", {}) or {}
-                    if t.get("rsi"):
-                        parts.append(f"RSI {t['rsi']}")
-                    if t.get("key_levels"):
-                        parts.append(f"Key levels: {str(t.get('key_levels'))[:80]}")
+                t = tech.get("technical", {}) or {}
+                if t.get("rsi"):
+                    reason_lines.append(f"• RSI: {t['rsi']}")
 
-                reason_text = " | ".join(parts)
+                levels = t.get("key_levels") or {}
+                if isinstance(levels, dict):
+                    sup = levels.get("nearest_support")
+                    res = levels.get("nearest_resistance")
+                    if sup or res:
+                        reason_lines.append(f"• Key levels: Support {sup}  •  Resistance {res}")
+
+                reason_text = "\n".join(reason_lines)
 
                 telegram.send_message(
                     "🟡 <b>Gold AI Signals — No qualified signal</b>\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
-                    f"📈 Price: {price_text}\n"
+                    f"📈 Price: {price_text}
+"
                     f"🎯 Decision: WAIT\n"
-                    f"📊 Groq: {ai.get('confidence', decision.get('confidence', 0)):.0f}% (min {decision.get('groq_min_confidence', 51)}%) | Agents min: {decision.get('agent_min_confidence', 60)}%\n\n"
+                    f"📊 Groq: {ai.get('confidence', decision.get('confidence', 0)):.0f}%  •  Agents ≥{agent_thr}%  •  Groq ≥{groq_thr}%\n\n"
                     f"<b>Reason:</b>\n{html.escape(reason_text)}\n\n"
                     f"<b>Notes:</b>\n{warnings_text}\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
