@@ -25,6 +25,30 @@ CREATE TABLE IF NOT EXISTS signals (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- =====================================================
+-- SELF-HEAL block for EXISTING signals tables
+-- -----------------------------------------------------
+-- An older 'signals' table created before these columns existed will be
+-- missing them (CREATE TABLE IF NOT EXISTS above is skipped when the table
+-- already exists). That is why "column is_active does not exist" was raised
+-- by the index below. These ALTERs add any missing column without touching
+-- existing data and are safe to re-run. No NOT NULL is forced here so the
+-- statements never fail on tables that already contain rows.
+-- =====================================================
+ALTER TABLE signals ADD COLUMN IF NOT EXISTS signal_type      VARCHAR(10);
+ALTER TABLE signals ADD COLUMN IF NOT EXISTS symbol           VARCHAR(20) DEFAULT 'XAU/USD';
+ALTER TABLE signals ADD COLUMN IF NOT EXISTS entry_price      DECIMAL(18, 4);
+ALTER TABLE signals ADD COLUMN IF NOT EXISTS confidence_score DECIMAL(5, 2) DEFAULT 0;
+ALTER TABLE signals ADD COLUMN IF NOT EXISTS quality          VARCHAR(20);
+ALTER TABLE signals ADD COLUMN IF NOT EXISTS session_name     VARCHAR(100);
+ALTER TABLE signals ADD COLUMN IF NOT EXISTS session_quality  VARCHAR(20);
+ALTER TABLE signals ADD COLUMN IF NOT EXISTS signal_reason    TEXT;
+ALTER TABLE signals ADD COLUMN IF NOT EXISTS agent_inputs     JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE signals ADD COLUMN IF NOT EXISTS is_active        BOOLEAN DEFAULT TRUE;
+ALTER TABLE signals ADD COLUMN IF NOT EXISTS expires_at       TIMESTAMPTZ;
+ALTER TABLE signals ADD COLUMN IF NOT EXISTS created_at       TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE signals ADD COLUMN IF NOT EXISTS updated_at       TIMESTAMPTZ DEFAULT NOW();
+
 CREATE INDEX IF NOT EXISTS idx_signals_active ON signals(is_active) WHERE is_active = TRUE;
 CREATE INDEX IF NOT EXISTS idx_signals_created ON signals(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_signals_type ON signals(signal_type);
@@ -145,6 +169,19 @@ CREATE TABLE IF NOT EXISTS ai_memory_rules (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+-- SELF-HEAL: ensure columns exist on an older ai_memory_rules table.
+ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS rule_text       TEXT;
+ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS category        VARCHAR(80) DEFAULT 'AI_REVIEW_LESSON';
+ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS applies_to      VARCHAR(20) DEFAULT 'BOTH';
+ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS confidence      INTEGER DEFAULT 70;
+ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS source_trade_id TEXT;
+ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS source          VARCHAR(80) DEFAULT 'ai_trade_review';
+ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS active          BOOLEAN DEFAULT TRUE;
+ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS times_triggered INTEGER DEFAULT 0;
+ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS metadata        JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS created_at      TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS updated_at      TIMESTAMPTZ DEFAULT NOW();
+
 CREATE INDEX IF NOT EXISTS idx_ai_memory_rules_active ON ai_memory_rules(active, confidence DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_memory_rules_source_trade ON ai_memory_rules(source_trade_id);
 
@@ -159,6 +196,15 @@ CREATE TABLE IF NOT EXISTS ai_trade_reviews (
     review JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+-- SELF-HEAL: ensure columns exist on an older ai_trade_reviews table.
+ALTER TABLE ai_trade_reviews ADD COLUMN IF NOT EXISTS trade_id    TEXT;
+ALTER TABLE ai_trade_reviews ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE ai_trade_reviews ADD COLUMN IF NOT EXISTS provider    VARCHAR(50);
+ALTER TABLE ai_trade_reviews ADD COLUMN IF NOT EXISTS model       VARCHAR(100);
+ALTER TABLE ai_trade_reviews ADD COLUMN IF NOT EXISTS tokens_used INTEGER DEFAULT 0;
+ALTER TABLE ai_trade_reviews ADD COLUMN IF NOT EXISTS review      JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE ai_trade_reviews ADD COLUMN IF NOT EXISTS created_at  TIMESTAMPTZ DEFAULT NOW();
+
 CREATE INDEX IF NOT EXISTS idx_ai_trade_reviews_trade ON ai_trade_reviews(trade_id);
 CREATE INDEX IF NOT EXISTS idx_ai_trade_reviews_reviewed ON ai_trade_reviews(reviewed_at DESC);
 
@@ -198,6 +244,9 @@ CREATE TABLE IF NOT EXISTS daily_reports (
     recommendations TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+-- SELF-HEAL: ensure columns exist on an older daily_reports table.
+ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS report_date  DATE;
+ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS created_at   TIMESTAMPTZ DEFAULT NOW();
 
 CREATE INDEX IF NOT EXISTS idx_daily_reports_date ON daily_reports(report_date DESC);
 
@@ -213,6 +262,9 @@ CREATE TABLE IF NOT EXISTS news_log (
     sentiment VARCHAR(20) DEFAULT 'NEUTRAL',
     logged_at TIMESTAMPTZ DEFAULT NOW()
 );
+-- SELF-HEAL: ensure columns exist on an older news_log table.
+ALTER TABLE news_log ADD COLUMN IF NOT EXISTS impact    VARCHAR(20);
+ALTER TABLE news_log ADD COLUMN IF NOT EXISTS logged_at TIMESTAMPTZ DEFAULT NOW();
 
 CREATE INDEX IF NOT EXISTS idx_news_impact ON news_log(impact);
 CREATE INDEX IF NOT EXISTS idx_news_logged ON news_log(logged_at DESC);
@@ -225,6 +277,20 @@ CREATE TABLE IF NOT EXISTS risk_settings (
     description TEXT,
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+-- SELF-HEAL: ensure columns + UNIQUE(setting_key) exist on an older risk_settings table
+-- (required by the ON CONFLICT (setting_key) seed below).
+ALTER TABLE risk_settings ADD COLUMN IF NOT EXISTS setting_key   VARCHAR(50);
+ALTER TABLE risk_settings ADD COLUMN IF NOT EXISTS setting_value JSONB;
+ALTER TABLE risk_settings ADD COLUMN IF NOT EXISTS description   TEXT;
+ALTER TABLE risk_settings ADD COLUMN IF NOT EXISTS updated_at    TIMESTAMPTZ DEFAULT NOW();
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'risk_settings_setting_key_key'
+    ) THEN
+        ALTER TABLE risk_settings ADD CONSTRAINT risk_settings_setting_key_key UNIQUE (setting_key);
+    END IF;
+END $$;
 
 INSERT INTO risk_settings (setting_key, setting_value, description) VALUES
 ('max_risk_per_trade', '{"value": 2, "unit": "percent"}', 'الحد الأقصى للمخاطرة لكل صفقة'),
@@ -286,6 +352,39 @@ CREATE TABLE IF NOT EXISTS agent_evaluations (
     trade_closed_at TIMESTAMPTZ,
     evaluated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- SELF-HEAL: ensure columns exist on older learning tables.
+ALTER TABLE agent_weights ADD COLUMN IF NOT EXISTS agent_name        VARCHAR(50);
+ALTER TABLE agent_weights ADD COLUMN IF NOT EXISTS weight            DECIMAL(7, 6) DEFAULT 0.15;
+ALTER TABLE agent_weights ADD COLUMN IF NOT EXISTS win_rate          DECIMAL(5, 2) DEFAULT 0;
+ALTER TABLE agent_weights ADD COLUMN IF NOT EXISTS total_predictions INTEGER DEFAULT 0;
+ALTER TABLE agent_weights ADD COLUMN IF NOT EXISTS trend             VARCHAR(20) DEFAULT 'STABLE';
+ALTER TABLE agent_weights ADD COLUMN IF NOT EXISTS learning_score    DECIMAL(7, 6) DEFAULT 0.5;
+ALTER TABLE agent_weights ADD COLUMN IF NOT EXISTS updated_at        TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE agent_weights ADD COLUMN IF NOT EXISTS created_at        TIMESTAMPTZ DEFAULT NOW();
+-- agent_name must be UNIQUE for the ON CONFLICT seed below; add the constraint
+-- only if it is missing (wrapped so re-runs never error).
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'agent_weights_agent_name_key'
+    ) THEN
+        ALTER TABLE agent_weights ADD CONSTRAINT agent_weights_agent_name_key UNIQUE (agent_name);
+    END IF;
+END $$;
+
+ALTER TABLE learning_history ADD COLUMN IF NOT EXISTS report_date           TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE learning_history ADD COLUMN IF NOT EXISTS agents_performance    JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE learning_history ADD COLUMN IF NOT EXISTS adjusted_weights      JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE learning_history ADD COLUMN IF NOT EXISTS previous_weights      JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE learning_history ADD COLUMN IF NOT EXISTS total_trades_analyzed INTEGER DEFAULT 0;
+ALTER TABLE learning_history ADD COLUMN IF NOT EXISTS overall_win_rate      DECIMAL(5, 2) DEFAULT 0;
+ALTER TABLE learning_history ADD COLUMN IF NOT EXISTS recommendations       TEXT[];
+ALTER TABLE learning_history ADD COLUMN IF NOT EXISTS changes_summary       TEXT;
+ALTER TABLE learning_history ADD COLUMN IF NOT EXISTS created_at            TIMESTAMPTZ DEFAULT NOW();
+
+ALTER TABLE agent_evaluations ADD COLUMN IF NOT EXISTS agent_name      VARCHAR(50);
+ALTER TABLE agent_evaluations ADD COLUMN IF NOT EXISTS trade_closed_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_agent_weights_name ON agent_weights(agent_name);
 CREATE INDEX IF NOT EXISTS idx_learning_history_date ON learning_history(report_date DESC);
