@@ -1,6 +1,6 @@
 """سكريبت التحليل الرئيسي.
 
-يعمل كل 15 دقيقة عبر GitHub Actions. يجلب بيانات الذهب، يشغل الوكلاء (مع AI)،
+يعمل كل 10 دقائق عبر GitHub Actions. يجلب بيانات الذهب، يشغل الوكلاء (مع AI)،
 يطبق إدارة المخاطر والقرار، ثم يحفظ ويرسل الإشارة إذا كانت مؤهلة.
 """
 
@@ -53,11 +53,13 @@ def synthetic_timeframe_sources(data: Dict[str, Any]) -> list[str]:
 
 
 def should_send_status(config: Dict[str, Any]) -> bool:
-    """Always send status updates during trading hours.
-    The user wants at least one informative message every hour (even if just "waiting").
+    """Send status/no-signal Telegram messages only on manual runs or if enabled.
+
+    Scheduled analysis runs every 10 minutes.
     """
-    # Always send during trading hours so user gets regular market status
-    return True
+    if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
+        return True
+    return bool(config.get("notifications", {}).get("send_no_signal_updates", False))
 
 
 def should_send_hourly_status(config: Dict[str, Any]) -> bool:
@@ -65,6 +67,10 @@ def should_send_hourly_status(config: Dict[str, Any]) -> bool:
     Runs every 10 min, so we only send when minute < 10.
     """
     from datetime import datetime, timezone
+    if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
+        return True
+    if not bool(config.get("notifications", {}).get("send_no_signal_updates", False)):
+        return False
     now = datetime.now(timezone.utc)
     return now.minute < 10
 
@@ -219,18 +225,258 @@ async def run_analysis_async() -> None:
                 session.get("current_session") or "غير محدد",
                 session.get("reason", ""),
             )
-            if should_send_status(config):
+            if should_send_hourly_status(config):
+                # Price may not be fetched yet; use placeholder or skip price if unavailable
+                price_text = "N/A"
                 telegram.send_message(
                     "🟡 <b>Gold AI Signals — Market Status</b>\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
                     f"📈 Price: {price_text}\n"
                     f"🎯 Decision: WAIT\n"
-                    f"📊 Groq: {ai.get('confidence', decision.get('confidence', 0)):.0f}%  •  Agents ≥{agent_thr}%  •  Groq ≥{groq_thr}%\n\n"
+                    f"📊 Outside trading hours\n\n"
+                    f"<b>Reason:</b>\n• {html.escape(str(session.get('reason', 'Outside trading hours')))}\n"
+                    f"<b>Session:</b> {html.escape(str(session.get('current_session') or 'N/A'))}\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    "<i>Periodic market status • Next check in ~10 min</i>"
+                )
+            return  # ══ لا تحليل خارج الجلسات ══
+
+        # ── تهيئة الخدمات ──
+        market_data = MarketDataService(config)
+        database = DatabaseService(config)
+
+        # ── تهيئة خدمة AI ──
+        ai_service = None
+        ai_config = config.get("ai_service", {})
+
+        if ai_config.get("enabled", False):
+            try:
+                ai_service = get_ai_service(config)
+                logger.info("🤖 AI Service مفعّل: %s", ai_config.get("provider", "unknown"))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("⚠️ فشل تهيئة AI: %s", exc)
+                if not bool(ai_config.get("fallback_to_classic", True)):
+                    telegram.send_error_alert(f"Groq is required but AI initialization failed: {exc}")
+                    return
+
+        logger.info("جلب بيانات السوق...")
+        data = market_data.get_gold_data()
+        if not data:
+            logger.error("فشل في جلب البيانات")
+            return
+
+        # Safety: never send production signals from synthetic/demo prices on GitHub Actions.
+        allow_synthetic = bool(config.get("data_source", {}).get("allow_synthetic_in_production", False))
+        synthetic_sources = synthetic_timeframe_sources(data)
+        if os.environ.get("GITHUB_ACTIONS") == "true" and synthetic_sources and not allow_synthetic:
+            message = f"Analysis blocked: synthetic_demo data detected in production timeframes: {', '.join(sorted(set(synthetic_sources)))}. Configure TWELVE_DATA_API_KEY."
+            logger.error(message)
+            telegram.send_error_alert(message)
+            return
+
+        # سياق الحساب/المحفظة
+        open_trades = database.get_open_trades()
+        today_signals = database.get_today_signals_count()
+        consecutive_losses = database.get_consecutive_losses()
+
+        # ── تشغيل وكلاء التحليل ──
+        all_results: Dict[str, Any] = {
+            "technical": run_agent("technical", TechnicalAgent(config, ai_service), data),
+            "classical": run_agent("classical", ClassicalAgent(config, ai_service), data),
+            "smc": run_agent("smc", SMCAgent(config, ai_service), data),
+            "price_action": run_agent("price_action", PriceActionAgent(config, ai_service), data),
+            "multitimeframe": run_agent("multitimeframe", MultiTimeframeAgent(config, ai_service), data),
+            "current_price": data["current_price"],
+            "spread_points": data.get("spread_points"),
+            "portfolio": {
+                "open_trades_count": len(open_trades),
+                "today_signals_count": today_signals,
+                "consecutive_losses": consecutive_losses,
+            },
+        }
+
+        # ── تشغيل وكلاء إضافية (بدون AI) ──
+        all_results["session"] = session
+        all_results["news"] = NewsRiskAgent(config).check()
+        all_results["daily_bias"] = run_agent("daily_bias", DailyBiasAgent(config), data)
+        if config.get("ai_news_interpretation", {}).get("enabled", True):
+            all_results["news_ai"] = await NewsInterpreter(config).interpret(
+                all_results["news"],
+                {
+                    "current_price": all_results.get("current_price"),
+                    "daily_bias": all_results.get("daily_bias"),
+                    "technical_summary": all_results.get("technical", {}).get("summary"),
+                },
+            )
+            all_results["news"]["ai_interpretation"] = all_results["news_ai"]
+        all_results["risk"] = RiskManagementAgent(config).evaluate(all_results)
+        all_results["dynamic_risk"] = DynamicRiskManager(config).evaluate(database)
+        all_results["memory_rules"] = database.get_active_memory_rules(
+            limit=int(config.get("ai_memory_rules", {}).get("max_active_rules_in_prompt", 8))
+        )
+        logger.info("🧠 قواعد الذاكرة النشطة المحملة: %s", len(all_results["memory_rules"]))
+
+        # ── تشغيل وكيل القرار (مع AI) ──
+        logger.info("تشغيل وكيل القرار (AI-enabled)...")
+
+        # --- 1) LearningService wired ---
+        learning_service = None
+        try:
+            learning_service = get_learning_service(database, config)
+            # تحميل الأوزان من DB (التي يحسبها run_learning.py يومياً).
+            # كانت هذه الخطوة مفقودة فلم تكن أوزان DB تؤثر على القرار.
+            try:
+                loaded = await learning_service.load_current_weights()
+                logger.info("🧠 أوزان الوكلاء المحمّلة من DB: %s", loaded)
+            except Exception as w_exc:
+                logger.warning("⚠️ فشل تحميل الأوزان من DB: %s (fallback إلى config)", w_exc)
+        except Exception:
+            learning_service = None
+        decision = await DecisionAgent(config, ai_service, learning_service).decide_async(all_results)
+
+        decision["dynamic_risk"] = all_results.get("dynamic_risk", {})
+        logger.info(
+            "القرار: %s - الثقة: %s%% - %s | DynamicRisk=%s",
+            decision.get("decision"),
+            decision.get("confidence"),
+            decision.get("summary"),
+            decision.get("dynamic_risk", {}).get("summary"),
+        )
+
+        # ── إضافة وضع التشغيل/التداول الحالي للقرار ──
+        github_event = os.environ.get("GITHUB_EVENT_NAME", "local")
+        operation_mode = str(config.get("operation_mode", "observation")).lower()
+        decision["run_source"] = "scheduled" if github_event == "schedule" else "manual" if github_event == "workflow_dispatch" else github_event
+        decision["operation_mode"] = operation_mode
+        groq_obs_cfg = config.get("groq_observation_mode", {}) or {}
+        if operation_mode == "observation" and groq_obs_cfg.get("enabled", False) and groq_obs_cfg.get("allow_single_agent_context", False):
+            decision["decision_mode"] = "One-Agent + Groq"
+        else:
+            decision["decision_mode"] = "Groq Observation" if operation_mode == "observation" and groq_obs_cfg.get("enabled", False) else "Production Strict"
+        decision["requires_three_agents"] = bool((config.get("operation_modes", {}).get(operation_mode, {}) or {}).get("requires_three_agents", operation_mode != "observation"))
+        trading_mode = str(config.get("trading_mode", "paper")).lower()
+        paper_config = config.get("paper_trading", {}) or {}
+        decision["trading_mode"] = trading_mode
+        decision["paper_trading"] = trading_mode == "paper" or bool(paper_config.get("enabled", False))
+        decision["paper_config"] = {
+            "starting_balance": paper_config.get("starting_balance"),
+            "currency": paper_config.get("currency", "USD"),
+            "default_lot_size": paper_config.get("default_lot_size", 0.01),
+        }
+        if decision.get("signal"):
+            decision["signal"]["trading_mode"] = trading_mode
+            decision["signal"]["paper_trading"] = decision["paper_trading"]
+
+        # ── إرسال الإشارة إذا كانت مؤهلة ──
+        if decision.get("decision") in {"BUY", "SELL"}:
+            settings = config.get("risk_settings", {})
+            max_daily = int(settings.get("max_daily_signals", 8))
+            max_open = int(settings.get("max_open_trades", 3))
+            today_signals = database.get_today_signals_count()
+            open_trades = database.get_open_trades()
+            if today_signals >= max_daily:
+                logger.info("تم الوصول للحد الأقصى من الإشارات اليومية: %s", max_daily)
+                if should_send_status(config):
+                    telegram.send_message(f"🟡 No signal: daily signal limit reached ({max_daily}).")
+                return
+            if len(open_trades) >= max_open:
+                logger.info("تم الوصول للحد الأقصى للصفقات المفتوحة: %s", max_open)
+                if should_send_status(config):
+                    telegram.send_message(f"🟡 No signal: max open trades reached ({max_open}).")
+                return
+
+            dynamic_block_reason = should_block_signal(decision, all_results.get("dynamic_risk", {}))
+            if dynamic_block_reason:
+                logger.info("تم منع الإشارة بسبب Dynamic Risk: %s", dynamic_block_reason)
+                if should_send_status(config):
+                    telegram.send_message(
+                        "🟡 <b>Signal blocked by Dynamic Risk</b>\n"
+                        "━━━━━━━━━━━━━━━━━━━━\n"
+                        f"Decision: {html.escape(str(decision.get('decision')))}\n"
+                        f"Reason: {html.escape(str(dynamic_block_reason))}\n"
+                        f"Level: {html.escape(str(all_results.get('dynamic_risk', {}).get('level')))}\n"
+                        "━━━━━━━━━━━━━━━━━━━━"
+                    )
+                return
+
+            duplicate_reason = duplicate_signal_reason(decision, database, config)
+            if duplicate_reason:
+                logger.info("تم منع إشارة مكررة: %s", duplicate_reason)
+                if should_send_status(config):
+                    telegram.send_message(
+                        "🟡 <b>Duplicate signal blocked</b>\n"
+                        "━━━━━━━━━━━━━━━━━━━━\n"
+                        f"Decision: {html.escape(str(decision.get('decision')))}\n"
+                        f"Reason: {html.escape(str(duplicate_reason))}\n"
+                        "━━━━━━━━━━━━━━━━━━━━"
+                    )
+                return
+
+            trade_id = database.save_trade(decision)
+            decision["trade_id"] = trade_id
+            if decision.get("signal"):
+                decision["signal"]["trade_id"] = trade_id
+            telegram.send_signal(decision)
+            logger.info("تم حفظ/إرسال الإشارة: %s", trade_id)
+        else:
+            logger.info(
+                "لا توجد إشارة مؤهلة حالياً. الأسباب/التحذيرات: %s",
+                decision.get("warnings"),
+            )
+            if should_send_hourly_status(config):
+                warnings = _dedupe_warnings(decision.get("warnings") or [])
+                warnings_text = "\n".join(f"• {html.escape(str(w))}" for w in warnings[:6]) or "• No special warnings"
+                # Ensure price exactly 2 decimal places
+                price_text = f"{float(decision.get('current_price', all_results.get('current_price', 0))):.2f}"
+                ai = decision.get("ai", {}) or {}
+                classic = decision.get("classic", {}) or {}
+
+                agent_thr = decision.get("agent_min_confidence", 60)
+                groq_thr = decision.get("groq_min_confidence", 51)
+                groq_c = ai.get('confidence', decision.get('confidence', 0))
+                groq_reason = ai.get("reasoning") or ai.get("opposite_risk") or ai.get("risk_notes") or ""
+
+                reason_lines = []
+                if groq_c < groq_thr:
+                    reason_lines.append(f"• Groq returned {groq_c:.0f}% — below {groq_thr}% threshold")
+                else:
+                    reason_lines.append(f"• Groq accepted direction at {groq_c:.0f}%")
+
+                if groq_reason:
+                    reason_lines.append(f"• {groq_reason[:150]}")
+
+                opp_agent = (classic.get("strongest_directional") or {}).get("agent")
+                opp_conf = (classic.get("strongest_directional") or {}).get("confidence", 0)
+                if opp_agent and opp_conf:
+                    reason_lines.append(f"• Strongest agent: {opp_agent} ({opp_conf}%)")
+
+                tech = all_results.get("technical", {}) or {}
+                t = tech.get("technical", {}) or {}
+                if t.get("rsi"):
+                    reason_lines.append(f"• RSI: {t['rsi']}")
+                levels = t.get("key_levels") or {}
+                if isinstance(levels, dict):
+                    sup = levels.get("nearest_support")
+                    res = levels.get("nearest_resistance")
+                    if sup or res:
+                        reason_lines.append(f"• Levels: Support {sup}  •  Resistance {res}")
+
+                reason_text = "\n".join(reason_lines)
+
+                telegram.send_message(
+                    "🟡 <b>Gold AI Signals — Market Status</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    f"📈 Price: {price_text}\n"
+                    f"🎯 Decision: WAIT\n"
+                    f"📊 Groq: {groq_c:.0f}%  •  Agents ≥{agent_thr}%  •  Groq ≥{groq_thr}%\n\n"
                     f"<b>Reason:</b>\n{html.escape(reason_text)}\n\n"
                     f"<b>Notes:</b>\n{warnings_text}\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
                     "<i>Periodic market status • Next check in ~10 min</i>"
                 )
+
+        logger.info("✅ اكتمل التحليل بنجاح")
+
     except Exception as exc:  # noqa: BLE001
         logger.exception("خطأ في التحليل")
         telegram.send_error_alert(str(exc))
