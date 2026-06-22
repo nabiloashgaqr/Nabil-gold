@@ -40,6 +40,33 @@ class RiskManagementAgent(BaseAgent):
             stop_loss, sl_method, buffer = self._stop_loss(direction, entry_price, atr, support_levels, resistance_levels, smc_suggestion, results)
             tp1, tp2, tp3, target_method = self._take_profits(direction, entry_price, atr, support_levels, resistance_levels)
 
+            # Gold can move 50-100+ points within seconds; a too-tight
+            # ATR-based stop gets clipped by ordinary noise/spread rather than
+            # an actual reversal. min_sl_distance_points sets a floor on how
+            # close SL may sit to entry. When the floor widens the stop,
+            # TP1/TP2/TP3 are rescaled from the SAME R:R ratios implied by the
+            # configured ATR multipliers (tp_mult/sl_mult) applied to the new,
+            # wider stop distance - otherwise R:R would shrink and min_rr_ratio
+            # would start rejecting trades purely because SL got floored.
+            min_sl_distance = self._f(self.settings.get("min_sl_distance_points"), 0.0) / 10.0
+            if min_sl_distance > 0 and abs(entry_price - stop_loss) < min_sl_distance:
+                sl_mult = self._f(self.settings.get("atr_multiplier_sl"), 1.5) or 1.5
+                tp1_ratio = self._f(self.settings.get("atr_multiplier_tp1"), 2.0) / sl_mult
+                tp2_ratio = self._f(self.settings.get("atr_multiplier_tp2"), 3.5) / sl_mult
+                tp3_ratio = max(tp2_ratio + 1.0, tp2_ratio * 1.2)
+                if direction == "BUY":
+                    stop_loss = entry_price - min_sl_distance
+                    tp1 = entry_price + min_sl_distance * tp1_ratio
+                    tp2 = entry_price + min_sl_distance * tp2_ratio
+                    tp3 = entry_price + min_sl_distance * tp3_ratio
+                else:
+                    stop_loss = entry_price + min_sl_distance
+                    tp1 = entry_price - min_sl_distance * tp1_ratio
+                    tp2 = entry_price - min_sl_distance * tp2_ratio
+                    tp3 = entry_price - min_sl_distance * tp3_ratio
+                sl_method = f"{sl_method}+min_floor"
+                target_method = "rr_from_floored_sl"
+
             risk_distance = abs(entry_price - stop_loss)
             max_rr = self._f(self.settings.get("max_rr_ratio"), 4.0)
             if risk_distance > 0 and max_rr > 0:

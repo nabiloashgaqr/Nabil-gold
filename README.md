@@ -7,7 +7,7 @@
 ![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-Automated-orange)
 ![Telegram](https://img.shields.io/badge/Telegram-Signals-blue)
 ![Groq](https://img.shields.io/badge/AI-GroqCloud-purple)
-![Tests](https://img.shields.io/badge/Tests-245%20Passed-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-248%20Passed-brightgreen)
 ![Mode](https://img.shields.io/badge/Mode-Paper%20Trading-yellow)
 
 </div>
@@ -41,7 +41,7 @@
 | الجزء | الحالة |
 |---|---|
 | Telegram / Groq / GitHub Actions | ✅ يعمل |
-| الاختبارات | ✅ **245/245** ناجح |
+| الاختبارات | ✅ **248/248** ناجح |
 | Paper Trading | ✅ مفعّل |
 | Groq كقرار نهائي (One-Agent + Groq) | ✅ إجباري |
 | حلقة التعلّم (Memory Rules + Learning Weights) | ✅ متصلة بالكامل بقاعدة البيانات |
@@ -136,8 +136,9 @@ DynamicRiskManager (معطّل حاليًا/مرحلة تعلّم) → Duplicate
 ## 💰 إدارة المخاطر (3 طبقات)
 
 ### 1) RiskManagementAgent (قبل الإشارة) — فعّال دائمًا
-- حساب SL بـ ATR × 1.5
-- TP1 = R:R 2.0 · TP2 = R:R 3.5
+- حساب SL بـ ATR × 1.5، مع **حد أدنى 200 نقطة (20$)** — الذهب يتحرك 50-100 نقطة بثواني، فـ SL أضيق من هذا يُفتح بالضوضاء لا بانعكاس حقيقي
+- عند تفعيل الحد الأدنى، يُعاد حساب TP1/TP2/TP3 بنفس نسبة R:R المعتمدة من ATR (لا ينخفض R:R بسبب توسيع SL)
+- TP1 = R:R 2.0 · TP2 = R:R 3.5 (نسبيًا لـ SL الفعلي، وليس ATR مستقل)
 - max R:R = 4.0 (سقف لتجنّب أهداف غير واقعية)
 
 ### 2) DynamicRiskManager (بعد الإشارة) — معطّل مؤقتًا (مرحلة تعلّم)
@@ -147,13 +148,13 @@ DynamicRiskManager (معطّل حاليًا/مرحلة تعلّم) → Duplicate
 | **CAUTION** | خسارتان متتاليتان (recent_losses) | ثقة ≥ 75 + جودة ≥ 70 |
 | **STRICT** | warn_after_losses (2) | ثقة ≥ 82 + جودة ≥ 80 |
 | **HALT** | 3 خسائر متتالية | حظر كامل |
-| **DAILY_HALT** | خسارة يومية ≥ 30 نقطة | حظر كامل |
+| **DAILY_HALT** | خسارة يومية ≥ **1000 نقطة (100$)** | حظر كامل |
 
-> الكود مغطّى بالكامل بالاختبارات (16 اختبار في `test_dynamic_risk.py`)، جاهز لإعادة التفعيل بتغيير `enabled: true` فقط.
+> `daily_loss_limit_points` كان مضبوطاً على 30 نقطة (3$ فقط) — أصغر من وقف خسارة صفقة واحدة عادية! صُحِّح إلى 1000 نقطة (≈ 5 صفقات بأقصى وقف 200 نقطة قبل التوقف اليومي). الكود مغطّى بالكامل بالاختبارات (16 اختبار في `test_dynamic_risk.py`)، جاهز لإعادة التفعيل بتغيير `enabled: true` فقط.
 
 ### 3) Trade Management (أثناء الصفقة) — فعّال دائمًا
 - Partial Close 50% عند TP1 + نقل SL إلى نقطة الدخول فعليًا (يُكتب في DB، لا يبقى علماً فقط)
-- **Trailing Stop تقدّمي حقيقي** بعد قفل Breakeven: يتحرك فقط بالاتجاه الرابح، لا يتراجع أبدًا عند الانسحاب
+- **Trailing Stop تقدّمي حقيقي** بعد قفل Breakeven: مسافة **90 نقطة (9$)** تتيح للذهب "التنفّس" دون خروج مبكر بالضوضاء، يتحرك فقط بالاتجاه الرابح، لا يتراجع أبدًا عند الانسحاب
 - إغلاق `TRAILING_SL_HIT` كـ WIN بالربح المقفول الفعلي (لا كـ Breakeven عادي)
 - `expire_after_hours = 8`
 
@@ -246,7 +247,7 @@ timeframe 5m/15m/1H/4H · rolling window 160 شمعة · step 12 شمعة · hor
 
 | Workflow | الوظيفة | الجدولة |
 |---|---|---|
-| ✅ Tests | تشغيل 245 اختبار | عند push / PR / يدوي |
+| ✅ Tests | تشغيل 248 اختبار | عند push / PR / يدوي |
 | 📊 Gold Analysis Bot (`analyze.yml`) | التحليل + إرسال الإشارات | كل 10 دقائق (09:00–22:59) |
 | 🔄 Update Open Trades (`update_trades.yml`) | SL/TP/Breakeven/Trailing | كل ساعة (09:00–22:59) |
 | 📊 Daily Report & Learning (`daily_report.yml`) | تقرير + Learning + AI Trade Review | 23:00 يوميًا |
@@ -289,7 +290,7 @@ Nabil-gold/
 ├── agents/                 13 وكيل (decision, technical, classical, smc, open_trades_manager, ...)
 ├── services/               15 ملف (ai_service, database, telegram_bot, weekly_report, news_feed_forexfactory, ...)
 ├── scripts/                12 ملف (run_analysis, run_trade_updates, run_learning, run_weekly_report, ...)
-├── tests/                  20 ملف — 245 اختبار
+├── tests/                  20 ملف — 248 اختبار
 ├── utils/                  helpers + indicators
 ├── config.json             الإعدادات الرئيسية
 ├── supabase_schema.sql     مخطط قاعدة البيانات (13 جدول)
@@ -354,13 +355,16 @@ pip install -r requirements.txt
 python -m pytest tests/ -v
 ```
 
-**النتيجة:** `245 passed` في ~1.5 ثانية
+**النتيجة:** `248 passed` في ~1.5 ثانية
 
 ---
 
 ## 🛠️ آخر التطويرات (سجل مختصر)
 
 ### إصلاحات موثوقية وأمان
+- ✅ **حد أدنى لمسافة SL (200 نقطة/20$)** مع إعادة حساب TP1/TP2/TP3 تلقائيًا بنفس نسبة R:R — يمنع وقف خسارة أضيق من ضوضاء الذهب الطبيعية (50-100 نقطة/ثواني) من رفض الصفقات عبر فلتر min_rr_ratio
+- ✅ تصحيح `daily_loss_limit_points` (30 → 1000 نقطة) — كان أصغر من وقف خسارة صفقة واحدة عادية، فيُفقد معنى "ميزانية يوم كامل"
+- ✅ توسيع `trailing_stop.trailing_distance` (20 → 90 نقطة) لإعطاء الذهب مساحة تنفّس قبل قفل الربح
 - ✅ إصلاح باغ مؤشر `ENV:` في `ai_service.py` (كان يستخدم النص الحرفي `ENV:VAR` كمفتاح API بدل تحليله)
 - ✅ Groq retry/backoff (3 محاولات، exponential 1s/2s) على timeout/429/5xx — لا retry على 401/403/400
 - ✅ تعقيم نص الأخبار (`sanitize_prompt_text`) قبل دخوله أي Groq prompt — منبع موحّد لكل المصادر
@@ -384,7 +388,7 @@ python -m pytest tests/ -v
 - ✅ Duplicate Signal Filter (نافذة 90 دقيقة) · AI Memory Rules من Trade Review
 
 ### Code Quality
-- ✅ **245/245** اختبار ناجح (يشمل اختبارات جديدة لـ: ai_service ENV fix، dynamic_risk، Groq retry، تعقيم الأخبار، أوزان DB، Trailing Stop الحقيقي)
+- ✅ **248/248** اختبار ناجح (يشمل اختبارات جديدة لـ: ai_service ENV fix، dynamic_risk، Groq retry، تعقيم الأخبار، أوزان DB، Trailing Stop الحقيقي)
 - ✅ NameError الحرج في `_final_decision` مُصلَح (كان يحدث عند نجاح استدعاء AI)
 
 ---

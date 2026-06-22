@@ -7,6 +7,8 @@ from pathlib import Path
 import json
 import sys
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(ROOT))
 
@@ -130,3 +132,73 @@ def test_risk_agent_rejects_consecutive_losses() -> None:
     result = RiskManagementAgent(config).evaluate(results)
     assert result["approved"] is False
     assert result["rejection_reason"] == "Cooling after consecutive losses"
+
+
+def test_risk_agent_applies_min_sl_floor_and_rescales_targets() -> None:
+    """ATR=4.0 with nearby support normally produces a ~60-point SL (well
+    under a 200-point floor). The floor must widen SL to exactly 200 points
+    AND rescale TP1/TP2 by the same R:R ratios implied by the ATR
+    multipliers, so min_rr_ratio still passes instead of rejecting the trade
+    purely because SL got floored."""
+    config = {
+        "risk_settings": {
+            "min_rr_ratio": 1.5,
+            "atr_multiplier_sl": 1.5,
+            "atr_multiplier_tp1": 2.0,
+            "atr_multiplier_tp2": 3.5,
+            "min_sl_distance_points": 200,
+            "max_open_trades": 3,
+        },
+        "filters": {"min_atr_for_entry": 1.0, "max_spread_points": 5, "max_consecutive_losses": 3},
+    }
+    result = RiskManagementAgent(config).evaluate(base_risk_results())
+
+    assert result["stop_loss"]["distance_points"] == pytest.approx(200.0, abs=0.5)
+    assert "min_floor" in result["stop_loss"]["method"]
+    assert result["risk_metrics"]["target_method"] == "rr_from_floored_sl"
+    # tp ratios must match tp_mult/sl_mult exactly (2.0/1.5 and 3.5/1.5)
+    assert result["take_profit"]["tp1"]["rr_ratio"] == pytest.approx(2.0 / 1.5, abs=0.02)
+    assert result["take_profit"]["tp2"]["rr_ratio"] == pytest.approx(3.5 / 1.5, abs=0.02)
+    # the whole point of rescaling: min_rr_ratio must still be satisfied
+    assert result["take_profit"]["tp2"]["rr_ratio"] >= 1.5
+
+
+def test_risk_agent_no_floor_when_atr_sl_already_wider() -> None:
+    """When ATR is large enough that the natural stop already exceeds the
+    floor, the floor must NOT engage and the original ATR/support-aware
+    target logic must be left untouched."""
+    config = {
+        "risk_settings": {
+            "min_rr_ratio": 1.5,
+            "atr_multiplier_sl": 1.5,
+            "atr_multiplier_tp1": 2.0,
+            "atr_multiplier_tp2": 3.5,
+            "min_sl_distance_points": 200,
+            "max_open_trades": 3,
+        },
+        "filters": {"min_atr_for_entry": 1.0, "max_spread_points": 5, "max_consecutive_losses": 3},
+    }
+    results = {
+        "current_price": 2350.0,
+        "spread_points": 2.0,
+        "technical": {"direction": "BUY", "confidence": 80, "indicators_raw": {"atr": 15.0}},
+        "classical": {"direction": "BUY", "confidence": 75},
+        "smc": {"direction": "BUY", "confidence": 75, "entry_suggestion": {}, "order_blocks": []},
+        "price_action": {"direction": "NEUTRAL", "confidence": 30},
+        "multitimeframe": {"direction": "BUY", "confidence": 80},
+        "portfolio": {"open_trades_count": 0, "today_signals_count": 0, "consecutive_losses": 0},
+    }
+    result = RiskManagementAgent(config).evaluate(results)
+
+    # ATR(15) * 1.5 = 22.5 price = 225 points, already above the 200 floor.
+    assert result["stop_loss"]["distance_points"] == pytest.approx(225.0, abs=1.0)
+    assert "min_floor" not in result["stop_loss"]["method"]
+    assert result["risk_metrics"]["target_method"] == "atr_targets"
+
+
+def test_risk_agent_min_sl_floor_disabled_by_default_value_zero() -> None:
+    """min_sl_distance_points=0 (or unset) must fully preserve old behavior."""
+    config = {"risk_settings": {"min_rr_ratio": 1.5, "max_open_trades": 3}, "filters": {"min_atr_for_entry": 1.0, "max_spread_points": 5, "max_consecutive_losses": 3}}
+    result = RiskManagementAgent(config).evaluate(base_risk_results())
+    assert "min_floor" not in result["stop_loss"]["method"]
+
