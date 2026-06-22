@@ -8,7 +8,7 @@ on:
   schedule:
     # Daily Report at 23:00 Asia/Hebron (20:00 UTC in summer)
     # Monday to Friday only (1-5)
-    - cron: "0 20 * * 1-5"  # 23:00 Asia/Hebron, Mon-Fri
+    - cron: "0 19 * * 1-5"  # 23:00 Asia/Hebron, Mon-Fri
   workflow_dispatch:
 
 jobs:

@@ -97,13 +97,13 @@ class AIService:
         """تحميل System Prompts للوكلاء المختلفين"""
         return {
             'technical': """You are a professional gold technical analyst. Reply in JSON only and in English. Keep SL/TP levels accurate.""",
-            'smc': """You are a professional SMC analyst. Identify market structure and supply/demand blocks precisely. Reply in English.""",
-            'classical': """You are an expert in Japanese candlestick patterns. Assess pattern reliability before recommending. Reply in English.""",
-            'price_action': """You are a professional Price Action analyst. Identify supply and demand zones clearly. Reply in English.""",
-            'multitimeframe': """You are a multi-timeframe analyst. Compare timeframes and pick the best entry. Reply in English.""",
-            'news_risk': """You are a geopolitical risk analyst. Assess the impact of news on gold. Reply in English.""",
-            'risk_management': """You are a risk-management expert. Compute the optimal position size. Reply in English.""",
-            'decision': """You are a decision-making expert. Integrate all analyses and decide wisely. Reply in English."""
+            'smc': """You are a professional SMC analyst. Identify market structure and supply/demand blocks precisely. Reply in concise professional English only. Do not use any other language.""",
+            'classical': """You are an expert in Japanese candlestick patterns. Assess pattern reliability before recommending. Reply in concise professional English only. Do not use any other language.""",
+            'price_action': """You are a professional Price Action analyst. Identify supply and demand zones clearly. Reply in concise professional English only. Do not use any other language.""",
+            'multitimeframe': """You are a multi-timeframe analyst. Compare timeframes and pick the best entry. Reply in concise professional English only. Do not use any other language.""",
+            'news_risk': """You are a geopolitical risk analyst. Assess the impact of news on gold. Reply in concise professional English only. Do not use any other language.""",
+            'risk_management': """You are a risk-management expert. Compute the optimal position size. Reply in concise professional English only. Do not use any other language.""",
+            'decision': """You are a decision-making expert. Integrate all analyses and decide wisely. Reply in concise professional English only. Do not use any other language."""
         }
     
     async def analyze_chart(
