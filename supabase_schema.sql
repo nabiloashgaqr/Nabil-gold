@@ -83,9 +83,52 @@ CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_created ON trades(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_trades_open ON trades(status) WHERE status IN ('OPEN', 'PARTIAL', 'TP1_HIT');
 
--- NOTE: Previously there was a block of ALTER TABLE ... ADD COLUMN IF NOT EXISTS for trades
--- that duplicated columns already defined above. That block has been removed for clarity.
--- For safe online schema changes, use dedicated migration scripts under /migrations.
+-- =====================================================
+-- SELF-HEAL block for EXISTING trades tables
+-- -----------------------------------------------------
+-- CREATE TABLE IF NOT EXISTS above is skipped entirely when the table already
+-- exists, so an older table created before these columns were added will be
+-- MISSING them (this is what causes the PGRST204
+-- "Could not find the 'confidence' column of 'trades'" error).
+-- The ALTER ... ADD COLUMN IF NOT EXISTS statements below add any missing
+-- column without touching existing data, and are safe to re-run any time.
+-- =====================================================
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS signal_id           TEXT;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS type                VARCHAR(10);
+-- 'side' is written by the Python code alongside 'type' and was never in the base schema:
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS side                VARCHAR(10);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS symbol              VARCHAR(20) DEFAULT 'XAU/USD';
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_price         DECIMAL(18, 4);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_time          TIMESTAMPTZ;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS stop_loss           DECIMAL(18, 4);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS initial_stop_loss   DECIMAL(18, 4);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS tp1                 DECIMAL(18, 4);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS tp2                 DECIMAL(18, 4);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS confidence          INTEGER DEFAULT 0;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS trading_mode        VARCHAR(20) DEFAULT 'paper';
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS paper_trading       BOOLEAN DEFAULT TRUE;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS paper_balance_start DECIMAL(18, 4);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS paper_lot_size      DECIMAL(18, 6);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS status              VARCHAR(30) DEFAULT 'OPEN';
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS current_price       DECIMAL(18, 4);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS current_pnl         DECIMAL(18, 4) DEFAULT 0;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS current_pnl_points  DECIMAL(18, 4) DEFAULT 0;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS final_pnl           DECIMAL(18, 4);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS sl_moved_to_entry   BOOLEAN DEFAULT FALSE;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS partial_close       BOOLEAN DEFAULT FALSE;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS updates_sent        JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS result              VARCHAR(30);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS reasons             JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS signal_snapshot     JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS ai_reviewed         BOOLEAN DEFAULT FALSE;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS ai_review           JSONB;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS memory_rule_ids     TEXT[] DEFAULT ARRAY[]::TEXT[];
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS created_at          TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS closed_at           TIMESTAMPTZ;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS close_time          TIMESTAMPTZ;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS close_price         DECIMAL(18, 4);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS last_updated        TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS updated_at          TIMESTAMPTZ DEFAULT NOW();
 
 -- AI Memory Rules table
 CREATE TABLE IF NOT EXISTS ai_memory_rules (
@@ -324,6 +367,12 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
 
 -- If you intentionally use anon key for a private bot, create restricted policies manually.
 -- Recommended GitHub Secret: SUPABASE_KEY = service_role key, not anon key.
+
+-- =====================================================
+-- Reload PostgREST schema cache immediately so newly added columns
+-- (e.g. confidence) are recognised without waiting — clears PGRST204.
+-- =====================================================
+NOTIFY pgrst, 'reload schema';
 
 -- =====================================================
 -- ✅ Schema v2 ready.
