@@ -414,6 +414,14 @@ async def run_analysis_async() -> None:
                 warnings_text = "\n".join(f"• {html.escape(str(w))}" for w in warnings[:6]) or "• No warnings; current decision is simply WAIT"
                 reason_text = html.escape(str(decision.get("summary", decision.get("reasoning", "N/A"))))
                 price_text = html.escape(str(decision.get("current_price", all_results.get("current_price"))))
+
+                # Clean redundant Groq Observation phrasing (e.g. "48% below 60% (low confidence: 48% below 60%)")
+                if "Groq Observation" in reason_text or "low confidence" in reason_text.lower():
+                    import re
+                    reason_text = re.sub(r'\s*\(low confidence:?\s*[^)]*\)', '', reason_text, flags=re.IGNORECASE)
+                    reason_text = re.sub(r'\s*or confidence\s*\d+%?\s*is below\s*\d+%?', '', reason_text, flags=re.IGNORECASE)
+                    reason_text = re.sub(r'\s+', ' ', reason_text).strip()
+
                 telegram.send_message(
                     "🟡 <b>Gold AI Signals — No qualified signal</b>\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"

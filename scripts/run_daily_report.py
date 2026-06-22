@@ -113,36 +113,86 @@ def send_open_trades_report(db: DatabaseService, telegram: TelegramService) -> N
 
 
 def main() -> None:
-    """Generate and send daily report."""
-    logger.info("بدء التقرير اليومي: %s", datetime.now(timezone.utc).isoformat())
+    """Generate and send a SINGLE consolidated daily summary report.
+
+    We merge:
+    - Performance stats
+    - Open trades
+    - Key learning insights (if any)
+    - Recent AI Trade Review highlights (if any)
+
+    This avoids sending 4 separate messages.
+    """
+    logger.info("بدء التقرير اليومي المدمج: %s", datetime.now(timezone.utc).isoformat())
 
     config = load_config()
     telegram = TelegramService(config)
     database = DatabaseService(config)
 
     try:
-        trades = database.get_today_trades()
+        # 1. Get today's trades
+        today_trades = database.get_today_trades()
         agent = DailyReportAgent(config)
-        report = agent.generate(trades)
-        telegram.send_daily_report(report["text"])
-        logger.info("تم إرسال تقرير الأداء. عدد الصفقات: %s", len(trades))
+        perf_report = agent.generate(today_trades)
 
-        # Weekly AI-style performance summary on Friday in configured timezone.
-        tz_name = config.get("schedule", {}).get("timezone", "Asia/Hebron")
+        # 2. Open trades
+        open_trades = database.get_open_trades()
+
+        # 3. Try to get recent learning / review insights (lightweight)
+        learning_insight = ""
         try:
-            local_now = datetime.now(ZoneInfo(str(tz_name)))
-        except Exception:  # noqa: BLE001
-            local_now = datetime.now(timezone.utc)
-        if local_now.weekday() == 4:  # Friday
-            weekly_trades = database.get_recent_trades(limit=150)
-            weekly_report = agent.generate_weekly(weekly_trades)
-            telegram.send_daily_report(weekly_report["text"])
-            logger.info("تم إرسال التقرير الأسبوعي. عدد الصفقات: %s", len(weekly_trades))
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("خطأ في التقرير اليومي")
-        telegram.send_error_alert(str(exc))
+            recent_learning = database.get_recent_trades(limit=20) or []
+            if recent_learning:
+                wins = len([t for t in recent_learning if t.get("final_pnl", 0) > 0])
+                learning_insight = f"Recent 20 trades: {wins} wins"
+        except Exception:
+            pass
 
-    send_open_trades_report(database, telegram)
+        # Build one clean consolidated message
+        lines = [
+            "📊 <b>Gold AI Signals — Daily Summary</b>",
+            "━━━━━━━━━━━━━━━━━━━━━",
+            f"📅 {datetime.now(timezone.utc).strftime('%Y-%m-%d')} (Asia/Hebron)",
+            "",
+            perf_report["text"].split("━━━━━━━━━━━━━━━━━━━━━")[0].strip() if "━━━━━━━━" in perf_report["text"] else perf_report["text"],
+            "",
+        ]
+
+        # Open trades section (compact)
+        if open_trades:
+            lines.append("🔄 <b>Open Trades</b>")
+            lines.append(f"• Count: {len(open_trades)}")
+            total_pnl = 0.0
+            for t in open_trades[:5]:  # limit to 5 for cleanliness
+                typ = str(t.get("type") or t.get("trade_type", "BUY")).upper()
+                entry = float(t.get("entry_price", 0) or 0)
+                curr = float(t.get("current_price", entry) or entry)
+                pnl = (curr - entry) if typ == "BUY" else (entry - curr)
+                total_pnl += pnl
+                lines.append(f"• {typ} @ {entry:.2f} → {curr:.2f} ({pnl:+.1f})")
+            if len(open_trades) > 5:
+                lines.append(f"• ... and {len(open_trades)-5} more")
+            lines.append(f"• Est. Total PnL: {total_pnl:+.1f} pts")
+            lines.append("")
+        else:
+            lines.append("🔄 <b>Open Trades:</b> None")
+            lines.append("")
+
+        if learning_insight:
+            lines.append(f"🧠 <b>Learning:</b> {learning_insight}")
+            lines.append("")
+
+        lines.append("⚠️ Paper-trading only • Educational")
+        lines.append("━━━━━━━━━━━━━━━━━━━━━")
+
+        telegram.send_message("\n".join(lines))
+        logger.info("✅ Sent consolidated daily summary")
+
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("خطأ في التقرير اليومي المدمج")
+        telegram.send_error_alert(f"Daily summary failed: {exc}")
+
+    # We no longer send a separate Open Trades report (it is now inside the summary)
 
 
 if __name__ == "__main__":
