@@ -102,19 +102,16 @@ CREATE TABLE IF NOT EXISTS trades (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
-CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
-CREATE INDEX IF NOT EXISTS idx_trades_created ON trades(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_trades_open ON trades(status) WHERE status IN ('OPEN', 'PARTIAL', 'TP1_HIT');
-
 -- =====================================================
 -- SELF-HEAL block for EXISTING trades tables
 -- -----------------------------------------------------
 -- CREATE TABLE IF NOT EXISTS above is skipped entirely when the table already
 -- exists, so an older table created before these columns were added will be
--- MISSING them (this is what causes the PGRST204
--- "Could not find the 'confidence' column of 'trades'" error).
--- The ALTER ... ADD COLUMN IF NOT EXISTS statements below add any missing
+-- MISSING them (this is what causes errors like PGRST204
+-- "Could not find the 'confidence' column of 'trades'" and
+-- "column symbol does not exist" raised by the indexes below).
+-- The ALTER ... ADD COLUMN IF NOT EXISTS statements MUST run BEFORE the
+-- CREATE INDEX statements that reference these columns. They add any missing
 -- column without touching existing data, and are safe to re-run any time.
 -- =====================================================
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS signal_id           TEXT;
@@ -153,6 +150,12 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS close_time          TIMESTAMPTZ;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS close_price         DECIMAL(18, 4);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS last_updated        TIMESTAMPTZ DEFAULT NOW();
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS updated_at          TIMESTAMPTZ DEFAULT NOW();
+
+-- Indexes come AFTER the heal block so they never reference a missing column.
+CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
+CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
+CREATE INDEX IF NOT EXISTS idx_trades_created ON trades(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trades_open ON trades(status) WHERE status IN ('OPEN', 'PARTIAL', 'TP1_HIT');
 
 -- AI Memory Rules table
 CREATE TABLE IF NOT EXISTS ai_memory_rules (
