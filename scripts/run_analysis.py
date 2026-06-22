@@ -181,11 +181,11 @@ async def run_analysis_async() -> None:
             )
             if should_send_status(config):
                 telegram.send_message(
-                    "🚫 <b>Gold AI Signals - لا يوجد تحليل الآن</b>\n"
+                    "🚫 <b>Gold AI Signals — No analysis right now</b>\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
-                    f"السبب: {session.get('reason', 'خارج ساعات التداول')}\n"
-                    f"الجلسة: {session.get('current_session') or 'غير محدد'}\n"
-                    f"الجودة: {session.get('session_quality', 'N/A')}\n"
+                    f"Reason: {session.get('reason', 'Outside trading hours')}\n"
+                    f"Session: {session.get('current_session') or 'N/A'}\n"
+                    f"Quality: {session.get('session_quality', 'N/A')}\n"
                     "━━━━━━━━━━━━━━━━━━━━"
                 )
             return  # ══ لا تحليل خارج الجلسات ══
@@ -339,11 +339,11 @@ async def run_analysis_async() -> None:
                 logger.info("تم منع الإشارة بسبب Dynamic Risk: %s", dynamic_block_reason)
                 if should_send_status(config):
                     telegram.send_message(
-                        "🟡 <b>تم منع الإشارة بواسطة Dynamic Risk</b>\n"
+                        "🟡 <b>Signal blocked by Dynamic Risk</b>\n"
                         "━━━━━━━━━━━━━━━━━━━━\n"
-                        f"القرار: {decision.get('decision')}\n"
-                        f"السبب: {dynamic_block_reason}\n"
-                        f"الحالة: {all_results.get('dynamic_risk', {}).get('level')}\n"
+                        f"Decision: {decision.get('decision')}\n"
+                        f"Reason: {dynamic_block_reason}\n"
+                        f"Level: {all_results.get('dynamic_risk', {}).get('level')}\n"
                         "━━━━━━━━━━━━━━━━━━━━"
                     )
                 return
@@ -353,10 +353,10 @@ async def run_analysis_async() -> None:
                 logger.info("تم منع إشارة مكررة: %s", duplicate_reason)
                 if should_send_status(config):
                     telegram.send_message(
-                        "🟡 <b>تم منع إشارة مكررة</b>\n"
+                        "🟡 <b>Duplicate signal blocked</b>\n"
                         "━━━━━━━━━━━━━━━━━━━━\n"
-                        f"القرار: {decision.get('decision')}\n"
-                        f"السبب: {duplicate_reason}\n"
+                        f"Decision: {decision.get('decision')}\n"
+                        f"Reason: {duplicate_reason}\n"
                         "━━━━━━━━━━━━━━━━━━━━"
                     )
                 return
@@ -374,15 +374,15 @@ async def run_analysis_async() -> None:
             )
             if should_send_status(config):
                 warnings = decision.get("warnings") or []
-                warnings_text = "\n".join(f"• {w}" for w in warnings[:6]) or "• لا توجد تحذيرات؛ القرار الحالي WAIT فقط"
+                warnings_text = "\n".join(f"• {w}" for w in warnings[:6]) or "• No warnings; current decision is simply WAIT"
                 telegram.send_message(
-                    "🟡 <b>Gold AI Signals - لا توجد إشارة مؤهلة</b>\n"
+                    "🟡 <b>Gold AI Signals — No qualified signal</b>\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
-                    f"السعر الحالي: {decision.get('current_price', all_results.get('current_price'))}\n"
-                    f"القرار: {decision.get('decision', 'WAIT')}\n"
-                    f"الثقة: {decision.get('confidence', 0)}%\n"
-                    f"السبب: {decision.get('summary', decision.get('reasoning', 'غير محدد'))}\n\n"
-                    f"<b>ملاحظات:</b>\n{warnings_text}\n"
+                    f"Current price: {decision.get('current_price', all_results.get('current_price'))}\n"
+                    f"Decision: {decision.get('decision', 'WAIT')}\n"
+                    f"Confidence: {decision.get('confidence', 0)}%\n"
+                    f"Reason: {decision.get('summary', decision.get('reasoning', 'N/A'))}\n\n"
+                    f"<b>Notes:</b>\n{warnings_text}\n"
                     "━━━━━━━━━━━━━━━━━━━━"
                 )
 
