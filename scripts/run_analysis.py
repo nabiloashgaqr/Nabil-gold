@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import html
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict
 
@@ -183,9 +184,9 @@ async def run_analysis_async() -> None:
                 telegram.send_message(
                     "🚫 <b>Gold AI Signals — No analysis right now</b>\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
-                    f"Reason: {session.get('reason', 'Outside trading hours')}\n"
-                    f"Session: {session.get('current_session') or 'N/A'}\n"
-                    f"Quality: {session.get('session_quality', 'N/A')}\n"
+                    f"Reason: {html.escape(str(session.get('reason', 'Outside trading hours')))}\n"
+                    f"Session: {html.escape(str(session.get('current_session') or 'N/A'))}\n"
+                    f"Quality: {html.escape(str(session.get('session_quality', 'N/A')))}\n"
                     "━━━━━━━━━━━━━━━━━━━━"
                 )
             return  # ══ لا تحليل خارج الجلسات ══
@@ -341,9 +342,9 @@ async def run_analysis_async() -> None:
                     telegram.send_message(
                         "🟡 <b>Signal blocked by Dynamic Risk</b>\n"
                         "━━━━━━━━━━━━━━━━━━━━\n"
-                        f"Decision: {decision.get('decision')}\n"
-                        f"Reason: {dynamic_block_reason}\n"
-                        f"Level: {all_results.get('dynamic_risk', {}).get('level')}\n"
+                        f"Decision: {html.escape(str(decision.get('decision')))}\n"
+                        f"Reason: {html.escape(str(dynamic_block_reason))}\n"
+                        f"Level: {html.escape(str(all_results.get('dynamic_risk', {}).get('level')))}\n"
                         "━━━━━━━━━━━━━━━━━━━━"
                     )
                 return
@@ -355,8 +356,8 @@ async def run_analysis_async() -> None:
                     telegram.send_message(
                         "🟡 <b>Duplicate signal blocked</b>\n"
                         "━━━━━━━━━━━━━━━━━━━━\n"
-                        f"Decision: {decision.get('decision')}\n"
-                        f"Reason: {duplicate_reason}\n"
+                        f"Decision: {html.escape(str(decision.get('decision')))}\n"
+                        f"Reason: {html.escape(str(duplicate_reason))}\n"
                         "━━━━━━━━━━━━━━━━━━━━"
                     )
                 return
@@ -374,14 +375,18 @@ async def run_analysis_async() -> None:
             )
             if should_send_status(config):
                 warnings = decision.get("warnings") or []
-                warnings_text = "\n".join(f"• {w}" for w in warnings[:6]) or "• No warnings; current decision is simply WAIT"
+                # Escape dynamic values: summaries/warnings can contain '<', '>', '&'
+                # (e.g. "confidence 40% < 60%"), which break parse_mode=HTML (400).
+                warnings_text = "\n".join(f"• {html.escape(str(w))}" for w in warnings[:6]) or "• No warnings; current decision is simply WAIT"
+                reason_text = html.escape(str(decision.get("summary", decision.get("reasoning", "N/A"))))
+                price_text = html.escape(str(decision.get("current_price", all_results.get("current_price"))))
                 telegram.send_message(
                     "🟡 <b>Gold AI Signals — No qualified signal</b>\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
-                    f"Current price: {decision.get('current_price', all_results.get('current_price'))}\n"
-                    f"Decision: {decision.get('decision', 'WAIT')}\n"
-                    f"Confidence: {decision.get('confidence', 0)}%\n"
-                    f"Reason: {decision.get('summary', decision.get('reasoning', 'N/A'))}\n\n"
+                    f"Current price: {price_text}\n"
+                    f"Decision: {html.escape(str(decision.get('decision', 'WAIT')))}\n"
+                    f"Confidence: {html.escape(str(decision.get('confidence', 0)))}%\n"
+                    f"Reason: {reason_text}\n\n"
                     f"<b>Notes:</b>\n{warnings_text}\n"
                     "━━━━━━━━━━━━━━━━━━━━"
                 )
