@@ -277,8 +277,17 @@ def test_agent_weights_in_decision():
     assert decision["signal"] in {"BUY", "SELL", "WAIT"}
 
 
-def test_news_agent_safe_when_no_events():
-    """News agent must return SAFE when no events are configured."""
+def test_news_agent_safe_when_no_events(monkeypatch):
+    """News agent must return SAFE when no events are configured.
+
+    NewsRiskAgent also pulls a free ForexFactory feed over the network as a
+    fallback. A unit test must not depend on live internet data (real events
+    like FOMC make this flaky), so the feed is stubbed to return nothing here;
+    this isolates the actual logic under test: empty file -> SAFE.
+    """
+    import services.news_feed_forexfactory as ff
+    monkeypatch.setattr(ff, "fetch_forexfactory_events", lambda *a, **k: [])
+
     config = base_config()
     with tempfile.TemporaryDirectory() as tmpdir:
         news_path = Path(tmpdir) / "news_events.json"
