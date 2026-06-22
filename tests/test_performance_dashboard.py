@@ -3,7 +3,7 @@
 """
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 import sys
 import os
@@ -227,7 +227,7 @@ class TestPerformanceDashboard:
     def test_format_telegram_report(self, dashboard):
         """اختبار تنسيق تقرير تيليجرام"""
         report = {
-            'generated_at': datetime.utcnow().isoformat(),
+            'generated_at': datetime.now(timezone.utc).isoformat(),
             'period_days': 7,
             'portfolio': {
                 'balance': 10500,
