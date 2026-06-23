@@ -2,7 +2,9 @@ name: 🔄 Update Open Trades
 
 concurrency:
   group: update_trades-${{ github.ref }}
-  cancel-in-progress: true
+  # Do not cancel an in-progress trade update (it may be writing SL/TP/trailing
+  # changes to the DB). Let it finish.
+  cancel-in-progress: false
 
 on:
   schedule:

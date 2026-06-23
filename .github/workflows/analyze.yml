@@ -2,7 +2,12 @@ name: 📊 Gold Analysis Bot
 
 concurrency:
   group: analyze-${{ github.ref }}
-  cancel-in-progress: true
+  # IMPORTANT: never cancel a run that is already in progress.
+  # This is a signal bot: a run that is mid-analysis may be about to save a
+  # trade and send a Telegram signal. cancel-in-progress:true would silently
+  # kill it (e.g. when a manual run or a delayed/queued cron starts), which is
+  # a classic cause of "signal never arrived on the scheduled run".
+  cancel-in-progress: false
 
 on:
   schedule:
