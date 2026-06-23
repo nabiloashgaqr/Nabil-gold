@@ -507,6 +507,100 @@ class TelegramService:
 """.strip()
         return self.send_message(text, urgent=event_type in {"TP1_HIT", "TP2_HIT", "SL_HIT", "BE_HIT", "EXPIRED", "TRAILING_SL_HIT"})
 
+    # Display priority: the most important event leads the combined message.
+    _EVENT_PRIORITY = (
+        "TP2_HIT", "SL_HIT", "TRAILING_SL_HIT", "BE_HIT", "TP1_HIT",
+        "MOVE_SL_TO_BE", "EXPIRED", "MANUAL_CLOSE", "TRAILING_SL_UPDATED",
+        "EXIT_WARNING", "NEAR_TP1", "LONG_RUNNING",
+    )
+
+    def send_trade_events(
+        self,
+        trade: Dict[str, Any],
+        events: List[str],
+        current_price: float,
+        pnl_points: float,
+        evaluation: Dict[str, Any] | None = None,
+    ) -> bool:
+        """Send ONE combined message for all events fired this cycle on a trade.
+
+        Previously the caller looped and sent a separate Telegram message per
+        event, so a trade that triggered e.g. LONG_RUNNING + EXIT_WARNING in the
+        same evaluation produced two near-identical messages at the same time.
+        This consolidates them: one header (highest-priority event) plus a short
+        "notes" list covering every event, with the trade snapshot shown once.
+        """
+        events = [e for e in (events or []) if e]
+        if not events:
+            return False
+        if len(events) == 1:
+            return self.send_trade_event(trade, events[0], current_price, pnl_points, evaluation)
+
+        evaluation = evaluation or {}
+        event_titles = {
+            "NEAR_TP1": "🔄 Near Take Profit 1",
+            "TP1_HIT": "✅ Take Profit 1 Hit",
+            "MOVE_SL_TO_BE": "💡 Move Stop Loss to Break-even",
+            "TP2_HIT": "🏆 Take Profit 2 Hit",
+            "SL_HIT": "❌ Stop Loss Hit",
+            "BE_HIT": "➖ Break-even Hit",
+            "LONG_RUNNING": "⏱ Long-running Trade",
+            "EXIT_WARNING": "⚠️ Exit / Risk Warning",
+            "EXPIRED": "⌛ Trade Expired",
+            "MANUAL_CLOSE": "📌 Manual Close",
+            "TRAILING_SL_UPDATED": "📈 Trailing Stop Moved",
+            "TRAILING_SL_HIT": "🔒 Trailing Stop Hit (Profit Locked)",
+        }
+        # Order events by priority; the first becomes the title.
+        ordered = sorted(
+            events,
+            key=lambda e: self._EVENT_PRIORITY.index(e) if e in self._EVENT_PRIORITY else len(self._EVENT_PRIORITY),
+        )
+        title = event_titles.get(ordered[0], "🔄 Trade Update")
+
+        pnl_emoji = "✅" if pnl_points > 0 else "➖" if pnl_points == 0 else "❌"
+        old_status = evaluation.get("old_status", trade.get("status", "OPEN"))
+        new_status = evaluation.get("new_status", old_status)
+        progress = evaluation.get("progress_to_tp1")
+        hours_open = evaluation.get("hours_open")
+
+        extra_lines = []
+        if progress is not None:
+            extra_lines.append(f"📊 <b>Progress to TP1:</b> {float(progress) * 100:.0f}%")
+        if hours_open is not None:
+            extra_lines.append(f"⏱ <b>Time open:</b> {float(hours_open):.1f}h")
+        extra_text = "\n".join(extra_lines)
+
+        # One note line per event (deduplicated, in priority order).
+        note_lines = []
+        for ev in ordered:
+            note = self._trade_event_note(ev, trade, current_price, evaluation)
+            if note and note not in note_lines:
+                note_lines.append(f"• {note}")
+        notes_text = "\n".join(note_lines)
+
+        text = f"""
+{title} - <b>XAU/USD</b>
+━━━━━━━━━━━━━━━━━━━━━
+
+🆔 <b>ID:</b> <code>{html.escape(str(trade.get('id')))}</code>
+📊 <b>Type:</b> {html.escape(str(trade.get('type')))}
+📍 <b>Entry:</b> {format_price(trade.get('entry_price'))}
+🛑 <b>Stop Loss:</b> {format_price(trade.get('stop_loss'))}
+🎯 <b>TP1:</b> {format_price(trade.get('tp1'))}
+🎯 <b>TP2:</b> {format_price(trade.get('tp2'))}
+💰 <b>Current Price:</b> {format_price(current_price)}
+📈 <b>Current PnL:</b> {pnl_points:+.1f} pts {pnl_emoji}
+📌 <b>Status:</b> {html.escape(str(old_status))} → {html.escape(str(new_status))}
+{extra_text}
+
+{notes_text}
+
+⚠️ Educational paper-trading update only. Not financial advice.
+""".strip()
+        urgent = any(e in {"TP1_HIT", "TP2_HIT", "SL_HIT", "BE_HIT", "EXPIRED", "TRAILING_SL_HIT"} for e in ordered)
+        return self.send_message(text, urgent=urgent)
+
     def send_trade_update(self, trade: Dict[str, Any], new_status: str, current_price: float, pnl_points: float) -> bool:
         """Backward-compatible wrapper for status-change updates."""
         return self.send_trade_event(trade, new_status, current_price, pnl_points, {"old_status": trade.get("status", "OPEN"), "new_status": new_status})
