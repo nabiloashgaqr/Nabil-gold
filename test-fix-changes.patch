@@ -1,0 +1,47 @@
+diff --git a/tests/test_integration.py b/tests/test_integration.py
+index 3df1e19..721ed5e 100644
+--- a/tests/test_integration.py
++++ b/tests/test_integration.py
+@@ -168,13 +168,16 @@ def test_decision_with_news_danger_blocks_signal():
+     # Create data with news danger
+     with tempfile.TemporaryDirectory() as tmpdir:
+         news_path = Path(tmpdir) / "news_events.json"
+-        event_time = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat().replace("+00:00", "Z")
++        # Pin "now" to a calm session so the result is driven purely by the
++        # high-impact event (DANGER), not by any session-rollover CAUTION.
++        fixed_now = datetime(2026, 6, 23, 10, 0, tzinfo=timezone.utc)
++        event_time = (fixed_now + timedelta(minutes=10)).isoformat().replace("+00:00", "Z")
+         news_path.write_text(json.dumps([{"event": "FOMC Rate Decision", "time": event_time, "impact": "HIGH", "currency": "USD"}]))
+-        
++
+         agent = NewsRiskAgent(config)
+         agent.events_path = news_path
+-        news = agent.check()
+-        
++        news = agent.check(now=fixed_now)
++
+         assert news["market_status"] == "DANGER"
+         assert news["can_trade"] is False
+         
+@@ -282,14 +285,20 @@ def test_news_agent_safe_when_no_events():
+ 
+     The live ForexFactory feed is stubbed globally by the autouse fixture in
+     tests/conftest.py, so this isolates the real logic: empty file -> SAFE.
++
++    NOTE: check() also applies a session-risk rule (e.g. "Late NY / Rollover"
++    21:00-23:59 UTC -> CAUTION) independent of news. We therefore pin ``now`` to
++    a calm session (10:00 UTC = London) so this test deterministically exercises
++    only the news logic instead of being flaky around rollover hours.
+     """
+     config = base_config()
++    safe_now = datetime(2026, 6, 23, 10, 0, tzinfo=timezone.utc)  # London session
+     with tempfile.TemporaryDirectory() as tmpdir:
+         news_path = Path(tmpdir) / "news_events.json"
+         news_path.write_text("[]")
+         agent = NewsRiskAgent(config)
+         agent.events_path = news_path
+-        result = agent.check()
++        result = agent.check(now=safe_now)
+         assert result["market_status"] == "SAFE"
+         assert result["can_trade"] is True
+         assert len(result["upcoming_events"]) == 0
