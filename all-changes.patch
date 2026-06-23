@@ -1,0 +1,813 @@
+diff --git a/.github/workflows/analyze.yml b/.github/workflows/analyze.yml
+index 5f011a1..e4d018f 100644
+--- a/.github/workflows/analyze.yml
++++ b/.github/workflows/analyze.yml
+@@ -2,7 +2,12 @@ name: 📊 Gold Analysis Bot
+ 
+ concurrency:
+   group: analyze-${{ github.ref }}
+-  cancel-in-progress: true
++  # IMPORTANT: never cancel a run that is already in progress.
++  # This is a signal bot: a run that is mid-analysis may be about to save a
++  # trade and send a Telegram signal. cancel-in-progress:true would silently
++  # kill it (e.g. when a manual run or a delayed/queued cron starts), which is
++  # a classic cause of "signal never arrived on the scheduled run".
++  cancel-in-progress: false
+ 
+ on:
+   schedule:
+diff --git a/.github/workflows/update_trades.yml b/.github/workflows/update_trades.yml
+index 8de64cf..391e5d8 100644
+--- a/.github/workflows/update_trades.yml
++++ b/.github/workflows/update_trades.yml
+@@ -2,7 +2,9 @@ name: 🔄 Update Open Trades
+ 
+ concurrency:
+   group: update_trades-${{ github.ref }}
+-  cancel-in-progress: true
++  # Do not cancel an in-progress trade update (it may be writing SL/TP/trailing
++  # changes to the DB). Let it finish.
++  cancel-in-progress: false
+ 
+ on:
+   schedule:
+diff --git a/config.json b/config.json
+index 0dbf32b..3b87792 100644
+--- a/config.json
++++ b/config.json
+@@ -272,16 +272,27 @@
+     "hourly_status_interval_minutes": 60,
+     "market_status_title": "Market Status",
+     "status_every_analysis": true,
+-    "hourly_market_status": true
++    "hourly_market_status": true,
++    "notify_on_blocked_signal": true,
++    "description_notify_on_blocked_signal": "إذا true تُرسل أسباب حجب الإشارة (تكرار/مخاطر ديناميكية/حدود) على التشغيل المجدول أيضاً، لتوضيح سبب عدم وصول إشارة بدل التخمين. التشغيل اليدوي يرسلها دائماً."
+   },
+   "duplicate_signal_filter": {
+     "enabled": true,
+-    "lookback_minutes": 90,
+-    "price_tolerance_points": 3.0,
+-    "price_tolerance_atr_multiplier": 0.75,
+-    "block_if_open_same_direction": true,
+-    "description": "يسمح بصفقة جديدة بنفس الاتجاه (BUY/SELL) فقط إذا مر أكثر من 90 دقيقة AND كان فرق السعر خارج ±50 نقطة. 50 نقطة = 5 دولار للأونصة على الذهب (1 نقطة = 0.10$). يطبق على الصفقات المفتوحة (OPEN/TP1_HIT) والمغلقة الحديثة. لا يمنع إذا الزمن >90min والسعر خارج المنطقة.",
+-    "same_direction_price_zone_points": 50
++    "price_zone_points": 50,
++    "description_price_zone_points": "نطاق السعر الذي يُعتبر فيه دخولان 'نفس المنطقة' (نقاط الذهب: 1$=10 نقاط، أي 50 نقطة=5$). خارج هذا النطاق يُعد إعداداً جديداً مشروعاً ولا يُحجب.",
++    "open_trade": {
++      "block_same_direction_in_zone": true,
++      "block_same_direction_any_price": false,
++      "description": "حماية تكديس الصفقات المفتوحة: امنع فتح صفقة بنفس الاتجاه داخل نفس منطقة السعر (in_zone). فعّل any_price=true إذا أردت صفقة واحدة فقط لكل اتجاه بغضّ النظر عن السعر."
++    },
++    "cooldown": {
++      "lookback_hours": 6,
++      "after_loss_minutes": 90,
++      "after_breakeven_minutes": 45,
++      "after_win_minutes": 30,
++      "description": "تبريد واعٍ بالنتيجة للصفقات المغلقة حديثاً في نفس منطقة السعر فقط: بعد خسارة تبريد أطول (تجنّب التكرار الانتقامي)، بعد تعادل متوسط، بعد ربح أقصر (اتجاه ناجح). lookback_hours يحدد أقصى عمر للصفقة المغلقة التي تُؤخذ بالحسبان."
++    },
++    "description": "فلتر تكرار احترافي بمفهومين منفصلين: (1) حماية تكديس الصفقات المفتوحة في نفس المنطقة، (2) تبريد واعٍ بالنتيجة للصفقات المغلقة حديثاً في نفس المنطقة. دخول في منطقة سعر مختلفة لا يُحجب. مفاتيح legacy (lookback_minutes/same_direction_price_zone_points) ما زالت مدعومة كـ fallback."
+   },
+   "quality_score": {
+     "enabled": true,
+@@ -406,4 +417,4 @@
+     "storage_path": "storage/weekly_report.json",
+     "timezone": "Asia/Hebron"
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/scripts/run_analysis.py b/scripts/run_analysis.py
+index 91018f3..eeb0269 100644
+--- a/scripts/run_analysis.py
++++ b/scripts/run_analysis.py
+@@ -53,13 +53,18 @@ def synthetic_timeframe_sources(data: Dict[str, Any]) -> list[str]:
+ 
+ 
+ def should_send_status(config: Dict[str, Any]) -> bool:
+-    """Send status/no-signal Telegram messages only on manual runs or if enabled.
++    """Send status/no-signal Telegram messages on manual runs OR when enabled.
+ 
+-    Scheduled analysis runs every 10 minutes.
++    Scheduled analysis runs every 10 minutes. We want blocked-signal reasons
++    (duplicate / dynamic-risk / limits) to be visible on scheduled runs too, so
++    the user can see *why* nothing arrived instead of guessing. This is the
++    applied recommendation: drive visibility from config.
+     """
+     if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
+         return True
+-    return bool(config.get("notifications", {}).get("send_no_signal_updates", False))
++    notif = config.get("notifications", {}) or {}
++    # Either the general no-signal flag or the dedicated blocked-signal flag.
++    return bool(notif.get("send_no_signal_updates", False)) or bool(notif.get("notify_on_blocked_signal", False))
+ 
+ 
+ def should_send_hourly_status(config: Dict[str, Any]) -> bool:
+@@ -69,9 +74,15 @@ def should_send_hourly_status(config: Dict[str, Any]) -> bool:
+     from datetime import datetime, timezone
+     if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
+         return True
+-    if not bool(config.get("notifications", {}).get("send_no_signal_updates", False)):
++    notif = config.get("notifications", {}) or {}
++    if not (bool(notif.get("send_no_signal_updates", False)) or bool(notif.get("hourly_status", False))):
+         return False
+     now = datetime.now(timezone.utc)
++    interval = int(notif.get("hourly_status_interval_minutes", 60) or 60)
++    # Map the interval onto the 10-minute schedule: only fire in the first slot
++    # of each interval window so we send ~once per interval, never every run.
++    if interval <= 10:
++        return True
+     return now.minute < 10
+ 
+ 
+@@ -92,7 +103,7 @@ def _parse_datetime(value: Any) -> datetime | None:
+ 
+ 
+ def _trade_direction(trade: Dict[str, Any]) -> str:
+-    return str(trade.get('type') or trade.get('trade_type') or trade.get('decision') or '').upper()
++    return str(trade.get('type') or trade.get('side') or trade.get('trade_type') or trade.get('decision') or '').upper()
+ 
+ 
+ def _trade_entry_price(trade: Dict[str, Any]) -> float | None:
+@@ -106,15 +117,84 @@ def _trade_entry_price(trade: Dict[str, Any]) -> float | None:
+     return None
+ 
+ 
++# Trade lifecycle states (mirrors agents/open_trades_manager.py).
++_OPEN_STATUSES = {"OPEN", "PARTIAL", "TP1_HIT"}
++_LOSS_STATUSES = {"SL_HIT"}
++_WIN_STATUSES = {"TP2_HIT"}
++_BREAKEVEN_STATUSES = {"BE_HIT", "EXPIRED", "MANUAL_CLOSE"}
++
++
++def _trade_outcome(trade: Dict[str, Any]) -> str:
++    """Classify a trade as OPEN / WIN / LOSS / BREAKEVEN using status, the
++    explicit ``result`` field, then PnL as a last resort.
++    """
++    status = str(trade.get("status", "")).upper()
++    if status in _OPEN_STATUSES:
++        return "OPEN"
++
++    result = str(trade.get("result", "") or "").upper()
++    if result in {"WIN", "LOSS", "BREAKEVEN"}:
++        return result
++
++    if status in _LOSS_STATUSES:
++        return "LOSS"
++    if status in _WIN_STATUSES:
++        return "WIN"
++    if status in _BREAKEVEN_STATUSES:
++        return "BREAKEVEN"
++
++    # Fallback to realized PnL when status/result are missing.
++    for key in ("final_pnl", "current_pnl"):
++        try:
++            pnl = float(trade.get(key))
++        except (TypeError, ValueError):
++            continue
++        if pnl > 0:
++            return "WIN"
++        if pnl < 0:
++            return "LOSS"
++        return "BREAKEVEN"
++    return "BREAKEVEN"
++
++
++def _trade_reference_time(trade: Dict[str, Any], now: datetime) -> datetime:
++    """Best timestamp to age a trade from: close time for closed trades, else
++    the open/created time.
++    """
++    closed = _parse_datetime(
++        trade.get("closed_at") or trade.get("close_time")
++    )
++    if closed:
++        return closed
++    opened = _parse_datetime(
++        trade.get("created_at") or trade.get("entry_time") or trade.get("opened_at")
++    )
++    return opened or now
++
++
+ def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService, config: Dict[str, Any]) -> str | None:
+-    """Return a reason if this signal is a duplicate of an open/recent similar signal.
+-
+-    New logic (user request):
+-    - Allow same-direction signal if:
+-        * More than 90 minutes have passed since the previous same-direction trade, AND
+-        * The new entry price is NOT within ±50 points of the previous entry price
+-          (i.e. different price zone).
+-    - This applies to BOTH currently open trades (OPEN/TP1_HIT) and recent closed trades.
++    """Return a human-readable reason if this signal should be blocked as a
++    duplicate / churn / revenge re-entry. Otherwise return None.
++
++    Professional, outcome-aware design — two clearly separated concerns:
++
++    1) OPEN-POSITION STACKING PROTECTION (true duplicate)
++       If a same-direction trade is still OPEN/TP1_HIT:
++         * block if it sits within ``price_zone_points`` of the new entry
++           (you'd be doubling the same position at the same level), OR
++         * block unconditionally if ``block_same_direction_any_price`` is set
++           (only one open position per direction at a time).
++
++    2) RECENTLY-CLOSED COOLDOWN (anti-churn / anti-revenge)
++       For same-direction trades CLOSED within ``lookback_hours``, apply an
++       outcome-aware cooldown, but ONLY when the new entry is in the same price
++       zone (a genuinely different price area is a new setup, not a repeat):
++         * after a LOSS      -> longest cooldown  (don't repeat a losing setup)
++         * after BREAKEVEN   -> medium cooldown
++         * after a WIN       -> shortest cooldown  (a working direction)
++
++    All thresholds are configurable, with backward-compatible fallbacks to the
++    legacy ``lookback_minutes`` / ``same_direction_price_zone_points`` keys.
+     """
+     filt = config.get('duplicate_signal_filter', {}) or {}
+     if not filt.get('enabled', True):
+@@ -130,75 +210,107 @@ def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService,
+         entry_price = float(entry.get('price') or decision.get('current_price') or 0)
+     except (TypeError, ValueError):
+         entry_price = 0.0
+-
+     if entry_price <= 0:
+         return None
+ 
+     now = datetime.now(timezone.utc)
+ 
+-    # === NEW PARAMETERS (user requested) ===
+-    same_dir_time_threshold = int(filt.get('lookback_minutes', 90))          # 90 minutes
+-    same_dir_price_zone = float(filt.get('same_direction_price_zone_points', 50))  # ±50 points
+-
+-    # Gold point definition (confirmed by user):
+-    # On XAU/USD, 1 point = 0.10 USD per ounce
+-    # Therefore: 50 points = 5.00 USD per ounce
+-    # price_diff comes from market data in USD (e.g. 7.79)
+-    # We convert: price_diff_points = price_diff_usd * 10
+-
+-    # Collect all relevant previous trades in same direction (open + recent)
+-    previous_same_dir_trades = []
++    # ── Tunables (with legacy fallbacks) ───────────────────────────────────
++    # Gold point convention: 1 USD = 10 points (1 point = 0.10 USD/oz).
++    price_zone_points = float(
++        filt.get('price_zone_points', filt.get('same_direction_price_zone_points', 50))
++    )
++
++    open_cfg = filt.get('open_trade', {}) or {}
++    block_open_any_price = bool(
++        open_cfg.get('block_same_direction_any_price', filt.get('block_if_open_same_direction', False))
++    )
++    block_open_in_zone = bool(open_cfg.get('block_same_direction_in_zone', True))
++
++    cooldown_cfg = filt.get('cooldown', {}) or {}
++    legacy_cooldown = float(filt.get('lookback_minutes', 90))
++    cooldown_after_loss = float(cooldown_cfg.get('after_loss_minutes', legacy_cooldown))
++    cooldown_after_breakeven = float(cooldown_cfg.get('after_breakeven_minutes', max(legacy_cooldown * 0.5, 30)))
++    cooldown_after_win = float(cooldown_cfg.get('after_win_minutes', max(legacy_cooldown * 0.33, 20)))
++    lookback_hours = float(cooldown_cfg.get('lookback_hours', 6))
++
++    def _points_away(prev_price: float) -> float:
++        return abs(entry_price - prev_price) * 10.0
++
++    # ── Collect same-direction candidates (open + recently closed) ─────────
++    candidates: List[Dict[str, Any]] = []
++    seen_ids: set = set()
++
++    def _add(trade: Dict[str, Any]) -> None:
++        tid = str(trade.get('id', ''))
++        if tid and tid in seen_ids:
++            return
++        if tid:
++            seen_ids.add(tid)
++        candidates.append(trade)
+ 
+-    # 1. Open trades (including TP1_HIT)
+     for trade in database.get_open_trades():
+         if _trade_direction(trade) == direction:
+-            previous_same_dir_trades.append(trade)
+-
+-    # 2. Recent closed trades (within a generous window, e.g. 1 day)
++            _add(trade)
+     for trade in database.get_recent_trades(limit=50):
+         if _trade_direction(trade) == direction:
+-            created = _parse_datetime(trade.get('created_at') or trade.get('entry_time') or trade.get('opened_at'))
+-            if created and (now - created).total_seconds() < 24 * 3600:  # last 24h is enough
+-                previous_same_dir_trades.append(trade)
+-
+-    # Remove duplicates by id
+-    seen_ids = set()
+-    unique_prev = []
+-    for t in previous_same_dir_trades:
+-        tid = str(t.get('id', ''))
+-        if tid and tid not in seen_ids:
+-            seen_ids.add(tid)
+-            unique_prev.append(t)
++            _add(trade)
+ 
+-    for trade in unique_prev:
++    # ── 1) Open-position stacking protection ───────────────────────────────
++    for trade in candidates:
++        if _trade_outcome(trade) != "OPEN":
++            continue
++        prev_entry = _trade_entry_price(trade)
++        if prev_entry is None:
++            continue
++        if block_open_any_price:
++            return (
++                f"Duplicate {direction} blocked: an open {direction} position "
++                f"({trade.get('id', 'unknown')}) already exists (one position per direction)."
++            )
++        if block_open_in_zone:
++            pts = _points_away(prev_entry)
++            if pts <= price_zone_points:
++                return (
++                    f"Duplicate {direction} blocked: open {direction} position "
++                    f"({trade.get('id', 'unknown')}) in the same price zone "
++                    f"({pts:.0f}pts away, zone={price_zone_points:.0f}pts) — would stack the same level."
++                )
++
++    # ── 2) Recently-closed, outcome-aware cooldown (same zone only) ────────
++    cooldown_by_outcome = {
++        "LOSS": cooldown_after_loss,
++        "BREAKEVEN": cooldown_after_breakeven,
++        "WIN": cooldown_after_win,
++    }
++    for trade in candidates:
++        outcome = _trade_outcome(trade)
++        if outcome == "OPEN":
++            continue
+         prev_entry = _trade_entry_price(trade)
+         if prev_entry is None:
+             continue
+ 
+-        created = _parse_datetime(
+-            trade.get('created_at') or trade.get('entry_time') or trade.get('opened_at')
+-        ) or now
+-
+-        age_minutes = (now - created).total_seconds() / 60.0
+-        price_diff_usd = abs(entry_price - prev_entry)
+-        price_diff_points = price_diff_usd * 10.0   # 1 USD = 10 points
+-
+-        # Block ONLY if it is "too close in time OR too close in price zone"
+-        # Allow if BOTH: age > 90min AND price_diff_points > 50
+-        is_too_recent = age_minutes <= same_dir_time_threshold
+-        is_same_zone = price_diff_points <= same_dir_price_zone
+-
+-        if is_too_recent or is_same_zone:
+-            reason = (
+-                f"Duplicate {direction} signal blocked: "
+-                f"previous {direction} trade {trade.get('id', 'unknown')} "
+-                f"(age={age_minutes:.0f}min, diff={price_diff_points:.1f}pts / {price_diff_usd:.2f}$). "
+-                f"Rule: allow only after >{same_dir_time_threshold}min AND >{same_dir_price_zone}pts away."
++        ref_time = _trade_reference_time(trade, now)
++        age_minutes = (now - ref_time).total_seconds() / 60.0
++        if age_minutes > lookback_hours * 60.0:
++            continue  # too old to matter
++
++        pts = _points_away(prev_entry)
++        if pts > price_zone_points:
++            continue  # different price area = legitimately new setup
++
++        cooldown = cooldown_by_outcome.get(outcome, cooldown_after_breakeven)
++        if age_minutes <= cooldown:
++            return (
++                f"Duplicate {direction} blocked: a {outcome} {direction} trade "
++                f"({trade.get('id', 'unknown')}) closed {age_minutes:.0f}min ago in the same "
++                f"price zone ({pts:.0f}pts away). Cooldown after {outcome} is {cooldown:.0f}min."
+             )
+-            return reason
+ 
+     return None
+ 
++
+ def _dedupe_warnings(warnings: list) -> list:
+     """Collapse duplicate / overlapping warnings before showing them in Telegram.
+ 
+@@ -303,6 +415,12 @@ async def run_analysis_async() -> None:
+         data = market_data.get_gold_data()
+         if not data:
+             logger.error("فشل في جلب البيانات")
++            # Don't fail silently on scheduled runs — surface it so a recurring
++            # data outage is visible instead of looking like "no signal".
++            telegram.send_error_alert(
++                "Analysis aborted: failed to fetch market data (Twelve Data). "
++                "No signal will be generated this cycle."
++            )
+             return
+ 
+         # Safety: never send production signals from synthetic/demo prices on GitHub Actions.
+@@ -452,12 +570,52 @@ async def run_analysis_async() -> None:
+                     )
+                 return
+ 
++            # IMPORTANT ordering & delivery handling.
++            #
++            # Previous behaviour saved the trade to the DB first and then called
++            # telegram.send_signal(...) while *ignoring its return value*. If the
++            # Telegram delivery failed (network blip, rate limit, HTML parse
++            # error) on a scheduled run, the user received nothing — yet the
++            # trade was already persisted. Every later scheduled run then saw
++            # that trade and silently blocked the "duplicate" same-direction
++            # signal. Net effect: signals appear only on manual runs, never on
++            # the scheduled ones. That is exactly the reported symptom.
++            #
++            # Fix: send the Telegram signal FIRST. Only persist the trade if the
++            # signal was actually delivered, so a failed delivery does not poison
++            # the duplicate filter and the next scheduled run can retry cleanly.
++            trade_id = f"PENDING_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
++            decision["trade_id"] = trade_id
++            if decision.get("signal"):
++                decision["signal"]["trade_id"] = trade_id
++
++            delivered = False
++            try:
++                delivered = bool(telegram.send_signal(decision))
++            except Exception as send_exc:  # noqa: BLE001
++                logger.exception("فشل إرسال إشارة Telegram")
++                telegram.send_error_alert(f"Signal generated but Telegram delivery raised: {send_exc}")
++                delivered = False
++
++            if not delivered:
++                # Do NOT save the trade: an unsent signal must not block future
++                # runs via the duplicate filter. Alert loudly instead of failing
++                # silently (the old code's worst failure mode).
++                logger.error(
++                    "⚠️ تم توليد إشارة %s لكن فشل إرسالها إلى Telegram — لن تُحفظ الصفقة لتفادي حجب التكرار.",
++                    decision.get("decision"),
++                )
++                telegram.send_error_alert(
++                    f"Signal {decision.get('decision')} generated but Telegram delivery failed; "
++                    "trade NOT saved so the next run can retry."
++                )
++                return
++
+             trade_id = database.save_trade(decision)
+             decision["trade_id"] = trade_id
+             if decision.get("signal"):
+                 decision["signal"]["trade_id"] = trade_id
+-            telegram.send_signal(decision)
+-            logger.info("تم حفظ/إرسال الإشارة: %s", trade_id)
++            logger.info("تم إرسال الإشارة ثم حفظها: %s", trade_id)
+         else:
+             logger.info(
+                 "لا توجد إشارة مؤهلة حالياً. الأسباب/التحذيرات: %s",
+diff --git a/tests/test_duplicate_filter.py b/tests/test_duplicate_filter.py
+new file mode 100644
+index 0000000..2f3c8a4
+--- /dev/null
++++ b/tests/test_duplicate_filter.py
+@@ -0,0 +1,189 @@
++"""Tests for the redesigned, outcome-aware duplicate-signal filter in
++scripts/run_analysis.py (duplicate_signal_reason).
++
++Two separated concerns are covered:
++  1) open-position stacking protection (in-zone / any-price)
++  2) recently-closed, outcome-aware cooldown (loss > breakeven > win), same-zone only
++"""
++
++from __future__ import annotations
++
++from datetime import datetime, timedelta, timezone
++from typing import Any, Dict, List
++
++import scripts.run_analysis as ra
++
++
++class _FakeDB:
++    def __init__(self, open_trades: List[Dict[str, Any]] | None = None,
++                 recent_trades: List[Dict[str, Any]] | None = None):
++        self._open = open_trades or []
++        self._recent = recent_trades or []
++
++    def get_open_trades(self) -> List[Dict[str, Any]]:
++        return self._open
++
++    def get_recent_trades(self, limit: int = 20) -> List[Dict[str, Any]]:
++        return self._recent[:limit]
++
++
++def _now() -> datetime:
++    return datetime.now(timezone.utc)
++
++
++def _iso(dt: datetime) -> str:
++    return dt.replace(microsecond=0).isoformat()
++
++
++def _decision(direction: str = "SELL", price: float = 4130.0) -> Dict[str, Any]:
++    return {
++        "decision": direction,
++        "current_price": price,
++        "signal": {"entry": {"price": price}},
++    }
++
++
++# Standard config reflecting the new structure.
++CONFIG = {
++    "duplicate_signal_filter": {
++        "enabled": True,
++        "price_zone_points": 50,  # 50 points = 5.0 USD
++        "open_trade": {
++            "block_same_direction_in_zone": True,
++            "block_same_direction_any_price": False,
++        },
++        "cooldown": {
++            "lookback_hours": 6,
++            "after_loss_minutes": 90,
++            "after_breakeven_minutes": 45,
++            "after_win_minutes": 30,
++        },
++    }
++}
++
++
++# ── Disabled / non-directional ────────────────────────────────────────────
++def test_disabled_filter_allows_everything():
++    cfg = {"duplicate_signal_filter": {"enabled": False}}
++    db = _FakeDB(open_trades=[{"id": "x", "type": "SELL", "entry_price": 4130.0, "status": "OPEN"}])
++    assert ra.duplicate_signal_reason(_decision("SELL", 4130.0), db, cfg) is None
++
++
++def test_wait_decision_not_blocked():
++    db = _FakeDB()
++    assert ra.duplicate_signal_reason(_decision("WAIT", 4130.0), db, CONFIG) is None
++
++
++# ── 1) Open-position stacking protection ──────────────────────────────────
++def test_open_same_direction_in_zone_blocked():
++    db = _FakeDB(open_trades=[{"id": "t1", "type": "SELL", "entry_price": 4131.0, "status": "OPEN"}])
++    # 1.0 USD = 10 points away, within the 50-point zone -> blocked
++    reason = ra.duplicate_signal_reason(_decision("SELL", 4130.0), db, CONFIG)
++    assert reason and "open" in reason.lower()
++
++
++def test_open_same_direction_out_of_zone_allowed():
++    db = _FakeDB(open_trades=[{"id": "t1", "type": "SELL", "entry_price": 4145.0, "status": "OPEN"}])
++    # 15 USD = 150 points away, outside 50-point zone -> allowed
++    assert ra.duplicate_signal_reason(_decision("SELL", 4130.0), db, CONFIG) is None
++
++
++def test_open_opposite_direction_ignored():
++    db = _FakeDB(open_trades=[{"id": "t1", "type": "BUY", "entry_price": 4130.0, "status": "OPEN"}])
++    assert ra.duplicate_signal_reason(_decision("SELL", 4130.0), db, CONFIG) is None
++
++
++def test_open_any_price_blocks_even_far():
++    cfg = {
++        "duplicate_signal_filter": {
++            "enabled": True,
++            "price_zone_points": 50,
++            "open_trade": {"block_same_direction_any_price": True},
++        }
++    }
++    db = _FakeDB(open_trades=[{"id": "t1", "type": "SELL", "entry_price": 4200.0, "status": "OPEN"}])
++    reason = ra.duplicate_signal_reason(_decision("SELL", 4130.0), db, cfg)
++    assert reason and "one position per direction" in reason.lower()
++
++
++def test_side_field_recognized_as_direction():
++    db = _FakeDB(open_trades=[{"id": "t1", "side": "SELL", "entry_price": 4131.0, "status": "OPEN"}])
++    assert ra.duplicate_signal_reason(_decision("SELL", 4130.0), db, CONFIG) is not None
++
++
++# ── 2) Outcome-aware cooldown for closed trades (same zone) ────────────────
++def _closed(outcome_status: str, minutes_ago: float, price: float = 4131.0, result: str | None = None):
++    closed = _now() - timedelta(minutes=minutes_ago)
++    t = {
++        "id": f"c_{outcome_status}",
++        "type": "SELL",
++        "entry_price": price,
++        "status": outcome_status,
++        "created_at": _iso(closed - timedelta(minutes=30)),
++        "closed_at": _iso(closed),
++    }
++    if result:
++        t["result"] = result
++    return t
++
++
++def test_loss_cooldown_blocks_within_window():
++    # SL_HIT 60 min ago, same zone -> within 90-min loss cooldown -> blocked
++    db = _FakeDB(recent_trades=[_closed("SL_HIT", 60)])
++    reason = ra.duplicate_signal_reason(_decision("SELL", 4130.0), db, CONFIG)
++    assert reason and "LOSS" in reason
++
++
++def test_loss_cooldown_expires():
++    # SL_HIT 120 min ago -> past 90-min loss cooldown -> allowed
++    db = _FakeDB(recent_trades=[_closed("SL_HIT", 120)])
++    assert ra.duplicate_signal_reason(_decision("SELL", 4130.0), db, CONFIG) is None
++
++
++def test_win_cooldown_shorter_than_loss():
++    # TP2_HIT (WIN) 40 min ago -> past 30-min win cooldown -> allowed,
++    # even though a loss at the same age WOULD still be blocked.
++    db_win = _FakeDB(recent_trades=[_closed("TP2_HIT", 40)])
++    assert ra.duplicate_signal_reason(_decision("SELL", 4130.0), db_win, CONFIG) is None
++    db_loss = _FakeDB(recent_trades=[_closed("SL_HIT", 40)])
++    assert ra.duplicate_signal_reason(_decision("SELL", 4130.0), db_loss, CONFIG) is not None
++
++
++def test_breakeven_cooldown_medium():
++    # BE_HIT 30 min ago -> within 45-min breakeven cooldown -> blocked
++    db = _FakeDB(recent_trades=[_closed("BE_HIT", 30)])
++    reason = ra.duplicate_signal_reason(_decision("SELL", 4130.0), db, CONFIG)
++    assert reason and "BREAKEVEN" in reason
++
++
++def test_closed_out_of_zone_allowed_even_if_recent():
++    # Loss 10 min ago but 150 points away -> different setup -> allowed
++    db = _FakeDB(recent_trades=[_closed("SL_HIT", 10, price=4145.0)])
++    assert ra.duplicate_signal_reason(_decision("SELL", 4130.0), db, CONFIG) is None
++
++
++def test_closed_beyond_lookback_hours_ignored():
++    # Loss in zone but 7 hours ago -> beyond 6-hour lookback -> allowed
++    db = _FakeDB(recent_trades=[_closed("SL_HIT", 7 * 60)])
++    assert ra.duplicate_signal_reason(_decision("SELL", 4130.0), db, CONFIG) is None
++
++
++def test_result_field_used_when_status_ambiguous():
++    # status MANUAL_CLOSE but explicit result LOSS -> longest cooldown applies
++    db = _FakeDB(recent_trades=[_closed("MANUAL_CLOSE", 60, result="LOSS")])
++    reason = ra.duplicate_signal_reason(_decision("SELL", 4130.0), db, CONFIG)
++    assert reason and "LOSS" in reason
++
++
++# ── Backward compatibility with legacy keys ───────────────────────────────
++def test_legacy_keys_still_work():
++    legacy = {
++        "duplicate_signal_filter": {
++            "enabled": True,
++            "lookback_minutes": 90,
++            "same_direction_price_zone_points": 50,
++        }
++    }
++    # Open trade in zone should still block via legacy fallback defaults.
++    db = _FakeDB(open_trades=[{"id": "t1", "type": "SELL", "entry_price": 4131.0, "status": "OPEN"}])
++    assert ra.duplicate_signal_reason(_decision("SELL", 4130.0), db, legacy) is not None
+diff --git a/tests/test_signal_delivery.py b/tests/test_signal_delivery.py
+new file mode 100644
+index 0000000..1761524
+--- /dev/null
++++ b/tests/test_signal_delivery.py
+@@ -0,0 +1,162 @@
++"""Tests for the scheduled-signal delivery path in scripts/run_analysis.py.
++
++These guard the regression where signals only showed up on manual runs:
++a Telegram send failure must NOT result in a saved trade (which would then
++poison the duplicate filter and silently block every later scheduled run).
++"""
++
++from __future__ import annotations
++
++import asyncio
++from typing import Any, Dict, List
++from unittest.mock import MagicMock
++
++import pytest
++
++import scripts.run_analysis as ra
++
++
++class _FakeTelegram:
++    """Minimal Telegram stub recording what was sent."""
++
++    def __init__(self, *, signal_ok: bool = True, raise_on_signal: bool = False):
++        self.signal_ok = signal_ok
++        self.raise_on_signal = raise_on_signal
++        self.signals_sent: List[Dict[str, Any]] = []
++        self.errors: List[str] = []
++
++    def send_signal(self, decision: Dict[str, Any]) -> bool:
++        if self.raise_on_signal:
++            raise RuntimeError("network down")
++        self.signals_sent.append(decision)
++        return self.signal_ok
++
++    def send_error_alert(self, message: str) -> bool:
++        self.errors.append(message)
++        return True
++
++    def send_message(self, *a, **k) -> bool:
++        return True
++
++
++def _build_decision() -> Dict[str, Any]:
++    return {
++        "decision": "SELL",
++        "confidence": 74,
++        "current_price": 4130.14,
++        "signal": {
++            "type": "SELL",
++            "entry": {"price": 4130.14, "low": 4129.49, "high": 4130.79},
++            "stop_loss": 4150.14,
++            "tp1": 4103.47,
++            "tp2": 4083.47,
++        },
++    }
++
++
++def _patch_common(monkeypatch, telegram, database):
++    """Patch run_analysis dependencies so we can exercise only the send/save path."""
++    config = {
++        "risk_settings": {"max_daily_signals": 50, "max_open_trades": 50},
++        "duplicate_signal_filter": {"enabled": False},
++        "trading_hours": {"enabled": False},
++        "ai_service": {"enabled": False},
++        "trading_mode": "paper",
++        "paper_trading": {"enabled": True},
++        "operation_mode": "observation",
++        "groq_observation_mode": {"enabled": True, "allow_single_agent_context": True},
++    }
++    monkeypatch.setattr(ra, "load_config", lambda: config)
++    monkeypatch.setattr(ra, "TelegramService", lambda *_a, **_k: telegram)
++    monkeypatch.setattr(ra, "DatabaseService", lambda *_a, **_k: database)
++
++    # Force trading allowed so we reach the decision/send block.
++    fake_session = MagicMock()
++    fake_session.check.return_value = {"trading_allowed": True, "current_session": "Test", "session_quality": "HIGH"}
++    monkeypatch.setattr(ra, "TradingSessionAgent", lambda *_a, **_k: fake_session)
++
++    # Market data present.
++    fake_md = MagicMock()
++    fake_md.get_gold_data.return_value = {
++        "current_price": 4130.14,
++        "source": "twelve_data",
++        "timeframes": {},
++        "data": [],
++    }
++    monkeypatch.setattr(ra, "MarketDataService", lambda *_a, **_k: fake_md)
++
++    # No AI service init.
++    monkeypatch.setattr(ra, "get_ai_service", lambda *_a, **_k: None)
++    monkeypatch.setattr(ra, "get_learning_service", lambda *_a, **_k: None)
++
++    # Stub the analysis agents (run_agent just returns WAIT-ish dicts).
++    monkeypatch.setattr(ra, "run_agent", lambda name, agent, data: {"agent": name, "signal": "WAIT", "confidence": 0})
++    for agent_name in (
++        "TechnicalAgent", "ClassicalAgent", "SMCAgent", "PriceActionAgent",
++        "MultiTimeframeAgent", "NewsRiskAgent", "RiskManagementAgent", "DailyBiasAgent",
++    ):
++        monkeypatch.setattr(ra, agent_name, lambda *_a, **_k: MagicMock(), raising=False)
++
++    monkeypatch.setattr(ra, "RiskManagementAgent", lambda *_a, **_k: MagicMock(evaluate=lambda r: {}))
++    monkeypatch.setattr(ra, "DynamicRiskManager", lambda *_a, **_k: MagicMock(evaluate=lambda db: {}))
++    monkeypatch.setattr(ra, "should_block_signal", lambda *_a, **_k: None)
++
++    # DecisionAgent returns our prebuilt SELL decision.
++    decision = _build_decision()
++
++    class _FakeDecisionAgent:
++        def __init__(self, *_a, **_k):
++            pass
++
++        async def decide_async(self, _all_results):
++            return dict(decision)
++
++    monkeypatch.setattr(ra, "DecisionAgent", _FakeDecisionAgent)
++    return config
++
++
++def _make_db():
++    db = MagicMock()
++    db.get_open_trades.return_value = []
++    db.get_today_signals_count.return_value = 0
++    db.get_consecutive_losses.return_value = 0
++    db.get_recent_trades.return_value = []
++    db.get_active_memory_rules.return_value = []
++    db.save_trade.return_value = "TRADE_TEST_123"
++    return db
++
++
++def test_failed_telegram_delivery_does_not_save_trade(monkeypatch):
++    """If Telegram delivery fails, the trade must NOT be persisted."""
++    telegram = _FakeTelegram(signal_ok=False)
++    database = _make_db()
++    _patch_common(monkeypatch, telegram, database)
++
++    asyncio.run(ra.run_analysis_async())
++
++    database.save_trade.assert_not_called()
++    assert telegram.errors, "An error alert should be sent when delivery fails"
++
++
++def test_telegram_exception_does_not_save_trade(monkeypatch):
++    """If Telegram raises, the trade must NOT be persisted either."""
++    telegram = _FakeTelegram(raise_on_signal=True)
++    database = _make_db()
++    _patch_common(monkeypatch, telegram, database)
++
++    asyncio.run(ra.run_analysis_async())
++
++    database.save_trade.assert_not_called()
++    assert telegram.errors
++
++
++def test_successful_delivery_saves_trade(monkeypatch):
++    """Happy path: signal delivered, then trade saved exactly once."""
++    telegram = _FakeTelegram(signal_ok=True)
++    database = _make_db()
++    _patch_common(monkeypatch, telegram, database)
++
++    asyncio.run(ra.run_analysis_async())
++
++    assert len(telegram.signals_sent) == 1
++    database.save_trade.assert_called_once()
