@@ -31,8 +31,187 @@ index 8de64cf..391e5d8 100644
  
  on:
    schedule:
+diff --git a/agents/decision_agent.py b/agents/decision_agent.py
+index 519cfbd..8ee342e 100644
+--- a/agents/decision_agent.py
++++ b/agents/decision_agent.py
+@@ -986,18 +986,31 @@ Move conflicting evidence into opposing_evidence, or set final_signal = WAIT.
+             tp2_price = tp2.get('price', 0)
+             rr_ratio = tp2.get('rr_ratio', tp1.get('rr_ratio', 0))
+ 
++            # Prefer the smart order classification computed by the risk agent
++            # (level/SMC aware). Fall back to the local price-vs-entry heuristic.
++            order_type = entry_info.get('order_type') or self._order_type(final_signal, float(entry_price or 0), current_price)
++            entry_kind = entry_info.get('kind') or ('MARKET' if order_type.endswith('MARKET') else order_type.split('_')[-1])
++
+             signal_payload = {
+                 'type': final_signal,
+                 'entry': {
+                     'price': entry_price,
+                     'low': entry_zone.get('low', entry_price),
+                     'high': entry_zone.get('high', entry_price),
++                    'kind': entry_kind,
++                    'order_type': order_type,
++                    'basis': entry_info.get('basis', ''),
++                    'current_price': entry_info.get('current_price', current_price),
++                    'distance_points': entry_info.get('distance_points', 0.0),
+                 },
+                 'stop_loss': stop_loss,
+                 'tp1': tp1_price,
+                 'tp2': tp2_price,
++                'tp1_rr': tp1.get('rr_ratio', 0),
++                'tp2_rr': tp2.get('rr_ratio', 0),
+                 'rr_ratio': rr_ratio,
+-                'order_type': self._order_type(final_signal, float(entry_price or 0), current_price),
++                'order_type': order_type,
++                'entry_kind': entry_kind,
+                 'position_size': risk.get('position_size', {}),
+                 'risk_summary': risk.get('summary', ''),
+             }
+diff --git a/agents/risk_management_agent.py b/agents/risk_management_agent.py
+index a631102..49651c9 100644
+--- a/agents/risk_management_agent.py
++++ b/agents/risk_management_agent.py
+@@ -36,7 +36,9 @@ class RiskManagementAgent(BaseAgent):
+             smc_suggestion = results.get("smc", {}).get("entry_suggestion", {}) or {}
+             portfolio = results.get("portfolio", {}) or {}
+ 
+-            entry_price = self._entry_price(direction, current_price, smc_suggestion)
++            entry_price, entry_kind, entry_basis = self._smart_entry(
++                direction, current_price, atr, smc_suggestion, support_levels, resistance_levels
++            )
+             stop_loss, sl_method, buffer = self._stop_loss(direction, entry_price, atr, support_levels, resistance_levels, smc_suggestion, results)
+             tp1, tp2, tp3, target_method = self._take_profits(direction, entry_price, atr, support_levels, resistance_levels)
+ 
+@@ -117,6 +119,16 @@ class RiskManagementAgent(BaseAgent):
+                         "low": round(entry_price - max(0.20, atr * 0.07), 2),
+                         "high": round(entry_price + max(0.20, atr * 0.07), 2),
+                     },
++                    # Smart execution metadata (see _smart_entry / _classify_order):
++                    #   kind        -> MARKET / LIMIT / STOP (human concept)
++                    #   order_type  -> BUY_MARKET / SELL_LIMIT / ... (broker style)
++                    #   basis       -> short text explaining the entry choice
++                    #   current_price -> market price at evaluation time
++                    "kind": entry_kind,
++                    "order_type": self._classify_order(direction, entry_price, current_price),
++                    "basis": entry_basis,
++                    "current_price": round(current_price, 2),
++                    "distance_points": abs(calculate_pips(current_price, entry_price, direction)) if entry_price != current_price else 0.0,
+                 },
+                 "stop_loss": {
+                     "price": round(stop_loss, 2),
+@@ -253,12 +265,106 @@ class RiskManagementAgent(BaseAgent):
+         resistances = sorted({round(x, 2) for x in resistances if x > current_price})
+         return supports, resistances
+ 
+-    def _entry_price(self, direction: str, current_price: float, smc_suggestion: Dict[str, Any]) -> float:
++    def _classify_order(self, direction: str, entry: float, current_price: float | None) -> str:
++        """Broker-style order classification from entry vs current price.
++
++        BUY  below price -> BUY_LIMIT ; above price -> BUY_STOP
++        SELL above price -> SELL_LIMIT; below price -> SELL_STOP
++        within threshold  -> *_MARKET
++        """
++        try:
++            entry = float(entry)
++            current = float(current_price if current_price is not None else entry)
++        except (TypeError, ValueError):
++            return f"{direction}_MARKET"
++        threshold = self._f(self.config.get("order_execution", {}).get("pending_threshold_points", 1.0), 1.0) / 10.0
++        if abs(entry - current) <= max(threshold, 0.01):
++            return f"{direction}_MARKET"
++        if direction == "BUY":
++            return "BUY_LIMIT" if entry < current else "BUY_STOP"
++        if direction == "SELL":
++            return "SELL_LIMIT" if entry > current else "SELL_STOP"
++        return f"{direction}_MARKET"
++
++    def _smart_entry(
++        self,
++        direction: str,
++        current_price: float,
++        atr: float,
++        smc_suggestion: Dict[str, Any],
++        support_levels: List[float],
++        resistance_levels: List[float],
++    ) -> Tuple[float, str, str]:
++        """Decide a smart entry and return (entry_price, kind, basis).
++
++        kind is one of MARKET / LIMIT / STOP.
++
++        Logic (config: order_execution.smart_entry):
++          1) If SMC gives a valid same-direction entry near price, use it
++             (LIMIT pullback or STOP breakout depending on side).
++          2) Otherwise, if a relevant level (support for BUY, resistance for
++             SELL) sits a sensible pullback away (between min and max points),
++             propose a LIMIT entry there.
++          3) Otherwise fall back to immediate MARKET entry at current price.
++        """
++        se = self.config.get("order_execution", {}).get("smart_entry", {}) or {}
++        enabled = bool(se.get("enabled", True))
++
++        # 1) SMC suggestion takes priority when present and reasonable.
+         smc_type = str(smc_suggestion.get("type", "")).upper()
+         smc_entry = self._f(smc_suggestion.get("entry"), 0.0)
+         if smc_type == direction and smc_entry > 0 and abs(smc_entry - current_price) <= max(current_price * 0.01, 20):
+-            return smc_entry
+-        return current_price
++            kind = "MARKET" if abs(smc_entry - current_price) <= max(0.10, atr * 0.05) else "LIMIT"
++            if kind == "LIMIT":
++                # A pullback into SMC zone is a LIMIT; a break beyond is a STOP.
++                if (direction == "BUY" and smc_entry > current_price) or (direction == "SELL" and smc_entry < current_price):
++                    kind = "STOP"
++            return round(smc_entry, 2), kind, "SMC order block / zone"
++
++        if not enabled:
++            return round(current_price, 2), "MARKET", "Immediate market entry"
++
++        # 2) Level-based pullback LIMIT.
++        # Pullback distance must be meaningful but not too far to be unrealistic.
++        min_pts = self._f(se.get("min_pullback_points", 8), 8) / 10.0    # USD
++        max_pts = self._f(se.get("max_pullback_points", 35), 35) / 10.0  # USD
++        atr_frac = self._f(se.get("atr_fraction", 0.25), 0.25)
++        # Preferred pullback size from ATR, clamped to [min, max].
++        desired = min(max(atr * atr_frac, min_pts), max_pts) if atr > 0 else min_pts
++
++        # Prefer a LIMIT only when a *real* structural level (support for BUY,
++        # resistance for SELL) sits a sensible pullback away. If price is already
++        # at/through a good level (no level within the pullback band), enter at
++        # MARKET. This keeps the Market/Limit choice genuinely meaningful.
++        allow_synthetic = bool(se.get("allow_synthetic_pullback", False))
++        candidate: float | None = None
++        basis = ""
++        if direction == "BUY":
++            belows = [s for s in support_levels if 0 < s < current_price]
++            for lvl in sorted(belows, reverse=True):  # nearest first
++                dist = current_price - lvl
++                if min_pts <= dist <= max_pts:
++                    candidate, basis = lvl, "Limit buy at nearest support"
++                    break
++            if candidate is None and allow_synthetic and desired >= min_pts:
++                candidate, basis = current_price - desired, "Limit buy on shallow pullback"
++        elif direction == "SELL":
++            aboves = [r for r in resistance_levels if r > current_price]
++            for lvl in sorted(aboves):  # nearest first
++                dist = lvl - current_price
++                if min_pts <= dist <= max_pts:
++                    candidate, basis = lvl, "Limit sell at nearest resistance"
++                    break
++            if candidate is None and allow_synthetic and desired >= min_pts:
++                candidate, basis = current_price + desired, "Limit sell on shallow bounce"
++
++        if candidate is not None and candidate > 0:
++            is_pullback = (direction == "BUY" and candidate < current_price) or (direction == "SELL" and candidate > current_price)
++            if is_pullback:
++                return round(candidate, 2), "LIMIT", basis
++
++        # 3) No suitable pullback level -> immediate MARKET entry.
++        return round(current_price, 2), "MARKET", "Immediate market entry (no pullback level nearby)"
+ 
+     def _stop_loss(
+         self,
 diff --git a/config.json b/config.json
-index 0dbf32b..3b87792 100644
+index 0dbf32b..fb9d6e2 100644
 --- a/config.json
 +++ b/config.json
 @@ -272,16 +272,27 @@
@@ -70,7 +249,23 @@ index 0dbf32b..3b87792 100644
    },
    "quality_score": {
      "enabled": true,
-@@ -406,4 +417,4 @@
+@@ -379,7 +390,14 @@
+       "BUY_STOP",
+       "SELL_STOP"
+     ],
+-    "description": "Paper order classification only: market, limit, or stop based on entry vs current price."
++    "description": "Paper order classification only: market, limit, or stop based on entry vs current price.",
++    "smart_entry": {
++      "enabled": true,
++      "min_pullback_points": 60,
++      "max_pullback_points": 350,
++      "atr_fraction": 0.5,
++      "description": "دخول ذكي مُعاير لحركة الذهب (1 نقطة = 0.10$، أي 1$ = 10 نقاط): إذا كان هناك دعم (للشراء)/مقاومة (للبيع) ضمن مسافة ارتداد بين min و max نقطة يُقترح أمر Limit عنده؛ وإلا أمر Market فوري. النطاق الافتراضي 60–350 نقطة (6$–35$): 60 نقطة = ارتداد قريب، و200–350 نقطة = المتوسط الطبيعي لتحرك الذهب. atr_fraction يحدد حجم الارتداد المفضّل نسبةً إلى ATR (يُستخدم فقط مع allow_synthetic_pullback)."
++    }
+   },
+   "operation_mode": "observation",
+   "operation_modes": {
+@@ -406,4 +424,4 @@
      "storage_path": "storage/weekly_report.json",
      "timezone": "Asia/Hebron"
    }
@@ -78,7 +273,7 @@ index 0dbf32b..3b87792 100644
 \ No newline at end of file
 +}
 diff --git a/scripts/run_analysis.py b/scripts/run_analysis.py
-index 91018f3..eeb0269 100644
+index 91018f3..d6908cd 100644
 --- a/scripts/run_analysis.py
 +++ b/scripts/run_analysis.py
 @@ -53,13 +53,18 @@ def synthetic_timeframe_sources(data: Dict[str, Any]) -> list[str]:
@@ -393,7 +588,7 @@ index 91018f3..eeb0269 100644
              return
  
          # Safety: never send production signals from synthetic/demo prices on GitHub Actions.
-@@ -452,12 +570,52 @@ async def run_analysis_async() -> None:
+@@ -452,12 +570,56 @@ async def run_analysis_async() -> None:
                      )
                  return
  
@@ -411,7 +606,11 @@ index 91018f3..eeb0269 100644
 +            # Fix: send the Telegram signal FIRST. Only persist the trade if the
 +            # signal was actually delivered, so a failed delivery does not poison
 +            # the duplicate filter and the next scheduled run can retry cleanly.
-+            trade_id = f"PENDING_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
++            #
++            # Mint the REAL trade id up-front (same format save_trade uses) so the
++            # id shown in the Telegram message is final — never a 'PENDING_...'
++            # placeholder. save_trade() reuses this exact id when persisting.
++            trade_id = database.new_trade_id()
 +            decision["trade_id"] = trade_id
 +            if decision.get("signal"):
 +                decision["signal"]["trade_id"] = trade_id
@@ -448,11 +647,95 @@ index 91018f3..eeb0269 100644
          else:
              logger.info(
                  "لا توجد إشارة مؤهلة حالياً. الأسباب/التحذيرات: %s",
+diff --git a/services/database.py b/services/database.py
+index f8f241f..e84188b 100644
+--- a/services/database.py
++++ b/services/database.py
+@@ -74,9 +74,27 @@ class DatabaseService:
+             return False
+         return bool(self.config.get("github_actions", {}).get("require_supabase", False))
+ 
++    @staticmethod
++    def new_trade_id() -> str:
++        """Generate a canonical trade id.
++
++        Exposed so callers (e.g. run_analysis) can mint the *real* id BEFORE the
++        Telegram message is sent, instead of showing a temporary 'PENDING_...'
++        placeholder and only assigning the real id at save time.
++        """
++        return f"TRADE_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}_{uuid.uuid4().hex[:8]}"
++
+     def save_trade(self, decision: Dict[str, Any]) -> str:
+         """Save a new trade from a decision dictionary."""
+-        trade_id = f"TRADE_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}_{uuid.uuid4().hex[:8]}"
++        # Reuse a pre-assigned id (set by the caller before sending Telegram) so
++        # the id shown in the signal message matches the stored trade exactly.
++        trade_id = (
++            decision.get("trade_id")
++            or (decision.get("signal", {}) or {}).get("trade_id")
++            or self.new_trade_id()
++        )
++        if str(trade_id).startswith("PENDING_") or not str(trade_id).startswith("TRADE_"):
++            trade_id = self.new_trade_id()
+         signal = decision.get("signal", {})
+         entry = signal.get("entry", {})
+         entry_price = float(entry.get("price") or ((float(entry.get("low", 0)) + float(entry.get("high", 0))) / 2) or 0)
 diff --git a/services/telegram_bot.py b/services/telegram_bot.py
-index 09910fd..82a63ba 100644
+index 09910fd..51d938f 100644
 --- a/services/telegram_bot.py
 +++ b/services/telegram_bot.py
-@@ -165,14 +165,14 @@ class TelegramService:
+@@ -115,9 +115,24 @@ class TelegramService:
+         entry = signal.get("entry", {}) or {}
+         entry_low = entry.get("low", entry.get("price", 0))
+         entry_high = entry.get("high", entry.get("price", 0))
++        entry_price = entry.get("price", 0)
+         current_price = decision.get("current_price", signal.get("current_price", entry.get("price", 0)))
+         ai = decision.get("ai", {}) or {}
+ 
++        # ── Smart entry execution (MARKET / LIMIT / STOP) ──────────────────
++        order_type = str(signal.get("order_type", entry.get("order_type", f"{trade_type}_MARKET"))).upper()
++        entry_kind = str(signal.get("entry_kind", entry.get("kind", "")) or "").upper()
++        if not entry_kind:
++            entry_kind = "MARKET" if order_type.endswith("MARKET") else order_type.split("_")[-1]
++        entry_basis = self._clean_ai_field(entry.get("basis"))
++        entry_dist = entry.get("distance_points") or 0
++        # Human label + emoji for the order kind.
++        kind_label = {
++            "MARKET": "⚡ Market (immediate)",
++            "LIMIT": "🎯 Limit (pullback)",
++            "STOP": "🚀 Stop (breakout)",
++        }.get(entry_kind, "⚡ Market (immediate)")
++
+         # ── Header: time · session · run source ────────────────────────────
+         header_bits: List[str] = [self._now_text()]
+         session_info = decision.get("session_info", {}) or {}
+@@ -147,17 +162,16 @@ class TelegramService:
+             snapshot_bits.append(f"Quality {html.escape(str(quality.get('grade')))} ({float(quality.get('score', 0)):.0f}%)")
+         snapshot_line = " · ".join(snapshot_bits)
+ 
+-        # ── Targets with per-TP R:R (read from the real risk payload) ───────
+-        tp = ((decision.get("risk", {}) or {}).get("take_profit", {}) or {})
+-        tp1_rr = (tp.get("tp1", {}) or {}).get("rr_ratio")
+-        tp2_rr = (tp.get("tp2", {}) or {}).get("rr_ratio")
+-        if tp1_rr is None and tp2_rr is None:
+-            tp2_rr = signal.get("rr_ratio")
++        # ── Targets: one line per TP, no R:R (per user preference) ──────────
+         sl_points = (((decision.get("risk", {}) or {}).get("stop_loss", {}) or {}).get("distance_points"))
+         sl_suffix = f"  ({float(sl_points):.0f} pts)" if sl_points else ""
+-        tp1_txt = self._tp_text(signal.get("tp1"), "TP1", tp1_rr)
+-        tp2_txt = self._tp_text(signal.get("tp2"), "TP2", tp2_rr)
+-        tp_line = " · ".join(t for t in (tp1_txt, tp2_txt) if t) or "—"
++        tp_lines = []
++        for label, key in (("TP1", "tp1"), ("TP2", "tp2")):
++            price = signal.get(key)
++            if price in (None, 0, "", "0"):
++                continue
++            tp_lines.append(f"• <b>{label}:</b> {format_price(price)}")
++        tp_block = "\n".join(tp_lines) if tp_lines else "• —"
+ 
+         # ── Agent votes table (all five + Groq final gate) ─────────────────
+         votes_block = self._format_agent_votes(decision, ai, trade_type, confidence)
+@@ -165,14 +179,14 @@ class TelegramService:
          # ── WHY THIS TRADE — single merged, de-duplicated rationale ────────
          why_block = self._format_why_this_trade(decision, ai)
  
@@ -470,7 +753,7 @@ index 09910fd..82a63ba 100644
          # Dynamic risk: only surface when it actually changes behaviour.
          # (Daily bias is already covered inside WHY THIS TRADE when it agrees,
          #  and as a counter-trend warning here only when it opposes the trade.)
-@@ -181,12 +181,16 @@ class TelegramService:
+@@ -181,12 +195,16 @@ class TelegramService:
          direction = str(decision.get("decision", "")).upper()
          opposes = (bias == "BULLISH" and direction == "SELL") or (bias == "BEARISH" and direction == "BUY")
          if opposes and daily_bias.get("confidence"):
@@ -490,7 +773,7 @@ index 09910fd..82a63ba 100644
  
          # ── Footer ─────────────────────────────────────────────────────────
          trading_mode = str(decision.get("trading_mode", signal.get("trading_mode", "paper"))).lower()
-@@ -201,25 +205,37 @@ class TelegramService:
+@@ -201,25 +219,48 @@ class TelegramService:
              rule_text = "Groq final gate"
          trade_id = decision.get("trade_id", signal.get("trade_id", "not saved yet"))
  
@@ -520,10 +803,21 @@ index 09910fd..82a63ba 100644
 +            f"🕒 {html.escape(header_line)}",
 +            f"📈 {snapshot_line}",
 +            thin,
-+            "🎯 <b>TRADE PLAN</b>\n"
-+            f"• <b>Entry zone:</b>  {format_price(entry_low)} – {format_price(entry_high)}\n"
-+            f"• <b>Stop loss:</b>   {format_price(signal.get('stop_loss'))}{sl_suffix}\n"
-+            f"• <b>Take profit:</b> {tp_line}",
++            self._format_trade_plan(
++                trade_type=trade_type,
++                entry_kind=entry_kind,
++                kind_label=kind_label,
++                order_type=order_type,
++                entry_price=entry_price,
++                entry_low=entry_low,
++                entry_high=entry_high,
++                current_price=current_price,
++                entry_basis=entry_basis,
++                entry_dist=entry_dist,
++                stop_loss=signal.get("stop_loss"),
++                sl_suffix=sl_suffix,
++                tp_block=tp_block,
++            ),
 +            thin,
 +            votes_block,
 +            thin,
@@ -545,7 +839,64 @@ index 09910fd..82a63ba 100644
      # ------------------------------------------------------------------ #
      # send_signal helpers
      # ------------------------------------------------------------------ #
-@@ -261,20 +277,29 @@ class TelegramService:
+@@ -235,6 +276,56 @@ class TelegramService:
+         rr_suffix = f", R:R {rr_val:.2f}" if rr_val else ""
+         return f"{format_price(price)} ({label}{rr_suffix})"
+ 
++    def _format_trade_plan(
++        self,
++        *,
++        trade_type: str,
++        entry_kind: str,
++        kind_label: str,
++        order_type: str,
++        entry_price: Any,
++        entry_low: Any,
++        entry_high: Any,
++        current_price: Any,
++        entry_basis: str,
++        entry_dist: Any,
++        stop_loss: Any,
++        sl_suffix: str,
++        tp_block: str,
++    ) -> str:
++        """Render the TRADE PLAN section with smart entry execution.
++
++        For a MARKET order: show the immediate entry zone.
++        For a LIMIT/STOP order: show the pending entry price AND the current
++        market price, so the user knows it is a resting (pullback/breakout)
++        order rather than an immediate fill.
++        """
++        try:
++            dist_txt = f"  ({float(entry_dist):.0f} pts away)" if float(entry_dist or 0) > 0 else ""
++        except (TypeError, ValueError):
++            dist_txt = ""
++
++        lines = ["🎯 <b>TRADE PLAN</b>"]
++        # Order-type line, broker-style label too.
++        ot_pretty = order_type.replace("_", " ").title()
++        lines.append(f"• <b>Order:</b> {kind_label} — <code>{html.escape(ot_pretty)}</code>")
++
++        if entry_kind == "MARKET":
++            lines.append(f"• <b>Entry zone:</b> {format_price(entry_low)} – {format_price(entry_high)}")
++        else:
++            # Pending order: show target entry + live market reference.
++            lines.append(f"• <b>Entry @</b> {format_price(entry_price)}{dist_txt}")
++            lines.append(f"• <b>Market now:</b> {format_price(current_price)}")
++            if entry_basis:
++                lines.append(f"   <i>{entry_basis}</i>")
++
++        lines.append(f"• <b>Stop loss:</b> {format_price(stop_loss)}{sl_suffix}")
++        lines.append("• <b>Take profit:</b>")
++        # tp_block already has its own bullet lines; indent them under the header.
++        for tl in tp_block.split("\n"):
++            lines.append(f"  {tl}")
++        return "\n".join(lines)
++
+     @staticmethod
+     def _clean_ai_field(value: Any) -> str:
+         """Return a one-line, escaped AI field, or '' for empty/placeholder text."""
+@@ -261,20 +352,29 @@ class TelegramService:
                  if name:
                      per_agent[name] = (side, v.get("confidence"))
  
@@ -581,7 +932,7 @@ index 09910fd..82a63ba 100644
          return "\n".join(lines)
  
      def _format_why_this_trade(self, decision: Dict[str, Any], ai: Dict[str, Any]) -> str:
-@@ -344,9 +369,9 @@ class TelegramService:
+@@ -344,9 +444,9 @@ class TelegramService:
                  break
  
          if not merged:
@@ -1078,3 +1429,189 @@ index 0000000..d199c47
 +    decision["ai"] = {"available": True, "signal": "BUY", "confidence": 70}
 +    text = _capture_signal(decision)
 +    assert "SIGNAL — BUY" in text and "🟢" in text
+diff --git a/tests/test_smart_entry_and_id.py b/tests/test_smart_entry_and_id.py
+new file mode 100644
+index 0000000..3dff6b9
+--- /dev/null
++++ b/tests/test_smart_entry_and_id.py
+@@ -0,0 +1,180 @@
++"""Tests for:
++  * smart entry classification (MARKET / LIMIT / STOP) in RiskManagementAgent
++  * the Telegram TRADE PLAN rendering of order type + per-line TPs (no R:R)
++  * the real trade-id (no 'PENDING_' placeholder) flow in the DB layer
++"""
++
++from __future__ import annotations
++
++import re
++from typing import Any, Dict
++
++from agents.risk_management_agent import RiskManagementAgent
++from services.database import DatabaseService
++from services.telegram_bot import TelegramService
++
++
++def _base_buy_results() -> Dict[str, Any]:
++    return {
++        "current_price": 2350.0,
++        "spread_points": 2.0,
++        "technical": {"signal": "BUY", "confidence": 70},
++        "classical": {"signal": "BUY", "confidence": 65},
++        "smc": {"signal": "BUY", "confidence": 60, "entry_suggestion": {}},
++        "price_action": {"signal": "BUY", "confidence": 62},
++        "multitimeframe": {"signal": "BUY", "confidence": 64},
++        "atr": 8.0,
++        "portfolio": {"open_trades_count": 0, "today_signals_count": 0, "consecutive_losses": 0},
++    }
++
++
++_CFG = {
++    "risk_settings": {"min_rr_ratio": 1.0, "max_open_trades": 3, "min_sl_distance_points": 200,
++                      "atr_multiplier_sl": 1.5, "atr_multiplier_tp1": 2.0, "atr_multiplier_tp2": 3.5,
++                      "max_rr_ratio": 4.0},
++    "filters": {"min_atr_for_entry": 1.0, "max_spread_points": 5, "max_consecutive_losses": 3},
++    # Gold-calibrated band: 1 point = 0.10$ -> 60..350 points = 6$..35$.
++    "order_execution": {"pending_threshold_points": 1.0,
++                        "smart_entry": {"enabled": True, "min_pullback_points": 60,
++                                        "max_pullback_points": 350, "atr_fraction": 0.5}},
++}
++
++
++# ── Smart entry classification ─────────────────────────────────────────────
++def test_market_when_no_level_nearby():
++    e = RiskManagementAgent(_CFG).evaluate(_base_buy_results()).get("entry", {})
++    assert e.get("kind") == "MARKET"
++    assert e.get("order_type") == "BUY_MARKET"
++
++
++def test_limit_at_support_within_band():
++    results = _base_buy_results()
++    # Support 15$ below price = 150 points -> inside the 60..350 gold band.
++    results["technical"] = {"signal": "BUY", "confidence": 70, "key_levels": {"nearest_support": 2335.0}}
++    e = RiskManagementAgent(_CFG).evaluate(results).get("entry", {})
++    assert e.get("kind") == "LIMIT"
++    assert e.get("order_type") == "BUY_LIMIT"
++    assert abs(float(e.get("price")) - 2335.0) < 0.01
++
++
++def test_market_when_level_too_close():
++    results = _base_buy_results()
++    # Support only 2$ (20 points) away -> below the 60-point minimum -> MARKET.
++    results["technical"] = {"signal": "BUY", "confidence": 70, "key_levels": {"nearest_support": 2348.0}}
++    e = RiskManagementAgent(_CFG).evaluate(results).get("entry", {})
++    assert e.get("kind") == "MARKET"
++
++
++def test_market_when_level_too_far():
++    results = _base_buy_results()
++    # Support 50$ (500 points) away -> beyond the 350-point maximum -> MARKET.
++    results["technical"] = {"signal": "BUY", "confidence": 70, "key_levels": {"nearest_support": 2300.0}}
++    e = RiskManagementAgent(_CFG).evaluate(results).get("entry", {})
++    assert e.get("kind") == "MARKET"
++
++
++def test_sell_limit_at_resistance():
++    results = {
++        "current_price": 4124.82, "spread_points": 2.0,
++        # Resistance ~15$ (150 points) above price -> inside the band.
++        "technical": {"signal": "SELL", "confidence": 70, "key_levels": {"nearest_resistance": 4140.0}},
++        "classical": {"signal": "SELL", "confidence": 65},
++        "smc": {"signal": "SELL", "confidence": 60, "entry_suggestion": {}},
++        "price_action": {"signal": "SELL", "confidence": 62},
++        "multitimeframe": {"signal": "SELL", "confidence": 64},
++        "atr": 18.0,
++        "portfolio": {"open_trades_count": 0, "today_signals_count": 0, "consecutive_losses": 0},
++    }
++    e = RiskManagementAgent(_CFG).evaluate(results).get("entry", {})
++    assert e.get("kind") == "LIMIT"
++    assert e.get("order_type") == "SELL_LIMIT"
++    assert float(e.get("price")) > 4124.82  # resting above market
++
++
++# ── Telegram TRADE PLAN rendering ──────────────────────────────────────────
++def _render(decision: Dict[str, Any]) -> str:
++    svc = TelegramService({"telegram": {"bot_token": None, "chat_id": None}})
++    cap: Dict[str, str] = {}
++    svc.send_message = lambda text, urgent=False, **k: cap.__setitem__("t", text) or True  # type: ignore
++    svc.send_signal(decision)
++    return re.sub(r"</?(b|i|code)>", "", cap["t"])
++
++
++def _market_decision() -> Dict[str, Any]:
++    return {
++        "decision": "SELL", "confidence": 64, "current_price": 4124.82,
++        "signal": {"type": "SELL",
++                   "entry": {"low": 4124.19, "high": 4125.45, "price": 4124.82,
++                             "kind": "MARKET", "order_type": "SELL_MARKET",
++                             "basis": "Immediate market entry", "current_price": 4124.82,
++                             "distance_points": 0.0},
++                   "stop_loss": 4144.82, "tp1": 4098.15, "tp2": 4078.15,
++                   "order_type": "SELL_MARKET", "entry_kind": "MARKET"},
++        "risk": {"stop_loss": {"distance_points": 200}},
++        "ai": {"available": True, "signal": "SELL", "confidence": 64},
++        "votes": {"SELL": [{"agent": "multitimeframe", "confidence": 64}], "WAIT": []},
++        "trade_id": "TRADE_20260623_120035_123456_abcd1234",
++    }
++
++
++def test_market_plan_shows_market_and_zone():
++    text = _render(_market_decision())
++    assert "Market (immediate)" in text
++    assert "Sell Market" in text
++    assert "Entry zone:" in text
++
++
++def test_limit_plan_shows_entry_and_market_now():
++    d = _market_decision()
++    d["signal"]["entry"].update({"kind": "LIMIT", "order_type": "SELL_LIMIT", "price": 4130.0,
++                                 "basis": "Limit sell at nearest resistance", "distance_points": 52.0})
++    d["signal"]["order_type"] = "SELL_LIMIT"
++    d["signal"]["entry_kind"] = "LIMIT"
++    text = _render(d)
++    assert "Limit (pullback)" in text
++    assert "Entry @ 4130.00" in text
++    assert "Market now: 4124.82" in text
++
++
++def test_tps_on_separate_lines_without_rr():
++    text = _render(_market_decision())
++    lines = [l.strip() for l in text.split("\n")]
++    assert "• TP1: 4098.15" in lines
++    assert "• TP2: 4078.15" in lines
++    # No R:R anywhere in the message anymore.
++    assert "R:R" not in text
++
++
++def test_no_pending_placeholder_in_id_when_real_id_given():
++    text = _render(_market_decision())
++    assert "PENDING_" not in text
++    assert "TRADE_20260623" in text
++
++
++# ── DB id reuse (no PENDING in stored id) ──────────────────────────────────
++def test_save_trade_reuses_real_id(tmp_path):
++    cfg = {"database": {"provider": "local", "local_fallback_file": str(tmp_path / "trades.json")}}
++    db = DatabaseService(cfg)
++    real_id = db.new_trade_id()
++    assert real_id.startswith("TRADE_")
++    decision = {
++        "decision": "BUY", "confidence": 70, "current_price": 2350.0,
++        "trade_id": real_id,
++        "signal": {"type": "BUY", "entry": {"price": 2350.0}, "stop_loss": 2344.0, "tp1": 2356.0, "tp2": 2362.0,
++                   "trade_id": real_id},
++    }
++    saved = db.save_trade(decision)
++    assert saved == real_id
++
++
++def test_save_trade_replaces_pending_id(tmp_path):
++    cfg = {"database": {"provider": "local", "local_fallback_file": str(tmp_path / "trades.json")}}
++    db = DatabaseService(cfg)
++    decision = {
++        "decision": "BUY", "confidence": 70, "current_price": 2350.0,
++        "trade_id": "PENDING_20260623_120000",
++        "signal": {"type": "BUY", "entry": {"price": 2350.0}, "stop_loss": 2344.0, "tp1": 2356.0, "tp2": 2362.0},
++    }
++    saved = db.save_trade(decision)
++    assert saved.startswith("TRADE_")
++    assert "PENDING" not in saved
