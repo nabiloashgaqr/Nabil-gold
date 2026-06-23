@@ -25,6 +25,86 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 
+def _short_id(trade_id: str) -> str:
+    """Compact, readable trade id: keep the date + last hex chunk.
+
+    TRADE_20260623_120035_726925_7cf3f415 -> #7cf3f415
+    Falls back to the last 8 chars if the format differs.
+    """
+    s = str(trade_id or "")
+    if not s:
+        return "#?"
+    parts = s.split("_")
+    last = parts[-1]
+    if len(parts) > 1 and len(last) >= 4:
+        return f"#{last}"
+    # Single chunk (or too-short tail): use the last 8 characters.
+    return f"#{s[-8:]}"
+
+
+def _build_status_message(open_trades, evaluations, current_price: float) -> str:
+    """Build a SHORT hourly status: one line per trade with P/L, plus a total.
+
+    Example:
+        🔄 Trades Update · 14:00 UTC
+        Price 4136.12 · 2 open
+        ───────────────
+        🔴 SELL #7cf3f415  -113 pts (-11.3$) · 0%➜TP1
+        🟢 BUY  #a1b2c3d4  +48 pts (+4.8$) · 36%➜TP1
+        ───────────────
+        Net: -65 pts (-6.5$)
+    """
+    import html as _html
+
+    now_txt = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    if not open_trades:
+        return (
+            "🔄 <b>Trades Update</b> · " + now_txt + "\n"
+            f"Price {current_price:.2f}\n"
+            "📭 No open trades."
+        )
+
+    # Index evaluations by trade id for quick lookup of pnl/progress.
+    by_id = {str(ev.get("trade_id")): ev for ev in (evaluations or [])}
+
+    lines = [
+        f"🔄 <b>Trades Update</b> · {now_txt}",
+        f"Price {current_price:.2f} · {len(open_trades)} open",
+        "───────────────",
+    ]
+    net_points = 0.0
+    for t in open_trades[:20]:
+        tid = str(t.get("id", ""))
+        ev = by_id.get(tid, {})
+        direction = str(t.get("type") or t.get("side") or "BUY").upper()
+        pnl = float(ev.get("pnl_points", 0) or 0)
+        net_points += pnl
+        usd = pnl / 10.0  # 10 points = 1 USD on gold
+        sign = "🟢" if pnl > 0 else "🔴" if pnl < 0 else "➖"
+        # Progress toward TP1 (0..100). Show only when meaningful.
+        prog = ev.get("progress_to_tp1")
+        prog_txt = ""
+        if prog is not None:
+            try:
+                prog_txt = f" · {float(prog) * 100:.0f}%➜TP1"
+            except (TypeError, ValueError):
+                prog_txt = ""
+        status = str(ev.get("new_status") or t.get("status") or "OPEN")
+        status_txt = "" if status == "OPEN" else f" [{_html.escape(status)}]"
+        lines.append(
+            f"{sign} {direction:<4} <code>{_short_id(tid)}</code>  "
+            f"{pnl:+.0f} pts ({usd:+.1f}$){prog_txt}{status_txt}"
+        )
+    if len(open_trades) > 20:
+        lines.append(f"… and {len(open_trades) - 20} more")
+
+    net_usd = net_points / 10.0
+    net_emoji = "🟢" if net_points > 0 else "🔴" if net_points < 0 else "➖"
+    lines.append("───────────────")
+    lines.append(f"{net_emoji} <b>Net:</b> {net_points:+.0f} pts ({net_usd:+.1f}$)")
+    return "\n".join(lines)
+
+
 def main() -> None:
     """تحديث الصفقات المفتوحة."""
     logger.info("بدء تحديث الصفقات: %s", datetime.now(timezone.utc).isoformat())
@@ -102,42 +182,23 @@ def main() -> None:
                     evaluation.get("pnl_points"),
                 )
 
-        # ── Confirmation message ───────────────────────────────────────────
-        # A Telegram event is only sent when something actually happens
-        # (TP1/TP2/SL/BE/trailing/near-tp1/...). On a quiet hour there are no
-        # events, so the user would otherwise see "nothing happened" and wonder
-        # whether the run worked. On MANUAL runs (or when notify_on_trade_update
-        # is enabled) send a short confirmation summary so it's never silent.
+        # ── Hourly heartbeat / status message ───────────────────────────────
+        # A trade EVENT message is only sent when something actually happens
+        # (TP1/TP2/SL/BE/trailing/near-tp1). On a quiet hour there are no events,
+        # so without this the user sees nothing and assumes the bot is dead.
+        # Default behaviour: send a SHORT per-trade status every scheduled run,
+        # unless explicitly disabled. (notify_on_trade_update=false only silences
+        # the message, but heartbeat_on_trade_update keeps the once-an-hour pulse.)
         manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch" or force_update
-        notify_updates = bool(config.get("notifications", {}).get("notify_on_trade_update", False))
-        if (manual or notify_updates) and total_events == 0 and not eod_quiet:
-            import html as _html
-            if open_trades:
-                lines = []
-                for ev in evaluations:
-                    pnl = ev.get("pnl_points", 0)
-                    sign = "🟢" if pnl > 0 else "🔴" if pnl < 0 else "➖"
-                    lines.append(
-                        f"{sign} <code>{_html.escape(str(ev.get('trade_id')))}</code> "
-                        f"{_html.escape(str(ev.get('new_status')))} · {pnl:+.1f} pts"
-                    )
-                body = "\n".join(lines[:20])
-                telegram.send_message(
-                    "🔄 <b>Trade Update — no new events</b>\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n"
-                    f"📈 Price: {float(current_price):.2f}\n"
-                    f"📊 Open trades: {len(open_trades)} · PnL refreshed\n\n"
-                    f"{body}\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n"
-                    "<i>No TP/SL/breakeven/trailing triggered this cycle.</i>"
-                )
-            else:
-                telegram.send_message(
-                    "🔄 <b>Trade Update</b>\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n"
-                    f"📈 Price: {float(current_price):.2f}\n"
-                    "📊 No open trades to manage."
-                )
+        notif = config.get("notifications", {}) or {}
+        # Heartbeat is ON by default (the user wants at least one update per hour).
+        heartbeat = bool(notif.get("heartbeat_on_trade_update", True))
+        notify_updates = bool(notif.get("notify_on_trade_update", False))
+        should_send = (manual or notify_updates or heartbeat) and total_events == 0 and not eod_quiet
+        if should_send:
+            telegram.send_message(
+                _build_status_message(open_trades, evaluations, float(current_price))
+            )
 
         logger.info("اكتمل تحديث الصفقات (events=%s, open=%s)", total_events, len(open_trades))
     except Exception as exc:  # noqa: BLE001
