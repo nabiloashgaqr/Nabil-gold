@@ -74,9 +74,27 @@ class DatabaseService:
             return False
         return bool(self.config.get("github_actions", {}).get("require_supabase", False))
 
+    @staticmethod
+    def new_trade_id() -> str:
+        """Generate a canonical trade id.
+
+        Exposed so callers (e.g. run_analysis) can mint the *real* id BEFORE the
+        Telegram message is sent, instead of showing a temporary 'PENDING_...'
+        placeholder and only assigning the real id at save time.
+        """
+        return f"TRADE_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}_{uuid.uuid4().hex[:8]}"
+
     def save_trade(self, decision: Dict[str, Any]) -> str:
         """Save a new trade from a decision dictionary."""
-        trade_id = f"TRADE_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}_{uuid.uuid4().hex[:8]}"
+        # Reuse a pre-assigned id (set by the caller before sending Telegram) so
+        # the id shown in the signal message matches the stored trade exactly.
+        trade_id = (
+            decision.get("trade_id")
+            or (decision.get("signal", {}) or {}).get("trade_id")
+            or self.new_trade_id()
+        )
+        if str(trade_id).startswith("PENDING_") or not str(trade_id).startswith("TRADE_"):
+            trade_id = self.new_trade_id()
         signal = decision.get("signal", {})
         entry = signal.get("entry", {})
         entry_price = float(entry.get("price") or ((float(entry.get("low", 0)) + float(entry.get("high", 0))) / 2) or 0)

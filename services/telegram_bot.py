@@ -115,8 +115,23 @@ class TelegramService:
         entry = signal.get("entry", {}) or {}
         entry_low = entry.get("low", entry.get("price", 0))
         entry_high = entry.get("high", entry.get("price", 0))
+        entry_price = entry.get("price", 0)
         current_price = decision.get("current_price", signal.get("current_price", entry.get("price", 0)))
         ai = decision.get("ai", {}) or {}
+
+        # ── Smart entry execution (MARKET / LIMIT / STOP) ──────────────────
+        order_type = str(signal.get("order_type", entry.get("order_type", f"{trade_type}_MARKET"))).upper()
+        entry_kind = str(signal.get("entry_kind", entry.get("kind", "")) or "").upper()
+        if not entry_kind:
+            entry_kind = "MARKET" if order_type.endswith("MARKET") else order_type.split("_")[-1]
+        entry_basis = self._clean_ai_field(entry.get("basis"))
+        entry_dist = entry.get("distance_points") or 0
+        # Human label + emoji for the order kind.
+        kind_label = {
+            "MARKET": "⚡ Market (immediate)",
+            "LIMIT": "🎯 Limit (pullback)",
+            "STOP": "🚀 Stop (breakout)",
+        }.get(entry_kind, "⚡ Market (immediate)")
 
         # ── Header: time · session · run source ────────────────────────────
         header_bits: List[str] = [self._now_text()]
@@ -147,17 +162,16 @@ class TelegramService:
             snapshot_bits.append(f"Quality {html.escape(str(quality.get('grade')))} ({float(quality.get('score', 0)):.0f}%)")
         snapshot_line = " · ".join(snapshot_bits)
 
-        # ── Targets with per-TP R:R (read from the real risk payload) ───────
-        tp = ((decision.get("risk", {}) or {}).get("take_profit", {}) or {})
-        tp1_rr = (tp.get("tp1", {}) or {}).get("rr_ratio")
-        tp2_rr = (tp.get("tp2", {}) or {}).get("rr_ratio")
-        if tp1_rr is None and tp2_rr is None:
-            tp2_rr = signal.get("rr_ratio")
+        # ── Targets: one line per TP, no R:R (per user preference) ──────────
         sl_points = (((decision.get("risk", {}) or {}).get("stop_loss", {}) or {}).get("distance_points"))
         sl_suffix = f"  ({float(sl_points):.0f} pts)" if sl_points else ""
-        tp1_txt = self._tp_text(signal.get("tp1"), "TP1", tp1_rr)
-        tp2_txt = self._tp_text(signal.get("tp2"), "TP2", tp2_rr)
-        tp_line = " · ".join(t for t in (tp1_txt, tp2_txt) if t) or "—"
+        tp_lines = []
+        for label, key in (("TP1", "tp1"), ("TP2", "tp2")):
+            price = signal.get(key)
+            if price in (None, 0, "", "0"):
+                continue
+            tp_lines.append(f"• <b>{label}:</b> {format_price(price)}")
+        tp_block = "\n".join(tp_lines) if tp_lines else "• —"
 
         # ── Agent votes table (all five + Groq final gate) ─────────────────
         votes_block = self._format_agent_votes(decision, ai, trade_type, confidence)
@@ -214,10 +228,21 @@ class TelegramService:
             f"🕒 {html.escape(header_line)}",
             f"📈 {snapshot_line}",
             thin,
-            "🎯 <b>TRADE PLAN</b>\n"
-            f"• <b>Entry zone:</b>  {format_price(entry_low)} – {format_price(entry_high)}\n"
-            f"• <b>Stop loss:</b>   {format_price(signal.get('stop_loss'))}{sl_suffix}\n"
-            f"• <b>Take profit:</b> {tp_line}",
+            self._format_trade_plan(
+                trade_type=trade_type,
+                entry_kind=entry_kind,
+                kind_label=kind_label,
+                order_type=order_type,
+                entry_price=entry_price,
+                entry_low=entry_low,
+                entry_high=entry_high,
+                current_price=current_price,
+                entry_basis=entry_basis,
+                entry_dist=entry_dist,
+                stop_loss=signal.get("stop_loss"),
+                sl_suffix=sl_suffix,
+                tp_block=tp_block,
+            ),
             thin,
             votes_block,
             thin,
@@ -250,6 +275,56 @@ class TelegramService:
             rr_val = None
         rr_suffix = f", R:R {rr_val:.2f}" if rr_val else ""
         return f"{format_price(price)} ({label}{rr_suffix})"
+
+    def _format_trade_plan(
+        self,
+        *,
+        trade_type: str,
+        entry_kind: str,
+        kind_label: str,
+        order_type: str,
+        entry_price: Any,
+        entry_low: Any,
+        entry_high: Any,
+        current_price: Any,
+        entry_basis: str,
+        entry_dist: Any,
+        stop_loss: Any,
+        sl_suffix: str,
+        tp_block: str,
+    ) -> str:
+        """Render the TRADE PLAN section with smart entry execution.
+
+        For a MARKET order: show the immediate entry zone.
+        For a LIMIT/STOP order: show the pending entry price AND the current
+        market price, so the user knows it is a resting (pullback/breakout)
+        order rather than an immediate fill.
+        """
+        try:
+            dist_txt = f"  ({float(entry_dist):.0f} pts away)" if float(entry_dist or 0) > 0 else ""
+        except (TypeError, ValueError):
+            dist_txt = ""
+
+        lines = ["🎯 <b>TRADE PLAN</b>"]
+        # Order-type line, broker-style label too.
+        ot_pretty = order_type.replace("_", " ").title()
+        lines.append(f"• <b>Order:</b> {kind_label} — <code>{html.escape(ot_pretty)}</code>")
+
+        if entry_kind == "MARKET":
+            lines.append(f"• <b>Entry zone:</b> {format_price(entry_low)} – {format_price(entry_high)}")
+        else:
+            # Pending order: show target entry + live market reference.
+            lines.append(f"• <b>Entry @</b> {format_price(entry_price)}{dist_txt}")
+            lines.append(f"• <b>Market now:</b> {format_price(current_price)}")
+            if entry_basis:
+                lines.append(f"   <i>{entry_basis}</i>")
+
+        lines.append(f"• <b>Stop loss:</b> {format_price(stop_loss)}{sl_suffix}")
+        lines.append("• <b>Take profit:</b>")
+        # tp_block already has its own bullet lines; indent them under the header.
+        for tl in tp_block.split("\n"):
+            lines.append(f"  {tl}")
+        return "\n".join(lines)
 
     @staticmethod
     def _clean_ai_field(value: Any) -> str:
