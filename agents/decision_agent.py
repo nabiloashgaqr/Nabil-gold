@@ -986,18 +986,31 @@ Move conflicting evidence into opposing_evidence, or set final_signal = WAIT.
             tp2_price = tp2.get('price', 0)
             rr_ratio = tp2.get('rr_ratio', tp1.get('rr_ratio', 0))
 
+            # Prefer the smart order classification computed by the risk agent
+            # (level/SMC aware). Fall back to the local price-vs-entry heuristic.
+            order_type = entry_info.get('order_type') or self._order_type(final_signal, float(entry_price or 0), current_price)
+            entry_kind = entry_info.get('kind') or ('MARKET' if order_type.endswith('MARKET') else order_type.split('_')[-1])
+
             signal_payload = {
                 'type': final_signal,
                 'entry': {
                     'price': entry_price,
                     'low': entry_zone.get('low', entry_price),
                     'high': entry_zone.get('high', entry_price),
+                    'kind': entry_kind,
+                    'order_type': order_type,
+                    'basis': entry_info.get('basis', ''),
+                    'current_price': entry_info.get('current_price', current_price),
+                    'distance_points': entry_info.get('distance_points', 0.0),
                 },
                 'stop_loss': stop_loss,
                 'tp1': tp1_price,
                 'tp2': tp2_price,
+                'tp1_rr': tp1.get('rr_ratio', 0),
+                'tp2_rr': tp2.get('rr_ratio', 0),
                 'rr_ratio': rr_ratio,
-                'order_type': self._order_type(final_signal, float(entry_price or 0), current_price),
+                'order_type': order_type,
+                'entry_kind': entry_kind,
                 'position_size': risk.get('position_size', {}),
                 'risk_summary': risk.get('summary', ''),
             }

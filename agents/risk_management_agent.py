@@ -36,7 +36,9 @@ class RiskManagementAgent(BaseAgent):
             smc_suggestion = results.get("smc", {}).get("entry_suggestion", {}) or {}
             portfolio = results.get("portfolio", {}) or {}
 
-            entry_price = self._entry_price(direction, current_price, smc_suggestion)
+            entry_price, entry_kind, entry_basis = self._smart_entry(
+                direction, current_price, atr, smc_suggestion, support_levels, resistance_levels
+            )
             stop_loss, sl_method, buffer = self._stop_loss(direction, entry_price, atr, support_levels, resistance_levels, smc_suggestion, results)
             tp1, tp2, tp3, target_method = self._take_profits(direction, entry_price, atr, support_levels, resistance_levels)
 
@@ -117,6 +119,16 @@ class RiskManagementAgent(BaseAgent):
                         "low": round(entry_price - max(0.20, atr * 0.07), 2),
                         "high": round(entry_price + max(0.20, atr * 0.07), 2),
                     },
+                    # Smart execution metadata (see _smart_entry / _classify_order):
+                    #   kind        -> MARKET / LIMIT / STOP (human concept)
+                    #   order_type  -> BUY_MARKET / SELL_LIMIT / ... (broker style)
+                    #   basis       -> short text explaining the entry choice
+                    #   current_price -> market price at evaluation time
+                    "kind": entry_kind,
+                    "order_type": self._classify_order(direction, entry_price, current_price),
+                    "basis": entry_basis,
+                    "current_price": round(current_price, 2),
+                    "distance_points": abs(calculate_pips(current_price, entry_price, direction)) if entry_price != current_price else 0.0,
                 },
                 "stop_loss": {
                     "price": round(stop_loss, 2),
@@ -253,12 +265,106 @@ class RiskManagementAgent(BaseAgent):
         resistances = sorted({round(x, 2) for x in resistances if x > current_price})
         return supports, resistances
 
-    def _entry_price(self, direction: str, current_price: float, smc_suggestion: Dict[str, Any]) -> float:
+    def _classify_order(self, direction: str, entry: float, current_price: float | None) -> str:
+        """Broker-style order classification from entry vs current price.
+
+        BUY  below price -> BUY_LIMIT ; above price -> BUY_STOP
+        SELL above price -> SELL_LIMIT; below price -> SELL_STOP
+        within threshold  -> *_MARKET
+        """
+        try:
+            entry = float(entry)
+            current = float(current_price if current_price is not None else entry)
+        except (TypeError, ValueError):
+            return f"{direction}_MARKET"
+        threshold = self._f(self.config.get("order_execution", {}).get("pending_threshold_points", 1.0), 1.0) / 10.0
+        if abs(entry - current) <= max(threshold, 0.01):
+            return f"{direction}_MARKET"
+        if direction == "BUY":
+            return "BUY_LIMIT" if entry < current else "BUY_STOP"
+        if direction == "SELL":
+            return "SELL_LIMIT" if entry > current else "SELL_STOP"
+        return f"{direction}_MARKET"
+
+    def _smart_entry(
+        self,
+        direction: str,
+        current_price: float,
+        atr: float,
+        smc_suggestion: Dict[str, Any],
+        support_levels: List[float],
+        resistance_levels: List[float],
+    ) -> Tuple[float, str, str]:
+        """Decide a smart entry and return (entry_price, kind, basis).
+
+        kind is one of MARKET / LIMIT / STOP.
+
+        Logic (config: order_execution.smart_entry):
+          1) If SMC gives a valid same-direction entry near price, use it
+             (LIMIT pullback or STOP breakout depending on side).
+          2) Otherwise, if a relevant level (support for BUY, resistance for
+             SELL) sits a sensible pullback away (between min and max points),
+             propose a LIMIT entry there.
+          3) Otherwise fall back to immediate MARKET entry at current price.
+        """
+        se = self.config.get("order_execution", {}).get("smart_entry", {}) or {}
+        enabled = bool(se.get("enabled", True))
+
+        # 1) SMC suggestion takes priority when present and reasonable.
         smc_type = str(smc_suggestion.get("type", "")).upper()
         smc_entry = self._f(smc_suggestion.get("entry"), 0.0)
         if smc_type == direction and smc_entry > 0 and abs(smc_entry - current_price) <= max(current_price * 0.01, 20):
-            return smc_entry
-        return current_price
+            kind = "MARKET" if abs(smc_entry - current_price) <= max(0.10, atr * 0.05) else "LIMIT"
+            if kind == "LIMIT":
+                # A pullback into SMC zone is a LIMIT; a break beyond is a STOP.
+                if (direction == "BUY" and smc_entry > current_price) or (direction == "SELL" and smc_entry < current_price):
+                    kind = "STOP"
+            return round(smc_entry, 2), kind, "SMC order block / zone"
+
+        if not enabled:
+            return round(current_price, 2), "MARKET", "Immediate market entry"
+
+        # 2) Level-based pullback LIMIT.
+        # Pullback distance must be meaningful but not too far to be unrealistic.
+        min_pts = self._f(se.get("min_pullback_points", 8), 8) / 10.0    # USD
+        max_pts = self._f(se.get("max_pullback_points", 35), 35) / 10.0  # USD
+        atr_frac = self._f(se.get("atr_fraction", 0.25), 0.25)
+        # Preferred pullback size from ATR, clamped to [min, max].
+        desired = min(max(atr * atr_frac, min_pts), max_pts) if atr > 0 else min_pts
+
+        # Prefer a LIMIT only when a *real* structural level (support for BUY,
+        # resistance for SELL) sits a sensible pullback away. If price is already
+        # at/through a good level (no level within the pullback band), enter at
+        # MARKET. This keeps the Market/Limit choice genuinely meaningful.
+        allow_synthetic = bool(se.get("allow_synthetic_pullback", False))
+        candidate: float | None = None
+        basis = ""
+        if direction == "BUY":
+            belows = [s for s in support_levels if 0 < s < current_price]
+            for lvl in sorted(belows, reverse=True):  # nearest first
+                dist = current_price - lvl
+                if min_pts <= dist <= max_pts:
+                    candidate, basis = lvl, "Limit buy at nearest support"
+                    break
+            if candidate is None and allow_synthetic and desired >= min_pts:
+                candidate, basis = current_price - desired, "Limit buy on shallow pullback"
+        elif direction == "SELL":
+            aboves = [r for r in resistance_levels if r > current_price]
+            for lvl in sorted(aboves):  # nearest first
+                dist = lvl - current_price
+                if min_pts <= dist <= max_pts:
+                    candidate, basis = lvl, "Limit sell at nearest resistance"
+                    break
+            if candidate is None and allow_synthetic and desired >= min_pts:
+                candidate, basis = current_price + desired, "Limit sell on shallow bounce"
+
+        if candidate is not None and candidate > 0:
+            is_pullback = (direction == "BUY" and candidate < current_price) or (direction == "SELL" and candidate > current_price)
+            if is_pullback:
+                return round(candidate, 2), "LIMIT", basis
+
+        # 3) No suitable pullback level -> immediate MARKET entry.
+        return round(current_price, 2), "MARKET", "Immediate market entry (no pullback level nearby)"
 
     def _stop_loss(
         self,
