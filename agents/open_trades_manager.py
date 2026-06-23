@@ -61,8 +61,16 @@ class OpenTradesManager(BaseAgent):
             if trade_id and database and evaluation.get("updates"):
                 database.update_trade(trade_id, evaluation["updates"])
             if telegram:
-                for event in evaluation.get("events", []):
-                    telegram.send_trade_event(trade, event, current_price, evaluation.get("pnl_points", 0), evaluation)
+                events = evaluation.get("events", []) or []
+                if events:
+                    # Send ONE combined message per trade per cycle instead of a
+                    # separate message per event (avoids duplicate near-identical
+                    # messages when e.g. LONG_RUNNING + EXIT_WARNING fire together).
+                    if hasattr(telegram, "send_trade_events"):
+                        telegram.send_trade_events(trade, events, current_price, evaluation.get("pnl_points", 0), evaluation)
+                    else:  # backward-compatible fallback
+                        for event in events:
+                            telegram.send_trade_event(trade, event, current_price, evaluation.get("pnl_points", 0), evaluation)
         return evaluations
 
     def evaluate_trade(self, trade: Dict[str, Any], current_price: float, now: datetime | None = None) -> Dict[str, Any]:
