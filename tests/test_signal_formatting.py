@@ -1,0 +1,116 @@
+"""Formatting guards for the Telegram trade-signal message.
+
+These lock in the cleanup of the signal report:
+  * no literal backslash-n ("\\n") leaks into the rendered text
+  * sections are separated by real newlines
+  * empty optional sections (RISK) are dropped, never left as blank gaps
+  * agent votes render with directional markers and the Groq final gate
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any, Dict
+
+from services.telegram_bot import TelegramService
+
+
+def _capture_signal(decision: Dict[str, Any]) -> str:
+    service = TelegramService({"telegram": {"bot_token": None, "chat_id": None}})
+    captured: Dict[str, str] = {}
+
+    def _fake_send(text: str, urgent: bool = False, **_k) -> bool:
+        captured["text"] = text
+        return True
+
+    service.send_message = _fake_send  # type: ignore[assignment]
+    service.send_signal(decision)
+    return captured["text"]
+
+
+def _full_decision() -> Dict[str, Any]:
+    return {
+        "decision": "SELL",
+        "confidence": 74,
+        "current_price": 4130.14,
+        "session_info": {"current_session": "Early Asia to Late NY", "session_quality": "HIGH"},
+        "run_source": "manual",
+        "quality": {"grade": "A", "score": 87},
+        "signal": {
+            "type": "SELL",
+            "entry": {"low": 4129.49, "high": 4130.79, "price": 4130.14},
+            "stop_loss": 4150.14, "tp1": 4103.47, "tp2": 4083.47,
+        },
+        "risk": {
+            "stop_loss": {"distance_points": 200},
+            "take_profit": {"tp1": {"rr_ratio": 1.33}, "tp2": {"rr_ratio": 2.33}},
+        },
+        "votes": {
+            "SELL": [{"agent": "classical", "confidence": 82}, {"agent": "multitimeframe", "confidence": 67}],
+            "WAIT": [{"agent": "technical"}, {"agent": "smc"}, {"agent": "price_action"}],
+        },
+        "ai": {
+            "available": True, "signal": "SELL", "confidence": 74,
+            "entry_reason": "Alignment with daily bias and a bearish order block",
+            "risk_notes": "Moderate-high volatility; support near 4092.16",
+            "invalidation": "Price breaking above 4146.45",
+        },
+        "daily_bias": {"bias": "BEARISH", "confidence": 95},
+        "dynamic_risk": {"level": "NORMAL"},
+        "decision_mode": "One-Agent + Groq",
+        "trading_mode": "paper", "paper_trading": True,
+        "trade_id": "TRADE_TEST_FMT",
+    }
+
+
+def test_no_literal_backslash_n_in_message():
+    """Regression: the old code emitted '\\n' (escaped) instead of a newline."""
+    text = _capture_signal(_full_decision())
+    assert "\\n" not in text, "Literal backslash-n leaked into the signal text"
+
+
+def test_risk_note_and_invalidation_on_separate_lines():
+    text = _capture_signal(_full_decision())
+    lines = text.split("\n")
+    risk_line = next((l for l in lines if "Risk note:" in l), "")
+    inval_line = next((l for l in lines if "Invalidation:" in l), "")
+    assert risk_line and inval_line
+    # They must be different physical lines, not concatenated together.
+    assert risk_line != inval_line
+    assert "Invalidation:" not in risk_line
+
+
+def test_footer_pieces_on_separate_lines():
+    text = _capture_signal(_full_decision())
+    assert "not financial advice." in text
+    # The id line must not be glued onto the disclaimer line.
+    disclaimer_line = next(l for l in text.split("\n") if "not financial advice." in l)
+    assert "TRADE_TEST_FMT" not in disclaimer_line
+
+
+def test_empty_risk_section_dropped_without_gap():
+    decision = _full_decision()
+    decision["ai"] = {"available": True, "signal": "SELL", "confidence": 74}
+    decision["daily_bias"] = {"bias": "NEUTRAL"}
+    text = _capture_signal(decision)
+    assert "RISK" not in text.split("AGENT VOTES")[-1].split("WHY THIS TRADE")[-1]
+    # No triple blank lines anywhere.
+    assert "\n\n\n" not in text
+
+
+def test_agent_votes_have_direction_markers_and_groq_gate():
+    text = _capture_signal(_full_decision())
+    assert "AGENT VOTES" in text
+    assert "← decision gate" in text
+    # Directional dots present.
+    assert "🔴" in text and "⚪" in text
+
+
+def test_buy_uses_green_header_emoji():
+    decision = _full_decision()
+    decision["decision"] = "BUY"
+    decision["signal"]["type"] = "BUY"
+    decision["votes"] = {"BUY": [{"agent": "technical", "confidence": 70}], "WAIT": []}
+    decision["ai"] = {"available": True, "signal": "BUY", "confidence": 70}
+    text = _capture_signal(decision)
+    assert "SIGNAL — BUY" in text and "🟢" in text
