@@ -82,8 +82,10 @@ def main() -> None:
             telegram=telegram,
             now=datetime.now(timezone.utc),
         )
+        total_events = 0
         for evaluation in evaluations:
             if evaluation.get("events"):
+                total_events += len(evaluation.get("events", []))
                 logger.info(
                     "تحديث الصفقة %s: %s | %s -> %s | PnL=%s",
                     evaluation.get("trade_id"),
@@ -93,7 +95,44 @@ def main() -> None:
                     evaluation.get("pnl_points"),
                 )
 
-        logger.info("اكتمل تحديث الصفقات")
+        # ── Confirmation message ───────────────────────────────────────────
+        # A Telegram event is only sent when something actually happens
+        # (TP1/TP2/SL/BE/trailing/near-tp1/...). On a quiet hour there are no
+        # events, so the user would otherwise see "nothing happened" and wonder
+        # whether the run worked. On MANUAL runs (or when notify_on_trade_update
+        # is enabled) send a short confirmation summary so it's never silent.
+        manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch" or force_update
+        notify_updates = bool(config.get("notifications", {}).get("notify_on_trade_update", False))
+        if (manual or notify_updates) and total_events == 0:
+            import html as _html
+            if open_trades:
+                lines = []
+                for ev in evaluations:
+                    pnl = ev.get("pnl_points", 0)
+                    sign = "🟢" if pnl > 0 else "🔴" if pnl < 0 else "➖"
+                    lines.append(
+                        f"{sign} <code>{_html.escape(str(ev.get('trade_id')))}</code> "
+                        f"{_html.escape(str(ev.get('new_status')))} · {pnl:+.1f} pts"
+                    )
+                body = "\n".join(lines[:20])
+                telegram.send_message(
+                    "🔄 <b>Trade Update — no new events</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    f"📈 Price: {float(current_price):.2f}\n"
+                    f"📊 Open trades: {len(open_trades)} · PnL refreshed\n\n"
+                    f"{body}\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    "<i>No TP/SL/breakeven/trailing triggered this cycle.</i>"
+                )
+            else:
+                telegram.send_message(
+                    "🔄 <b>Trade Update</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    f"📈 Price: {float(current_price):.2f}\n"
+                    "📊 No open trades to manage."
+                )
+
+        logger.info("اكتمل تحديث الصفقات (events=%s, open=%s)", total_events, len(open_trades))
     except Exception as exc:  # noqa: BLE001
         logger.exception("خطأ في التحديث: %s", exc)
 
