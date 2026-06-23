@@ -150,7 +150,7 @@
   "trade_management": {
     "near_tp1_progress": 0.8,
     "time_warning_hours": 4,
-    "expire_after_hours": 8,
+    "expire_after_hours": 24,
     "auto_move_sl_to_entry_after_tp1": true,
     "trailing_stop_enabled": true,
     "trailing_activation_at": "TP1",
@@ -158,7 +158,9 @@
     "partial_close_at_tp1": true,
     "partial_close_percentage": 50,
     "update_outside_trading_hours": true,
-    "description_update_outside_trading_hours": "متابعة الصفقات المفتوحة (SL/TP/breakeven/trailing) تعمل على مدار الساعة حتى خارج نافذة توليد الإشارات (02:00-22:00). الذهب يتحرك 24/5 وقد تضرب الصفقة هدفاً/وقفاً في أي وقت. توليد الإشارات الجديدة يبقى مقيّداً بالنافذة، لكن إدارة الصفقات القائمة لا تتوقف."
+    "description_update_outside_trading_hours": "متابعة الصفقات المفتوحة (SL/TP/breakeven/trailing) تعمل على مدار الساعة حتى خارج نافذة توليد الإشارات (02:00-22:00). الذهب يتحرك 24/5 وقد تضرب الصفقة هدفاً/وقفاً في أي وقت. توليد الإشارات الجديدة يبقى مقيّداً بالنافذة، لكن إدارة الصفقات القائمة لا تتوقف.",
+    "keep_protected_winners_open": true,
+    "description_expire": "expire_after_hours=24: تُغلق الصفقة تلقائياً بعد 24 ساعة. keep_protected_winners_open=true: لا تُغلق صفقة رابحة وقفها مُؤمّن عند الدخول أو أفضل حتى لو انتهت المدة — يُترك الستوب/التريلينغ يديرها بدل قطعها بالساعة."
   },
   "performance": {
     "track_win_rate_per_agent": true,
