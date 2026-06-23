@@ -274,7 +274,9 @@
     "status_every_analysis": true,
     "hourly_market_status": true,
     "notify_on_blocked_signal": true,
-    "description_notify_on_blocked_signal": "إذا true تُرسل أسباب حجب الإشارة (تكرار/مخاطر ديناميكية/حدود) على التشغيل المجدول أيضاً، لتوضيح سبب عدم وصول إشارة بدل التخمين. التشغيل اليدوي يرسلها دائماً."
+    "description_notify_on_blocked_signal": "إذا true تُرسل أسباب حجب الإشارة (تكرار/مخاطر ديناميكية/حدود) على التشغيل المجدول أيضاً، لتوضيح سبب عدم وصول إشارة بدل التخمين. التشغيل اليدوي يرسلها دائماً.",
+    "notify_on_trade_update": false,
+    "description_notify_on_trade_update": "إذا true تُرسل رسالة تأكيد مختصرة بعد كل تحديث صفقات حتى عند عدم وجود أحداث (TP/SL/breakeven/trailing). التشغيل اليدوي يرسلها دائماً. الافتراضي false لتجنّب رسالة كل ساعة."
   },
   "duplicate_signal_filter": {
     "enabled": true,

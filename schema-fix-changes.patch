@@ -1,0 +1,414 @@
+diff --git a/config.json b/config.json
+index fb9d6e2..c75b7b4 100644
+--- a/config.json
++++ b/config.json
+@@ -274,7 +274,9 @@
+     "status_every_analysis": true,
+     "hourly_market_status": true,
+     "notify_on_blocked_signal": true,
+-    "description_notify_on_blocked_signal": "إذا true تُرسل أسباب حجب الإشارة (تكرار/مخاطر ديناميكية/حدود) على التشغيل المجدول أيضاً، لتوضيح سبب عدم وصول إشارة بدل التخمين. التشغيل اليدوي يرسلها دائماً."
++    "description_notify_on_blocked_signal": "إذا true تُرسل أسباب حجب الإشارة (تكرار/مخاطر ديناميكية/حدود) على التشغيل المجدول أيضاً، لتوضيح سبب عدم وصول إشارة بدل التخمين. التشغيل اليدوي يرسلها دائماً.",
++    "notify_on_trade_update": false,
++    "description_notify_on_trade_update": "إذا true تُرسل رسالة تأكيد مختصرة بعد كل تحديث صفقات حتى عند عدم وجود أحداث (TP/SL/breakeven/trailing). التشغيل اليدوي يرسلها دائماً. الافتراضي false لتجنّب رسالة كل ساعة."
+   },
+   "duplicate_signal_filter": {
+     "enabled": true,
+diff --git a/scripts/run_trade_updates.py b/scripts/run_trade_updates.py
+index eb52fed..12a641e 100644
+--- a/scripts/run_trade_updates.py
++++ b/scripts/run_trade_updates.py
+@@ -82,8 +82,10 @@ def main() -> None:
+             telegram=telegram,
+             now=datetime.now(timezone.utc),
+         )
++        total_events = 0
+         for evaluation in evaluations:
+             if evaluation.get("events"):
++                total_events += len(evaluation.get("events", []))
+                 logger.info(
+                     "تحديث الصفقة %s: %s | %s -> %s | PnL=%s",
+                     evaluation.get("trade_id"),
+@@ -93,7 +95,44 @@ def main() -> None:
+                     evaluation.get("pnl_points"),
+                 )
+ 
+-        logger.info("اكتمل تحديث الصفقات")
++        # ── Confirmation message ───────────────────────────────────────────
++        # A Telegram event is only sent when something actually happens
++        # (TP1/TP2/SL/BE/trailing/near-tp1/...). On a quiet hour there are no
++        # events, so the user would otherwise see "nothing happened" and wonder
++        # whether the run worked. On MANUAL runs (or when notify_on_trade_update
++        # is enabled) send a short confirmation summary so it's never silent.
++        manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch" or force_update
++        notify_updates = bool(config.get("notifications", {}).get("notify_on_trade_update", False))
++        if (manual or notify_updates) and total_events == 0:
++            import html as _html
++            if open_trades:
++                lines = []
++                for ev in evaluations:
++                    pnl = ev.get("pnl_points", 0)
++                    sign = "🟢" if pnl > 0 else "🔴" if pnl < 0 else "➖"
++                    lines.append(
++                        f"{sign} <code>{_html.escape(str(ev.get('trade_id')))}</code> "
++                        f"{_html.escape(str(ev.get('new_status')))} · {pnl:+.1f} pts"
++                    )
++                body = "\n".join(lines[:20])
++                telegram.send_message(
++                    "🔄 <b>Trade Update — no new events</b>\n"
++                    "━━━━━━━━━━━━━━━━━━━━\n"
++                    f"📈 Price: {float(current_price):.2f}\n"
++                    f"📊 Open trades: {len(open_trades)} · PnL refreshed\n\n"
++                    f"{body}\n"
++                    "━━━━━━━━━━━━━━━━━━━━\n"
++                    "<i>No TP/SL/breakeven/trailing triggered this cycle.</i>"
++                )
++            else:
++                telegram.send_message(
++                    "🔄 <b>Trade Update</b>\n"
++                    "━━━━━━━━━━━━━━━━━━━━\n"
++                    f"📈 Price: {float(current_price):.2f}\n"
++                    "📊 No open trades to manage."
++                )
++
++        logger.info("اكتمل تحديث الصفقات (events=%s, open=%s)", total_events, len(open_trades))
+     except Exception as exc:  # noqa: BLE001
+         logger.exception("خطأ في التحديث: %s", exc)
+ 
+diff --git a/services/database.py b/services/database.py
+index e84188b..3470130 100644
+--- a/services/database.py
++++ b/services/database.py
+@@ -9,6 +9,7 @@ from __future__ import annotations
+ 
+ import logging
+ import os
++import re
+ import uuid
+ from datetime import date, datetime, timezone
+ from pathlib import Path
+@@ -336,10 +337,39 @@ class DatabaseService:
+         rules = [r for r in load_trades(rules_path) if r.get("active", True)]
+         return sorted(rules, key=lambda r: (float(r.get("confidence", 0) or 0), str(r.get("updated_at", ""))), reverse=True)[:limit]
+ 
++    def _missing_column_name(self, exc: Exception) -> str | None:
++        """Extract the missing column name from a Supabase/PostgREST error.
++
++        Handles both error styles:
++          * PostgREST schema-cache: PGRST204 -> "Could not find the 'X' column
++            of 'trades' in the schema cache"
++          * Postgres: 42703 -> "column \"X\" does not exist"
++        Returns the column name (e.g. 'exit_warning') or None.
++        """
++        text = str(exc)
++        # PGRST204 style: ... the 'X' column ...
++        m = re.search(r"the '([^']+)' column", text)
++        if m:
++            return m.group(1)
++        # 42703 style: column "X" does not exist
++        m = re.search(r'column "([^"]+)" does not exist', text)
++        if m:
++            return m.group(1)
++        # Fallback single-quoted Postgres style: column 'X' does not exist
++        m = re.search(r"column '([^']+)' does not exist", text)
++        if m:
++            return m.group(1)
++        return None
++
+     def _missing_column(self, exc: Exception, column: str) -> bool:
+         """Return True for Supabase/PostgREST missing-column errors."""
+         text = str(exc).lower()
+-        return "42703" in text and column.lower() in text and "does not exist" in text
++        if "42703" in text and column.lower() in text and "does not exist" in text:
++            return True
++        # PGRST204 schema-cache style.
++        if "pgrst204" in text or "schema cache" in text:
++            return column.lower() in text
++        return False
+ 
+     def _trade_time_text(self, trade: Dict[str, Any]) -> str:
+         """Best available timestamp across current and legacy trade schemas."""
+@@ -418,29 +448,95 @@ class DatabaseService:
+                 break
+         return losses
+ 
++    # How many unknown columns we are willing to strip one-by-one before giving
++    # up and using the minimal legacy payload.
++    _MAX_COLUMN_RETRIES = 12
++
++    def _drop_missing_columns_and_retry(self, op, payload: Dict[str, Any]):
++        """Run ``op(payload)``; if it fails on an unknown column, drop ONLY that
++        column and retry, instead of collapsing to a tiny legacy payload.
++
++        This preserves critical fields (stop_loss, result, sl_moved_to_entry,
++        close_time, ...) that the old legacy fallback silently discarded — which
++        is why trailing-stop / breakeven updates never persisted on older
++        Supabase schemas. Only the genuinely missing columns are removed.
++        """
++        current = dict(payload)
++        dropped: List[str] = []
++        last_exc: Exception | None = None
++        for _ in range(self._MAX_COLUMN_RETRIES):
++            try:
++                return op(current), dropped
++            except Exception as exc:  # noqa: BLE001
++                last_exc = exc
++                col = self._missing_column_name(exc)
++                if not col or col not in current:
++                    break
++                current.pop(col, None)
++                dropped.append(col)
++                if not current:
++                    break
++        # Could not resolve by dropping columns; surface for caller fallback.
++        raise last_exc if last_exc else RuntimeError("Supabase operation failed")
++
+     def _insert_trade_supabase(self, trade_data: Dict[str, Any]) -> None:
+-        """Insert full trade row, falling back to legacy column set if needed."""
++        """Insert full trade row.
++
++        If the live schema is missing some newer columns, drop ONLY those and
++        retry, so we still store as much as the schema supports. Fall back to the
++        minimal legacy payload only as a last resort.
++        """
+         assert self.client is not None
+         try:
+             self.client.table("trades").insert(trade_data).execute()
++            return
+         except Exception as exc:  # noqa: BLE001
+-            legacy = self._legacy_payload(trade_data)
+-            if legacy == trade_data:
+-                raise
+-            self.logger.warning("Full trade insert failed, trying legacy schema: %s", exc)
+-            self.client.table("trades").insert(legacy).execute()
++            try:
++                _, dropped = self._drop_missing_columns_and_retry(
++                    lambda p: self.client.table("trades").insert(p).execute(), trade_data
++                )
++                if dropped:
++                    self.logger.warning(
++                        "Trade insert succeeded after dropping unknown column(s): %s. "
++                        "Add them to your Supabase 'trades' table (see supabase_schema.sql).",
++                        ", ".join(dropped),
++                    )
++                return
++            except Exception:  # noqa: BLE001
++                legacy = self._legacy_payload(trade_data)
++                if legacy == trade_data:
++                    raise
++                self.logger.warning("Full trade insert failed, trying legacy schema: %s", exc)
++                self.client.table("trades").insert(legacy).execute()
+ 
+     def _update_trade_supabase(self, trade_id: str, updates: Dict[str, Any]) -> None:
+-        """Update full trade row, falling back to legacy columns if needed."""
++        """Update full trade row.
++
++        Drop only unknown columns and retry (preserving stop_loss/result/etc.),
++        falling back to the minimal legacy column set only if that still fails.
++        """
+         assert self.client is not None
+         try:
+             self.client.table("trades").update(updates).eq("id", trade_id).execute()
++            return
+         except Exception as exc:  # noqa: BLE001
+-            legacy = self._legacy_payload(updates)
+-            if not legacy or legacy == updates:
+-                raise
+-            self.logger.warning("Full trade update failed, trying legacy schema: %s", exc)
+-            self.client.table("trades").update(legacy).eq("id", trade_id).execute()
++            try:
++                _, dropped = self._drop_missing_columns_and_retry(
++                    lambda p: self.client.table("trades").update(p).eq("id", trade_id).execute(), updates
++                )
++                if dropped:
++                    self.logger.warning(
++                        "Trade %s update succeeded after dropping unknown column(s): %s. "
++                        "Add them to your Supabase 'trades' table (see supabase_schema.sql).",
++                        trade_id, ", ".join(dropped),
++                    )
++                return
++            except Exception:  # noqa: BLE001
++                legacy = self._legacy_payload(updates)
++                if not legacy or legacy == updates:
++                    raise
++                self.logger.warning("Full trade update failed, trying legacy schema: %s", exc)
++                self.client.table("trades").update(legacy).eq("id", trade_id).execute()
+ 
+     def _legacy_payload(self, data: Dict[str, Any]) -> Dict[str, Any]:
+         """Keep only columns from the initial Supabase schema for compatibility."""
+@@ -450,13 +546,19 @@ class DatabaseService:
+             "side",
+             "entry_price",
+             "stop_loss",
++            "initial_stop_loss",
+             "tp1",
+             "tp2",
+             "confidence",
+             "status",
+             "current_price",
+             "current_pnl",
++            # Critical management fields — must survive even the last-resort
++            # fallback, otherwise breakeven/trailing-stop changes never persist.
++            "sl_moved_to_entry",
++            "result",
+             "closed_at",
++            "close_time",
+             "close_price",
+             "final_pnl",
+             "reasons",
+diff --git a/supabase_schema.sql b/supabase_schema.sql
+index e0b46b2..42633f4 100644
+--- a/supabase_schema.sql
++++ b/supabase_schema.sql
+@@ -86,6 +86,10 @@ CREATE TABLE IF NOT EXISTS trades (
+     sl_moved_to_entry BOOLEAN DEFAULT FALSE,
+     partial_close BOOLEAN DEFAULT FALSE,
+     updates_sent JSONB DEFAULT '[]'::jsonb,
++    exit_warning BOOLEAN DEFAULT FALSE,
++    management_phase VARCHAR(40),
++    max_favorable_excursion DECIMAL(18, 4) DEFAULT 0,
++    max_adverse_excursion DECIMAL(18, 4) DEFAULT 0,
+     result VARCHAR(30),
+     reasons JSONB DEFAULT '[]'::jsonb,
+     signal_snapshot JSONB DEFAULT '{}'::jsonb,
+@@ -138,6 +142,13 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS final_pnl           DECIMAL(18, 4);
+ ALTER TABLE trades ADD COLUMN IF NOT EXISTS sl_moved_to_entry   BOOLEAN DEFAULT FALSE;
+ ALTER TABLE trades ADD COLUMN IF NOT EXISTS partial_close       BOOLEAN DEFAULT FALSE;
+ ALTER TABLE trades ADD COLUMN IF NOT EXISTS updates_sent        JSONB DEFAULT '[]'::jsonb;
++-- Trade-management telemetry written by OpenTradesManager (added later).
++-- Without these, hourly updates hit "Could not find the 'exit_warning' column"
++-- (PGRST204) and fall back to a reduced payload.
++ALTER TABLE trades ADD COLUMN IF NOT EXISTS exit_warning            BOOLEAN DEFAULT FALSE;
++ALTER TABLE trades ADD COLUMN IF NOT EXISTS management_phase        VARCHAR(40);
++ALTER TABLE trades ADD COLUMN IF NOT EXISTS max_favorable_excursion DECIMAL(18, 4) DEFAULT 0;
++ALTER TABLE trades ADD COLUMN IF NOT EXISTS max_adverse_excursion   DECIMAL(18, 4) DEFAULT 0;
+ ALTER TABLE trades ADD COLUMN IF NOT EXISTS result              VARCHAR(30);
+ ALTER TABLE trades ADD COLUMN IF NOT EXISTS reasons             JSONB DEFAULT '[]'::jsonb;
+ ALTER TABLE trades ADD COLUMN IF NOT EXISTS signal_snapshot     JSONB DEFAULT '{}'::jsonb;
+diff --git a/tests/test_db_schema_fallback.py b/tests/test_db_schema_fallback.py
+new file mode 100644
+index 0000000..c608fbf
+--- /dev/null
++++ b/tests/test_db_schema_fallback.py
+@@ -0,0 +1,122 @@
++"""Tests for resilient Supabase column handling in DatabaseService.
++
++Regression for the production log:
++  "Could not find the 'exit_warning' column of 'trades' in the schema cache" (PGRST204)
++
++The old fallback collapsed the update to a tiny legacy payload, silently dropping
++critical fields (stop_loss, result, sl_moved_to_entry, ...). The new behavior
++drops ONLY the genuinely-missing column(s) and retries, preserving everything else.
++"""
++
++from __future__ import annotations
++
++from typing import Any, Dict, List
++
++from services.database import DatabaseService
++
++
++class _PGRST204(Exception):
++    """Mimic a PostgREST schema-cache missing-column error."""
++
++
++def _err(col: str) -> _PGRST204:
++    return _PGRST204(
++        f"{{'message': \"Could not find the '{col}' column of 'trades' in the schema cache\", "
++        f"'code': 'PGRST204', 'hint': None, 'details': None}}"
++    )
++
++
++class _FakeQuery:
++    """Records update payloads and raises for columns not in the live schema."""
++
++    def __init__(self, table: "_FakeTable", op: str, payload: Dict[str, Any]):
++        self.table = table
++        self.op = op
++        self.payload = payload
++
++    def eq(self, *_a, **_k):
++        return self
++
++    def execute(self):
++        missing = [c for c in self.payload if c not in self.table.live_columns]
++        if missing:
++            raise _err(missing[0])
++        self.table.last_payload = dict(self.payload)
++        self.table.calls.append(dict(self.payload))
++        return type("Resp", (), {"data": [self.payload]})()
++
++
++class _FakeTable:
++    def __init__(self, live_columns: set):
++        self.live_columns = live_columns
++        self.last_payload: Dict[str, Any] | None = None
++        self.calls: List[Dict[str, Any]] = []
++
++    def update(self, payload):
++        return _FakeQuery(self, "update", payload)
++
++    def insert(self, payload):
++        return _FakeQuery(self, "insert", payload)
++
++
++class _FakeClient:
++    def __init__(self, live_columns: set):
++        self._table = _FakeTable(live_columns)
++
++    def table(self, _name):
++        return self._table
++
++
++def _make_db(live_columns: set) -> DatabaseService:
++    db = DatabaseService({"database": {"provider": "supabase"}})
++    db.client = _FakeClient(live_columns)  # type: ignore[assignment]
++    db.use_supabase = True
++    return db
++
++
++def test_missing_column_name_parsing():
++    db = _make_db(set())
++    assert db._missing_column_name(_err("exit_warning")) == "exit_warning"
++    assert db._missing_column_name(Exception('column "foo" does not exist')) == "foo"
++    assert db._missing_column_name(Exception("totally unrelated")) is None
++
++
++def test_update_drops_only_missing_column_keeps_critical_fields():
++    # Live schema lacks 'exit_warning' and 'management_phase' but HAS stop_loss etc.
++    live = {"id", "status", "stop_loss", "sl_moved_to_entry", "result",
++            "current_price", "current_pnl", "last_updated"}
++    db = _make_db(live)
++    updates = {
++        "status": "TP1_HIT",
++        "stop_loss": 2344.0,            # critical — must persist (breakeven move)
++        "sl_moved_to_entry": True,      # critical — must persist
++        "result": None,
++        "current_price": 2351.0,
++        "current_pnl": 7.0,
++        "exit_warning": False,          # missing column -> should be dropped
++        "management_phase": "RUNNING",  # missing column -> should be dropped
++        "last_updated": "2026-06-23T12:39:27Z",
++    }
++    db.update_trade("TRADE_X", updates)
++
++    stored = db.client._table.last_payload  # type: ignore[attr-defined]
++    assert stored is not None
++    # Critical fields survived.
++    assert stored["stop_loss"] == 2344.0
++    assert stored["sl_moved_to_entry"] is True
++    assert stored["status"] == "TP1_HIT"
++    # Only the genuinely-missing columns were dropped.
++    assert "exit_warning" not in stored
++    assert "management_phase" not in stored
++
++
++def test_update_succeeds_directly_when_schema_complete():
++    live = {"id", "status", "stop_loss", "sl_moved_to_entry", "result",
++            "current_price", "current_pnl", "exit_warning", "management_phase", "last_updated"}
++    db = _make_db(live)
++    updates = {"status": "TP1_HIT", "exit_warning": True, "management_phase": "RUNNING", "stop_loss": 2344.0}
++    db.update_trade("TRADE_Y", updates)
++    stored = db.client._table.last_payload  # type: ignore[attr-defined]
++    assert stored == updates
++    # Exactly one successful call (no retries needed).
++    assert len(db.client._table.calls) == 1  # type: ignore[attr-defined]

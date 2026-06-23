@@ -86,6 +86,10 @@ CREATE TABLE IF NOT EXISTS trades (
     sl_moved_to_entry BOOLEAN DEFAULT FALSE,
     partial_close BOOLEAN DEFAULT FALSE,
     updates_sent JSONB DEFAULT '[]'::jsonb,
+    exit_warning BOOLEAN DEFAULT FALSE,
+    management_phase VARCHAR(40),
+    max_favorable_excursion DECIMAL(18, 4) DEFAULT 0,
+    max_adverse_excursion DECIMAL(18, 4) DEFAULT 0,
     result VARCHAR(30),
     reasons JSONB DEFAULT '[]'::jsonb,
     signal_snapshot JSONB DEFAULT '{}'::jsonb,
@@ -138,6 +142,13 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS final_pnl           DECIMAL(18, 4);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS sl_moved_to_entry   BOOLEAN DEFAULT FALSE;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS partial_close       BOOLEAN DEFAULT FALSE;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS updates_sent        JSONB DEFAULT '[]'::jsonb;
+-- Trade-management telemetry written by OpenTradesManager (added later).
+-- Without these, hourly updates hit "Could not find the 'exit_warning' column"
+-- (PGRST204) and fall back to a reduced payload.
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS exit_warning            BOOLEAN DEFAULT FALSE;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS management_phase        VARCHAR(40);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS max_favorable_excursion DECIMAL(18, 4) DEFAULT 0;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS max_adverse_excursion   DECIMAL(18, 4) DEFAULT 0;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS result              VARCHAR(30);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS reasons             JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS signal_snapshot     JSONB DEFAULT '{}'::jsonb;
