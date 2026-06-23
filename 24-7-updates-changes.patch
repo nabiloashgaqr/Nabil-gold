@@ -1,0 +1,62 @@
+diff --git a/.github/workflows/update_trades.yml b/.github/workflows/update_trades.yml
+index 391e5d8..5bd4ee5 100644
+--- a/.github/workflows/update_trades.yml
++++ b/.github/workflows/update_trades.yml
+@@ -8,11 +8,14 @@ concurrency:
+ 
+ on:
+   schedule:
+-    # Update trades during signal window: 02:00 → 22:00 Asia/Hebron (Mon-Fri)
+-    # 02:00 local = 23:00 UTC previous day
+-    # 22:00 local = 19:00 UTC
+-    - cron: "0 23 * * 0,1,2,3,4"      # 23:00 UTC (Sun-Thu)
+-    - cron: "0 0-19 * * 1,2,3,4,5"    # 00:00-19:59 UTC (Mon-Fri)
++    # Open-trade MANAGEMENT must run around the clock on trading days — gold
++    # moves 24/5, so a trade can hit TP1/SL/trailing at any hour, including
++    # outside the signal-generation window. Run every 30 minutes, all hours,
++    # Sunday 22:00 UTC (Mon 01:00 local) → Friday 21:00 UTC.
++    # The script itself manages open trades regardless of session because
++    # trade_management.update_outside_trading_hours = true.
++    - cron: "*/30 * * * 1,2,3,4,5"     # every 30 min, Mon-Fri (all hours UTC)
++    - cron: "*/30 22,23 * * 0"          # Sunday 22:00-23:59 UTC (market open, Mon local)
+   workflow_dispatch:
+ 
+ jobs:
+diff --git a/config.json b/config.json
+index 5768fb5..a1deffe 100644
+--- a/config.json
++++ b/config.json
+@@ -157,7 +157,8 @@
+     "trailing_distance_points": 15,
+     "partial_close_at_tp1": true,
+     "partial_close_percentage": 50,
+-    "update_outside_trading_hours": false
++    "update_outside_trading_hours": true,
++    "description_update_outside_trading_hours": "متابعة الصفقات المفتوحة (SL/TP/breakeven/trailing) تعمل على مدار الساعة حتى خارج نافذة توليد الإشارات (02:00-22:00). الذهب يتحرك 24/5 وقد تضرب الصفقة هدفاً/وقفاً في أي وقت. توليد الإشارات الجديدة يبقى مقيّداً بالنافذة، لكن إدارة الصفقات القائمة لا تتوقف."
+   },
+   "performance": {
+     "track_win_rate_per_agent": true,
+diff --git a/scripts/run_trade_updates.py b/scripts/run_trade_updates.py
+index 02f3d95..79273b7 100644
+--- a/scripts/run_trade_updates.py
++++ b/scripts/run_trade_updates.py
+@@ -194,7 +194,18 @@ def main() -> None:
+         # Heartbeat is ON by default (the user wants at least one update per hour).
+         heartbeat = bool(notif.get("heartbeat_on_trade_update", True))
+         notify_updates = bool(notif.get("notify_on_trade_update", False))
+-        should_send = (manual or notify_updates or heartbeat) and total_events == 0 and not eod_quiet
++        # The workflow now runs every 30 min (24h). To keep the heartbeat to
++        # roughly ONCE per hour, only fire it in the first half of the hour on
++        # scheduled runs. Manual runs always send. Real TP/SL/trailing events are
++        # sent immediately above (this block only runs when total_events == 0).
++        heartbeat_interval = int(notif.get("heartbeat_interval_minutes", 60) or 60)
++        if manual:
++            heartbeat_due = True
++        elif heartbeat_interval <= 30:
++            heartbeat_due = True
++        else:
++            heartbeat_due = datetime.now(timezone.utc).minute < 30
++        should_send = (manual or notify_updates or heartbeat) and heartbeat_due and total_events == 0 and not eod_quiet
+         if should_send:
+             telegram.send_message(
+                 _build_status_message(open_trades, evaluations, float(current_price))
