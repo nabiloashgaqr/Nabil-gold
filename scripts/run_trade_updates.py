@@ -194,7 +194,18 @@ def main() -> None:
         # Heartbeat is ON by default (the user wants at least one update per hour).
         heartbeat = bool(notif.get("heartbeat_on_trade_update", True))
         notify_updates = bool(notif.get("notify_on_trade_update", False))
-        should_send = (manual or notify_updates or heartbeat) and total_events == 0 and not eod_quiet
+        # The workflow now runs every 30 min (24h). To keep the heartbeat to
+        # roughly ONCE per hour, only fire it in the first half of the hour on
+        # scheduled runs. Manual runs always send. Real TP/SL/trailing events are
+        # sent immediately above (this block only runs when total_events == 0).
+        heartbeat_interval = int(notif.get("heartbeat_interval_minutes", 60) or 60)
+        if manual:
+            heartbeat_due = True
+        elif heartbeat_interval <= 30:
+            heartbeat_due = True
+        else:
+            heartbeat_due = datetime.now(timezone.utc).minute < 30
+        should_send = (manual or notify_updates or heartbeat) and heartbeat_due and total_events == 0 and not eod_quiet
         if should_send:
             telegram.send_message(
                 _build_status_message(open_trades, evaluations, float(current_price))
