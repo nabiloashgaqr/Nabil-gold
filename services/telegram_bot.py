@@ -165,14 +165,14 @@ class TelegramService:
         # ── WHY THIS TRADE — single merged, de-duplicated rationale ────────
         why_block = self._format_why_this_trade(decision, ai)
 
-        # ── RISK NOTE / INVALIDATION (one line each, only if meaningful) ───
+        # ── RISK NOTE / INVALIDATION / counter-trend (only if meaningful) ──
         extra_lines: List[str] = []
         risk_notes = self._clean_ai_field(ai.get("risk_notes"))
         if risk_notes:
-            extra_lines.append(f"<b>RISK NOTE</b>   {risk_notes}")
+            extra_lines.append(f"⚠️ <b>Risk note:</b> {risk_notes}")
         invalidation = self._clean_ai_field(ai.get("invalidation"))
         if invalidation:
-            extra_lines.append(f"<b>INVALIDATION</b>  {invalidation}")
+            extra_lines.append(f"🚫 <b>Invalidation:</b> {invalidation}")
         # Dynamic risk: only surface when it actually changes behaviour.
         # (Daily bias is already covered inside WHY THIS TRADE when it agrees,
         #  and as a counter-trend warning here only when it opposes the trade.)
@@ -181,12 +181,16 @@ class TelegramService:
         direction = str(decision.get("decision", "")).upper()
         opposes = (bias == "BULLISH" and direction == "SELL") or (bias == "BEARISH" and direction == "BUY")
         if opposes and daily_bias.get("confidence"):
-            extra_lines.append(f"<b>DAILY BIAS</b>   ⚠️ Counter-trend vs {html.escape(bias)} ({float(daily_bias.get('confidence', 0)):.0f}%)")
+            extra_lines.append(f"⚠️ <b>Daily bias:</b> counter-trend vs {html.escape(bias)} ({float(daily_bias.get('confidence', 0)):.0f}%)")
         dynamic_risk = decision.get("dynamic_risk", {}) or {}
         dr_level = str(dynamic_risk.get("level", "NORMAL")).upper()
         if dr_level and dr_level != "NORMAL":
-            extra_lines.append(f"<b>DYNAMIC RISK</b>  {html.escape(dr_level)}")
-        extra_block = ("\\n".join(extra_lines) + "\\n") if extra_lines else ""  # single newline only (avoids double blank when RISK NOTE / INVALIDATION are both empty)
+            extra_lines.append(f"🛡️ <b>Dynamic risk:</b> {html.escape(dr_level)}")
+        # Real newline join; rendered as its own RISK section when present.
+        if extra_lines:
+            risk_block = "🛡️ <b>RISK</b>\n" + "\n".join(extra_lines)
+        else:
+            risk_block = ""
 
         # ── Footer ─────────────────────────────────────────────────────────
         trading_mode = str(decision.get("trading_mode", signal.get("trading_mode", "paper"))).lower()
@@ -201,24 +205,36 @@ class TelegramService:
             rule_text = "Groq final gate"
         trade_id = decision.get("trade_id", signal.get("trade_id", "not saved yet"))
 
-        text = f"""
-📊 <b>XAU/USD SIGNAL — {trade_type}</b> {emoji}
-━━━━━━━━━━━━━━━━━━━━━
-{html.escape(header_line)}
-{snapshot_line}
-
-<b>ENTRY ZONE</b>   {format_price(entry_low)} – {format_price(entry_high)}
-<b>STOP LOSS</b>    {format_price(signal.get('stop_loss'))}{sl_suffix}
-<b>TAKE PROFIT</b>  {tp_line}
-
-{votes_block}
-
-{why_block}
-
-{extra_block}<i>Mode: {mode_text} · Decision: {html.escape(rule_text)}</i>
-<i>Educational signal only — not financial advice.</i>  ID: <code>{html.escape(str(trade_id))}</code>
-""".strip()
+        # Assemble sections, dropping any empty ones so we never emit blank gaps.
+        divider = "━━━━━━━━━━━━━━━━━━━━━"
+        thin = "──────────────────"
+        sections = [
+            f"📊 <b>XAU/USD SIGNAL — {trade_type}</b> {emoji}",
+            divider,
+            f"🕒 {html.escape(header_line)}",
+            f"📈 {snapshot_line}",
+            thin,
+            "🎯 <b>TRADE PLAN</b>\n"
+            f"• <b>Entry zone:</b>  {format_price(entry_low)} – {format_price(entry_high)}\n"
+            f"• <b>Stop loss:</b>   {format_price(signal.get('stop_loss'))}{sl_suffix}\n"
+            f"• <b>Take profit:</b> {tp_line}",
+            thin,
+            votes_block,
+            thin,
+            why_block,
+        ]
+        if risk_block:
+            sections.append(thin)
+            sections.append(risk_block)
+        sections.append(divider)
+        sections.append(
+            f"<i>Mode: {mode_text} · Decision: {html.escape(rule_text)}</i>\n"
+            f"<i>Educational signal only — not financial advice.</i>\n"
+            f"🆔 <code>{html.escape(str(trade_id))}</code>"
+        )
+        text = "\n".join(sections).strip()
         return self.send_message(text, urgent=True)
+
 
     # ------------------------------------------------------------------ #
     # send_signal helpers
@@ -261,20 +277,29 @@ class TelegramService:
                 if name:
                     per_agent[name] = (side, v.get("confidence"))
 
-        lines = ["<b>AGENT VOTES</b>"]
+        side_emoji = {"BUY": "🟢", "SELL": "🔴", "WAIT": "⚪"}
+
+        def _row(label: str, side: str, conf: Any, suffix: str = "") -> str:
+            side = str(side).upper()
+            dot = side_emoji.get(side, "⚪")
+            conf_txt = f"{int(float(conf))}%" if conf not in (None, "") else "—"
+            # Pad label and side so the percentages line up in monospace clients.
+            return f"{dot} {label:<15} {side:<4} {conf_txt:>4}{suffix}"
+
+        lines = ["🧭 <b>AGENT VOTES</b>"]
         for key, label in self.VOTING_AGENTS:
             side, conf = per_agent.get(key, ("WAIT", None))
-            conf_txt = f"{int(float(conf))}%" if conf not in (None, "") else "—"
-            lines.append(f"• {label:<16} {side:<4} {conf_txt}")
+            lines.append(_row(label, side, conf))
 
         if ai.get("available"):
             ai_signal = str(ai.get("signal", final_type) or final_type).upper()
             ai_conf = ai.get("confidence", final_conf)
             try:
-                ai_conf_txt = f"{int(float(ai_conf))}%"
+                ai_conf_val: Any = int(float(ai_conf))
             except (TypeError, ValueError):
-                ai_conf_txt = f"{final_conf}%"
-            lines.append(f"• {'Groq (final)':<16} {ai_signal:<4} {ai_conf_txt}  ← decision gate")
+                ai_conf_val = final_conf
+            lines.append("·" * 18)
+            lines.append(_row("Groq (final)", ai_signal, ai_conf_val, "  ← decision gate"))
         return "\n".join(lines)
 
     def _format_why_this_trade(self, decision: Dict[str, Any], ai: Dict[str, Any]) -> str:
@@ -344,9 +369,9 @@ class TelegramService:
                 break
 
         if not merged:
-            return "<b>WHY THIS TRADE</b>\n• No detailed rationale available"
+            return "💡 <b>WHY THIS TRADE</b>\n• No detailed rationale available"
         body = "\n".join(f"• {m}" for m in merged)
-        return f"<b>WHY THIS TRADE</b>\n{body}"
+        return f"💡 <b>WHY THIS TRADE</b>\n{body}"
 
     def send_trade_event(
         self,
