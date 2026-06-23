@@ -53,13 +53,18 @@ def synthetic_timeframe_sources(data: Dict[str, Any]) -> list[str]:
 
 
 def should_send_status(config: Dict[str, Any]) -> bool:
-    """Send status/no-signal Telegram messages only on manual runs or if enabled.
+    """Send status/no-signal Telegram messages on manual runs OR when enabled.
 
-    Scheduled analysis runs every 10 minutes.
+    Scheduled analysis runs every 10 minutes. We want blocked-signal reasons
+    (duplicate / dynamic-risk / limits) to be visible on scheduled runs too, so
+    the user can see *why* nothing arrived instead of guessing. This is the
+    applied recommendation: drive visibility from config.
     """
     if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
         return True
-    return bool(config.get("notifications", {}).get("send_no_signal_updates", False))
+    notif = config.get("notifications", {}) or {}
+    # Either the general no-signal flag or the dedicated blocked-signal flag.
+    return bool(notif.get("send_no_signal_updates", False)) or bool(notif.get("notify_on_blocked_signal", False))
 
 
 def should_send_hourly_status(config: Dict[str, Any]) -> bool:
@@ -69,9 +74,15 @@ def should_send_hourly_status(config: Dict[str, Any]) -> bool:
     from datetime import datetime, timezone
     if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
         return True
-    if not bool(config.get("notifications", {}).get("send_no_signal_updates", False)):
+    notif = config.get("notifications", {}) or {}
+    if not (bool(notif.get("send_no_signal_updates", False)) or bool(notif.get("hourly_status", False))):
         return False
     now = datetime.now(timezone.utc)
+    interval = int(notif.get("hourly_status_interval_minutes", 60) or 60)
+    # Map the interval onto the 10-minute schedule: only fire in the first slot
+    # of each interval window so we send ~once per interval, never every run.
+    if interval <= 10:
+        return True
     return now.minute < 10
 
 
@@ -92,7 +103,7 @@ def _parse_datetime(value: Any) -> datetime | None:
 
 
 def _trade_direction(trade: Dict[str, Any]) -> str:
-    return str(trade.get('type') or trade.get('trade_type') or trade.get('decision') or '').upper()
+    return str(trade.get('type') or trade.get('side') or trade.get('trade_type') or trade.get('decision') or '').upper()
 
 
 def _trade_entry_price(trade: Dict[str, Any]) -> float | None:
@@ -106,15 +117,84 @@ def _trade_entry_price(trade: Dict[str, Any]) -> float | None:
     return None
 
 
-def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService, config: Dict[str, Any]) -> str | None:
-    """Return a reason if this signal is a duplicate of an open/recent similar signal.
+# Trade lifecycle states (mirrors agents/open_trades_manager.py).
+_OPEN_STATUSES = {"OPEN", "PARTIAL", "TP1_HIT"}
+_LOSS_STATUSES = {"SL_HIT"}
+_WIN_STATUSES = {"TP2_HIT"}
+_BREAKEVEN_STATUSES = {"BE_HIT", "EXPIRED", "MANUAL_CLOSE"}
 
-    New logic (user request):
-    - Allow same-direction signal if:
-        * More than 90 minutes have passed since the previous same-direction trade, AND
-        * The new entry price is NOT within ±50 points of the previous entry price
-          (i.e. different price zone).
-    - This applies to BOTH currently open trades (OPEN/TP1_HIT) and recent closed trades.
+
+def _trade_outcome(trade: Dict[str, Any]) -> str:
+    """Classify a trade as OPEN / WIN / LOSS / BREAKEVEN using status, the
+    explicit ``result`` field, then PnL as a last resort.
+    """
+    status = str(trade.get("status", "")).upper()
+    if status in _OPEN_STATUSES:
+        return "OPEN"
+
+    result = str(trade.get("result", "") or "").upper()
+    if result in {"WIN", "LOSS", "BREAKEVEN"}:
+        return result
+
+    if status in _LOSS_STATUSES:
+        return "LOSS"
+    if status in _WIN_STATUSES:
+        return "WIN"
+    if status in _BREAKEVEN_STATUSES:
+        return "BREAKEVEN"
+
+    # Fallback to realized PnL when status/result are missing.
+    for key in ("final_pnl", "current_pnl"):
+        try:
+            pnl = float(trade.get(key))
+        except (TypeError, ValueError):
+            continue
+        if pnl > 0:
+            return "WIN"
+        if pnl < 0:
+            return "LOSS"
+        return "BREAKEVEN"
+    return "BREAKEVEN"
+
+
+def _trade_reference_time(trade: Dict[str, Any], now: datetime) -> datetime:
+    """Best timestamp to age a trade from: close time for closed trades, else
+    the open/created time.
+    """
+    closed = _parse_datetime(
+        trade.get("closed_at") or trade.get("close_time")
+    )
+    if closed:
+        return closed
+    opened = _parse_datetime(
+        trade.get("created_at") or trade.get("entry_time") or trade.get("opened_at")
+    )
+    return opened or now
+
+
+def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService, config: Dict[str, Any]) -> str | None:
+    """Return a human-readable reason if this signal should be blocked as a
+    duplicate / churn / revenge re-entry. Otherwise return None.
+
+    Professional, outcome-aware design — two clearly separated concerns:
+
+    1) OPEN-POSITION STACKING PROTECTION (true duplicate)
+       If a same-direction trade is still OPEN/TP1_HIT:
+         * block if it sits within ``price_zone_points`` of the new entry
+           (you'd be doubling the same position at the same level), OR
+         * block unconditionally if ``block_same_direction_any_price`` is set
+           (only one open position per direction at a time).
+
+    2) RECENTLY-CLOSED COOLDOWN (anti-churn / anti-revenge)
+       For same-direction trades CLOSED within ``lookback_hours``, apply an
+       outcome-aware cooldown, but ONLY when the new entry is in the same price
+       zone (a genuinely different price area is a new setup, not a repeat):
+         * after a LOSS      -> longest cooldown  (don't repeat a losing setup)
+         * after BREAKEVEN   -> medium cooldown
+         * after a WIN       -> shortest cooldown  (a working direction)
+
+    All thresholds are configurable, with backward-compatible fallbacks to the
+    legacy ``lookback_minutes`` / ``same_direction_price_zone_points`` keys.
     """
     filt = config.get('duplicate_signal_filter', {}) or {}
     if not filt.get('enabled', True):
@@ -130,74 +210,106 @@ def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService,
         entry_price = float(entry.get('price') or decision.get('current_price') or 0)
     except (TypeError, ValueError):
         entry_price = 0.0
-
     if entry_price <= 0:
         return None
 
     now = datetime.now(timezone.utc)
 
-    # === NEW PARAMETERS (user requested) ===
-    same_dir_time_threshold = int(filt.get('lookback_minutes', 90))          # 90 minutes
-    same_dir_price_zone = float(filt.get('same_direction_price_zone_points', 50))  # ±50 points
+    # ── Tunables (with legacy fallbacks) ───────────────────────────────────
+    # Gold point convention: 1 USD = 10 points (1 point = 0.10 USD/oz).
+    price_zone_points = float(
+        filt.get('price_zone_points', filt.get('same_direction_price_zone_points', 50))
+    )
 
-    # Gold point definition (confirmed by user):
-    # On XAU/USD, 1 point = 0.10 USD per ounce
-    # Therefore: 50 points = 5.00 USD per ounce
-    # price_diff comes from market data in USD (e.g. 7.79)
-    # We convert: price_diff_points = price_diff_usd * 10
+    open_cfg = filt.get('open_trade', {}) or {}
+    block_open_any_price = bool(
+        open_cfg.get('block_same_direction_any_price', filt.get('block_if_open_same_direction', False))
+    )
+    block_open_in_zone = bool(open_cfg.get('block_same_direction_in_zone', True))
 
-    # Collect all relevant previous trades in same direction (open + recent)
-    previous_same_dir_trades = []
+    cooldown_cfg = filt.get('cooldown', {}) or {}
+    legacy_cooldown = float(filt.get('lookback_minutes', 90))
+    cooldown_after_loss = float(cooldown_cfg.get('after_loss_minutes', legacy_cooldown))
+    cooldown_after_breakeven = float(cooldown_cfg.get('after_breakeven_minutes', max(legacy_cooldown * 0.5, 30)))
+    cooldown_after_win = float(cooldown_cfg.get('after_win_minutes', max(legacy_cooldown * 0.33, 20)))
+    lookback_hours = float(cooldown_cfg.get('lookback_hours', 6))
 
-    # 1. Open trades (including TP1_HIT)
+    def _points_away(prev_price: float) -> float:
+        return abs(entry_price - prev_price) * 10.0
+
+    # ── Collect same-direction candidates (open + recently closed) ─────────
+    candidates: List[Dict[str, Any]] = []
+    seen_ids: set = set()
+
+    def _add(trade: Dict[str, Any]) -> None:
+        tid = str(trade.get('id', ''))
+        if tid and tid in seen_ids:
+            return
+        if tid:
+            seen_ids.add(tid)
+        candidates.append(trade)
+
     for trade in database.get_open_trades():
         if _trade_direction(trade) == direction:
-            previous_same_dir_trades.append(trade)
-
-    # 2. Recent closed trades (within a generous window, e.g. 1 day)
+            _add(trade)
     for trade in database.get_recent_trades(limit=50):
         if _trade_direction(trade) == direction:
-            created = _parse_datetime(trade.get('created_at') or trade.get('entry_time') or trade.get('opened_at'))
-            if created and (now - created).total_seconds() < 24 * 3600:  # last 24h is enough
-                previous_same_dir_trades.append(trade)
+            _add(trade)
 
-    # Remove duplicates by id
-    seen_ids = set()
-    unique_prev = []
-    for t in previous_same_dir_trades:
-        tid = str(t.get('id', ''))
-        if tid and tid not in seen_ids:
-            seen_ids.add(tid)
-            unique_prev.append(t)
+    # ── 1) Open-position stacking protection ───────────────────────────────
+    for trade in candidates:
+        if _trade_outcome(trade) != "OPEN":
+            continue
+        prev_entry = _trade_entry_price(trade)
+        if prev_entry is None:
+            continue
+        if block_open_any_price:
+            return (
+                f"Duplicate {direction} blocked: an open {direction} position "
+                f"({trade.get('id', 'unknown')}) already exists (one position per direction)."
+            )
+        if block_open_in_zone:
+            pts = _points_away(prev_entry)
+            if pts <= price_zone_points:
+                return (
+                    f"Duplicate {direction} blocked: open {direction} position "
+                    f"({trade.get('id', 'unknown')}) in the same price zone "
+                    f"({pts:.0f}pts away, zone={price_zone_points:.0f}pts) — would stack the same level."
+                )
 
-    for trade in unique_prev:
+    # ── 2) Recently-closed, outcome-aware cooldown (same zone only) ────────
+    cooldown_by_outcome = {
+        "LOSS": cooldown_after_loss,
+        "BREAKEVEN": cooldown_after_breakeven,
+        "WIN": cooldown_after_win,
+    }
+    for trade in candidates:
+        outcome = _trade_outcome(trade)
+        if outcome == "OPEN":
+            continue
         prev_entry = _trade_entry_price(trade)
         if prev_entry is None:
             continue
 
-        created = _parse_datetime(
-            trade.get('created_at') or trade.get('entry_time') or trade.get('opened_at')
-        ) or now
+        ref_time = _trade_reference_time(trade, now)
+        age_minutes = (now - ref_time).total_seconds() / 60.0
+        if age_minutes > lookback_hours * 60.0:
+            continue  # too old to matter
 
-        age_minutes = (now - created).total_seconds() / 60.0
-        price_diff_usd = abs(entry_price - prev_entry)
-        price_diff_points = price_diff_usd * 10.0   # 1 USD = 10 points
+        pts = _points_away(prev_entry)
+        if pts > price_zone_points:
+            continue  # different price area = legitimately new setup
 
-        # Block ONLY if it is "too close in time OR too close in price zone"
-        # Allow if BOTH: age > 90min AND price_diff_points > 50
-        is_too_recent = age_minutes <= same_dir_time_threshold
-        is_same_zone = price_diff_points <= same_dir_price_zone
-
-        if is_too_recent or is_same_zone:
-            reason = (
-                f"Duplicate {direction} signal blocked: "
-                f"previous {direction} trade {trade.get('id', 'unknown')} "
-                f"(age={age_minutes:.0f}min, diff={price_diff_points:.1f}pts / {price_diff_usd:.2f}$). "
-                f"Rule: allow only after >{same_dir_time_threshold}min AND >{same_dir_price_zone}pts away."
+        cooldown = cooldown_by_outcome.get(outcome, cooldown_after_breakeven)
+        if age_minutes <= cooldown:
+            return (
+                f"Duplicate {direction} blocked: a {outcome} {direction} trade "
+                f"({trade.get('id', 'unknown')}) closed {age_minutes:.0f}min ago in the same "
+                f"price zone ({pts:.0f}pts away). Cooldown after {outcome} is {cooldown:.0f}min."
             )
-            return reason
 
     return None
+
 
 def _dedupe_warnings(warnings: list) -> list:
     """Collapse duplicate / overlapping warnings before showing them in Telegram.
@@ -303,6 +415,12 @@ async def run_analysis_async() -> None:
         data = market_data.get_gold_data()
         if not data:
             logger.error("فشل في جلب البيانات")
+            # Don't fail silently on scheduled runs — surface it so a recurring
+            # data outage is visible instead of looking like "no signal".
+            telegram.send_error_alert(
+                "Analysis aborted: failed to fetch market data (Twelve Data). "
+                "No signal will be generated this cycle."
+            )
             return
 
         # Safety: never send production signals from synthetic/demo prices on GitHub Actions.
@@ -452,12 +570,52 @@ async def run_analysis_async() -> None:
                     )
                 return
 
+            # IMPORTANT ordering & delivery handling.
+            #
+            # Previous behaviour saved the trade to the DB first and then called
+            # telegram.send_signal(...) while *ignoring its return value*. If the
+            # Telegram delivery failed (network blip, rate limit, HTML parse
+            # error) on a scheduled run, the user received nothing — yet the
+            # trade was already persisted. Every later scheduled run then saw
+            # that trade and silently blocked the "duplicate" same-direction
+            # signal. Net effect: signals appear only on manual runs, never on
+            # the scheduled ones. That is exactly the reported symptom.
+            #
+            # Fix: send the Telegram signal FIRST. Only persist the trade if the
+            # signal was actually delivered, so a failed delivery does not poison
+            # the duplicate filter and the next scheduled run can retry cleanly.
+            trade_id = f"PENDING_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+            decision["trade_id"] = trade_id
+            if decision.get("signal"):
+                decision["signal"]["trade_id"] = trade_id
+
+            delivered = False
+            try:
+                delivered = bool(telegram.send_signal(decision))
+            except Exception as send_exc:  # noqa: BLE001
+                logger.exception("فشل إرسال إشارة Telegram")
+                telegram.send_error_alert(f"Signal generated but Telegram delivery raised: {send_exc}")
+                delivered = False
+
+            if not delivered:
+                # Do NOT save the trade: an unsent signal must not block future
+                # runs via the duplicate filter. Alert loudly instead of failing
+                # silently (the old code's worst failure mode).
+                logger.error(
+                    "⚠️ تم توليد إشارة %s لكن فشل إرسالها إلى Telegram — لن تُحفظ الصفقة لتفادي حجب التكرار.",
+                    decision.get("decision"),
+                )
+                telegram.send_error_alert(
+                    f"Signal {decision.get('decision')} generated but Telegram delivery failed; "
+                    "trade NOT saved so the next run can retry."
+                )
+                return
+
             trade_id = database.save_trade(decision)
             decision["trade_id"] = trade_id
             if decision.get("signal"):
                 decision["signal"]["trade_id"] = trade_id
-            telegram.send_signal(decision)
-            logger.info("تم حفظ/إرسال الإشارة: %s", trade_id)
+            logger.info("تم إرسال الإشارة ثم حفظها: %s", trade_id)
         else:
             logger.info(
                 "لا توجد إشارة مؤهلة حالياً. الأسباب/التحذيرات: %s",
