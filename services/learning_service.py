@@ -496,7 +496,7 @@ class LearningService:
         )
     
     def get_learning_summary(self) -> str:
-        """ملخص التعلم لتيليجرام - محسّن"""
+        """Clean English learning summary for Telegram (sent daily ~23:00)."""
         
         if not self.learning_history:
             return "📊 No learning history yet"
@@ -505,19 +505,19 @@ class LearningService:
         
         lines = [
             "━━━━━━━━━━━━━━━━━━━━",
-            "🧠 *Smart Learning Report v2.0*",
+            "🧠 Smart Learning Report v2.0",
             f"📅 Date: {last_report.report_date[:10]}",
             "━━━━━━━━━━━━━━━━━━━━",
-            f"📊 Trades: {last_report.total_trades_analyzed}",
-            f"📈 Win rate: {last_report.overall_win_rate:.1f}%",
+            f"📊 Trades analyzed: {last_report.total_trades_analyzed}",
+            f"📈 Overall win rate: {last_report.overall_win_rate:.1f}%",
             ""
         ]
         
         if last_report.top_performers:
-            lines.append(f"🏆 Top: {', '.join(last_report.top_performers)}")
+            lines.append(f"🏆 Top performers: {', '.join(last_report.top_performers)}")
         
         lines.append("")
-        lines.append("🤖 *Agent performance:*")
+        lines.append("🤖 Agent performance:")
         
         for name, record in sorted(last_report.agents_performance.items(), key=lambda x: -x[1].win_rate):
             emoji = "🟢" if record.trend == "IMPROVING" else "🔴" if record.trend == "DECLINING" else "🟡"
@@ -536,7 +536,7 @@ class LearningService:
         
         lines.extend([
             "",
-            f"📝 {last_report.changes_summary}",
+            f"📝 Changes: {last_report.changes_summary}",
             "━━━━━━━━━━━━━━━━━━━━"
         ])
         

@@ -125,10 +125,18 @@ class TelegramService:
             sq = str(session_info.get("session_quality", "UNKNOWN"))
             quality_emoji = {"BEST": "⭐⭐⭐", "HIGH": "⭐⭐", "MEDIUM": "⭐", "LOW": "⚠️"}.get(sq, "")
             header_bits.append(f"{html.escape(str(session_info.get('current_session')))} {quality_emoji}".strip())
-        run_source = decision.get("run_source", "")
-        run_source_text = {"scheduled": "Scheduled run", "manual": "Manual run", "workflow_dispatch": "Manual run", "schedule": "Scheduled run"}.get(str(run_source), "")
-        if run_source_text:
-            header_bits.append(run_source_text)
+
+        # Robust run_source handling (always produce clean English, never "unknown run")
+        run_source = str(decision.get("run_source", "") or decision.get("operation_mode", "") or "").lower().strip()
+        run_map = {
+            "scheduled": "Scheduled run",
+            "schedule": "Scheduled run",
+            "manual": "Manual run",
+            "workflow_dispatch": "Manual run",
+            "observation": "Observation mode",
+        }
+        run_source_text = run_map.get(run_source, "Analysis run")
+        header_bits.append(run_source_text)
         header_line = " · ".join(b for b in header_bits if b)
 
         # ── Price / confidence / quality (single line) ─────────────────────
@@ -178,7 +186,7 @@ class TelegramService:
         dr_level = str(dynamic_risk.get("level", "NORMAL")).upper()
         if dr_level and dr_level != "NORMAL":
             extra_lines.append(f"<b>DYNAMIC RISK</b>  {html.escape(dr_level)}")
-        extra_block = ("\n".join(extra_lines) + "\n\n") if extra_lines else ""  # trailing blank kept for footer spacing
+        extra_block = ("\\n".join(extra_lines) + "\\n") if extra_lines else ""  # single newline only (avoids double blank when RISK NOTE / INVALIDATION are both empty)
 
         # ── Footer ─────────────────────────────────────────────────────────
         trading_mode = str(decision.get("trading_mode", signal.get("trading_mode", "paper"))).lower()
