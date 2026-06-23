@@ -584,7 +584,11 @@ async def run_analysis_async() -> None:
             # Fix: send the Telegram signal FIRST. Only persist the trade if the
             # signal was actually delivered, so a failed delivery does not poison
             # the duplicate filter and the next scheduled run can retry cleanly.
-            trade_id = f"PENDING_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+            #
+            # Mint the REAL trade id up-front (same format save_trade uses) so the
+            # id shown in the Telegram message is final — never a 'PENDING_...'
+            # placeholder. save_trade() reuses this exact id when persisting.
+            trade_id = database.new_trade_id()
             decision["trade_id"] = trade_id
             if decision.get("signal"):
                 decision["signal"]["trade_id"] = trade_id
