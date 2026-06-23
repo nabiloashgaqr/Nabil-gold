@@ -43,6 +43,11 @@ class OpenTradesManager(BaseAgent):
         self.trailing_step = float(ts_config.get("trailing_step", 5.0))
         self.trailing_min_profit_lock = float(ts_config.get("min_profit_lock", 0.0))
 
+        # Early breakeven: move SL to entry once the trade is +N points in
+        # profit, WITHOUT waiting for TP1. 0/absent disables it (legacy
+        # behaviour = breakeven only after TP1). Points convention: 10 pts = $1.
+        self.early_breakeven_points = float(ts_config.get("early_breakeven_points", 0.0))
+
     def update_trades(
         self,
         open_trades: List[Dict[str, Any]],
@@ -126,8 +131,7 @@ class OpenTradesManager(BaseAgent):
             close_price = current_price
             final_pnl = pnl_points
         elif (
-            old_status == "TP1_HIT"
-            and sl_moved_to_entry
+            sl_moved_to_entry
             and self._beyond_breakeven(trade_type, stop_loss, entry)
             and self._hit_sl(trade_type, current_price, stop_loss)
         ):
@@ -135,13 +139,15 @@ class OpenTradesManager(BaseAgent):
             # progressive-trailing branch below) and price has now pulled back
             # to it - this locks in the trailed profit rather than a plain
             # breakeven exit, and rather than the original far-away hard SL.
+            # Applies whether the move-to-BE happened after TP1 or via the
+            # early-breakeven mechanism while still OPEN.
             new_status = "SL_HIT"
             events.append("TRAILING_SL_HIT")
             trailing_exit_pnl = calculate_pips(entry, stop_loss, trade_type)
             result = "WIN" if trailing_exit_pnl > 0 else "BREAKEVEN"
             close_price = stop_loss
             final_pnl = round(trailing_exit_pnl, 1)
-        elif sl_moved_to_entry and old_status == "TP1_HIT" and self._hit_break_even(trade_type, current_price, entry):
+        elif sl_moved_to_entry and self._hit_break_even(trade_type, current_price, entry):
             new_status = "BE_HIT"
             events.append("BE_HIT")
             result = "BREAKEVEN"
@@ -178,13 +184,35 @@ class OpenTradesManager(BaseAgent):
                 close_price = current_price
                 final_pnl = pnl_points
 
-            # 3) Progressive trailing (only once breakeven is already locked, and
-            # only when nothing status-changing happened above this run).
-            if self.trailing_enabled and old_status == "TP1_HIT" and sl_moved_to_entry and new_status == "TP1_HIT":
-                trailing_candidate = self._compute_trailing_stop(trade_type, current_price, stop_loss, entry)
+            # 2b) EARLY BREAKEVEN: once the trade is +N points in profit, move the
+            # stop to entry WITHOUT waiting for TP1. Independent of partial close.
+            if (
+                self.early_breakeven_points > 0
+                and not sl_moved_to_entry
+                and new_status in self.OPEN_STATUSES
+                and "EXPIRED" not in events
+                and pnl_points >= self.early_breakeven_points
+            ):
+                sl_moved_to_entry = True
+                new_stop_loss = entry  # persist the breakeven stop
+                if "MOVE_SL_TO_BE" not in updates_sent:
+                    events.append("MOVE_SL_TO_BE")
+
+            # 3) Progressive trailing once breakeven is locked (either via TP1 or
+            # via early breakeven above), and only when nothing status-changing
+            # happened this run. Works while OPEN or TP1_HIT.
+            if (
+                self.trailing_enabled
+                and sl_moved_to_entry
+                and new_status in self.OPEN_STATUSES
+                and "EXPIRED" not in events
+            ):
+                base_stop = new_stop_loss if new_stop_loss is not None else stop_loss
+                trailing_candidate = self._compute_trailing_stop(trade_type, current_price, base_stop, entry)
                 if trailing_candidate is not None:
                     new_stop_loss = trailing_candidate
-                    events.append("TRAILING_SL_UPDATED")
+                    if "TRAILING_SL_UPDATED" not in events:
+                        events.append("TRAILING_SL_UPDATED")
 
         # Avoid repeating informational events already sent. Status events are naturally one-time after status changes.
         filtered_events: List[str] = []
