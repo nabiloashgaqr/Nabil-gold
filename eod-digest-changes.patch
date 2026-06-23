@@ -1,0 +1,441 @@
+diff --git a/.github/workflows/daily_report.yml b/.github/workflows/daily_report.yml
+index cffe611..2cb0844 100644
+--- a/.github/workflows/daily_report.yml
++++ b/.github/workflows/daily_report.yml
+@@ -39,6 +39,10 @@ jobs:
+           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+ 
++      # The three steps below run with EOD_QUIET=true so they DON'T each send a
++      # separate Telegram message. Instead they update the DB and hand their
++      # summary to storage/eod_*.txt; the final step folds everything into ONE
++      # consolidated daily message. (Same workspace is shared across steps.)
+       - name: 🔄 End-of-Day Trade Update
+         run: |
+           python scripts/run_trade_updates.py
+@@ -50,6 +54,7 @@ jobs:
+           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+           FORCE_TRADE_UPDATE: "true"
++          EOD_QUIET: "true"
+ 
+       - name: 🧠 Run Learning Update
+         run: |
+@@ -59,6 +64,7 @@ jobs:
+           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
++          EOD_QUIET: "true"
+ 
+       - name: 🧠 AI Trade Review for Losses
+         run: |
+@@ -69,6 +75,7 @@ jobs:
+           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
++          EOD_QUIET: "true"
+ 
+       - name: 📊 Generate Daily Report + Open Trades Report
+         run: |
+diff --git a/scripts/run_daily_report.py b/scripts/run_daily_report.py
+index 4d780bd..3952f8d 100644
+--- a/scripts/run_daily_report.py
++++ b/scripts/run_daily_report.py
+@@ -27,6 +27,61 @@ setup_logging()
+ logger = logging.getLogger(__name__)
+ 
+ 
++def _eod_dir():
++    from pathlib import Path
++    return Path(__file__).resolve().parents[1] / "storage"
++
++
++def _read_eod_section(name: str) -> str:
++    """Read a section written by a quiet sub-script (learning/review), or ''."""
++    try:
++        path = _eod_dir() / f"eod_{name}.txt"
++        if path.exists():
++            return path.read_text(encoding="utf-8").strip()
++    except Exception as exc:  # noqa: BLE001
++        logger.warning("Could not read EOD section %s: %s", name, exc)
++    return ""
++
++
++def _cleanup_eod_sections() -> None:
++    """Remove EOD handoff files after merging so they don't leak to next day."""
++    for name in ("learning", "review"):
++        try:
++            path = _eod_dir() / f"eod_{name}.txt"
++            if path.exists():
++                path.unlink()
++        except Exception:  # noqa: BLE001
++            pass
++
++
++def _compact_section(text: str, max_lines: int = 8, skip_first_title: bool = True) -> str:
++    """Strip decorative divider lines and cap the number of lines so a merged
++    section stays short inside the single consolidated message.
++
++    ``skip_first_title`` drops the section's own leading title line (e.g.
++    "📊 Learning Update" / "🧠 AI Trade Review (Losses)") because the daily
++    report already prints its own header above it — avoids a doubled heading.
++    """
++    out = []
++    title_skipped = not skip_first_title
++    for raw in text.splitlines():
++        line = raw.rstrip()
++        if not line:
++            continue
++        # Drop pure divider lines.
++        if set(line) <= set("━─=-_ "):
++            continue
++        # Drop the first non-divider line if it is the section's own title.
++        if not title_skipped:
++            title_skipped = True
++            continue
++        out.append(line)
++        if len(out) >= max_lines:
++            out.append("…")
++            break
++    return "\n".join(out)
++
++
+ def _trade_value(trade: dict, *keys: str, default=None):
+     """Return the first existing/non-empty value from possible schema aliases."""
+     for key in keys:
+@@ -178,15 +233,38 @@ def main() -> None:
+             lines.append("🔄 <b>Open Trades:</b> None")
+             lines.append("")
+ 
+-        if learning_insight:
++        # ── Merge end-of-day sections produced by the quiet sub-scripts ──────
++        # run_learning.py and run_trade_review.py (with EOD_QUIET=true) write
++        # their summaries to storage/eod_*.txt instead of sending their own
++        # Telegram message. We fold them into this single consolidated report.
++        learning_section = _read_eod_section("learning")
++        review_section = _read_eod_section("review")
++
++        # Only show the lightweight insight when the richer learning section is
++        # absent (avoids two "Learning" blocks).
++        if learning_insight and not learning_section:
+             lines.append(f"🧠 <b>Learning:</b> {learning_insight}")
+             lines.append("")
+ 
++        if learning_section:
++            lines.append("🧠 <b>Learning Update</b>")
++            lines.append(_compact_section(learning_section, max_lines=8))
++            lines.append("")
++        if review_section:
++            lines.append("🔎 <b>AI Trade Review</b>")
++            lines.append(_compact_section(review_section, max_lines=10))
++            lines.append("")
++
+         lines.append("⚠️ Paper-trading only • Educational")
+         lines.append("━━━━━━━━━━━━━━━━━━━━━")
+ 
+-        telegram.send_message("\n".join(lines))
+-        logger.info("✅ Sent consolidated daily summary")
++        message = "\n".join(lines)
++        # Telegram hard limit is 4096 chars; trim defensively.
++        if len(message) > 3900:
++            message = message[:3850].rstrip() + "\n…\n━━━━━━━━━━━━━━━━━━━━━"
++        telegram.send_message(message)
++        _cleanup_eod_sections()
++        logger.info("✅ Sent consolidated daily summary (single message)")
+ 
+     except Exception as exc:  # noqa: BLE001
+         logger.exception("خطأ في التقرير اليومي المدمج")
+diff --git a/scripts/run_learning.py b/scripts/run_learning.py
+index 3f2212c..837c9c6 100644
+--- a/scripts/run_learning.py
++++ b/scripts/run_learning.py
+@@ -22,50 +22,81 @@ setup_logging()
+ logger = logging.getLogger(__name__)
+ 
+ 
+-def main() -> None:
+-    """الدالة الرئيسية للتعلم"""
+-    
++def _quiet_mode() -> bool:
++    """When running inside the consolidated end-of-day digest, individual scripts
++    should NOT send their own Telegram message; the daily report aggregates them.
++    """
++    return os.environ.get("EOD_QUIET", "").lower() in {"1", "true", "yes"}
++
++
++def _write_eod_section(name: str, text: str) -> None:
++    """Persist a section so the consolidated daily report can merge it.
++
++    Written into storage/eod_<name>.txt; the daily report reads then deletes it.
++    Within a single GitHub Actions job the workspace is shared across steps.
++    """
++    try:
++        from pathlib import Path
++        root = Path(__file__).resolve().parents[1] / "storage"
++        root.mkdir(parents=True, exist_ok=True)
++        (root / f"eod_{name}.txt").write_text(text or "", encoding="utf-8")
++    except Exception as exc:  # noqa: BLE001
++        logger.warning("Could not persist EOD section %s: %s", name, exc)
++
++
++def main() -> str | None:
++    """الدالة الرئيسية للتعلم. Returns the learning summary text (for the digest)."""
++
+     logger.info("🧠 بدء التعلم الذكي اليومي: %s", datetime.now(timezone.utc).isoformat())
+-    
++
+     config = load_config()
+     db = DatabaseService(config)
+     telegram = TelegramService(config)
+-    
++
+     try:
+         # التحقق من تفعيل التعلم
+         learning_config = config.get('learning', {})
+         if not learning_config.get('enabled', False):
+             logger.info("❌ التعلم الذكي معطل في الإعدادات")
+-            return
+-        
++            return None
++
+         # تحميل الأوزان الحالية
+         learning_service = get_learning_service(db, config)
+-        
++
+         # تحميل الأوزان من قاعدة البيانات
+         current_weights = learning_service.current_weights
+         logger.info("📊 الأوزان الحالية: %s", current_weights)
+-        
++
+         # تحليل وتحديث الأوزان
+         import asyncio
+         report = asyncio.run(learning_service.analyze_and_update_weights())
+-        
+-        # إرسال تقرير التعلم
++
++        # بناء تقرير التعلم
+         summary = learning_service.get_learning_summary()
+-        telegram.send_message(summary)
+-        
++
++        # إرسال تقرير التعلم (إلا في وضع الكتم الخاص بنهاية اليوم)
++        if _quiet_mode():
++            logger.info("🔇 EOD_QUIET: لن تُرسل رسالة تعلّم منفصلة (ستُدمج في التقرير اليومي)")
++            _write_eod_section("learning", summary)
++        else:
++            telegram.send_message(summary)
++
+         # تحديث config بالأوزان الجديدة
+         if report.adjusted_weights:
+             config['agent_weights'] = report.adjusted_weights
+             logger.info("✅ تم تحديث الأوزان: %s", report.adjusted_weights)
+-        
++
+         logger.info("✅ اكتمل التعلم الذكي بنجاح")
+-        logger.info("📊 الصفقات: %d | Win Rate: %.1f%%", 
++        logger.info("📊 الصفقات: %d | Win Rate: %.1f%%",
+                    report.total_trades_analyzed, report.overall_win_rate)
+         logger.info("📝 التغييرات: %s", report.changes_summary)
+-        
++        return summary
++
+     except Exception as e:
+         logger.error("❌ خطأ في التعلم: %s", e)
+-        telegram.send_error_alert(f"Smart learning error: {e}")
++        if not _quiet_mode():
++            telegram.send_error_alert(f"Smart learning error: {e}")
++        return None
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/scripts/run_trade_review.py b/scripts/run_trade_review.py
+index a2b0990..dcf7025 100644
+--- a/scripts/run_trade_review.py
++++ b/scripts/run_trade_review.py
+@@ -18,7 +18,24 @@ setup_logging()
+ logger = logging.getLogger(__name__)
+ 
+ 
+-def main() -> None:
++def _quiet_mode() -> bool:
++    """In the consolidated end-of-day digest, don't send a standalone message."""
++    return os.environ.get("EOD_QUIET", "").lower() in {"1", "true", "yes"}
++
++
++def _write_eod_section(name: str, text: str) -> None:
++    """Persist a section so the consolidated daily report can merge it."""
++    try:
++        from pathlib import Path
++        root = Path(__file__).resolve().parents[1] / "storage"
++        root.mkdir(parents=True, exist_ok=True)
++        (root / f"eod_{name}.txt").write_text(text or "", encoding="utf-8")
++    except Exception as exc:  # noqa: BLE001
++        logger.warning("Could not persist EOD section %s: %s", name, exc)
++
++
++def main() -> str | None:
++    """Run the AI trade review. Returns the summary text (for the digest)."""
+     logger.info("بدء AI Trade Review: %s", datetime.now(timezone.utc).isoformat())
+     config = load_config()
+     db = DatabaseService(config)
+@@ -26,15 +43,23 @@ def main() -> None:
+     try:
+         if not config.get("ai_trade_review", {}).get("enabled", True):
+             logger.info("AI Trade Review disabled")
+-            return
++            return None
+         result = run_trade_review(db, config)
+         text = format_trade_review_summary(result)
+-        telegram.send_message(text)
++        if _quiet_mode():
++            logger.info("🔇 EOD_QUIET: AI review message merged into daily report")
++            _write_eod_section("review", text)
++        else:
++            telegram.send_message(text)
+         logger.info("AI Trade Review completed: %s reviewed, %s errors", len(result.get("reviewed", [])), len(result.get("errors", [])))
++        return text
+     except Exception as exc:  # noqa: BLE001
+         logger.exception("AI Trade Review failed")
+-        telegram.send_error_alert(f"AI Trade Review failed: {exc}")
+-        raise
++        if not _quiet_mode():
++            telegram.send_error_alert(f"AI Trade Review failed: {exc}")
++        if not _quiet_mode():
++            raise
++        return None
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/scripts/run_trade_updates.py b/scripts/run_trade_updates.py
+index 12a641e..400912f 100644
+--- a/scripts/run_trade_updates.py
++++ b/scripts/run_trade_updates.py
+@@ -75,11 +75,18 @@ def main() -> None:
+         open_trades = database.get_open_trades()
+         logger.info("عدد الصفقات المفتوحة: %s", len(open_trades))
+ 
++        # In the consolidated end-of-day digest, suppress this script's own
++        # Telegram messages (trade events + confirmation). DB updates still run;
++        # the daily report aggregates everything into one message. We achieve
++        # this by passing telegram=None to the manager so it sends nothing.
++        eod_quiet = os.environ.get("EOD_QUIET", "").lower() in {"1", "true", "yes"}
++        telegram_for_events = None if eod_quiet else telegram
++
+         evaluations = manager.update_trades(
+             open_trades=open_trades,
+             current_price=float(current_price),
+             database=database,
+-            telegram=telegram,
++            telegram=telegram_for_events,
+             now=datetime.now(timezone.utc),
+         )
+         total_events = 0
+@@ -103,7 +110,7 @@ def main() -> None:
+         # is enabled) send a short confirmation summary so it's never silent.
+         manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch" or force_update
+         notify_updates = bool(config.get("notifications", {}).get("notify_on_trade_update", False))
+-        if (manual or notify_updates) and total_events == 0:
++        if (manual or notify_updates) and total_events == 0 and not eod_quiet:
+             import html as _html
+             if open_trades:
+                 lines = []
+diff --git a/tests/test_eod_consolidation.py b/tests/test_eod_consolidation.py
+new file mode 100644
+index 0000000..ffce636
+--- /dev/null
++++ b/tests/test_eod_consolidation.py
+@@ -0,0 +1,94 @@
++"""Tests for the consolidated end-of-day digest.
++
++Goal: at end of day the user gets ONE message, not four. The learning and AI
++trade-review sub-scripts run in EOD_QUIET mode (no standalone Telegram message)
++and hand their summaries to the daily report via storage/eod_*.txt, which folds
++them into a single consolidated message and cleans up the files.
++"""
++
++from __future__ import annotations
++
++import re
++from pathlib import Path
++from unittest.mock import MagicMock
++
++import scripts.run_daily_report as rd
++
++
++def _seed_eod(tmp_path: Path, monkeypatch):
++    storage = tmp_path / "storage"
++    storage.mkdir()
++    (storage / "eod_learning.txt").write_text(
++        "📊 Learning Update\n━━━━━━\nTrades analyzed: 12 | Win rate: 58%\nNew weights saved.\n",
++        encoding="utf-8",
++    )
++    (storage / "eod_review.txt").write_text(
++        "🧠 AI Trade Review (Losses)\n━━━━━━\nReviewed: 2 trade(s)\n🔻 Trade: TRADE_X\n",
++        encoding="utf-8",
++    )
++    monkeypatch.setattr(rd, "_eod_dir", lambda: storage)
++    return storage
++
++
++def _run(monkeypatch) -> str:
++    captured: dict = {}
++
++    class _Tg:
++        def send_message(self, text, **k):
++            captured["t"] = text
++            return True
++
++        def send_error_alert(self, *a, **k):
++            return True
++
++    monkeypatch.setattr(rd, "TelegramService", lambda *a, **k: _Tg())
++    db = MagicMock()
++    db.get_today_trades.return_value = [{"type": "SELL", "entry_price": 4124.0, "current_price": 4130.0, "final_pnl": -60}]
++    db.get_open_trades.return_value = [{"type": "SELL", "entry_price": 4124.0, "current_price": 4130.0}]
++    db.get_recent_trades.return_value = [{"final_pnl": 5}]
++    monkeypatch.setattr(rd, "DatabaseService", lambda *a, **k: db)
++    monkeypatch.setattr(rd, "DailyReportAgent", lambda *a, **k: MagicMock(
++        generate=lambda t: {"text": "📈 Performance\nTrades: 1 | Wins: 0 | Losses: 1"}))
++    rd.main()
++    return captured["t"]
++
++
++def test_single_message_contains_all_sections(tmp_path, monkeypatch):
++    _seed_eod(tmp_path, monkeypatch)
++    text = _run(monkeypatch)
++    # One message with performance + open trades + learning + review folded in.
++    assert "Daily Summary" in text
++    assert "Learning Update" in text
++    assert "AI Trade Review" in text
++    assert "Reviewed: 2 trade(s)" in text
++
++
++def test_eod_files_cleaned_up(tmp_path, monkeypatch):
++    storage = _seed_eod(tmp_path, monkeypatch)
++    _run(monkeypatch)
++    assert not (storage / "eod_learning.txt").exists()
++    assert not (storage / "eod_review.txt").exists()
++
++
++def test_no_doubled_section_titles(tmp_path, monkeypatch):
++    _seed_eod(tmp_path, monkeypatch)
++    text = re.sub(r"</?(b|i|code)>", "", _run(monkeypatch))
++    # The learning block header should appear once, not twice in a row.
++    assert text.count("Learning Update") == 1
++
++
++def test_works_without_eod_files(tmp_path, monkeypatch):
++    storage = tmp_path / "storage"
++    storage.mkdir()
++    monkeypatch.setattr(rd, "_eod_dir", lambda: storage)
++    text = _run(monkeypatch)
++    # Still sends a single daily summary even when sub-sections are absent.
++    assert "Daily Summary" in text
++
++
++def test_compact_section_drops_title_and_dividers():
++    raw = "📊 Learning Update\n━━━━━━\nLine A\n\nLine B"
++    out = rd._compact_section(raw, max_lines=8)
++    assert "Learning Update" not in out  # title dropped
++    assert "━" not in out               # divider dropped
++    assert "Line A" in out and "Line B" in out

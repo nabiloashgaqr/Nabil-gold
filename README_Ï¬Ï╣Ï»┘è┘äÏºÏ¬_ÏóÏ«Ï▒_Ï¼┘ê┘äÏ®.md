@@ -1,47 +1,72 @@
-# 📦 تعديلات آخر جولة — دمج رسائل أحداث الصفقة المتزامنة
+# 📦 تعديلات آخر جولة — دمج رسائل نهاية اليوم في رسالة واحدة
 
 > ⚠️ تُطبَّق **فوق** الحزم السابقة. تعتمد على ملفات الجولات السابقة.
 
 ## 🎯 المشكلة
-وصلتك **رسالتان لنفس الصفقة بنفس الوقت** (`Long-running Trade` و`Exit / Risk Warning`).
-السبب: عند وقوع أكثر من حدث في نفس دورة التقييم، كان الكود يرسل **رسالة Telegram منفصلة
-لكل حدث** — فظهرت رسالتان متطابقتان تقريباً في نفس اللحظة.
+في نهاية اليوم كان الـworkflow يرسل **4 رسائل منفصلة على الأقل** خلال دقيقة:
+1. تحديث الصفقات (+ رسائل أحداث TP/SL لكل صفقة)
+2. ملخّص التعلّم
+3. مراجعة AI للصفقات الخاسرة
+4. التقرير اليومي
 
-## ✅ الحل
-دمج كل أحداث الصفقة في **رسالة واحدة** لكل صفقة في الدورة:
-- العنوان = الحدث الأهم (حسب أولوية: TP2 > SL > تريلينغ > تعادل > TP1 > … > EXIT_WARNING > LONG_RUNNING).
-- ملاحظة مختصرة لكل حدث ضمن نفس الرسالة (دون تكرار).
-- بيانات الصفقة (الدخول/الوقف/الأهداف/الربح) تظهر مرة واحدة.
+= إزعاج وكثرة رسائل.
 
-### مثال (بدل رسالتين → رسالة واحدة)
+## ✅ الحل: رسالة واحدة مدمجة (Digest)
+السكربتات الثلاثة (تحديث الصفقات / التعلّم / المراجعة) تعمل الآن في **وضع كتم**
+(`EOD_QUIET=true`):
+- **لا ترسل رسائل Telegram خاصة بها** — لكنها تُحدّث قاعدة البيانات كالمعتاد.
+- التعلّم والمراجعة يكتبان ملخّصهما في `storage/eod_*.txt`.
+- **التقرير اليومي** يجمع كل شيء (الأداء + الصفقات المفتوحة + التعلّم + المراجعة)
+  في **رسالة واحدة منظّمة بأقسام**، ثم يحذف الملفات المؤقتة.
+
+أحداث الصفقات (TP/SL) أثناء تحديث نهاية اليوم تُكتم أيضاً وتُلخَّص ضمن التقرير.
+
+## 📊 الشكل النهائي (رسالة واحدة)
 ```
-⚠️ Exit / Risk Warning - XAU/USD
+📊 Gold AI Signals — Daily Summary
 ━━━━━━━━━━━━━━━━━━━━━
-🆔 ID: TRADE_2026...7cf3f415
-📊 Type: SELL
-📍 Entry: 4124.82
-🛑 Stop Loss: 4144.82
-🎯 TP1: 4098.15   🎯 TP2: 4078.15
-💰 Current Price: 4136.12
-📈 Current PnL: -113.0 pts ❌
-📌 Status: OPEN → OPEN
-📊 Progress to TP1: 0%   ⏱ Time open: 4.4h
+📅 2026-06-23 (Asia/Hebron)
 
-• ⚠️ Exit/risk warning: trade is near a danger zone or adverse move is deep.
-• ⏱ Trade has been open for a long time. Monitor momentum and news risk.
+📈 Performance
+Trades: 1 | Wins: 0 | Losses: 1
+PnL: -112 pts
 
-⚠️ Educational paper-trading update only. Not financial advice.
+🔄 Open Trades
+• Count: 1
+• SELL @ 4124.82 → 4136.00 (-11.2)
+• Est. Total PnL: -11.2 pts
+
+🧠 Learning Update
+Trades analyzed: 12 | Win rate: 58%
+Top agent: SMC (+0.05) | Weakest: Classical (-0.03)
+
+🔎 AI Trade Review
+Reviewed: 2 trade(s)
+🔻 Trade: TRADE_X
+├ Category: ENTRY_TIMING
+└ Review confidence: 80%
+
+⚠️ Paper-trading only • Educational
+━━━━━━━━━━━━━━━━━━━━━
 ```
 
-## 📂 الملفات (3)
-- `services/telegram_bot.py` — دالة `send_trade_events()` الجديدة (رسالة مدموجة).
-- `agents/open_trades_manager.py` — استدعاء رسالة واحدة لكل صفقة بدل حلقة لكل حدث.
-- `tests/test_trade_event_dedup.py` — 5 اختبارات جديدة.
+## 📂 الملفات (6)
+- `scripts/run_learning.py` — وضع الكتم + كتابة الملخّص لملف.
+- `scripts/run_trade_review.py` — وضع الكتم + كتابة الملخّص لملف.
+- `scripts/run_trade_updates.py` — كتم الرسائل في نهاية اليوم.
+- `scripts/run_daily_report.py` — دمج كل الأقسام في رسالة واحدة + تنظيف.
+- `.github/workflows/daily_report.yml` — `EOD_QUIET=true` للخطوات الثلاث.
+- `tests/test_eod_consolidation.py` — 5 اختبارات جديدة.
+
+## ℹ️ ملاحظات
+- خارج نهاية اليوم، تشغيل أي سكربت بمفرده يدوياً **يرسل رسالته كالمعتاد** (الكتم
+  فقط عند `EOD_QUIET=true`).
+- حدّ Telegram 4096 حرف؛ الرسالة تُقصّ بأمان إن تجاوزت 3900.
 
 ## 🚀 الرفع
-استبدل الملفات الـ3 فوق نظيراتها، أو:
+استبدل الملفات الـ6 فوق نظيراتها، أو:
 ```bash
 cd Nabil-gold
-git apply event-dedup-changes.patch
-python -m pytest tests/ -q     # المتوقع: 291 passed
+git apply eod-digest-changes.patch
+python -m pytest tests/ -q     # المتوقع: 296 passed
 ```
