@@ -28,6 +28,10 @@ class OpenTradesManager(BaseAgent):
         self.near_tp1_progress = float(self.management.get("near_tp1_progress", 0.80))
         self.time_warning_hours = float(self.management.get("time_warning_hours", 4))
         self.expire_after_hours = float(self.management.get("expire_after_hours", 8))
+        # When True, a time-expired trade that is in profit AND already protected
+        # (stop moved to entry / breakeven or better) is NOT force-closed; its
+        # trailing/breakeven stop is left to manage the exit instead.
+        self.keep_protected_winners_open = bool(self.management.get("keep_protected_winners_open", True))
         self.auto_be = bool(self.management.get("auto_move_sl_to_entry_after_tp1", True))
 
         # Genuine progressive trailing stop (beyond the initial breakeven lock).
@@ -178,11 +182,22 @@ class OpenTradesManager(BaseAgent):
             if exit_warning and "EXIT_WARNING" not in updates_sent:
                 events.append("EXIT_WARNING")
             if self.expire_after_hours > 0 and old_status == "OPEN" and hours_open >= self.expire_after_hours:
-                new_status = "EXPIRED"
-                events.append("EXPIRED")
-                result = "EXPIRED"
-                close_price = current_price
-                final_pnl = pnl_points
+                # Don't force-close a WINNING trade whose stop is already locked
+                # at/above breakeven — let the (trailing) stop ride instead of
+                # capping a runner by the clock. Only expire if it's not safely
+                # protected in profit. Controlled by keep_protected_winners_open.
+                protected_winner = (
+                    self.keep_protected_winners_open
+                    and sl_moved_to_entry
+                    and self._beyond_breakeven_or_at(trade_type, stop_loss, entry)
+                    and pnl_points > 0
+                )
+                if not protected_winner:
+                    new_status = "EXPIRED"
+                    events.append("EXPIRED")
+                    result = "EXPIRED"
+                    close_price = current_price
+                    final_pnl = pnl_points
 
             # 2b) EARLY BREAKEVEN: once the trade is +N points in profit, move the
             # stop to entry WITHOUT waiting for TP1. Independent of partial close.
@@ -354,6 +369,15 @@ class OpenTradesManager(BaseAgent):
         if trade_type == "BUY":
             return stop_loss > entry + epsilon
         return stop_loss < entry - epsilon
+
+    def _beyond_breakeven_or_at(self, trade_type: str, stop_loss: float, entry: float) -> bool:
+        """True when the stop is at entry (breakeven) or better — i.e. the trade
+        can no longer turn into a loss. Used to decide whether a time-expired
+        winner is safe to keep open under its protective stop."""
+        epsilon = 1e-6
+        if trade_type == "BUY":
+            return stop_loss >= entry - epsilon
+        return stop_loss <= entry + epsilon
 
     def _compute_trailing_stop(
         self, trade_type: str, current_price: float, current_stop_loss: float, entry: float
