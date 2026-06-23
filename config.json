@@ -390,7 +390,14 @@
       "BUY_STOP",
       "SELL_STOP"
     ],
-    "description": "Paper order classification only: market, limit, or stop based on entry vs current price."
+    "description": "Paper order classification only: market, limit, or stop based on entry vs current price.",
+    "smart_entry": {
+      "enabled": true,
+      "min_pullback_points": 60,
+      "max_pullback_points": 350,
+      "atr_fraction": 0.5,
+      "description": "دخول ذكي مُعاير لحركة الذهب (1 نقطة = 0.10$، أي 1$ = 10 نقاط): إذا كان هناك دعم (للشراء)/مقاومة (للبيع) ضمن مسافة ارتداد بين min و max نقطة يُقترح أمر Limit عنده؛ وإلا أمر Market فوري. النطاق الافتراضي 60–350 نقطة (6$–35$): 60 نقطة = ارتداد قريب، و200–350 نقطة = المتوسط الطبيعي لتحرك الذهب. atr_fraction يحدد حجم الارتداد المفضّل نسبةً إلى ATR (يُستخدم فقط مع allow_synthetic_pullback)."
+    }
   },
   "operation_mode": "observation",
   "operation_modes": {
