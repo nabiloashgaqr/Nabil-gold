@@ -75,11 +75,18 @@ def main() -> None:
         open_trades = database.get_open_trades()
         logger.info("عدد الصفقات المفتوحة: %s", len(open_trades))
 
+        # In the consolidated end-of-day digest, suppress this script's own
+        # Telegram messages (trade events + confirmation). DB updates still run;
+        # the daily report aggregates everything into one message. We achieve
+        # this by passing telegram=None to the manager so it sends nothing.
+        eod_quiet = os.environ.get("EOD_QUIET", "").lower() in {"1", "true", "yes"}
+        telegram_for_events = None if eod_quiet else telegram
+
         evaluations = manager.update_trades(
             open_trades=open_trades,
             current_price=float(current_price),
             database=database,
-            telegram=telegram,
+            telegram=telegram_for_events,
             now=datetime.now(timezone.utc),
         )
         total_events = 0
@@ -103,7 +110,7 @@ def main() -> None:
         # is enabled) send a short confirmation summary so it's never silent.
         manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch" or force_update
         notify_updates = bool(config.get("notifications", {}).get("notify_on_trade_update", False))
-        if (manual or notify_updates) and total_events == 0:
+        if (manual or notify_updates) and total_events == 0 and not eod_quiet:
             import html as _html
             if open_trades:
                 lines = []

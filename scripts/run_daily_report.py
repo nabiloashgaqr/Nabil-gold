@@ -27,6 +27,61 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 
+def _eod_dir():
+    from pathlib import Path
+    return Path(__file__).resolve().parents[1] / "storage"
+
+
+def _read_eod_section(name: str) -> str:
+    """Read a section written by a quiet sub-script (learning/review), or ''."""
+    try:
+        path = _eod_dir() / f"eod_{name}.txt"
+        if path.exists():
+            return path.read_text(encoding="utf-8").strip()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not read EOD section %s: %s", name, exc)
+    return ""
+
+
+def _cleanup_eod_sections() -> None:
+    """Remove EOD handoff files after merging so they don't leak to next day."""
+    for name in ("learning", "review"):
+        try:
+            path = _eod_dir() / f"eod_{name}.txt"
+            if path.exists():
+                path.unlink()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _compact_section(text: str, max_lines: int = 8, skip_first_title: bool = True) -> str:
+    """Strip decorative divider lines and cap the number of lines so a merged
+    section stays short inside the single consolidated message.
+
+    ``skip_first_title`` drops the section's own leading title line (e.g.
+    "📊 Learning Update" / "🧠 AI Trade Review (Losses)") because the daily
+    report already prints its own header above it — avoids a doubled heading.
+    """
+    out = []
+    title_skipped = not skip_first_title
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if not line:
+            continue
+        # Drop pure divider lines.
+        if set(line) <= set("━─=-_ "):
+            continue
+        # Drop the first non-divider line if it is the section's own title.
+        if not title_skipped:
+            title_skipped = True
+            continue
+        out.append(line)
+        if len(out) >= max_lines:
+            out.append("…")
+            break
+    return "\n".join(out)
+
+
 def _trade_value(trade: dict, *keys: str, default=None):
     """Return the first existing/non-empty value from possible schema aliases."""
     for key in keys:
@@ -178,15 +233,38 @@ def main() -> None:
             lines.append("🔄 <b>Open Trades:</b> None")
             lines.append("")
 
-        if learning_insight:
+        # ── Merge end-of-day sections produced by the quiet sub-scripts ──────
+        # run_learning.py and run_trade_review.py (with EOD_QUIET=true) write
+        # their summaries to storage/eod_*.txt instead of sending their own
+        # Telegram message. We fold them into this single consolidated report.
+        learning_section = _read_eod_section("learning")
+        review_section = _read_eod_section("review")
+
+        # Only show the lightweight insight when the richer learning section is
+        # absent (avoids two "Learning" blocks).
+        if learning_insight and not learning_section:
             lines.append(f"🧠 <b>Learning:</b> {learning_insight}")
+            lines.append("")
+
+        if learning_section:
+            lines.append("🧠 <b>Learning Update</b>")
+            lines.append(_compact_section(learning_section, max_lines=8))
+            lines.append("")
+        if review_section:
+            lines.append("🔎 <b>AI Trade Review</b>")
+            lines.append(_compact_section(review_section, max_lines=10))
             lines.append("")
 
         lines.append("⚠️ Paper-trading only • Educational")
         lines.append("━━━━━━━━━━━━━━━━━━━━━")
 
-        telegram.send_message("\n".join(lines))
-        logger.info("✅ Sent consolidated daily summary")
+        message = "\n".join(lines)
+        # Telegram hard limit is 4096 chars; trim defensively.
+        if len(message) > 3900:
+            message = message[:3850].rstrip() + "\n…\n━━━━━━━━━━━━━━━━━━━━━"
+        telegram.send_message(message)
+        _cleanup_eod_sections()
+        logger.info("✅ Sent consolidated daily summary (single message)")
 
     except Exception as exc:  # noqa: BLE001
         logger.exception("خطأ في التقرير اليومي المدمج")
