@@ -169,11 +169,13 @@
     "enabled": true,
     "tp1_trigger_pct": 50.0,
     "partial_close_pct": 50.0,
-    "trailing_distance": 90.0,
+    "trailing_distance": 100.0,
     "trailing_step": 5.0,
     "tp2_trigger_pct": 100.0,
     "tp2_distance": 15.0,
-    "min_profit_lock": 0.0
+    "min_profit_lock": 0.0,
+    "early_breakeven_points": 100.0,
+    "description_early_breakeven": "early_breakeven_points: عند بلوغ الربح هذا العدد من النقاط (100 = 10$) يُنقل الستوب إلى الدخول فوراً دون انتظار TP1. بعدها يبدأ trailing بمسافة trailing_distance (100 نقطة = 10$) خلف السعر، يتحرك فقط بالاتجاه الرابح ولا يتراجع. 0 يعطّل النقل المبكر (نقل عند TP1 فقط). نقاط الذهب: 10 نقاط = 1$."
   },
   "news_feed": {
     "enabled": false,
