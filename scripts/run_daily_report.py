@@ -185,53 +185,123 @@ def main() -> None:
     database = DatabaseService(config)
 
     try:
-        # 1. Get today's trades
+        # 1. Get today's trades (open + closed) and compute rich stats.
         today_trades = database.get_today_trades()
         agent = DailyReportAgent(config)
         perf_report = agent.generate(today_trades)
+        stats = perf_report.get("stats", {})
 
-        # 2. Open trades
+        # 2. Open trades (live).
         open_trades = database.get_open_trades()
 
-        # 3. Try to get recent learning / review insights (lightweight)
-        learning_insight = ""
-        try:
-            recent_learning = database.get_recent_trades(limit=20) or []
-            if recent_learning:
-                wins = len([t for t in recent_learning if t.get("final_pnl", 0) > 0])
-                learning_insight = f"Recent 20 trades: {wins} wins"
-        except Exception:
-            pass
+        # 3. Split today's trades into CLOSED vs OPEN for clear reporting.
+        open_statuses = {"OPEN", "TP1_HIT", "PARTIAL"}
+        closed_today = [t for t in today_trades if str(t.get("status", "")).upper() not in open_statuses]
 
-        # Build one clean consolidated message
+        def _pts(trade) -> float:
+            """Realized/floating PnL in POINTS (gold: 1 USD = 10 points).
+
+            OpenTradesManager already stores final_pnl/current_pnl/* in POINTS
+            (from calculate_pips), so those are used as-is. Only when deriving
+            from raw entry/close prices do we apply the ×10 conversion.
+            """
+            for key in ("final_pnl_points", "current_pnl_points", "final_pnl", "current_pnl"):
+                v = trade.get(key)
+                if v is not None:
+                    try:
+                        return float(v)  # already points
+                    except (TypeError, ValueError):
+                        pass
+            # Last resort: derive from entry vs close/current price (USD ×10).
+            typ = str(trade.get("type") or trade.get("trade_type") or "BUY").upper()
+            entry = float(trade.get("entry_price", 0) or 0)
+            px = float(trade.get("close_price") or trade.get("current_price") or entry or 0)
+            move = (px - entry) if typ == "BUY" else (entry - px)
+            return move * 10.0
+
+        def _usd(points: float) -> float:
+            return points / 10.0
+
+        # Build one clean consolidated message.
         lines = [
             "📊 <b>Gold AI Signals — Daily Summary</b>",
             "━━━━━━━━━━━━━━━━━━━━━",
             f"📅 {datetime.now(timezone.utc).strftime('%Y-%m-%d')} (Asia/Hebron)",
             "",
-            perf_report["text"].split("━━━━━━━━━━━━━━━━━━━━━")[0].strip() if "━━━━━━━━" in perf_report["text"] else perf_report["text"],
-            "",
         ]
 
-        # Open trades section (compact)
+        # ── Performance snapshot (today) ────────────────────────────────────
+        net_pts = float(stats.get("net_points", 0) or 0)
+        lines.append("📊 <b>Performance (today)</b>")
+        lines.append(
+            f"• Trades: {stats.get('total', 0)} "
+            f"(✅ {stats.get('wins', 0)} · ❌ {stats.get('losses', 0)} · "
+            f"➖ {stats.get('breakeven', 0)} · 🔄 {stats.get('open', 0)})"
+        )
+        lines.append(f"• Win rate: {stats.get('win_rate', 0)}%")
+        lines.append(f"• Net: {net_pts:+.0f} pts ({_usd(net_pts):+.1f}$)")
+        if stats.get("total", 0):
+            lines.append(
+                f"• Best {float(stats.get('best_trade', 0)):+.0f} pts · "
+                f"Worst {float(stats.get('worst_trade', 0)):+.0f} pts · "
+                f"PF {stats.get('profit_factor', 0)}"
+            )
+        lines.append("")
+
+        # ── Closed trades today ─────────────────────────────────────────────
+        if closed_today:
+            wins = [t for t in closed_today if _pts(t) > 0]
+            losses = [t for t in closed_today if _pts(t) < 0]
+            flat = [t for t in closed_today if _pts(t) == 0]
+            closed_net = sum(_pts(t) for t in closed_today)
+            lines.append(f"📕 <b>Closed Trades:</b> {len(closed_today)}  (✅ {len(wins)} · ❌ {len(losses)} · ➖ {len(flat)})")
+            for t in sorted(closed_today, key=_pts, reverse=True)[:8]:
+                typ = str(t.get("type") or t.get("trade_type", "BUY")).upper()
+                p = _pts(t)
+                sign = "🟢" if p > 0 else "🔴" if p < 0 else "➖"
+                status = str(t.get("status", "")).upper()
+                lines.append(f"{sign} {typ} {p:+.0f} pts ({_usd(p):+.1f}$) · {status}")
+            if len(closed_today) > 8:
+                lines.append(f"• … and {len(closed_today) - 8} more")
+            lines.append(f"• Closed Net: {closed_net:+.0f} pts ({_usd(closed_net):+.1f}$)")
+            lines.append("")
+        else:
+            lines.append("📕 <b>Closed Trades:</b> none today")
+            lines.append("")
+
+        # ── Open trades (live floating PnL) ─────────────────────────────────
         if open_trades:
-            lines.append("🔄 <b>Open Trades</b>")
-            lines.append(f"• Count: {len(open_trades)}")
-            total_pnl = 0.0
-            for t in open_trades[:5]:  # limit to 5 for cleanliness
+            lines.append(f"🔄 <b>Open Trades:</b> {len(open_trades)}")
+            total_pts = 0.0
+            for t in open_trades[:8]:
                 typ = str(t.get("type") or t.get("trade_type", "BUY")).upper()
                 entry = float(t.get("entry_price", 0) or 0)
                 curr = float(t.get("current_price", entry) or entry)
-                pnl = (curr - entry) if typ == "BUY" else (entry - curr)
-                total_pnl += pnl
-                lines.append(f"• {typ} @ {entry:.2f} → {curr:.2f} ({pnl:+.1f})")
-            if len(open_trades) > 5:
-                lines.append(f"• ... and {len(open_trades)-5} more")
-            lines.append(f"• Est. Total PnL: {total_pnl:+.1f} pts")
+                p = (curr - entry) * 10.0 if typ == "BUY" else (entry - curr) * 10.0
+                total_pts += p
+                sign = "🟢" if p > 0 else "🔴" if p < 0 else "➖"
+                lines.append(f"{sign} {typ} @ {entry:.2f} → {curr:.2f}  {p:+.0f} pts ({_usd(p):+.1f}$)")
+            if len(open_trades) > 8:
+                lines.append(f"• … and {len(open_trades) - 8} more")
+            lines.append(f"• Floating Net: {total_pts:+.0f} pts ({_usd(total_pts):+.1f}$)")
             lines.append("")
         else:
-            lines.append("🔄 <b>Open Trades:</b> None")
+            lines.append("🔄 <b>Open Trades:</b> none")
             lines.append("")
+
+        # ── By direction (today) ────────────────────────────────────────────
+        direction = stats.get("by_direction", {}) or {}
+        buy = direction.get("BUY", {}) or {}
+        sell = direction.get("SELL", {}) or {}
+        if buy.get("count") or sell.get("count"):
+            bnet = float(buy.get("net", 0) or 0)
+            snet = float(sell.get("net", 0) or 0)
+            lines.append("🧭 <b>By Direction</b>")
+            lines.append(f"• BUY: {buy.get('count', 0)} · Net {bnet:+.0f} pts")
+            lines.append(f"• SELL: {sell.get('count', 0)} · Net {snet:+.0f} pts")
+            lines.append("")
+
+        learning_insight = ""
 
         # ── Merge end-of-day sections produced by the quiet sub-scripts ──────
         # run_learning.py and run_trade_review.py (with EOD_QUIET=true) write
