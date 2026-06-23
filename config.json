@@ -157,7 +157,8 @@
     "trailing_distance_points": 15,
     "partial_close_at_tp1": true,
     "partial_close_percentage": 50,
-    "update_outside_trading_hours": false
+    "update_outside_trading_hours": true,
+    "description_update_outside_trading_hours": "متابعة الصفقات المفتوحة (SL/TP/breakeven/trailing) تعمل على مدار الساعة حتى خارج نافذة توليد الإشارات (02:00-22:00). الذهب يتحرك 24/5 وقد تضرب الصفقة هدفاً/وقفاً في أي وقت. توليد الإشارات الجديدة يبقى مقيّداً بالنافذة، لكن إدارة الصفقات القائمة لا تتوقف."
   },
   "performance": {
     "track_win_rate_per_agent": true,
