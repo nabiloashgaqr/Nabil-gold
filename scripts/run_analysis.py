@@ -107,7 +107,15 @@ def _trade_entry_price(trade: Dict[str, Any]) -> float | None:
 
 
 def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService, config: Dict[str, Any]) -> str | None:
-    """Return a reason if this signal is a duplicate of an open/recent similar signal."""
+    """Return a reason if this signal is a duplicate of an open/recent similar signal.
+
+    New logic (user request):
+    - Allow same-direction signal if:
+        * More than 90 minutes have passed since the previous same-direction trade, AND
+        * The new entry price is NOT within ±50 points of the previous entry price
+          (i.e. different price zone).
+    - This applies to BOTH currently open trades (OPEN/TP1_HIT) and recent closed trades.
+    """
     filt = config.get('duplicate_signal_filter', {}) or {}
     if not filt.get('enabled', True):
         return None
@@ -123,39 +131,71 @@ def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService,
     except (TypeError, ValueError):
         entry_price = 0.0
 
-    risk = decision.get('risk', {}) or {}
-    try:
-        atr = float((risk.get('risk_metrics', {}) or {}).get('atr') or 0)
-    except (TypeError, ValueError):
-        atr = 0.0
+    if entry_price <= 0:
+        return None
 
-    tolerance_points = float(filt.get('price_tolerance_points', 3.0) or 3.0)
-    tolerance_atr = float(filt.get('price_tolerance_atr_multiplier', 0.75) or 0.75)
-    tolerance = max(tolerance_points, atr * tolerance_atr)
     now = datetime.now(timezone.utc)
 
-    open_trades = database.get_open_trades()
-    if filt.get('block_if_open_same_direction', True):
-        for trade in open_trades:
-            if _trade_direction(trade) == direction:
-                return f"A {direction} trade is already open: {trade.get('id', 'unknown')}"
+    # === NEW PARAMETERS (user requested) ===
+    same_dir_time_threshold = int(filt.get('lookback_minutes', 90))          # 90 minutes
+    same_dir_price_zone = float(filt.get('same_direction_price_zone_points', 50))  # ±50 points
 
-    lookback_minutes = int(filt.get('lookback_minutes', 90) or 90)
-    cutoff = now - timedelta(minutes=lookback_minutes)
-    for trade in database.get_recent_trades(limit=30):
-        if _trade_direction(trade) != direction:
+    # Gold point definition (confirmed by user):
+    # On XAU/USD, 1 point = 0.10 USD per ounce
+    # Therefore: 50 points = 5.00 USD per ounce
+    # price_diff comes from market data in USD (e.g. 7.79)
+    # We convert: price_diff_points = price_diff_usd * 10
+
+    # Collect all relevant previous trades in same direction (open + recent)
+    previous_same_dir_trades = []
+
+    # 1. Open trades (including TP1_HIT)
+    for trade in database.get_open_trades():
+        if _trade_direction(trade) == direction:
+            previous_same_dir_trades.append(trade)
+
+    # 2. Recent closed trades (within a generous window, e.g. 1 day)
+    for trade in database.get_recent_trades(limit=50):
+        if _trade_direction(trade) == direction:
+            created = _parse_datetime(trade.get('created_at') or trade.get('entry_time') or trade.get('opened_at'))
+            if created and (now - created).total_seconds() < 24 * 3600:  # last 24h is enough
+                previous_same_dir_trades.append(trade)
+
+    # Remove duplicates by id
+    seen_ids = set()
+    unique_prev = []
+    for t in previous_same_dir_trades:
+        tid = str(t.get('id', ''))
+        if tid and tid not in seen_ids:
+            seen_ids.add(tid)
+            unique_prev.append(t)
+
+    for trade in unique_prev:
+        prev_entry = _trade_entry_price(trade)
+        if prev_entry is None:
             continue
-        created = _parse_datetime(trade.get('created_at') or trade.get('entry_time') or trade.get('opened_at'))
-        if created and created < cutoff:
-            continue
-        previous_entry = _trade_entry_price(trade)
-        if previous_entry is None or entry_price <= 0:
-            return f"A similar {direction} signal was sent within the last {lookback_minutes} min: {trade.get('id', 'unknown')}"
-        if abs(entry_price - previous_entry) <= tolerance:
-            return (
-                f"Duplicate {direction} signal: price close to a recent signal "
-                f"({previous_entry:.2f} vs {entry_price:.2f}, tolerance={tolerance:.2f})"
+
+        created = _parse_datetime(
+            trade.get('created_at') or trade.get('entry_time') or trade.get('opened_at')
+        ) or now
+
+        age_minutes = (now - created).total_seconds() / 60.0
+        price_diff_usd = abs(entry_price - prev_entry)
+        price_diff_points = price_diff_usd * 10.0   # 1 USD = 10 points
+
+        # Block ONLY if it is "too close in time OR too close in price zone"
+        # Allow if BOTH: age > 90min AND price_diff_points > 50
+        is_too_recent = age_minutes <= same_dir_time_threshold
+        is_same_zone = price_diff_points <= same_dir_price_zone
+
+        if is_too_recent or is_same_zone:
+            reason = (
+                f"Duplicate {direction} signal blocked: "
+                f"previous {direction} trade {trade.get('id', 'unknown')} "
+                f"(age={age_minutes:.0f}min, diff={price_diff_points:.1f}pts / {price_diff_usd:.2f}$). "
+                f"Rule: allow only after >{same_dir_time_threshold}min AND >{same_dir_price_zone}pts away."
             )
+            return reason
 
     return None
 
