@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -336,10 +337,39 @@ class DatabaseService:
         rules = [r for r in load_trades(rules_path) if r.get("active", True)]
         return sorted(rules, key=lambda r: (float(r.get("confidence", 0) or 0), str(r.get("updated_at", ""))), reverse=True)[:limit]
 
+    def _missing_column_name(self, exc: Exception) -> str | None:
+        """Extract the missing column name from a Supabase/PostgREST error.
+
+        Handles both error styles:
+          * PostgREST schema-cache: PGRST204 -> "Could not find the 'X' column
+            of 'trades' in the schema cache"
+          * Postgres: 42703 -> "column \"X\" does not exist"
+        Returns the column name (e.g. 'exit_warning') or None.
+        """
+        text = str(exc)
+        # PGRST204 style: ... the 'X' column ...
+        m = re.search(r"the '([^']+)' column", text)
+        if m:
+            return m.group(1)
+        # 42703 style: column "X" does not exist
+        m = re.search(r'column "([^"]+)" does not exist', text)
+        if m:
+            return m.group(1)
+        # Fallback single-quoted Postgres style: column 'X' does not exist
+        m = re.search(r"column '([^']+)' does not exist", text)
+        if m:
+            return m.group(1)
+        return None
+
     def _missing_column(self, exc: Exception, column: str) -> bool:
         """Return True for Supabase/PostgREST missing-column errors."""
         text = str(exc).lower()
-        return "42703" in text and column.lower() in text and "does not exist" in text
+        if "42703" in text and column.lower() in text and "does not exist" in text:
+            return True
+        # PGRST204 schema-cache style.
+        if "pgrst204" in text or "schema cache" in text:
+            return column.lower() in text
+        return False
 
     def _trade_time_text(self, trade: Dict[str, Any]) -> str:
         """Best available timestamp across current and legacy trade schemas."""
@@ -418,29 +448,95 @@ class DatabaseService:
                 break
         return losses
 
+    # How many unknown columns we are willing to strip one-by-one before giving
+    # up and using the minimal legacy payload.
+    _MAX_COLUMN_RETRIES = 12
+
+    def _drop_missing_columns_and_retry(self, op, payload: Dict[str, Any]):
+        """Run ``op(payload)``; if it fails on an unknown column, drop ONLY that
+        column and retry, instead of collapsing to a tiny legacy payload.
+
+        This preserves critical fields (stop_loss, result, sl_moved_to_entry,
+        close_time, ...) that the old legacy fallback silently discarded — which
+        is why trailing-stop / breakeven updates never persisted on older
+        Supabase schemas. Only the genuinely missing columns are removed.
+        """
+        current = dict(payload)
+        dropped: List[str] = []
+        last_exc: Exception | None = None
+        for _ in range(self._MAX_COLUMN_RETRIES):
+            try:
+                return op(current), dropped
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                col = self._missing_column_name(exc)
+                if not col or col not in current:
+                    break
+                current.pop(col, None)
+                dropped.append(col)
+                if not current:
+                    break
+        # Could not resolve by dropping columns; surface for caller fallback.
+        raise last_exc if last_exc else RuntimeError("Supabase operation failed")
+
     def _insert_trade_supabase(self, trade_data: Dict[str, Any]) -> None:
-        """Insert full trade row, falling back to legacy column set if needed."""
+        """Insert full trade row.
+
+        If the live schema is missing some newer columns, drop ONLY those and
+        retry, so we still store as much as the schema supports. Fall back to the
+        minimal legacy payload only as a last resort.
+        """
         assert self.client is not None
         try:
             self.client.table("trades").insert(trade_data).execute()
+            return
         except Exception as exc:  # noqa: BLE001
-            legacy = self._legacy_payload(trade_data)
-            if legacy == trade_data:
-                raise
-            self.logger.warning("Full trade insert failed, trying legacy schema: %s", exc)
-            self.client.table("trades").insert(legacy).execute()
+            try:
+                _, dropped = self._drop_missing_columns_and_retry(
+                    lambda p: self.client.table("trades").insert(p).execute(), trade_data
+                )
+                if dropped:
+                    self.logger.warning(
+                        "Trade insert succeeded after dropping unknown column(s): %s. "
+                        "Add them to your Supabase 'trades' table (see supabase_schema.sql).",
+                        ", ".join(dropped),
+                    )
+                return
+            except Exception:  # noqa: BLE001
+                legacy = self._legacy_payload(trade_data)
+                if legacy == trade_data:
+                    raise
+                self.logger.warning("Full trade insert failed, trying legacy schema: %s", exc)
+                self.client.table("trades").insert(legacy).execute()
 
     def _update_trade_supabase(self, trade_id: str, updates: Dict[str, Any]) -> None:
-        """Update full trade row, falling back to legacy columns if needed."""
+        """Update full trade row.
+
+        Drop only unknown columns and retry (preserving stop_loss/result/etc.),
+        falling back to the minimal legacy column set only if that still fails.
+        """
         assert self.client is not None
         try:
             self.client.table("trades").update(updates).eq("id", trade_id).execute()
+            return
         except Exception as exc:  # noqa: BLE001
-            legacy = self._legacy_payload(updates)
-            if not legacy or legacy == updates:
-                raise
-            self.logger.warning("Full trade update failed, trying legacy schema: %s", exc)
-            self.client.table("trades").update(legacy).eq("id", trade_id).execute()
+            try:
+                _, dropped = self._drop_missing_columns_and_retry(
+                    lambda p: self.client.table("trades").update(p).eq("id", trade_id).execute(), updates
+                )
+                if dropped:
+                    self.logger.warning(
+                        "Trade %s update succeeded after dropping unknown column(s): %s. "
+                        "Add them to your Supabase 'trades' table (see supabase_schema.sql).",
+                        trade_id, ", ".join(dropped),
+                    )
+                return
+            except Exception:  # noqa: BLE001
+                legacy = self._legacy_payload(updates)
+                if not legacy or legacy == updates:
+                    raise
+                self.logger.warning("Full trade update failed, trying legacy schema: %s", exc)
+                self.client.table("trades").update(legacy).eq("id", trade_id).execute()
 
     def _legacy_payload(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Keep only columns from the initial Supabase schema for compatibility."""
@@ -450,13 +546,19 @@ class DatabaseService:
             "side",
             "entry_price",
             "stop_loss",
+            "initial_stop_loss",
             "tp1",
             "tp2",
             "confidence",
             "status",
             "current_price",
             "current_pnl",
+            # Critical management fields — must survive even the last-resort
+            # fallback, otherwise breakeven/trailing-stop changes never persist.
+            "sl_moved_to_entry",
+            "result",
             "closed_at",
+            "close_time",
             "close_price",
             "final_pnl",
             "reasons",
