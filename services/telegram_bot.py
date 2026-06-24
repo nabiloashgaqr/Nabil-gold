@@ -185,7 +185,11 @@ class TelegramService:
         if risk_notes:
             extra_lines.append(f"⚠️ <b>Risk note:</b> {risk_notes}")
         invalidation = self._clean_ai_field(ai.get("invalidation"))
-        if invalidation:
+        # Drop the invalidation line when it's just a restatement of the stop
+        # loss (Groq often returns the same level). It only adds value when it
+        # gives DIFFERENT information (a different price, or a candle-close
+        # condition). We compare any number it contains to the SL price.
+        if invalidation and not self._invalidation_is_just_stop(invalidation, signal.get("stop_loss")):
             extra_lines.append(f"🚫 <b>Invalidation:</b> {invalidation}")
         # Dynamic risk: only surface when it actually changes behaviour.
         # (Daily bias is already covered inside WHY THIS TRADE when it agrees,
@@ -313,8 +317,14 @@ class TelegramService:
         if entry_kind == "MARKET":
             lines.append(f"• <b>Entry zone:</b> {format_price(entry_low)} – {format_price(entry_high)}")
         else:
-            # Pending order: show target entry + live market reference.
-            lines.append(f"• <b>Entry @</b> {format_price(entry_price)}{dist_txt}")
+            # Pending order: show the entry ZONE, the fill point inside it, and
+            # the live market reference so it's clear it's a resting order.
+            has_zone = entry_low not in (None, 0) and entry_high not in (None, 0) and float(entry_high) > float(entry_low)
+            if has_zone:
+                lines.append(f"• <b>Entry zone:</b> {format_price(entry_low)} – {format_price(entry_high)}")
+                lines.append(f"• <b>Fill @</b> {format_price(entry_price)} (zone mid){dist_txt}")
+            else:
+                lines.append(f"• <b>Entry @</b> {format_price(entry_price)}{dist_txt}")
             lines.append(f"• <b>Market now:</b> {format_price(current_price)}")
             if entry_basis:
                 lines.append(f"   <i>{entry_basis}</i>")
@@ -327,6 +337,16 @@ class TelegramService:
         return "\n".join(lines)
 
     @staticmethod
+    def _status_text(old_status: Any, new_status: Any) -> str:
+        """Render the status line. Show a transition 'A → B' only when it really
+        changed; otherwise just 'A' (avoids noise like 'TP1_HIT → TP1_HIT')."""
+        old = str(old_status or "OPEN")
+        new = str(new_status or old)
+        if old == new:
+            return html.escape(new)
+        return f"{html.escape(old)} → {html.escape(new)}"
+
+    @staticmethod
     def _clean_ai_field(value: Any) -> str:
         """Return a one-line, escaped AI field, or '' for empty/placeholder text."""
         if value is None:
@@ -335,6 +355,36 @@ class TelegramService:
         if not text or text.upper() in {"N/A", "NONE", "NULL", "-"}:
             return ""
         return html.escape(text)
+
+    @staticmethod
+    def _invalidation_is_just_stop(invalidation: str, stop_loss: Any) -> bool:
+        """True when the invalidation text is merely a restatement of the SL.
+
+        Hides the redundant 'Invalidation: 4121.05' line when stop_loss is also
+        4121.05. Keeps it when it carries different info: a *different* price, or
+        a candle-close / structural condition (no comparable number, or a number
+        far from the SL).
+        """
+        try:
+            sl = float(stop_loss)
+        except (TypeError, ValueError):
+            return False
+        if sl <= 0:
+            return False
+        import re as _re
+        nums = _re.findall(r"\d+(?:\.\d+)?", str(invalidation).replace(",", ""))
+        if not nums:
+            # No price at all (e.g. "close below structure") -> keep it.
+            return False
+        # If EVERY number in the text is essentially the SL, it's redundant.
+        # A "close above/below" condition at a different level is still useful.
+        for n in nums:
+            try:
+                if abs(float(n) - sl) > 0.5:  # >5 points difference = different level
+                    return False
+            except ValueError:
+                return False
+        return True
 
     def _format_agent_votes(self, decision: Dict[str, Any], ai: Dict[str, Any], final_type: str, final_conf: int) -> str:
         """Build the AGENT VOTES table for all five analysis agents + Groq.
@@ -471,6 +521,7 @@ class TelegramService:
             "MANUAL_CLOSE": "📌 Manual Close",
             "TRAILING_SL_UPDATED": "📈 Trailing Stop Moved",
             "TRAILING_SL_HIT": "🔒 Trailing Stop Hit (Profit Locked)",
+            "ORDER_FILLED": "🎯 Pending Order Filled",
         }
         title = event_titles.get(event_type, "🔄 Trade Update")
         pnl_emoji = "✅" if pnl_points > 0 else "➖" if pnl_points == 0 else "❌"
@@ -498,7 +549,7 @@ class TelegramService:
 🎯 <b>TP2:</b> {format_price(trade.get('tp2'))}
 💰 <b>Current Price:</b> {format_price(current_price)}
 📈 <b>Current PnL:</b> {pnl_points:+.1f} pts {pnl_emoji}
-📌 <b>Status:</b> {html.escape(str(old_status))} → {html.escape(str(new_status))}
+📌 <b>Status:</b> {self._status_text(old_status, new_status)}
 {extra_text}
 
 {note}
@@ -510,8 +561,8 @@ class TelegramService:
     # Display priority: the most important event leads the combined message.
     _EVENT_PRIORITY = (
         "TP2_HIT", "SL_HIT", "TRAILING_SL_HIT", "BE_HIT", "TP1_HIT",
-        "MOVE_SL_TO_BE", "EXPIRED", "MANUAL_CLOSE", "TRAILING_SL_UPDATED",
-        "EXIT_WARNING", "NEAR_TP1", "LONG_RUNNING",
+        "ORDER_FILLED", "MOVE_SL_TO_BE", "EXPIRED", "MANUAL_CLOSE",
+        "TRAILING_SL_UPDATED", "EXIT_WARNING", "NEAR_TP1", "LONG_RUNNING",
     )
 
     def send_trade_events(
@@ -550,6 +601,7 @@ class TelegramService:
             "MANUAL_CLOSE": "📌 Manual Close",
             "TRAILING_SL_UPDATED": "📈 Trailing Stop Moved",
             "TRAILING_SL_HIT": "🔒 Trailing Stop Hit (Profit Locked)",
+            "ORDER_FILLED": "🎯 Pending Order Filled",
         }
         # Order events by priority; the first becomes the title.
         ordered = sorted(
@@ -591,7 +643,7 @@ class TelegramService:
 🎯 <b>TP2:</b> {format_price(trade.get('tp2'))}
 💰 <b>Current Price:</b> {format_price(current_price)}
 📈 <b>Current PnL:</b> {pnl_points:+.1f} pts {pnl_emoji}
-📌 <b>Status:</b> {html.escape(str(old_status))} → {html.escape(str(new_status))}
+📌 <b>Status:</b> {self._status_text(old_status, new_status)}
 {extra_text}
 
 {notes_text}
@@ -607,6 +659,8 @@ class TelegramService:
 
     def _trade_event_note(self, event_type: str, trade: Dict[str, Any], current_price: float, evaluation: Dict[str, Any]) -> str:
         """Return an English note for a trade-management event."""
+        if event_type == "ORDER_FILLED":
+            return f"🎯 Pending order filled at {format_price(trade.get('entry_price'))}. Position is now live and being managed."
         if event_type == "NEAR_TP1":
             return f"💡 Price reached about 80% of TP1 distance ({format_price(trade.get('tp1'))}). Monitor trade management."
         if event_type == "TP1_HIT":

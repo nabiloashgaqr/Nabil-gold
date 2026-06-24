@@ -101,6 +101,17 @@ class DatabaseService:
         entry_price = float(entry.get("price") or ((float(entry.get("low", 0)) + float(entry.get("high", 0))) / 2) or 0)
         now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         stop_loss = round(float(signal.get("stop_loss", 0)), 2)
+
+        # ── Market vs pending (LIMIT/STOP) order ────────────────────────────
+        # A smart entry may place the order AWAY from the current price
+        # (a LIMIT pullback or STOP breakout). Such an order is NOT filled yet:
+        # it must wait until price actually touches entry_price. Storing it as
+        # OPEN immediately created phantom fills/profits (e.g. a SELL LIMIT at
+        # 4101 while price was 4068 and never traded up to 4101). So we persist
+        # it as PENDING and let the trade manager activate it on touch.
+        order_kind = str(signal.get("entry_kind") or entry.get("kind") or "MARKET").upper()
+        current_price = float(decision.get("current_price", entry_price) or entry_price)
+        initial_status = "PENDING" if order_kind in {"LIMIT", "STOP"} and abs(entry_price - current_price) > 0.01 else "OPEN"
         trade_data = {
             "id": trade_id,
             "type": decision.get("decision", signal.get("type")),
@@ -115,8 +126,10 @@ class DatabaseService:
             "paper_trading": bool(decision.get("paper_trading", True)),
             "paper_balance_start": decision.get("paper_config", {}).get("starting_balance"),
             "paper_lot_size": decision.get("paper_config", {}).get("default_lot_size"),
-            "status": "OPEN",
-            "current_price": round(float(decision.get("current_price", entry_price)), 2),
+            "status": initial_status,
+            "order_kind": order_kind,
+            "order_type": signal.get("order_type") or entry.get("order_type"),
+            "current_price": round(current_price, 2),
             "current_pnl": 0,
             "current_pnl_points": 0,
             "sl_moved_to_entry": False,
@@ -150,17 +163,23 @@ class DatabaseService:
         save_trades(trades, self.local_path)
         return trade_id
 
+    # Statuses the trade manager must still evaluate each cycle. PENDING is
+    # included so a not-yet-filled LIMIT/STOP order can be activated on touch
+    # (or expired/cancelled) — it is NOT a live position until it fills.
+    ACTIVE_STATUSES = ["OPEN", "PARTIAL", "TP1_HIT", "PENDING"]
+
     def get_open_trades(self) -> List[Dict[str, Any]]:
-        """Get OPEN/TP1_HIT trades."""
+        """Get trades the manager should process: live (OPEN/PARTIAL/TP1_HIT)
+        plus not-yet-filled PENDING limit/stop orders."""
         if self.use_supabase and self.client:
             try:
-                response = self.client.table("trades").select("*").in_("status", ["OPEN", "PARTIAL", "TP1_HIT"]).execute()
+                response = self.client.table("trades").select("*").in_("status", self.ACTIVE_STATUSES).execute()
                 return list(response.data or [])
             except Exception as exc:  # noqa: BLE001
                 if self._strict_supabase():
                     raise RuntimeError(f"Failed to fetch open trades from Supabase in production: {exc}") from exc
                 self.logger.error("Failed to fetch open trades from Supabase: %s", exc)
-        return [trade for trade in load_trades(self.local_path) if trade.get("status") in {"OPEN", "PARTIAL", "TP1_HIT"}]
+        return [trade for trade in load_trades(self.local_path) if trade.get("status") in set(self.ACTIVE_STATUSES)]
 
 
     async def execute_query(self, query: str, params: List[Any] | None = None) -> List[Dict[str, Any]]:
@@ -236,6 +255,46 @@ class DatabaseService:
                 break
         save_trades(trades, self.local_path)
 
+
+    def cancel_pending_orders(self, reason: str = "Replaced by a newer signal") -> int:
+        """Cancel all not-yet-filled PENDING orders. Returns how many were cancelled.
+
+        Called before saving a new signal so a stale resting LIMIT/STOP order is
+        replaced by the fresh setup instead of lingering forever.
+        """
+        now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        cancelled = 0
+        if self.use_supabase and self.client:
+            try:
+                resp = self.client.table("trades").select("id").eq("status", "PENDING").execute()
+                ids = [r.get("id") for r in (resp.data or []) if r.get("id")]
+                for tid in ids:
+                    self.update_trade(tid, {
+                        "status": "CANCELLED", "result": "CANCELLED",
+                        "closed_at": now_iso, "close_time": now_iso,
+                        "reasons": [reason], "last_updated": now_iso,
+                    })
+                    cancelled += 1
+                return cancelled
+            except Exception as exc:  # noqa: BLE001
+                if self._strict_supabase():
+                    raise RuntimeError(f"Failed to cancel pending orders in production: {exc}") from exc
+                self.logger.error("Failed to cancel pending orders from Supabase: %s", exc)
+
+        trades = load_trades(self.local_path)
+        changed = False
+        for trade in trades:
+            if str(trade.get("status", "")).upper() == "PENDING":
+                trade.update({
+                    "status": "CANCELLED", "result": "CANCELLED",
+                    "closed_at": now_iso, "close_time": now_iso,
+                    "reasons": [reason], "last_updated": now_iso,
+                })
+                cancelled += 1
+                changed = True
+        if changed:
+            save_trades(trades, self.local_path)
+        return cancelled
 
     def save_trade_review(self, review: Dict[str, Any]) -> str:
         """Persist an AI review for a closed trade."""
