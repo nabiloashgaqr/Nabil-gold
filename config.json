@@ -390,10 +390,21 @@
     "enabled": true,
     "mode": "paper",
     "default_order_type": "MARKET",
-    "entry_style": "market",
-    "description_entry_style": "market = دخول فوري بسعر السوق (BUY_MARKET/SELL_MARKET) - يلغي الأوامر المعلقة. smart = أمر معلق (LIMIT/STOP) عند وجود ارتداد واضح لمستوى دعم/مقاومة ضمن مسافة min_pullback_points–max_pullback_points نقطة. الافتراضي market لتجنب الصفقات المعلقة غير المرغوب بها.",
-    "pending_threshold_points": 1.0,
-    "description_pending_threshold_points": "في وضع smart فقط: إذا كان سعر الدخول يبعد عن السعر الحالي أقل من هذا العدد من النقاط (1 نقطة = 0.10$)، يُعتبر أمر MARKET فوري. القيمة 200 = 20$ — أي فقط الأهداف البعيدة أكثر من 20$ تصبح أوامر معلقة.",
+    "entry_style": "fixed_risk",
+    "description_entry_style": "fixed_risk = يدخل MARKET فقط عندما المسافة لأقرب مستوى (دعم/مقاومة/SMC) ضمن ميزانية المخاطرة. إذا المسافة > max_risk_distance_points نقطة → ننتظر حتى يقترب السعر. ستوب الخسارة يوضع خلف المستوى مباشرة + buffer. يدعم التعزيز (scale-in) عند اقتراب السعر من المستوى.",
+    "fixed_risk": {
+      "max_risk_distance_points": 300,
+      "description_max_risk_distance_points": "أقصى مسافة (بالنقاط) بين السعر الحالي وأقرب مستوى رئيسي للدخول. إذا المسافة ≤ 300 نقطة (30$) → ندخل MARKET فوراً. إذا > 300 → ننتظر. نقاط الذهب: 100 نقطة = 10.00$ في السعر (4100→4110).",
+      "sl_buffer_points": 20,
+      "description_sl_buffer_points": "بفر بالأعلى (للبيع) أو الأسفل (للشراء) من المستوى لوضع الستوب. 20 نقطة = 2.00$. يضمن أن الستوب ليس بالضبط عند المستوى.",
+      "scale_in_enabled": true,
+      "scale_in_max": 2,
+      "description_scale_in_max": "أقصى عدد من صفقات التعزيز المسموحة (بالإضافة للأصلية). 2 = يمكن الدخول 3 صفقات في نفس الاتجاه: الأصلية + تعزيز 1 + تعزيز 2.",
+      "scale_in_trigger_points": 100,
+      "description_scale_in_trigger_points": "عندما يبقى بين السعر والمستوى ≤ 100 نقطة (10$)، نعزز باتجاه الصفقة. السعر كاد يلمس المستوى — آخر فرصة قبل الانعكاس.",
+      "scale_in_size_ratio": 0.5,
+      "description_scale_in_size_ratio": "نسبة حجم التعزيز مقارنة بالصفقة الأصلية. 0.5 = نصف الحجم. 1.0 = نفس الحجم."
+    },
     "allowed_order_types": [
       "BUY_MARKET",
       "SELL_MARKET",
@@ -408,10 +419,9 @@
       "min_pullback_points": 60,
       "max_pullback_points": 350,
       "atr_fraction": 0.5,
-      "description": "دخول ذكي مُعاير لحركة الذهب (1 نقطة = 0.10$، أي 1$ = 10 نقاط): إذا كان هناك دعم (للشراء)/مقاومة (للبيع) ضمن مسافة ارتداد بين min و max نقطة يُقترح أمر Limit عنده؛ وإلا أمر Market فوري. النطاق الافتراضي 60–350 نقطة (6$–35$): 60 نقطة = ارتداد قريب، و200–350 نقطة = المتوسط الطبيعي لتحرك الذهب. atr_fraction يحدد حجم الارتداد المفضّل نسبةً إلى ATR (يُستخدم فقط مع allow_synthetic_pullback).",
+      "description": "مهمل في fixed_risk mode — يُستخدم فقط مع smart/market mode.",
       "fill_at": "mid",
-      "zone_width_points": 50,
-      "description_zone": "الدخول أصبح ZONE (منطقة) وليس رقماً ثابتاً. fill_at: mid=يدخل عند منتصف الزون (افتراضي) | edge=الحافة القريبة | far=الحافة البعيدة. zone_width_points=عرض الزون المُصطنع حول المستوى عند غياب order block حقيقي (50 نقطة=5$). إن توفر SMC order block يُستخدم عرضه الحقيقي. وقف الخسارة يوضع خلف الحافة البعيدة للزون تلقائياً."
+      "zone_width_points": 50
     }
   },
   "operation_mode": "observation",
