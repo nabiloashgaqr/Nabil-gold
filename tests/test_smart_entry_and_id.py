@@ -34,7 +34,7 @@ _CFG = {
                       "max_rr_ratio": 4.0},
     "filters": {"min_atr_for_entry": 1.0, "max_spread_points": 5, "max_consecutive_losses": 3},
     # Gold-calibrated band: 1 point = 0.10$ -> 60..350 points = 6$..35$.
-    "order_execution": {"pending_threshold_points": 1.0,
+    "order_execution": {"entry_style": "smart", "pending_threshold_points": 1.0,
                         "smart_entry": {"enabled": True, "min_pullback_points": 60,
                                         "max_pullback_points": 350, "atr_fraction": 0.5}},
 }

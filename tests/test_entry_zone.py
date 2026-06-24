@@ -3,10 +3,17 @@ the stop placed behind the zone's distal edge."""
 
 from __future__ import annotations
 
+import copy
+
 from agents.risk_management_agent import RiskManagementAgent
 from utils.helpers import load_config
 
 CFG = load_config()
+# These tests exercise smart/zone-based entry (order blocks, level zones).
+# Override entry_style to "smart" so _smart_entry uses the full zone logic
+# instead of the fixed_risk fast-path (which always returns MARKET or WAIT).
+_SMART_CFG = copy.deepcopy(CFG)
+_SMART_CFG["order_execution"]["entry_style"] = "smart"
 
 
 def _sell(**over):
@@ -21,7 +28,7 @@ def _sell(**over):
         "portfolio": {"open_trades_count": 0, "today_signals_count": 0, "consecutive_losses": 0},
     }
     res.update(over)
-    return RiskManagementAgent(CFG).evaluate(res)
+    return RiskManagementAgent(_SMART_CFG).evaluate(res)
 
 
 def test_order_block_zone_used():
@@ -70,7 +77,7 @@ def test_buy_order_block_zone_below_price():
         "atr": 18.0,
         "portfolio": {"open_trades_count": 0, "today_signals_count": 0, "consecutive_losses": 0},
     }
-    r = RiskManagementAgent(CFG).evaluate(res)
+    r = RiskManagementAgent(_SMART_CFG).evaluate(res)
     e = r["entry"]
     assert e["zone"]["source"] == "smc"
     assert abs(e["price"] - 4085.0) < 0.01  # mid of 4080-4090
@@ -81,7 +88,7 @@ def test_buy_order_block_zone_below_price():
 
 def test_fill_at_edge_config(monkeypatch):
     import copy
-    cfg = copy.deepcopy(CFG)
+    cfg = copy.deepcopy(_SMART_CFG)
     cfg["order_execution"]["smart_entry"]["fill_at"] = "edge"
     res = {
         "current_price": 4068.24, "spread_points": 2.0,
