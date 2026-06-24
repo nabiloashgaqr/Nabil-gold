@@ -114,3 +114,28 @@ def test_buy_uses_green_header_emoji():
     decision["ai"] = {"available": True, "signal": "BUY", "confidence": 70}
     text = _capture_signal(decision)
     assert "SIGNAL — BUY" in text and "🟢" in text
+
+
+# ── Invalidation deduplication (must not just repeat the stop loss) ─────────
+def test_invalidation_hidden_when_same_as_stop():
+    d = _full_decision()
+    d["signal"]["stop_loss"] = 4121.05
+    d["ai"]["invalidation"] = "Price close above 4121.05"
+    text = _capture_signal(d)
+    assert "Invalidation" not in text
+
+
+def test_invalidation_shown_when_different_level():
+    d = _full_decision()
+    d["signal"]["stop_loss"] = 4121.05
+    d["ai"]["invalidation"] = "Price close above 4135.00"
+    text = _capture_signal(d)
+    assert "Invalidation" in text and "4135" in text
+
+
+def test_invalidation_shown_when_structural_condition():
+    d = _full_decision()
+    d["signal"]["stop_loss"] = 4121.05
+    d["ai"]["invalidation"] = "Close above the bearish order block / structure break"
+    text = _capture_signal(d)
+    assert "Invalidation" in text

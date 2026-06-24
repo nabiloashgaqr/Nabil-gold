@@ -126,13 +126,17 @@ def test_market_plan_shows_market_and_zone():
 
 def test_limit_plan_shows_entry_and_market_now():
     d = _market_decision()
+    # A LIMIT order with an explicit entry ZONE (4125-4135, mid 4130).
     d["signal"]["entry"].update({"kind": "LIMIT", "order_type": "SELL_LIMIT", "price": 4130.0,
-                                 "basis": "Limit sell at nearest resistance", "distance_points": 52.0})
+                                 "low": 4125.0, "high": 4135.0,
+                                 "basis": "Sell zone at nearest resistance", "distance_points": 52.0})
     d["signal"]["order_type"] = "SELL_LIMIT"
     d["signal"]["entry_kind"] = "LIMIT"
     text = _render(d)
     assert "Limit (pullback)" in text
-    assert "Entry @ 4130.00" in text
+    # Zone range + mid fill point both shown.
+    assert "Entry zone: 4125.00 – 4135.00" in text
+    assert "Fill @ 4130.00" in text
     assert "Market now: 4124.82" in text
 
 

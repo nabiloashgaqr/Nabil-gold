@@ -89,3 +89,20 @@ def test_manager_sends_one_message_for_multi_event_trade():
     mgr.update_trades([trade], current_price=4140.0, telegram=tg, now=datetime.now(timezone.utc))
     # At most ONE message even though multiple informational events fired.
     assert len(tg.messages) <= 1
+
+
+# ── Status line dedup (no "A → A") ─────────────────────────────────────────
+def test_status_no_arrow_when_unchanged():
+    tg = _CapturingTelegram()
+    tg.send_trade_event(_trade(), "TRAILING_SL_UPDATED", 4080.8, 202.5,
+                        {"old_status": "TP1_HIT", "new_status": "TP1_HIT"})
+    msg = tg.messages[0]
+    assert "TP1_HIT → TP1_HIT" not in msg
+    assert "Status:</b> TP1_HIT" in msg or "Status: TP1_HIT" in msg
+
+
+def test_status_shows_arrow_when_changed():
+    tg = _CapturingTelegram()
+    tg.send_trade_event(_trade(), "TP1_HIT", 4074.0, 268.0,
+                        {"old_status": "OPEN", "new_status": "TP1_HIT"})
+    assert "OPEN → TP1_HIT" in tg.messages[0]
