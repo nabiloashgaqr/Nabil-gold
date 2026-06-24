@@ -954,13 +954,15 @@ Move conflicting evidence into opposing_evidence, or set final_signal = WAIT.
     def _order_type(self, signal: str, entry: float, current_price: float | None) -> str:
         """Classify paper order type from entry vs current price.
 
-        When entry_style="market" this always returns *_MARKET.
-        When entry_style="smart" it respects pending_threshold_points.
+        Respects entry_style config:
+          - "market" / "fixed_risk":  always *_MARKET.
+          - "smart":   uses pending_threshold_points.
+          - "hybrid":  uses market_threshold_points.
         """
         oe = self.config.get("order_execution", {}) or {}
         entry_style = str(oe.get("entry_style", "market")).lower()
 
-        if entry_style == "market":
+        if entry_style in ("market", "fixed_risk"):
             return f"{signal}_MARKET"
 
         try:
@@ -968,8 +970,13 @@ Move conflicting evidence into opposing_evidence, or set final_signal = WAIT.
             current = float(current_price or entry)
         except (TypeError, ValueError):
             return f"{signal}_MARKET"
-        threshold = float(oe.get("pending_threshold_points", 1.0) or 1.0)
-        if abs(entry - current) <= threshold:
+
+        if entry_style == "hybrid":
+            threshold = float(oe.get("market_threshold_points", 30) or 30) / 10.0
+        else:
+            threshold = float(oe.get("pending_threshold_points", 1.0) or 1.0)
+
+        if abs(entry - current) <= max(threshold, 0.01):
             return f"{signal}_MARKET"
         if signal == 'BUY':
             return 'BUY_LIMIT' if entry < current else 'BUY_STOP'

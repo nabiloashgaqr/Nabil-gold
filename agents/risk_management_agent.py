@@ -40,6 +40,8 @@ class RiskManagementAgent(BaseAgent):
                 direction, current_price, atr, smc_suggestion, support_levels, resistance_levels,
                 results=results,
             )
+            if entry_kind == "WAIT_FOR_LEVEL":
+                return self._rejected(entry_basis, current_price, direction_details=direction_details)
             stop_loss, sl_method, buffer = self._stop_loss(direction, entry_price, atr, support_levels, resistance_levels, smc_suggestion, results)
             # When the entry is a ZONE, the stop must sit BEHIND the zone's far
             # (distal) edge + buffer — otherwise the SL could fall inside the
@@ -292,25 +294,34 @@ class RiskManagementAgent(BaseAgent):
         SELL above price -> SELL_LIMIT; below price -> SELL_STOP
         within threshold  -> *_MARKET
 
-        When entry_style="market" this method always returns *_MARKET.
-        When entry_style="smart" it uses pending_threshold_points.
+        Respects entry_style config:
+          - "market" / "fixed_risk":  always *_MARKET (no pending orders).
+          - "smart":   uses pending_threshold_points.
+          - "hybrid":  uses market_threshold_points.
         """
         oe = self.config.get("order_execution", {}) or {}
         entry_style = str(oe.get("entry_style", "market")).lower()
 
-        # entry_style = "market" -> always MARKET entry
-        if entry_style == "market":
+        # market and fixed_risk -> always MARKET entry
+        if entry_style in ("market", "fixed_risk"):
             return f"{direction}_MARKET"
 
-        # entry_style = "smart" -> classify based on distance
         try:
             entry = float(entry)
             current = float(current_price if current_price is not None else entry)
         except (TypeError, ValueError):
             return f"{direction}_MARKET"
-        threshold = self._f(oe.get("pending_threshold_points", 1.0), 1.0) / 10.0
-        if abs(entry - current) <= max(threshold, 0.01):
-            return f"{direction}_MARKET"
+
+        if entry_style == "hybrid":
+            threshold = self._f(oe.get("market_threshold_points", 30), 30) / 10.0
+            if abs(entry - current) <= max(threshold, 0.01):
+                return f"{direction}_MARKET"
+        else:
+            # smart mode
+            threshold = self._f(oe.get("pending_threshold_points", 1.0), 1.0) / 10.0
+            if abs(entry - current) <= max(threshold, 0.01):
+                return f"{direction}_MARKET"
+
         if direction == "BUY":
             return "BUY_LIMIT" if entry < current else "BUY_STOP"
         if direction == "SELL":
@@ -327,36 +338,34 @@ class RiskManagementAgent(BaseAgent):
         resistance_levels: List[float],
         results: Dict[str, Any] | None = None,
     ) -> Tuple[float, str, str, Dict[str, Any]]:
-        """Decide a smart entry ZONE and return (entry_price, kind, basis, zone).
+        """Decide smart entry based on entry_style.
 
-        The order is a price RANGE (zone), not a single number. The order fills
-        when price reaches ``entry_price`` = the zone MIDPOINT (config fill_at).
-        Returned zone dict: {low, high, proximal, distal, fill_at, source}.
+        Returns (entry_price, kind, basis, zone).
 
-        proximal = edge nearest current price (price hits it first)
-        distal   = far edge (the stop is placed just beyond it)
+        Fixed-Risk mode (fixed_risk):
+          - Find the NEAREST key level in the trade direction.
+            For SELL: nearest resistance above price.
+            For BUY:  nearest support below price.
+          - Calculate distance from current_price to that level (in points).
+          - If distance <= max_risk_distance_points (e.g. 300):
+              -> MARKET entry at current_price.
+              -> SL is placed just beyond the level + buffer.
+              -> kind = "MARKET", basis explains the level.
+          - If distance > max_risk_distance_points:
+              -> kind = "WAIT_FOR_LEVEL", entry at current_price (won't be used).
+              -> The evaluate() method will reject the trade with a clear reason.
+              -> Next analysis cycle (10 min) will re-check.
 
-        Logic (respects entry_style config):
-          - entry_style="market": ALWAYS MARKET entry at current price.
-            This completely eliminates pending LIMIT/STOP orders.
-          - entry_style="smart": Try pullback levels first, fall back to MARKET.
+        Market mode (market):
+          - Always MARKET at current_price.
 
-        Smart mode logic:
-          1) Real SMC order block (bullish for BUY / bearish for SELL) -> use its
-             actual top/bottom as the zone (source="smc").
-          2) Else a structural level (support/resistance) a sensible pullback
-             away -> build a zone of width = zone_width_points around it.
-          3) Else immediate MARKET entry (zone collapses to current price).
+        Smart/hybrid modes:
+          - Uses old logic: SMC order blocks, support/resistance levels, LIMIT/STOP.
         """
         oe = self.config.get("order_execution", {}) or {}
         entry_style = str(oe.get("entry_style", "market")).lower()
         se = oe.get("smart_entry", {}) or {}
-        enabled = bool(se.get("enabled", True))
         results = results or {}
-        fill_at = str(se.get("fill_at", "mid")).lower()  # edge | mid | far
-        zone_width = self._f(se.get("zone_width_points", 50), 50) / 10.0   # USD width when synthesizing a zone
-        min_pts = self._f(se.get("min_pullback_points", 60), 60) / 10.0
-        max_pts = self._f(se.get("max_pullback_points", 350), 350) / 10.0
 
         def _market(reason: str = "Immediate market entry") -> Tuple[float, str, str, Dict[str, Any]]:
             z = {"low": round(current_price, 2), "high": round(current_price, 2),
@@ -364,61 +373,195 @@ class RiskManagementAgent(BaseAgent):
                  "fill_at": "market", "source": "market"}
             return round(current_price, 2), "MARKET", reason, z
 
-        # ── entry_style = "market": Always enter immediately ────────────────
+        def _wait(reason: str) -> Tuple[float, str, str, Dict[str, Any]]:
+            z = {"low": round(current_price, 2), "high": round(current_price, 2),
+                 "proximal": round(current_price, 2), "distal": round(current_price, 2),
+                 "fill_at": "market", "source": "wait"}
+            return round(current_price, 2), "WAIT_FOR_LEVEL", reason, z
+
+        # ── market mode ─────────────────────────────────────────────────
         if entry_style == "market":
             return _market("Market entry (entry_style=market)")
 
-        def _build_zone(proximal: float, distal: float, source: str, basis: str, kind: str) -> Tuple[float, str, str, Dict[str, Any]]:
+        # ── fixed_risk mode ─────────────────────────────────────────────
+        if entry_style == "fixed_risk":
+            fr = oe.get("fixed_risk", {}) or {}
+            max_risk_points = int(fr.get("max_risk_distance_points", 300) or 300)
+            max_risk_price = max_risk_points / 10.0  # convert points to price distance
+
+            points_to_price = lambda p: p / 10.0  # 300 points = 30.00 in price
+
+            if direction == "SELL":
+                # Find nearest resistance above current price
+                best_level = None
+                best_distance = None
+                for lvl in resistance_levels:
+                    if lvl > current_price:
+                        d = lvl - current_price
+                        if best_distance is None or d < best_distance:
+                            best_distance = d
+                            best_level = lvl
+                # Also check SMC bearish order blocks
+                smc = results.get("smc", {}) or {}
+                for ob in (smc.get("order_blocks", []) or []):
+                    if str(ob.get("type", "")).lower() == "bearish":
+                        z = ob.get("zone", {}) or {}
+                        top = self._f(z.get("top"))
+                        bottom = self._f(z.get("bottom"))
+                        zone_high = max(top, bottom)
+                        if zone_high > current_price:
+                            d = zone_high - current_price
+                            if best_distance is None or d < best_distance:
+                                best_distance = d
+                                best_level = zone_high
+
+                if best_level is not None and best_distance is not None:
+                    dist_points = best_distance * 10  # convert to points
+                    if dist_points <= max_risk_points:
+                        sl_price = best_level + (fr.get("sl_buffer_points", 20) / 10.0)
+                        return _market(
+                            f"SELL fixed_risk: resistance at {best_level:.2f} "
+                            f"({dist_points:.0f}pts away ≤ {max_risk_points}pts). "
+                            f"SL@{sl_price:.2f} (above level+buffer)"
+                        )
+                    else:
+                        target_price = best_level - points_to_price(max_risk_points)
+                        return _wait(
+                            f"SELL waiting: resistance at {best_level:.2f} is "
+                            f"{dist_points:.0f}pts away > {max_risk_points}pts. "
+                            f"Will enter when price rises to ~{target_price:.2f}"
+                        )
+                return _wait("SELL waiting: no resistance level found above price")
+
+            else:  # BUY
+                best_level = None
+                best_distance = None
+                for lvl in support_levels:
+                    if lvl < current_price:
+                        d = current_price - lvl
+                        if best_distance is None or d < best_distance:
+                            best_distance = d
+                            best_level = lvl
+                # SMC bullish order blocks
+                smc = results.get("smc", {}) or {}
+                for ob in (smc.get("order_blocks", []) or []):
+                    if str(ob.get("type", "")).lower() == "bullish":
+                        z = ob.get("zone", {}) or {}
+                        top = self._f(z.get("top"))
+                        bottom = self._f(z.get("bottom"))
+                        zone_low = min(top, bottom)
+                        if zone_low < current_price:
+                            d = current_price - zone_low
+                            if best_distance is None or d < best_distance:
+                                best_distance = d
+                                best_level = zone_low
+
+                if best_level is not None and best_distance is not None:
+                    dist_points = best_distance * 10
+                    if dist_points <= max_risk_points:
+                        sl_price = best_level - (fr.get("sl_buffer_points", 20) / 10.0)
+                        return _market(
+                            f"BUY fixed_risk: support at {best_level:.2f} "
+                            f"({dist_points:.0f}pts away ≤ {max_risk_points}pts). "
+                            f"SL@{sl_price:.2f} (below level+buffer)"
+                        )
+                    else:
+                        target_price = best_level + points_to_price(max_risk_points)
+                        return _wait(
+                            f"BUY waiting: support at {best_level:.2f} is "
+                            f"{dist_points:.0f}pts away > {max_risk_points}pts. "
+                            f"Will enter when price falls to ~{target_price:.2f}"
+                        )
+                return _wait("BUY waiting: no support level found below price")
+
+        # ── smart / hybrid modes (existing logic) ────────────────────────
+        enabled = bool(se.get("enabled", True))
+        fill_at = str(se.get("fill_at", "mid")).lower()
+        zone_width = self._f(se.get("zone_width_points", 50), 50) / 10.0
+        min_pts = self._f(se.get("min_pullback_points", 60), 60) / 10.0
+        max_pts = self._f(se.get("max_pullback_points", 350), 350) / 10.0
+
+        if not enabled:
+            return _market("Smart entry disabled")
+
+        def _build_zone(proximal, distal, source, basis, kind):
             low, high = min(proximal, distal), max(proximal, distal)
             if fill_at == "edge":
                 entry = proximal
             elif fill_at == "far":
                 entry = distal
-            else:  # mid (default)
+            else:
                 entry = (proximal + distal) / 2.0
             zone = {"low": round(low, 2), "high": round(high, 2),
                     "proximal": round(proximal, 2), "distal": round(distal, 2),
                     "fill_at": fill_at, "source": source}
             return round(entry, 2), kind, basis, zone
 
-        # ── entry_style = "smart": Try pullback levels ──────────────────────
-        if not enabled:
-            return _market("Smart entry disabled")
+        if entry_style == "hybrid":
+            market_threshold = self._f(oe.get("market_threshold_points", 30), 30) / 10.0
+            smc = results.get("smc", {}) or {}
+            order_blocks = smc.get("order_blocks", []) or []
+            want_type = "bullish" if direction == "BUY" else "bearish"
+            for ob in reversed(order_blocks):
+                if str(ob.get("type", "")).lower() != want_type:
+                    continue
+                z = ob.get("zone", {}) or {}
+                top = self._f(z.get("top"))
+                bottom = self._f(z.get("bottom"))
+                if top <= 0 or bottom <= 0:
+                    continue
+                if direction == "BUY":
+                    if top >= current_price:
+                        continue
+                    proximity = current_price - top
+                else:
+                    if bottom <= current_price:
+                        continue
+                    proximity = bottom - current_price
+                if proximity <= market_threshold:
+                    return _market(f"Price at SMC zone (within {market_threshold*10:.0f}pts)")
+            if direction == "BUY":
+                for lvl in support_levels:
+                    proximity = current_price - lvl
+                    if 0 < proximity <= market_threshold:
+                        return _market(f"Price at support (within {market_threshold*10:.0f}pts)")
+            else:
+                for lvl in resistance_levels:
+                    proximity = lvl - current_price
+                    if 0 < proximity <= market_threshold:
+                        return _market(f"Price at resistance (within {market_threshold*10:.0f}pts)")
 
-        # 1) Real SMC order block zone (uses actual top/bottom edges).
+        # SMC order blocks
         smc = results.get("smc", {}) or {}
         order_blocks = smc.get("order_blocks", []) or []
         want_type = "bullish" if direction == "BUY" else "bearish"
         obs = [ob for ob in order_blocks if str(ob.get("type", "")).lower() == want_type]
-        for ob in reversed(obs):  # most recent first
+        for ob in reversed(obs):
             z = ob.get("zone", {}) or {}
             top = self._f(z.get("top"))
             bottom = self._f(z.get("bottom"))
             if top <= 0 or bottom <= 0:
                 continue
-            # The proximal edge is the one nearer current price.
             if direction == "BUY":
-                # Demand zone should sit below price (a pullback to buy).
                 if top >= current_price:
                     continue
-                proximal, distal = top, bottom  # price falls: hits top first
+                proximal, distal = top, bottom
             else:
                 if bottom <= current_price:
                     continue
-                proximal, distal = bottom, top  # price rises: hits bottom first
+                proximal, distal = bottom, top
             dist = abs(proximal - current_price)
             if dist > max_pts:
                 continue
-            kind = "LIMIT"  # pullback into the block
+            kind = "LIMIT"
             return _build_zone(proximal, distal, "smc", "SMC order block zone", kind)
 
-        # 2) Structural level -> synthesize a zone of width zone_width around it.
+        # Support/resistance pullback
         half = max(zone_width / 2.0, 0.10)
         if direction == "BUY":
             belows = [s for s in support_levels if 0 < s < current_price]
             for lvl in sorted(belows, reverse=True):
                 if min_pts <= (current_price - lvl) <= max_pts:
-                    # zone straddles the support; proximal edge nearer price (top).
                     return _build_zone(lvl + half, lvl - half, "level", "Buy zone at nearest support", "LIMIT")
         else:
             aboves = [r for r in resistance_levels if r > current_price]
@@ -426,9 +569,7 @@ class RiskManagementAgent(BaseAgent):
                 if min_pts <= (lvl - current_price) <= max_pts:
                     return _build_zone(lvl - half, lvl + half, "level", "Sell zone at nearest resistance", "LIMIT")
 
-        # 3) No suitable zone -> market.
-        return _market()
-
+        return _market("No pullback zone nearby")
     def _stop_loss(
         self,
         direction: str,

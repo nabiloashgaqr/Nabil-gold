@@ -52,6 +52,16 @@ class OpenTradesManager(BaseAgent):
         # behaviour = breakeven only after TP1). Points convention: 10 pts = $1.
         self.early_breakeven_points = float(ts_config.get("early_breakeven_points", 0.0))
 
+        # Fixed-risk mode: track scale-in info
+        oe = self.config.get("order_execution", {}) or {}
+        self.entry_style = str(oe.get("entry_style", "market")).lower()
+        self.fr = oe.get("fixed_risk", {}) or {}
+
+        # Hybrid entry: auto-convert stale PENDING orders to MARKET after N cycles.
+        oe = self.config.get("order_execution", {}) or {}
+        self.entry_style = str(oe.get("entry_style", "market")).lower()
+        self.pending_order_max_cycles = int(oe.get("pending_order_max_cycles", 6) or 6)
+
     def update_trades(
         self,
         open_trades: List[Dict[str, Any]],
@@ -383,6 +393,11 @@ class OpenTradesManager(BaseAgent):
         Cancellation of stale pending orders is handled by the signal pipeline
         (a new signal replaces them); here we only fill-on-touch and refresh
         the displayed market price.
+
+        Hybrid mode: if pending_order_max_cycles is exceeded (order survives
+        too long without filling), auto-convert to MARKET at current price.
+        This prevents LIMIT/STOP orders from waiting forever when the pullback
+        never materialises.
         """
         order_type = str(trade.get("order_type") or trade.get("order_kind") or "").upper()
         filled = self._order_filled(order_type, trade_type, entry, current_price)
@@ -390,6 +405,34 @@ class OpenTradesManager(BaseAgent):
             "current_price": round(current_price, 2),
             "last_updated": self._iso(now),
         }
+
+        # Hybrid mode: auto-convert stale PENDING to MARKET
+        if not filled and self.entry_style == "hybrid" and self.pending_order_max_cycles > 0:
+            pending_cycles = self._f(trade.get("pending_cycles", 0))
+            pending_cycles += 1
+            if pending_cycles >= self.pending_order_max_cycles:
+                # Auto-convert: enter at current market price
+                base_updates.update({
+                    "status": "OPEN",
+                    "entry_time": self._iso(now),
+                    "entry_price": round(current_price, 2),
+                    "current_pnl": 0,
+                    "current_pnl_points": 0,
+                    "pending_cycles": 0,
+                })
+                return {
+                    "trade_id": trade.get("id"),
+                    "old_status": "PENDING",
+                    "new_status": "OPEN",
+                    "pnl_points": 0.0,
+                    "events": ["ORDER_FILLED"],
+                    "updates": base_updates,
+                    "progress_to_tp1": 0.0,
+                    "hours_open": 0.0,
+                }
+            # Still waiting - increment pending_cycles
+            base_updates["pending_cycles"] = pending_cycles
+
         if filled:
             # Fill at the configured entry price (paper). Position becomes live.
             base_updates.update({
@@ -408,6 +451,11 @@ class OpenTradesManager(BaseAgent):
                 "progress_to_tp1": 0.0,
                 "hours_open": 0.0,
             }
+        # Fixed-risk auto-convert: if price has reached within budget, open MARKET
+        if self.entry_style == "fixed_risk":
+            # recalc: check if price is now within risk budget from nearest level
+            pass  # Handled by the next analysis cycle via decision_agent
+
         # Still waiting — report distance to entry, no PnL.
         dist_pts = abs(calculate_pips(current_price, entry, trade_type))
         return {
