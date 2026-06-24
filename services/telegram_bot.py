@@ -87,6 +87,57 @@ class TelegramService:
                 time.sleep(wait)
         return False
 
+    # ------------------------------------------------------------------ #
+    # Interactive commands support (polling-based, no server needed)
+    # ------------------------------------------------------------------ #
+    def get_updates(self, offset: int | None = None, timeout: int = 0, allowed=("message",)) -> List[Dict[str, Any]]:
+        """Fetch new updates via long/short polling. Returns a list of updates.
+
+        ``offset`` should be last_update_id + 1 to acknowledge processed updates.
+        Safe no-op (empty list) when the bot token is not configured.
+        """
+        if not self.bot_token or str(self.bot_token).startswith("YOUR_"):
+            return []
+        url = self.API_BASE.format(token=self.bot_token, method="getUpdates")
+        params: Dict[str, Any] = {"timeout": timeout, "allowed_updates": list(allowed)}
+        if offset is not None:
+            params["offset"] = offset
+        try:
+            resp = self.session.get(url, params=params, timeout=timeout + 15)
+            data = resp.json()
+            if not data.get("ok"):
+                self.logger.warning("getUpdates not ok: %s", data.get("description"))
+                return []
+            return list(data.get("result", []))
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("getUpdates failed: %s", exc)
+            return []
+
+    def reply(self, chat_id: Any, text: str, reply_to: int | None = None) -> bool:
+        """Send a reply to a specific chat (used by the command handler)."""
+        if not self.bot_token or not chat_id:
+            self.logger.info("Telegram reply skipped (not configured).")
+            return False
+        self._rate_limit()
+        url = self.API_BASE.format(token=self.bot_token, method="sendMessage")
+        payload = {
+            "chat_id": chat_id, "text": text, "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+        if reply_to:
+            payload["reply_to_message_id"] = reply_to
+        try:
+            r = self.session.post(url, json=payload, timeout=20)
+            j = r.json()
+            if not j.get("ok") and r.status_code == 400 and "parse" in str(j.get("description", "")).lower():
+                payload.pop("parse_mode", None)
+                r = self.session.post(url, json=payload, timeout=20)
+                j = r.json()
+            return bool(j.get("ok"))
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("reply failed: %s", exc)
+            return False
+
     # Canonical order of the five voting analysis agents.
     VOTING_AGENTS = (
         ("technical", "Technical"),
