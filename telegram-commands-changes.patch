@@ -1,0 +1,542 @@
+diff --git a/.github/workflows/telegram_commands.yml b/.github/workflows/telegram_commands.yml
+new file mode 100644
+index 0000000..ca8d20f
+--- /dev/null
++++ b/.github/workflows/telegram_commands.yml
+@@ -0,0 +1,43 @@
++name: 🤖 Telegram Commands
++
++# Polls Telegram for user commands (/status, /open, /today, ...) and replies.
++# GitHub Actions has no always-on server, so we poll on a schedule. The minimum
++# cron granularity is 1 minute; replies arrive within ~1-2 minutes.
++
++concurrency:
++  group: telegram-commands
++  cancel-in-progress: false
++
++on:
++  workflow_dispatch:
++  schedule:
++    - cron: "* * * * *"   # every minute
++
++permissions:
++  contents: read
++
++jobs:
++  commands:
++    runs-on: ubuntu-latest
++    timeout-minutes: 5
++    steps:
++      - name: 📥 Checkout
++        uses: actions/checkout@v4
++
++      - name: 🐍 Setup Python
++        uses: actions/setup-python@v5
++        with:
++          python-version: '3.11'
++          cache: pip
++
++      - name: 📦 Install Dependencies
++        run: pip install -r requirements.txt
++
++      - name: 🤖 Handle commands
++        run: python scripts/run_telegram_commands.py
++        env:
++          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
++          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
++          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
++          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
++          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+diff --git a/scripts/run_telegram_commands.py b/scripts/run_telegram_commands.py
+new file mode 100644
+index 0000000..5f9972e
+--- /dev/null
++++ b/scripts/run_telegram_commands.py
+@@ -0,0 +1,39 @@
++"""Poll Telegram for user commands and reply (runs on a schedule).
++
++Because the project runs on GitHub Actions (no always-on server), this script
++pulls pending updates via getUpdates and answers them. Run it frequently (e.g.
++every 1-2 minutes) for near-real-time replies.
++"""
++
++from __future__ import annotations
++
++import logging
++import os
++import sys
++from datetime import datetime, timezone
++
++sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
++
++from services.database import DatabaseService
++from services.telegram_bot import TelegramService
++from services.telegram_commands import poll_and_handle
++from utils.helpers import load_config, setup_logging
++
++setup_logging()
++logger = logging.getLogger(__name__)
++
++
++def main() -> None:
++    logger.info("بدء معالجة أوامر Telegram: %s", datetime.now(timezone.utc).isoformat())
++    config = load_config()
++    telegram = TelegramService(config)
++    database = DatabaseService(config)
++    try:
++        handled = poll_and_handle(telegram, database, config)
++        logger.info("تمت معالجة %s أمر/أوامر", handled)
++    except Exception as exc:  # noqa: BLE001
++        logger.exception("فشل معالجة الأوامر: %s", exc)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/services/telegram_bot.py b/services/telegram_bot.py
+index f15f003..40cc02b 100644
+--- a/services/telegram_bot.py
++++ b/services/telegram_bot.py
+@@ -87,6 +87,57 @@ class TelegramService:
+                 time.sleep(wait)
+         return False
+ 
++    # ------------------------------------------------------------------ #
++    # Interactive commands support (polling-based, no server needed)
++    # ------------------------------------------------------------------ #
++    def get_updates(self, offset: int | None = None, timeout: int = 0, allowed=("message",)) -> List[Dict[str, Any]]:
++        """Fetch new updates via long/short polling. Returns a list of updates.
++
++        ``offset`` should be last_update_id + 1 to acknowledge processed updates.
++        Safe no-op (empty list) when the bot token is not configured.
++        """
++        if not self.bot_token or str(self.bot_token).startswith("YOUR_"):
++            return []
++        url = self.API_BASE.format(token=self.bot_token, method="getUpdates")
++        params: Dict[str, Any] = {"timeout": timeout, "allowed_updates": list(allowed)}
++        if offset is not None:
++            params["offset"] = offset
++        try:
++            resp = self.session.get(url, params=params, timeout=timeout + 15)
++            data = resp.json()
++            if not data.get("ok"):
++                self.logger.warning("getUpdates not ok: %s", data.get("description"))
++                return []
++            return list(data.get("result", []))
++        except Exception as exc:  # noqa: BLE001
++            self.logger.warning("getUpdates failed: %s", exc)
++            return []
++
++    def reply(self, chat_id: Any, text: str, reply_to: int | None = None) -> bool:
++        """Send a reply to a specific chat (used by the command handler)."""
++        if not self.bot_token or not chat_id:
++            self.logger.info("Telegram reply skipped (not configured).")
++            return False
++        self._rate_limit()
++        url = self.API_BASE.format(token=self.bot_token, method="sendMessage")
++        payload = {
++            "chat_id": chat_id, "text": text, "parse_mode": "HTML",
++            "disable_web_page_preview": True,
++        }
++        if reply_to:
++            payload["reply_to_message_id"] = reply_to
++        try:
++            r = self.session.post(url, json=payload, timeout=20)
++            j = r.json()
++            if not j.get("ok") and r.status_code == 400 and "parse" in str(j.get("description", "")).lower():
++                payload.pop("parse_mode", None)
++                r = self.session.post(url, json=payload, timeout=20)
++                j = r.json()
++            return bool(j.get("ok"))
++        except Exception as exc:  # noqa: BLE001
++            self.logger.warning("reply failed: %s", exc)
++            return False
++
+     # Canonical order of the five voting analysis agents.
+     VOTING_AGENTS = (
+         ("technical", "Technical"),
+diff --git a/services/telegram_commands.py b/services/telegram_commands.py
+new file mode 100644
+index 0000000..40f997a
+--- /dev/null
++++ b/services/telegram_commands.py
+@@ -0,0 +1,267 @@
++"""Interactive Telegram command handler for Gold AI Signals.
++
++Polling-based (works on GitHub Actions, no server). A scheduled workflow calls
++``poll_and_handle`` which fetches new updates, runs each command, and replies.
++
++Supported commands:
++  /start, /help        -> intro + command list
++  /status              -> current price + latest signal snapshot
++  /open                -> currently open / pending trades (+ floating PnL)
++  /today               -> today's performance (wins/losses/net)
++  /stats               -> overall performance (recent window)
++  /price               -> current gold price only
++  /rules               -> latest AI memory rules (learning)
++
++Update-offset is persisted in storage/telegram_offset.json so the same update is
++never processed twice across runs.
++"""
++
++from __future__ import annotations
++
++import html
++import json
++import logging
++from datetime import datetime, timezone
++from pathlib import Path
++from typing import Any, Dict, List
++
++logger = logging.getLogger(__name__)
++
++OPEN_LIVE = {"OPEN", "PARTIAL", "TP1_HIT"}
++PENDING = "PENDING"
++_OFFSET_FILE = Path(__file__).resolve().parents[1] / "storage" / "telegram_offset.json"
++
++
++def _f(v: Any, d: float = 0.0) -> float:
++    try:
++        return float(v)
++    except (TypeError, ValueError):
++        return d
++
++
++def _pnl_points(t: Dict[str, Any]) -> float:
++    for k in ("final_pnl", "current_pnl", "current_pnl_points"):
++        if t.get(k) is not None:
++            return _f(t.get(k))
++    typ = str(t.get("type") or t.get("trade_type") or "BUY").upper()
++    entry = _f(t.get("entry_price"))
++    px = _f(t.get("close_price") or t.get("current_price") or entry)
++    return ((px - entry) if typ == "BUY" else (entry - px)) * 10.0
++
++
++def _ttype(t: Dict[str, Any]) -> str:
++    return str(t.get("type") or t.get("trade_type") or "").upper()
++
++
++def _short_id(tid: str) -> str:
++    s = str(tid or "")
++    parts = s.split("_")
++    return "#" + (parts[-1] if parts and len(parts[-1]) >= 4 else s[-6:] or "?")
++
++
++# ── offset persistence ─────────────────────────────────────────────────────
++def _load_offset() -> int:
++    try:
++        return int(json.loads(_OFFSET_FILE.read_text()).get("offset", 0))
++    except Exception:  # noqa: BLE001
++        return 0
++
++
++def _save_offset(offset: int) -> None:
++    try:
++        _OFFSET_FILE.parent.mkdir(parents=True, exist_ok=True)
++        _OFFSET_FILE.write_text(json.dumps({"offset": offset}), encoding="utf-8")
++    except Exception as exc:  # noqa: BLE001
++        logger.warning("could not persist telegram offset: %s", exc)
++
++
++# ── command builders ───────────────────────────────────────────────────────
++def cmd_help() -> str:
++    return (
++        "🤖 <b>Gold AI Signals — Bot</b>\n"
++        "━━━━━━━━━━━━━━━━━━━━\n"
++        "الأوامر المتاحة / Available commands:\n\n"
++        "📊 /status — السعر + آخر إشارة\n"
++        "🔄 /open — الصفقات المفتوحة/المعلّقة\n"
++        "📅 /today — أداء اليوم\n"
++        "📈 /stats — الأداء العام\n"
++        "💰 /price — سعر الذهب الحالي\n"
++        "🧠 /rules — قواعد التعلّم الأخيرة\n"
++        "❓ /help — هذه القائمة\n"
++        "━━━━━━━━━━━━━━━━━━━━\n"
++        "<i>Educational / paper trading — not financial advice.</i>"
++    )
++
++
++def _current_price(config: Dict[str, Any]) -> float | None:
++    try:
++        from services.market_data import MarketDataService
++        md = MarketDataService(config)
++        return md.get_current_price()
++    except Exception as exc:  # noqa: BLE001
++        logger.warning("price fetch failed: %s", exc)
++        return None
++
++
++def cmd_price(config: Dict[str, Any]) -> str:
++    p = _current_price(config)
++    if p is None:
++        return "💰 السعر غير متاح حالياً / Price unavailable."
++    return f"💰 <b>XAU/USD:</b> {p:,.2f}\n<i>{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}</i>"
++
++
++def cmd_status(database, config: Dict[str, Any]) -> str:
++    p = _current_price(config)
++    price_line = f"💰 Price: <b>{p:,.2f}</b>" if p is not None else "💰 Price: —"
++    latest = None
++    try:
++        recent = database.get_recent_trades(limit=1) or []
++        latest = recent[0] if recent else None
++    except Exception:  # noqa: BLE001
++        latest = None
++    lines = ["📊 <b>Status</b>", "━━━━━━━━━━━━━━━━━━━━", price_line]
++    if latest:
++        typ = _ttype(latest)
++        emoji = "🟢" if typ == "BUY" else "🔴" if typ == "SELL" else "⚪"
++        st = str(latest.get("status", "")).upper()
++        lines.append(
++            f"\n🎯 Latest signal: {emoji} <b>{typ or '—'}</b> @ {_f(latest.get('entry_price')):,.2f}"
++            f"\n   Status: {html.escape(st)} · Conf {int(_f(latest.get('confidence')))}%"
++        )
++    else:
++        lines.append("\n🎯 No signals yet.")
++    lines.append("\n<i>Use /open and /today for more.</i>")
++    return "\n".join(lines)
++
++
++def cmd_open(database) -> str:
++    try:
++        trades = database.get_open_trades() or []
++    except Exception as exc:  # noqa: BLE001
++        return f"⚠️ Could not fetch open trades: {html.escape(str(exc))}"
++    live = [t for t in trades if str(t.get("status", "")).upper() in OPEN_LIVE]
++    pend = [t for t in trades if str(t.get("status", "")).upper() == PENDING]
++    if not live and not pend:
++        return "🔄 <b>Open Trades</b>\n━━━━━━━━━━━━━━━━━━━━\nNo open or pending trades."
++    lines = ["🔄 <b>Open Trades</b>", "━━━━━━━━━━━━━━━━━━━━"]
++    net = 0.0
++    for t in live[:15]:
++        p = _pnl_points(t)
++        net += p
++        sign = "🟢" if p > 0 else "🔴" if p < 0 else "➖"
++        lines.append(
++            f"{sign} {_ttype(t)} <code>{_short_id(t.get('id'))}</code> "
++            f"@ {_f(t.get('entry_price')):,.2f} · {p:+.0f} pts ({p/10:+.1f}$) · {html.escape(str(t.get('status','')).upper())}"
++        )
++    if pend:
++        lines.append("\n⏳ <b>Pending</b>")
++        for t in pend[:10]:
++            lines.append(
++                f"• {_ttype(t)} <code>{_short_id(t.get('id'))}</code> "
++                f"@ {_f(t.get('entry_price')):,.2f} (waiting for touch)"
++            )
++    if live:
++        lines.append(f"\n📊 Floating Net: <b>{net:+.0f} pts ({net/10:+.1f}$)</b>")
++    return "\n".join(lines)
++
++
++def cmd_today(database, config: Dict[str, Any]) -> str:
++    try:
++        from agents.daily_report_agent import DailyReportAgent
++        trades = database.get_today_trades() or []
++        stats = DailyReportAgent(config).generate(trades)["stats"]
++    except Exception as exc:  # noqa: BLE001
++        return f"⚠️ Could not build today's report: {html.escape(str(exc))}"
++    net = _f(stats.get("net_points"))
++    return (
++        "📅 <b>Today's Performance</b>\n"
++        "━━━━━━━━━━━━━━━━━━━━\n"
++        f"• Trades: {stats.get('total', 0)} (✅ {stats.get('wins', 0)} · ❌ {stats.get('losses', 0)} · 🔄 {stats.get('open', 0)})\n"
++        f"• Win rate: {stats.get('win_rate', 0)}%\n"
++        f"• Net: {net:+.0f} pts ({net/10:+.1f}$)\n"
++        f"• Best {_f(stats.get('best_trade')):+.0f} · Worst {_f(stats.get('worst_trade')):+.0f} · PF {stats.get('profit_factor', 0)}"
++    )
++
++
++def cmd_stats(database, config: Dict[str, Any]) -> str:
++    try:
++        from agents.daily_report_agent import DailyReportAgent
++        trades = database.get_recent_trades(limit=100) or []
++        stats = DailyReportAgent(config).generate(trades)["stats"]
++    except Exception as exc:  # noqa: BLE001
++        return f"⚠️ Could not build stats: {html.escape(str(exc))}"
++    net = _f(stats.get("net_points"))
++    by = stats.get("by_direction", {}) or {}
++    return (
++        "📈 <b>Overall Performance</b> <i>(recent 100)</i>\n"
++        "━━━━━━━━━━━━━━━━━━━━\n"
++        f"• Trades: {stats.get('total', 0)} · Win rate: {stats.get('win_rate', 0)}%\n"
++        f"• Net: {net:+.0f} pts ({net/10:+.1f}$) · PF {stats.get('profit_factor', 0)}\n"
++        f"• Avg win {_f(stats.get('avg_win')):+.0f} · Avg loss -{_f(stats.get('avg_loss')):.0f}\n"
++        f"• BUY net {_f(by.get('BUY', {}).get('net')):+.0f} · SELL net {_f(by.get('SELL', {}).get('net')):+.0f}"
++    )
++
++
++def cmd_rules(database) -> str:
++    try:
++        rules = database.get_active_memory_rules(limit=6) or []
++    except Exception as exc:  # noqa: BLE001
++        return f"⚠️ Could not fetch rules: {html.escape(str(exc))}"
++    if not rules:
++        return "🧠 <b>Memory Rules</b>\n━━━━━━━━━━━━━━━━━━━━\nNo active rules yet."
++    lines = ["🧠 <b>Active Memory Rules</b>", "━━━━━━━━━━━━━━━━━━━━"]
++    for r in rules:
++        lines.append(
++            f"• [{html.escape(str(r.get('category', 'MEMORY')))}/{html.escape(str(r.get('applies_to', 'BOTH')))}] "
++            f"{html.escape(str(r.get('rule_text', ''))[:180])}"
++        )
++    return "\n".join(lines)
++
++
++def handle_command(text: str, database, config: Dict[str, Any]) -> str | None:
++    """Map a command string to a reply. Returns None for non-commands."""
++    cmd = text.strip().split()[0].lower()
++    # Strip @botname suffix (groups send /status@MyBot).
++    cmd = cmd.split("@")[0]
++    if cmd in {"/start", "/help"}:
++        return cmd_help()
++    if cmd == "/status":
++        return cmd_status(database, config)
++    if cmd == "/open":
++        return cmd_open(database)
++    if cmd == "/today":
++        return cmd_today(database, config)
++    if cmd == "/stats":
++        return cmd_stats(database, config)
++    if cmd == "/price":
++        return cmd_price(config)
++    if cmd == "/rules":
++        return cmd_rules(database)
++    return None
++
++
++def poll_and_handle(telegram, database, config: Dict[str, Any], max_updates: int = 40) -> int:
++    """Fetch new updates and reply to commands. Returns count handled."""
++    offset = _load_offset()
++    updates = telegram.get_updates(offset=offset or None, timeout=0)
++    handled = 0
++    last_id = offset
++    for upd in updates[:max_updates]:
++        last_id = max(last_id, int(upd.get("update_id", 0)) + 1)
++        msg = upd.get("message") or upd.get("channel_post") or {}
++        text = str(msg.get("text", "") or "")
++        chat = (msg.get("chat") or {}).get("id")
++        mid = msg.get("message_id")
++        if not text.startswith("/") or chat is None:
++            continue
++        try:
++            reply = handle_command(text, database, config)
++        except Exception as exc:  # noqa: BLE001
++            logger.exception("command failed")
++            reply = f"⚠️ Error: {html.escape(str(exc))}"
++        if reply:
++            telegram.reply(chat, reply, reply_to=mid)
++            handled += 1
++    if last_id and last_id != offset:
++        _save_offset(last_id)
++    return handled
+diff --git a/tests/test_telegram_commands.py b/tests/test_telegram_commands.py
+new file mode 100644
+index 0000000..341ba74
+--- /dev/null
++++ b/tests/test_telegram_commands.py
+@@ -0,0 +1,107 @@
++"""Tests for the interactive Telegram command handler."""
++
++from __future__ import annotations
++
++from pathlib import Path
++from unittest.mock import MagicMock
++
++import services.telegram_commands as tc
++
++
++def _db():
++    db = MagicMock()
++    db.get_recent_trades.return_value = [
++        {"id": "TRADE_x_5a620d77", "type": "SELL", "status": "PENDING",
++         "entry_price": 4101.05, "confidence": 92, "current_pnl": 0}
++    ]
++    db.get_open_trades.return_value = [
++        {"id": "TRADE_a_7cf3", "type": "SELL", "status": "TP1_HIT", "entry_price": 4101.05, "current_pnl": 270},
++        {"id": "TRADE_b_9f0a", "type": "BUY", "status": "PENDING", "entry_price": 4000.0},
++    ]
++    db.get_today_trades.return_value = [
++        {"type": "SELL", "status": "TP2_HIT", "final_pnl": 570},
++        {"type": "BUY", "status": "SL_HIT", "final_pnl": -200},
++    ]
++    db.get_active_memory_rules.return_value = [
++        {"category": "RISK", "applies_to": "BOTH", "rule_text": "Widen the stop in high volatility."}
++    ]
++    return db
++
++
++def setup_function(_):
++    tc._current_price = lambda c: 4077.56  # avoid network
++
++
++def test_help():
++    out = tc.handle_command("/help", _db(), {})
++    assert "Available commands" in out and "/status" in out and "/open" in out
++
++
++def test_status_has_price_and_latest():
++    out = tc.handle_command("/status", _db(), {})
++    assert "4,077.56" in out and "SELL" in out and "PENDING" in out
++
++
++def test_open_separates_live_and_pending():
++    out = tc.handle_command("/open", _db(), {})
++    assert "TP1_HIT" in out
++    assert "Pending" in out and "waiting for touch" in out
++    assert "Floating Net" in out
++    assert "+270 pts" in out
++
++
++def test_today_net_correct():
++    out = tc.handle_command("/today", _db(), {})
++    # 570 - 200 = +370
++    assert "+370 pts" in out
++    assert "Win rate: 50.0%" in out
++
++
++def test_stats_builds():
++    out = tc.handle_command("/stats", _db(), {})
++    assert "Overall Performance" in out
++
++
++def test_rules():
++    out = tc.handle_command("/rules", _db(), {})
++    assert "RISK" in out and "Widen the stop" in out
++
++
++def test_unknown_command_ignored():
++    assert tc.handle_command("/nope", _db(), {}) is None
++    assert tc.handle_command("just text", _db(), {}) is None
++
++
++def test_command_with_botname_suffix():
++    assert tc.handle_command("/status@MyGoldBot", _db(), {}) is not None
++
++
++def test_poll_offset_and_dedup(tmp_path):
++    tc._OFFSET_FILE = tmp_path / "off.json"
++    tg = MagicMock()
++    tg.get_updates.return_value = [
++        {"update_id": 101, "message": {"message_id": 1, "chat": {"id": 5}, "text": "/status"}},
++        {"update_id": 102, "message": {"message_id": 2, "chat": {"id": 5}, "text": "not a cmd"}},
++        {"update_id": 103, "message": {"message_id": 3, "chat": {"id": 5}, "text": "/open"}},
++    ]
++    db = _db()
++    handled = tc.poll_and_handle(tg, db, {})
++    assert handled == 2
++    assert tg.reply.call_count == 2
++    assert tc._load_offset() == 104
++
++    # second poll: no new updates, nothing handled, offset passed through
++    tg2 = MagicMock()
++    tg2.get_updates.return_value = []
++    assert tc.poll_and_handle(tg2, db, {}) == 0
++    tg2.get_updates.assert_called_once_with(offset=104, timeout=0)
++
++
++def test_poll_ignores_non_command_chatless(tmp_path):
++    tc._OFFSET_FILE = tmp_path / "off2.json"
++    tg = MagicMock()
++    tg.get_updates.return_value = [
++        {"update_id": 201, "message": {"message_id": 1, "text": "/status"}},  # no chat id
++    ]
++    assert tc.poll_and_handle(tg, _db(), {}) == 0
++    tg.reply.assert_not_called()
