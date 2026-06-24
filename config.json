@@ -390,7 +390,10 @@
     "enabled": true,
     "mode": "paper",
     "default_order_type": "MARKET",
+    "entry_style": "market",
+    "description_entry_style": "market = دخول فوري بسعر السوق (BUY_MARKET/SELL_MARKET) - يلغي الأوامر المعلقة. smart = أمر معلق (LIMIT/STOP) عند وجود ارتداد واضح لمستوى دعم/مقاومة ضمن مسافة min_pullback_points–max_pullback_points نقطة. الافتراضي market لتجنب الصفقات المعلقة غير المرغوب بها.",
     "pending_threshold_points": 1.0,
+    "description_pending_threshold_points": "في وضع smart فقط: إذا كان سعر الدخول يبعد عن السعر الحالي أقل من هذا العدد من النقاط (1 نقطة = 0.10$)، يُعتبر أمر MARKET فوري. القيمة 200 = 20$ — أي فقط الأهداف البعيدة أكثر من 20$ تصبح أوامر معلقة.",
     "allowed_order_types": [
       "BUY_MARKET",
       "SELL_MARKET",
