@@ -355,6 +355,221 @@ def run_agent(agent_name: str, agent: Any, data: Dict[str, Any]) -> Dict[str, An
         return {"agent": agent_name, "signal": "WAIT", "confidence": 0, "reasoning": f"Agent failed: {exc}"}
 
 
+async def _check_scale_in(
+    config: Dict[str, Any],
+    all_results: Dict[str, Any],
+    open_trades: List[Dict[str, Any]],
+    database: DatabaseService,
+    telegram: TelegramService,
+    ai_service: Any | None = None,
+) -> None:
+    """Check for scale-in opportunities in fixed_risk mode.
+
+    Scale-in logic:
+      - Only in fixed_risk entry_style
+      - Only if there's an open trade
+      - Only if price has approached the key level (within trigger distance)
+      - Ask Groq for quick confirmation
+      - Bypass duplicate filter (intentional position building)
+      - Respect news filter (if news blocks trading, no scale-in)
+    """
+    oe = config.get("order_execution", {}) or {}
+    entry_style = str(oe.get("entry_style", "market")).lower()
+    if entry_style != "fixed_risk":
+        return
+
+    fr = oe.get("fixed_risk", {}) or {}
+    if not bool(fr.get("scale_in_enabled", True)):
+        return
+
+    if not open_trades:
+        return
+
+    # Check news filter first
+    news = all_results.get("news", {}) or {}
+    if news.get("can_trade") is False or str(news.get("market_status", "")).upper() == "DANGER":
+        logger.info("📊 Scale-in skipped: news filter blocks trading")
+        return
+    news_ai = all_results.get("news_ai", {}) or {}
+    if news_ai.get("available") and (bool(news_ai.get("block_trading", False)) or str(news_ai.get("risk_level", "")).upper() == "EXTREME"):
+        logger.info("📊 Scale-in skipped: AI news blocks trading")
+        return
+
+    trigger_points = int(fr.get("scale_in_trigger_points", 100) or 100)
+    max_scales = int(fr.get("scale_in_max", 2) or 2)
+    size_ratio = float(fr.get("scale_in_size_ratio", 0.5) or 0.5)
+    current_price = all_results.get("current_price", 0)
+    if not current_price:
+        return
+
+    # Collect levels from results
+    support_levels: list = []
+    resistance_levels: list = []
+    tech = all_results.get("technical", {}) or {}
+    tech_levels = tech.get("key_levels", {}) or {}
+    if tech_levels.get("nearest_support"):
+        support_levels.append(float(tech_levels["nearest_support"]))
+    if tech_levels.get("nearest_resistance"):
+        resistance_levels.append(float(tech_levels["nearest_resistance"]))
+    classical = all_results.get("classical", {}) or {}
+    for s in (classical.get("support_levels") or []):
+        support_levels.append(float(s))
+    for r in (classical.get("resistance_levels") or []):
+        resistance_levels.append(float(r))
+    smc = all_results.get("smc", {}) or {}
+    for ob in (smc.get("order_blocks", []) or []):
+        z = ob.get("zone", {}) or {}
+        top = float(z.get("top") or 0)
+        bottom = float(z.get("bottom") or 0)
+        if top > 0 and bottom > 0:
+            if str(ob.get("type", "")).lower() == "bullish":
+                support_levels.append(min(top, bottom))
+            else:
+                resistance_levels.append(max(top, bottom))
+
+    trigger_price = trigger_points / 10.0  # convert points to price distance
+
+    # Check each open trade for scale-in opportunity
+    for trade in open_trades:
+        trade_type = str(trade.get("type") or trade.get("side") or "").upper()
+        if trade_type not in {"BUY", "SELL"}:
+            continue
+        entry = float(trade.get("entry_price", 0))
+        if entry <= 0:
+            continue
+
+        # Count existing scales for this trade direction
+        existing_scales = 0
+        for t in open_trades:
+            if str(t.get("type") or t.get("side") or "").upper() == trade_type:
+                existing_scales += 1
+        existing_scales -= 1  # exclude the original
+        if existing_scales >= max_scales:
+            logger.info("📊 Scale-in skipped for %s: already %d scales (max %d)", trade_type, existing_scales, max_scales)
+            continue
+
+        # Check if price is near a key level
+        near_level = False
+        level_price = 0.0
+        level_name = ""
+
+        if trade_type == "SELL":
+            # Price should be near resistance (upside risk)
+            for res in resistance_levels:
+                distance = res - current_price
+                if 0 < distance <= trigger_price:
+                    near_level = True
+                    level_price = res
+                    level_name = f"resistance at {res:.2f}"
+                    break
+        else:  # BUY
+            for sup in support_levels:
+                distance = current_price - sup
+                if 0 < distance <= trigger_price:
+                    near_level = True
+                    level_price = sup
+                    level_name = f"support at {sup:.2f}"
+                    break
+
+        if not near_level:
+            logger.debug("📊 No scale-in: %s trade not near any level (trigger=%dpts)", trade_type, trigger_points)
+            continue
+
+        # Ask Groq for quick confirmation
+        groq_ok = True
+        groq_reason = ""
+        if ai_service:
+            try:
+                scale_prompt = f"""Quick scale-in check. We have an open {trade_type} position entered at {entry:.2f}.
+Current price is {current_price:.2f}, approaching {level_name}.
+The level is {abs(level_price - current_price):.2f}$ away.
+Should we add another {trade_type} position (scale-in)?
+
+News context: {str(all_results.get('news', {}))[:200]}
+AI news interpretation: {str(news_ai)[:200]}
+
+Reply JSON only:
+{{"scale_in": true/false, "confidence": 0-100, "reason": "brief reason"}}"""
+                if hasattr(ai_service, '_call_ai'):
+                    resp = await ai_service._call_ai(scale_prompt, 'decision')
+                else:
+                    resp = await ai_service.analyze_chart(
+                        symbol='XAUUSD', price_data={}, technical_indicators={},
+                        timeframe='15m', agent_type='decision'
+                    )
+                if resp.success and hasattr(resp, 'content'):
+                    import json as _json
+                    try:
+                        parsed = _json.loads(resp.content)
+                        groq_ok = bool(parsed.get("scale_in", False))
+                        groq_confidence = float(parsed.get("confidence", 0) or 0)
+                        groq_reason = str(parsed.get("reason", ""))
+                        if groq_ok and groq_confidence < 60:
+                            groq_ok = False
+                            groq_reason = f"low confidence ({groq_confidence:.0f}%)"
+                    except Exception:
+                        groq_ok = False
+                        groq_reason = "parse failed"
+            except Exception as exc:
+                logger.warning("📊 Groq scale-in check failed: %s", exc)
+                groq_ok = False
+                groq_reason = str(exc)
+
+        if not groq_ok:
+            logger.info("📊 Scale-in rejected by Groq for %s: %s", trade_type, groq_reason)
+            continue
+
+        # Execute scale-in
+        logger.info("📊 Scale-in %s confirmed by Groq: %s", trade_type, groq_reason)
+
+        scale_decision = {
+            "decision": trade_type,
+            "signal": {
+                "type": trade_type,
+                "entry": {"price": round(current_price, 2), "kind": "MARKET", "order_type": f"{trade_type}_MARKET"},
+                "stop_loss": trade.get("stop_loss"),
+                "tp1": trade.get("tp1"),
+                "tp2": trade.get("tp2"),
+                "scale_in": True,
+                "parent_trade_id": trade.get("id"),
+            },
+            "confidence": 80,
+            "current_price": current_price,
+            "trade_id": database.new_trade_id(),
+            "reasons": [f"Scale-in: {groq_reason}"],
+        }
+        scale_decision["signal"]["trade_id"] = scale_decision["trade_id"]
+
+                # Send Telegram notification
+        scale_msg = (
+            "📊 <b>SCALE-IN — {trade_type}</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "Parent trade: <code>{parent_id}</code>\n"
+            "Original entry: {entry_price}\n"
+            "Scale entry: {scale_price:.2f}\n"
+            "Level: {level}\n"
+            "Groq confidence: approved ✅\n"
+            "Reason: {reason}\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "<i>Scale-in #{scale_num}/{max_scales} • Size: {size_ratio:.0%} of original</i>"
+        ).format(
+            trade_type=trade_type,
+            parent_id=html.escape(str(trade.get("id", ""))),
+            entry_price=trade.get("entry_price"),
+            scale_price=current_price,
+            level=html.escape(level_name),
+            reason=html.escape(groq_reason),
+            scale_num=existing_scales + 1,
+            max_scales=max_scales,
+            size_ratio=size_ratio,
+        )
+        if delivered:
+            database.save_trade(scale_decision)
+            logger.info("📊 Scale-in trade saved: %s", scale_decision["trade_id"])
+        else:
+            logger.error("📊 Scale-in %s failed: Telegram delivery error", trade_type)
+
+
 async def run_analysis_async() -> None:
     """الدالة الرئيسية للتحليل (async)"""
 
@@ -685,6 +900,22 @@ async def run_analysis_async() -> None:
                     "━━━━━━━━━━━━━━━━━━━━\n"
                     "<i>Periodic market status • Next check in ~10 min</i>"
                 )
+
+        # ── Fixed-risk scale-in check ──
+        # After main signal handling, check if we should scale into any open trade
+        try:
+            open_trades_for_scale = database.get_open_trades()
+            if open_trades_for_scale:
+                await _check_scale_in(
+                    config=config,
+                    all_results=all_results,
+                    open_trades=open_trades_for_scale,
+                    database=database,
+                    telegram=telegram,
+                    ai_service=ai_service,
+                )
+        except Exception as scale_exc:
+            logger.warning("⚠️ Scale-in check failed: %s", scale_exc)
 
         logger.info("✅ اكتمل التحليل بنجاح")
 
