@@ -952,13 +952,23 @@ Move conflicting evidence into opposing_evidence, or set final_signal = WAIT.
         return warnings
 
     def _order_type(self, signal: str, entry: float, current_price: float | None) -> str:
-        """Classify paper order type from entry vs current price."""
+        """Classify paper order type from entry vs current price.
+
+        When entry_style="market" this always returns *_MARKET.
+        When entry_style="smart" it respects pending_threshold_points.
+        """
+        oe = self.config.get("order_execution", {}) or {}
+        entry_style = str(oe.get("entry_style", "market")).lower()
+
+        if entry_style == "market":
+            return f"{signal}_MARKET"
+
         try:
             entry = float(entry)
             current = float(current_price or entry)
         except (TypeError, ValueError):
             return f"{signal}_MARKET"
-        threshold = float(self.config.get('order_execution', {}).get('pending_threshold_points', 1.0) or 1.0)
+        threshold = float(oe.get("pending_threshold_points", 1.0) or 1.0)
         if abs(entry - current) <= threshold:
             return f"{signal}_MARKET"
         if signal == 'BUY':

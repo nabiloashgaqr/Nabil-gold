@@ -291,13 +291,24 @@ class RiskManagementAgent(BaseAgent):
         BUY  below price -> BUY_LIMIT ; above price -> BUY_STOP
         SELL above price -> SELL_LIMIT; below price -> SELL_STOP
         within threshold  -> *_MARKET
+
+        When entry_style="market" this method always returns *_MARKET.
+        When entry_style="smart" it uses pending_threshold_points.
         """
+        oe = self.config.get("order_execution", {}) or {}
+        entry_style = str(oe.get("entry_style", "market")).lower()
+
+        # entry_style = "market" -> always MARKET entry
+        if entry_style == "market":
+            return f"{direction}_MARKET"
+
+        # entry_style = "smart" -> classify based on distance
         try:
             entry = float(entry)
             current = float(current_price if current_price is not None else entry)
         except (TypeError, ValueError):
             return f"{direction}_MARKET"
-        threshold = self._f(self.config.get("order_execution", {}).get("pending_threshold_points", 1.0), 1.0) / 10.0
+        threshold = self._f(oe.get("pending_threshold_points", 1.0), 1.0) / 10.0
         if abs(entry - current) <= max(threshold, 0.01):
             return f"{direction}_MARKET"
         if direction == "BUY":
@@ -325,14 +336,21 @@ class RiskManagementAgent(BaseAgent):
         proximal = edge nearest current price (price hits it first)
         distal   = far edge (the stop is placed just beyond it)
 
-        Logic:
+        Logic (respects entry_style config):
+          - entry_style="market": ALWAYS MARKET entry at current price.
+            This completely eliminates pending LIMIT/STOP orders.
+          - entry_style="smart": Try pullback levels first, fall back to MARKET.
+
+        Smart mode logic:
           1) Real SMC order block (bullish for BUY / bearish for SELL) -> use its
              actual top/bottom as the zone (source="smc").
           2) Else a structural level (support/resistance) a sensible pullback
              away -> build a zone of width = zone_width_points around it.
           3) Else immediate MARKET entry (zone collapses to current price).
         """
-        se = self.config.get("order_execution", {}).get("smart_entry", {}) or {}
+        oe = self.config.get("order_execution", {}) or {}
+        entry_style = str(oe.get("entry_style", "market")).lower()
+        se = oe.get("smart_entry", {}) or {}
         enabled = bool(se.get("enabled", True))
         results = results or {}
         fill_at = str(se.get("fill_at", "mid")).lower()  # edge | mid | far
@@ -340,11 +358,15 @@ class RiskManagementAgent(BaseAgent):
         min_pts = self._f(se.get("min_pullback_points", 60), 60) / 10.0
         max_pts = self._f(se.get("max_pullback_points", 350), 350) / 10.0
 
-        def _market() -> Tuple[float, str, str, Dict[str, Any]]:
+        def _market(reason: str = "Immediate market entry") -> Tuple[float, str, str, Dict[str, Any]]:
             z = {"low": round(current_price, 2), "high": round(current_price, 2),
                  "proximal": round(current_price, 2), "distal": round(current_price, 2),
                  "fill_at": "market", "source": "market"}
-            return round(current_price, 2), "MARKET", "Immediate market entry (no pullback zone nearby)", z
+            return round(current_price, 2), "MARKET", reason, z
+
+        # ── entry_style = "market": Always enter immediately ────────────────
+        if entry_style == "market":
+            return _market("Market entry (entry_style=market)")
 
         def _build_zone(proximal: float, distal: float, source: str, basis: str, kind: str) -> Tuple[float, str, str, Dict[str, Any]]:
             low, high = min(proximal, distal), max(proximal, distal)
@@ -359,8 +381,9 @@ class RiskManagementAgent(BaseAgent):
                     "fill_at": fill_at, "source": source}
             return round(entry, 2), kind, basis, zone
 
+        # ── entry_style = "smart": Try pullback levels ──────────────────────
         if not enabled:
-            return _market()
+            return _market("Smart entry disabled")
 
         # 1) Real SMC order block zone (uses actual top/bottom edges).
         smc = results.get("smc", {}) or {}
