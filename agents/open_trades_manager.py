@@ -97,6 +97,13 @@ class OpenTradesManager(BaseAgent):
         previous_mfe = self._f(trade.get("max_favorable_excursion"), 0.0)
         previous_mae = self._f(trade.get("max_adverse_excursion"), 0.0)
 
+        # ── PENDING (un-filled LIMIT/STOP) order handling ───────────────────
+        # A pending order is NOT a live position: it has no PnL until price
+        # actually touches the entry. Only then does it become OPEN. This fixes
+        # phantom fills/profits where a far LIMIT was treated as already filled.
+        if old_status == "PENDING":
+            return self._evaluate_pending(trade, current_price, now, trade_type, entry, tp1)
+
         pnl_points = calculate_pips(entry, current_price, trade_type)
         max_favorable_excursion = max(previous_mfe, pnl_points)
         max_adverse_excursion = min(previous_mae, pnl_points)
@@ -342,6 +349,78 @@ class OpenTradesManager(BaseAgent):
         if tp1 and abs(current_price - entry) <= risk * 0.15:
             return None
         return None
+
+    def _order_filled(self, order_type: str, trade_type: str, entry: float, current_price: float) -> bool:
+        """True when a pending LIMIT/STOP order would fill at current price.
+
+        LIMIT: price returns to a better level than market at signal time.
+          BUY_LIMIT  fills when price falls to/through entry  (price <= entry)
+          SELL_LIMIT fills when price rises to/through entry  (price >= entry)
+        STOP: price breaks beyond entry in the trade direction.
+          BUY_STOP   fills when price rises to/through entry  (price >= entry)
+          SELL_STOP  fills when price falls to/through entry  (price <= entry)
+        Falls back to a sensible default from trade_type if order_type missing.
+        """
+        ot = str(order_type or "").upper()
+        if not ot or ot.endswith("MARKET"):
+            return True
+        if ot == "BUY_LIMIT":
+            return current_price <= entry
+        if ot == "SELL_LIMIT":
+            return current_price >= entry
+        if ot == "BUY_STOP":
+            return current_price >= entry
+        if ot == "SELL_STOP":
+            return current_price <= entry
+        # Unknown -> infer from kind via trade direction (treat as LIMIT pullback).
+        if trade_type == "BUY":
+            return current_price <= entry
+        return current_price >= entry
+
+    def _evaluate_pending(self, trade, current_price, now, trade_type, entry, tp1):
+        """Activate a pending order on touch, else keep it waiting (no PnL).
+
+        Cancellation of stale pending orders is handled by the signal pipeline
+        (a new signal replaces them); here we only fill-on-touch and refresh
+        the displayed market price.
+        """
+        order_type = str(trade.get("order_type") or trade.get("order_kind") or "").upper()
+        filled = self._order_filled(order_type, trade_type, entry, current_price)
+        base_updates = {
+            "current_price": round(current_price, 2),
+            "last_updated": self._iso(now),
+        }
+        if filled:
+            # Fill at the configured entry price (paper). Position becomes live.
+            base_updates.update({
+                "status": "OPEN",
+                "entry_time": self._iso(now),  # clock starts at fill, not at signal
+                "current_pnl": 0,
+                "current_pnl_points": 0,
+            })
+            return {
+                "trade_id": trade.get("id"),
+                "old_status": "PENDING",
+                "new_status": "OPEN",
+                "pnl_points": 0.0,
+                "events": ["ORDER_FILLED"],
+                "updates": base_updates,
+                "progress_to_tp1": 0.0,
+                "hours_open": 0.0,
+            }
+        # Still waiting — report distance to entry, no PnL.
+        dist_pts = abs(calculate_pips(current_price, entry, trade_type))
+        return {
+            "trade_id": trade.get("id"),
+            "old_status": "PENDING",
+            "new_status": "PENDING",
+            "pnl_points": 0.0,
+            "events": [],
+            "updates": base_updates,
+            "progress_to_tp1": 0.0,
+            "hours_open": self._hours_open(trade, now),
+            "pending_distance_points": round(dist_pts, 1),
+        }
 
     def _hit_tp1(self, trade_type: str, current_price: float, tp1: float) -> bool:
         if tp1 <= 0:
