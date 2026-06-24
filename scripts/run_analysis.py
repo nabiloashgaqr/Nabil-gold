@@ -615,6 +615,15 @@ async def run_analysis_async() -> None:
                 )
                 return
 
+            # Replace any stale not-yet-filled pending order with this fresh
+            # signal (user preference: a new signal supersedes the old pending one).
+            try:
+                cancelled = database.cancel_pending_orders("Replaced by a newer signal")
+                if cancelled:
+                    logger.info("🚫 أُلغيت %s أوامر معلّقة قديمة قبل حفظ الإشارة الجديدة", cancelled)
+            except Exception as cexc:  # noqa: BLE001
+                logger.warning("Could not cancel old pending orders: %s", cexc)
+
             trade_id = database.save_trade(decision)
             decision["trade_id"] = trade_id
             if decision.get("signal"):
