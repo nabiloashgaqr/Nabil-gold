@@ -134,6 +134,7 @@ class DatabaseService:
             "current_pnl_points": 0,
             "sl_moved_to_entry": False,
             "partial_close": False,
+            "pending_cycles": 0,  # hybrid mode: how many cycles a PENDING order has survived
             "updates_sent": [],
             "result": None,
             "created_at": now_iso,
