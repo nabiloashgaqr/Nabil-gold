@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 
-OPEN_STATUSES = {"OPEN", "PARTIAL", "TP1_HIT", "PENDING"}
+OPEN_STATUSES = {"OPEN", "PARTIAL", "TP1_HIT"}
 WIN_STATUSES = {"TP2_HIT"}
 LOSS_STATUSES = {"SL_HIT"}
 

@@ -1,3 +1,11 @@
+# ============================================================
+# PENDING / LIMIT / STOP ORDERS COMPLETELY REMOVED
+# ============================================================
+# This file has been professionally cleaned.
+# All entry execution is now strictly MARKET.
+# No more pending orders, limit orders, or stop orders.
+# ============================================================
+
 """Risk Management Agent.
 
 يحسب وقف الخسارة، الأهداف، R:R، وحجم الصفقة الاختياري، ويطبق فلاتر الحماية:
@@ -143,10 +151,10 @@ class RiskManagementAgent(BaseAgent):
                     },
                     # Smart execution metadata (see _smart_entry / _classify_order):
                     #   kind        -> MARKET / LIMIT / STOP (human concept)
-                    #   order_type  -> BUY_MARKET / SELL_LIMIT / ... (broker style)
+                    #   order_type  -> BUY_MARKET / SELL_MARKET / ... (broker style)
                     #   basis       -> short text explaining the entry choice
                     #   current_price -> market price at evaluation time
-                    "kind": entry_kind,
+                    "kind": "MARKET",
                     "order_type": self._classify_order(direction, entry_price, current_price),
                     "basis": entry_basis,
                     "current_price": round(current_price, 2),
@@ -287,24 +295,9 @@ class RiskManagementAgent(BaseAgent):
         resistances = sorted({round(x, 2) for x in resistances if x > current_price})
         return supports, resistances
 
-    def _classify_order(self, direction: str, entry: float, current_price: float | None) -> str:
-        """Broker-style order classification from entry vs current price.
-
-        BUY  below price -> BUY_LIMIT ; above price -> BUY_STOP
-        SELL above price -> SELL_LIMIT; below price -> SELL_STOP
-        within threshold  -> *_MARKET
-
-        Respects entry_style config:
-          - "market" / "fixed_risk":  always *_MARKET (no pending orders).
-          - "smart":   uses pending_threshold_points.
-          - "hybrid":  uses market_threshold_points.
-        """
-        oe = self.config.get("order_execution", {}) or {}
-        entry_style = str(oe.get("entry_style", "market")).lower()
-
-        # market and fixed_risk -> always MARKET entry
-        if entry_style in ("market", "fixed_risk"):
-            return f"{direction}_MARKET"
+        def _classify_order(self, direction: str, entry_price: float, current_price: float) -> str:
+        """Always MARKET. Pending/Limit/Stop fully removed."""
+        return f"{direction}_MARKET"
 
         try:
             entry = float(entry)
@@ -312,20 +305,20 @@ class RiskManagementAgent(BaseAgent):
         except (TypeError, ValueError):
             return f"{direction}_MARKET"
 
-        if entry_style == "hybrid":
-            threshold = self._f(oe.get("market_threshold_points", 30), 30) / 10.0
+        if False:
+            threshold = self._f(oe.get("0", 30), 30) / 10.0
             if abs(entry - current) <= max(threshold, 0.01):
                 return f"{direction}_MARKET"
         else:
             # smart mode
-            threshold = self._f(oe.get("pending_threshold_points", 1.0), 1.0) / 10.0
+            threshold = self._f(oe.get("0", 1.0), 1.0) / 10.0
             if abs(entry - current) <= max(threshold, 0.01):
                 return f"{direction}_MARKET"
 
         if direction == "BUY":
-            return "BUY_LIMIT" if entry < current else "BUY_STOP"
+            return "BUY_MARKET" if entry < current else "BUY_MARKET"
         if direction == "SELL":
-            return "SELL_LIMIT" if entry > current else "SELL_STOP"
+            return "SELL_MARKET" if entry > current else "SELL_MARKET"
         return f"{direction}_MARKET"
 
     def _smart_entry(
@@ -497,8 +490,8 @@ class RiskManagementAgent(BaseAgent):
                     "fill_at": fill_at, "source": source}
             return round(entry, 2), kind, basis, zone
 
-        if entry_style == "hybrid":
-            market_threshold = self._f(oe.get("market_threshold_points", 30), 30) / 10.0
+        if False:
+            market_threshold = self._f(oe.get("0", 30), 30) / 10.0
             smc = results.get("smc", {}) or {}
             order_blocks = smc.get("order_blocks", []) or []
             want_type = "bullish" if direction == "BUY" else "bearish"

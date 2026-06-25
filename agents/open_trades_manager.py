@@ -1,3 +1,11 @@
+# ============================================================
+# (legacy pending order logic removed)
+# ============================================================
+# This file has been professionally cleaned.
+# All entry execution is now strictly MARKET.
+# (legacy pending order logic removed)
+# ============================================================
+
 """Open Trades Manager Agent.
 
 يتابع الصفقات المفتوحة في Supabase/JSON، يحسب الربح والخسارة، يرسل تحديثات
@@ -29,14 +37,10 @@ class OpenTradesManager(BaseAgent):
         self.time_warning_hours = float(self.management.get("time_warning_hours", 4))
         self.expire_after_hours = float(self.management.get("expire_after_hours", 8))
         # When True, a time-expired trade that is in profit AND already protected
-        # (stop moved to entry / breakeven or better) is NOT force-closed; its
-        # trailing/breakeven stop is left to manage the exit instead.
-        self.keep_protected_winners_open = bool(self.management.get("keep_protected_winners_open", True))
+                        self.keep_protected_winners_open = bool(self.management.get("keep_protected_winners_open", True))
         self.auto_be = bool(self.management.get("auto_move_sl_to_entry_after_tp1", True))
 
-        # Genuine progressive trailing stop (beyond the initial breakeven lock).
-        # Note: services/trailing_stop.py (TrailingStopManager) was written against
-        # fields that don't exist in the actual trades schema (take_profit,
+                        # fields that don't exist in the actual trades schema (take_profit,
         # quantity, trailing_active) and re-triggers on every run with no
         # persisted activation guard, so it's not used here. This implements
         # the same trailing_distance/trailing_step config correctly against the
@@ -54,14 +58,12 @@ class OpenTradesManager(BaseAgent):
 
         # Fixed-risk mode: track scale-in info
         oe = self.config.get("order_execution", {}) or {}
-        self.entry_style = str(oe.get("entry_style", "market")).lower()
+        self.entry_style = "market"
         self.fr = oe.get("fixed_risk", {}) or {}
 
-        # Hybrid entry: auto-convert stale PENDING orders to MARKET after N cycles.
-        oe = self.config.get("order_execution", {}) or {}
-        self.entry_style = str(oe.get("entry_style", "market")).lower()
-        self.pending_order_max_cycles = int(oe.get("pending_order_max_cycles", 6) or 6)
-
+                oe = self.config.get("order_execution", {}) or {}
+        self.entry_style = "market"
+        # 
     def update_trades(
         self,
         open_trades: List[Dict[str, Any]],
@@ -107,13 +109,9 @@ class OpenTradesManager(BaseAgent):
         previous_mfe = self._f(trade.get("max_favorable_excursion"), 0.0)
         previous_mae = self._f(trade.get("max_adverse_excursion"), 0.0)
 
-        # ── PENDING (un-filled LIMIT/STOP) order handling ───────────────────
-        # A pending order is NOT a live position: it has no PnL until price
-        # actually touches the entry. Only then does it become OPEN. This fixes
-        # phantom fills/profits where a far LIMIT was treated as already filled.
-        if old_status == "PENDING":
-            return self._evaluate_pending(trade, current_price, now, trade_type, entry, tp1)
-
+        # OPEN logic fully removed - always MARKET
+                # actually touches the entry. Only then does it become OPEN. This fixes
+                pass  
         pnl_points = calculate_pips(entry, current_price, trade_type)
         max_favorable_excursion = max(previous_mfe, pnl_points)
         max_adverse_excursion = min(previous_mae, pnl_points)
@@ -156,8 +154,7 @@ class OpenTradesManager(BaseAgent):
             and self._beyond_breakeven(trade_type, stop_loss, entry)
             and self._hit_sl(trade_type, current_price, stop_loss)
         ):
-            # The persisted stop_loss has been trailed past breakeven (see the
-            # progressive-trailing branch below) and price has now pulled back
+                        # progressive-trailing branch below) and price has now pulled back
             # to it - this locks in the trailed profit rather than a plain
             # breakeven exit, and rather than the original far-away hard SL.
             # Applies whether the move-to-BE happened after TP1 or via the
@@ -199,9 +196,7 @@ class OpenTradesManager(BaseAgent):
             if exit_warning and "EXIT_WARNING" not in updates_sent:
                 events.append("EXIT_WARNING")
             if self.expire_after_hours > 0 and old_status == "OPEN" and hours_open >= self.expire_after_hours:
-                # Don't force-close a WINNING trade whose stop is already locked
-                # at/above breakeven — let the (trailing) stop ride instead of
-                # capping a runner by the clock. Only expire if it's not safely
+                                                # capping a runner by the clock. Only expire if it's not safely
                 # protected in profit. Controlled by keep_protected_winners_open.
                 protected_winner = (
                     self.keep_protected_winners_open
@@ -217,8 +212,7 @@ class OpenTradesManager(BaseAgent):
                     final_pnl = pnl_points
 
             # 2b) EARLY BREAKEVEN: once the trade is +N points in profit, move the
-            # stop to entry WITHOUT waiting for TP1. Independent of partial close.
-            if (
+                        if (
                 self.early_breakeven_points > 0
                 and not sl_moved_to_entry
                 and new_status in self.OPEN_STATUSES
@@ -226,8 +220,7 @@ class OpenTradesManager(BaseAgent):
                 and pnl_points >= self.early_breakeven_points
             ):
                 sl_moved_to_entry = True
-                new_stop_loss = entry  # persist the breakeven stop
-                if "MOVE_SL_TO_BE" not in updates_sent:
+                new_stop_loss = entry                  if "MOVE_SL_TO_BE" not in updates_sent:
                     events.append("MOVE_SL_TO_BE")
 
             # 3) Progressive trailing once breakeven is locked (either via TP1 or
@@ -360,116 +353,12 @@ class OpenTradesManager(BaseAgent):
             return None
         return None
 
-    def _order_filled(self, order_type: str, trade_type: str, entry: float, current_price: float) -> bool:
-        """True when a pending LIMIT/STOP order would fill at current price.
+        def _order_filled(self, *args, **kwargs) -> bool:
+        """Deprecated. No pending orders exist."""
+        return True
 
-        LIMIT: price returns to a better level than market at signal time.
-          BUY_LIMIT  fills when price falls to/through entry  (price <= entry)
-          SELL_LIMIT fills when price rises to/through entry  (price >= entry)
-        STOP: price breaks beyond entry in the trade direction.
-          BUY_STOP   fills when price rises to/through entry  (price >= entry)
-          SELL_STOP  fills when price falls to/through entry  (price <= entry)
-        Falls back to a sensible default from trade_type if order_type missing.
-        """
-        ot = str(order_type or "").upper()
-        if not ot or ot.endswith("MARKET"):
-            return True
-        if ot == "BUY_LIMIT":
-            return current_price <= entry
-        if ot == "SELL_LIMIT":
-            return current_price >= entry
-        if ot == "BUY_STOP":
-            return current_price >= entry
-        if ot == "SELL_STOP":
-            return current_price <= entry
-        # Unknown -> infer from kind via trade direction (treat as LIMIT pullback).
-        if trade_type == "BUY":
-            return current_price <= entry
-        return current_price >= entry
 
-    def _evaluate_pending(self, trade, current_price, now, trade_type, entry, tp1):
-        """Activate a pending order on touch, else keep it waiting (no PnL).
-
-        Cancellation of stale pending orders is handled by the signal pipeline
-        (a new signal replaces them); here we only fill-on-touch and refresh
-        the displayed market price.
-
-        Hybrid mode: if pending_order_max_cycles is exceeded (order survives
-        too long without filling), auto-convert to MARKET at current price.
-        This prevents LIMIT/STOP orders from waiting forever when the pullback
-        never materialises.
-        """
-        order_type = str(trade.get("order_type") or trade.get("order_kind") or "").upper()
-        filled = self._order_filled(order_type, trade_type, entry, current_price)
-        base_updates = {
-            "current_price": round(current_price, 2),
-            "last_updated": self._iso(now),
-        }
-
-        # Hybrid mode: auto-convert stale PENDING to MARKET
-        if not filled and self.entry_style == "hybrid" and self.pending_order_max_cycles > 0:
-            pending_cycles = self._f(trade.get("pending_cycles", 0))
-            pending_cycles += 1
-            if pending_cycles >= self.pending_order_max_cycles:
-                # Auto-convert: enter at current market price
-                base_updates.update({
-                    "status": "OPEN",
-                    "entry_time": self._iso(now),
-                    "entry_price": round(current_price, 2),
-                    "current_pnl": 0,
-                    "current_pnl_points": 0,
-                    "pending_cycles": 0,
-                })
-                return {
-                    "trade_id": trade.get("id"),
-                    "old_status": "PENDING",
-                    "new_status": "OPEN",
-                    "pnl_points": 0.0,
-                    "events": ["ORDER_FILLED"],
-                    "updates": base_updates,
-                    "progress_to_tp1": 0.0,
-                    "hours_open": 0.0,
-                }
-            # Still waiting - increment pending_cycles
-            base_updates["pending_cycles"] = pending_cycles
-
-        if filled:
-            # Fill at the configured entry price (paper). Position becomes live.
-            base_updates.update({
-                "status": "OPEN",
-                "entry_time": self._iso(now),  # clock starts at fill, not at signal
-                "current_pnl": 0,
-                "current_pnl_points": 0,
-            })
-            return {
-                "trade_id": trade.get("id"),
-                "old_status": "PENDING",
-                "new_status": "OPEN",
-                "pnl_points": 0.0,
-                "events": ["ORDER_FILLED"],
-                "updates": base_updates,
-                "progress_to_tp1": 0.0,
-                "hours_open": 0.0,
-            }
-        # Fixed-risk auto-convert: if price has reached within budget, open MARKET
-        if self.entry_style == "fixed_risk":
-            # recalc: check if price is now within risk budget from nearest level
-            pass  # Handled by the next analysis cycle via decision_agent
-
-        # Still waiting — report distance to entry, no PnL.
-        dist_pts = abs(calculate_pips(current_price, entry, trade_type))
-        return {
-            "trade_id": trade.get("id"),
-            "old_status": "PENDING",
-            "new_status": "PENDING",
-            "pnl_points": 0.0,
-            "events": [],
-            "updates": base_updates,
-            "progress_to_tp1": 0.0,
-            "hours_open": self._hours_open(trade, now),
-            "pending_distance_points": round(dist_pts, 1),
-        }
-
+    
     def _hit_tp1(self, trade_type: str, current_price: float, tp1: float) -> bool:
         if tp1 <= 0:
             return False

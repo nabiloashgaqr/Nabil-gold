@@ -390,8 +390,8 @@
     "enabled": true,
     "mode": "paper",
     "default_order_type": "MARKET",
-    "entry_style": "fixed_risk",
-    "description_entry_style": "fixed_risk = يدخل MARKET فقط عندما المسافة لأقرب مستوى (دعم/مقاومة/SMC) ضمن ميزانية المخاطرة. إذا المسافة > max_risk_distance_points نقطة → ننتظر حتى يقترب السعر. ستوب الخسارة يوضع خلف المستوى مباشرة + buffer. يدعم التعزيز (scale-in) عند اقتراب السعر من المستوى.",
+    "entry_style": "market",
+    "description_entry_style": "PURE MARKET ONLY. All Limit, Pending and Stop order logic has been professionally removed. Every signal enters immediately as MARKET.",
     "fixed_risk": {
       "max_risk_distance_points": 300,
       "description_max_risk_distance_points": "أقصى مسافة (بالنقاط) بين السعر الحالي وأقرب مستوى رئيسي للدخول. إذا المسافة ≤ 300 نقطة (30$) → ندخل MARKET فوراً. إذا > 300 → ننتظر. نقاط الذهب: 100 نقطة = 10.00$ في السعر (4100→4110).",
@@ -403,26 +403,16 @@
       "scale_in_trigger_points": 100,
       "description_scale_in_trigger_points": "عندما يبقى بين السعر والمستوى ≤ 100 نقطة (10$)، نعزز باتجاه الصفقة. السعر كاد يلمس المستوى — آخر فرصة قبل الانعكاس.",
       "scale_in_size_ratio": 0.5,
-      "description_scale_in_size_ratio": "نسبة حجم التعزيز مقارنة بالصفقة الأصلية. 0.5 = نصف الحجم. 1.0 = نفس الحجم."
+      "description_scale_in_size_ratio": "نسبة حجم التعزيز مقارنة بالصفقة الأصلية. 0.5 = نصف الحجم. 1.0 = نفس الحجم.",
+      "description": "fixed_risk zone logic kept for entry levels, but always MARKET execution.",
+      "note": "Zone logic kept only for SL/TP calculation. Execution always MARKET."
     },
     "allowed_order_types": [
       "BUY_MARKET",
-      "SELL_MARKET",
-      "BUY_LIMIT",
-      "SELL_LIMIT",
-      "BUY_STOP",
-      "SELL_STOP"
+      "SELL_MARKET"
     ],
     "description": "Paper order classification only: market, limit, or stop based on entry vs current price.",
-    "smart_entry": {
-      "enabled": true,
-      "min_pullback_points": 60,
-      "max_pullback_points": 350,
-      "atr_fraction": 0.5,
-      "description": "مهمل في fixed_risk mode — يُستخدم فقط مع smart/market mode.",
-      "fill_at": "mid",
-      "zone_width_points": 50
-    }
+    "pending_support_removed": true
   },
   "operation_mode": "observation",
   "operation_modes": {

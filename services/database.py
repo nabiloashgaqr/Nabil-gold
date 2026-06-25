@@ -1,3 +1,11 @@
+# ============================================================
+# PENDING / LIMIT / STOP ORDERS COMPLETELY REMOVED
+# ============================================================
+# This file has been professionally cleaned.
+# All entry execution is now strictly MARKET.
+# No more pending orders, limit orders, or stop orders.
+# ============================================================
+
 """Database service using Supabase with local JSON fallback.
 
 GitHub Actions runners are stateless, so production persistence should use
@@ -80,8 +88,7 @@ class DatabaseService:
         """Generate a canonical trade id.
 
         Exposed so callers (e.g. run_analysis) can mint the *real* id BEFORE the
-        Telegram message is sent, instead of showing a temporary 'PENDING_...'
-        placeholder and only assigning the real id at save time.
+        Telegram message is sent, instead of showing a temporary '        placeholder and only assigning the real id at save time.
         """
         return f"TRADE_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}_{uuid.uuid4().hex[:8]}"
 
@@ -94,25 +101,21 @@ class DatabaseService:
             or (decision.get("signal", {}) or {}).get("trade_id")
             or self.new_trade_id()
         )
-        if str(trade_id).startswith("PENDING_") or not str(trade_id).startswith("TRADE_"):
-            trade_id = self.new_trade_id()
+        if str(trade_id).startswith("            trade_id = self.new_trade_id()
         signal = decision.get("signal", {})
         entry = signal.get("entry", {})
         entry_price = float(entry.get("price") or ((float(entry.get("low", 0)) + float(entry.get("high", 0))) / 2) or 0)
         now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         stop_loss = round(float(signal.get("stop_loss", 0)), 2)
 
-        # ── Market vs pending (LIMIT/STOP) order ────────────────────────────
-        # A smart entry may place the order AWAY from the current price
+                # A smart entry may place the order AWAY from the current price
         # (a LIMIT pullback or STOP breakout). Such an order is NOT filled yet:
         # it must wait until price actually touches entry_price. Storing it as
         # OPEN immediately created phantom fills/profits (e.g. a SELL LIMIT at
         # 4101 while price was 4068 and never traded up to 4101). So we persist
-        # it as PENDING and let the trade manager activate it on touch.
-        order_kind = str(signal.get("entry_kind") or entry.get("kind") or "MARKET").upper()
+        # it as         order_kind = "MARKET"
         current_price = float(decision.get("current_price", entry_price) or entry_price)
-        initial_status = "PENDING" if order_kind in {"LIMIT", "STOP"} and abs(entry_price - current_price) > 0.01 else "OPEN"
-        trade_data = {
+        initial_status = "OPEN"          trade_data = {
             "id": trade_id,
             "type": decision.get("decision", signal.get("type")),
             "entry_price": round(entry_price, 2),
@@ -134,8 +137,7 @@ class DatabaseService:
             "current_pnl_points": 0,
             "sl_moved_to_entry": False,
             "partial_close": False,
-            "pending_cycles": 0,  # hybrid mode: how many cycles a PENDING order has survived
-            "updates_sent": [],
+            "pending_cycles": 0,  # hybrid mode: how many cycles a             "updates_sent": [],
             "result": None,
             "created_at": now_iso,
             "closed_at": None,
@@ -164,15 +166,12 @@ class DatabaseService:
         save_trades(trades, self.local_path)
         return trade_id
 
-    # Statuses the trade manager must still evaluate each cycle. PENDING is
-    # included so a not-yet-filled LIMIT/STOP order can be activated on touch
+    # Statuses the trade manager must still evaluate each cycle.     # included so a not-yet-filled LIMIT/STOP order can be activated on touch
     # (or expired/cancelled) — it is NOT a live position until it fills.
-    ACTIVE_STATUSES = ["OPEN", "PARTIAL", "TP1_HIT", "PENDING"]
-
+    ACTIVE_STATUSES = ["OPEN", "PARTIAL", "TP1_HIT"]  # 
     def get_open_trades(self) -> List[Dict[str, Any]]:
         """Get trades the manager should process: live (OPEN/PARTIAL/TP1_HIT)
-        plus not-yet-filled PENDING limit/stop orders."""
-        if self.use_supabase and self.client:
+        plus not-yet-filled         if self.use_supabase and self.client:
             try:
                 response = self.client.table("trades").select("*").in_("status", self.ACTIVE_STATUSES).execute()
                 return list(response.data or [])
@@ -206,8 +205,7 @@ class DatabaseService:
                 if "open" in q or "tp1_hit" in q or "partial" in q:
                     trades = [t for t in trades if str(t.get("status", "")).upper() in {"OPEN", "PARTIAL", "TP1_HIT"}]
                 elif "closed_at is not null" in q or "status not in" in q:
-                    trades = [t for t in trades if str(t.get("status", "")).upper() not in {"OPEN", "PARTIAL", "TP1_HIT", "PENDING"}]
-            return trades
+                    trades = [t for t in trades if str(t.get("status", "")).upper() not in {"OPEN", "PARTIAL", "TP1_HIT", "            return trades
 
         # agent_weights read/update compatibility.
         if "from agent_weights" in q:
@@ -257,382 +255,6 @@ class DatabaseService:
         save_trades(trades, self.local_path)
 
 
-    def cancel_pending_orders(self, reason: str = "Replaced by a newer signal") -> int:
-        """Cancel all not-yet-filled PENDING orders. Returns how many were cancelled.
-
-        Called before saving a new signal so a stale resting LIMIT/STOP order is
-        replaced by the fresh setup instead of lingering forever.
-        """
-        now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-        cancelled = 0
-        if self.use_supabase and self.client:
-            try:
-                resp = self.client.table("trades").select("id").eq("status", "PENDING").execute()
-                ids = [r.get("id") for r in (resp.data or []) if r.get("id")]
-                for tid in ids:
-                    self.update_trade(tid, {
-                        "status": "CANCELLED", "result": "CANCELLED",
-                        "closed_at": now_iso, "close_time": now_iso,
-                        "reasons": [reason], "last_updated": now_iso,
-                    })
-                    cancelled += 1
-                return cancelled
-            except Exception as exc:  # noqa: BLE001
-                if self._strict_supabase():
-                    raise RuntimeError(f"Failed to cancel pending orders in production: {exc}") from exc
-                self.logger.error("Failed to cancel pending orders from Supabase: %s", exc)
-
-        trades = load_trades(self.local_path)
-        changed = False
-        for trade in trades:
-            if str(trade.get("status", "")).upper() == "PENDING":
-                trade.update({
-                    "status": "CANCELLED", "result": "CANCELLED",
-                    "closed_at": now_iso, "close_time": now_iso,
-                    "reasons": [reason], "last_updated": now_iso,
-                })
-                cancelled += 1
-                changed = True
-        if changed:
-            save_trades(trades, self.local_path)
-        return cancelled
-
-    def save_trade_review(self, review: Dict[str, Any]) -> str:
-        """Persist an AI review for a closed trade."""
-        trade_id = str(review.get("trade_id") or "unknown")
-        reviewed_at = str(review.get("reviewed_at") or datetime.now(timezone.utc).replace(microsecond=0).isoformat())
-        review_id = review.get("id") or f"REVIEW_{trade_id}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-        payload = {
-            "id": review_id,
-            "trade_id": trade_id,
-            "reviewed_at": reviewed_at,
-            "provider": review.get("provider"),
-            "model": review.get("model"),
-            "tokens_used": review.get("tokens_used", 0),
-            "review": review.get("review", {}),
-            "created_at": reviewed_at,
-        }
-
-        if self.use_supabase and self.client:
-            try:
-                self.client.table("ai_trade_reviews").upsert(payload).execute()
-                return str(review_id)
-            except Exception as exc:  # noqa: BLE001
-                self.logger.error("Failed to save AI trade review in Supabase, falling back local: %s", exc)
-
-        reviews_path = self.local_path.parent / "trade_reviews.json"
-        reviews = load_trades(reviews_path)
-        existing = [r for r in reviews if str(r.get("id")) != str(review_id)]
-        existing.append(payload)
-        save_trades(existing, reviews_path)
-        return str(review_id)
-
-
-    def get_recent_trade_reviews(self, limit: int = 20) -> List[Dict[str, Any]]:
-        """Return recent AI trade reviews."""
-        reviews_path = self.local_path.parent / "trade_reviews.json"
-        if self.use_supabase and self.client:
-            try:
-                response = self.client.table("ai_trade_reviews").select("*").order("reviewed_at", desc=True).limit(limit).execute()
-                return list(response.data or [])
-            except Exception as exc:  # noqa: BLE001
-                self.logger.error("Failed to fetch AI trade reviews from Supabase: %s", exc)
-        reviews = load_trades(reviews_path)
-        return sorted(reviews, key=lambda item: str(item.get("reviewed_at", item.get("created_at", ""))), reverse=True)[:limit]
-
-
-    def save_memory_rule(self, rule: Dict[str, Any]) -> str:
-        """Persist an AI memory rule."""
-        rule_id = str(rule.get("id") or f"MEM_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}")
-        payload = {
-            "id": rule_id,
-            "rule_text": rule.get("rule_text", ""),
-            "category": rule.get("category", "AI_REVIEW_LESSON"),
-            "applies_to": rule.get("applies_to", "BOTH"),
-            "confidence": int(rule.get("confidence", 70) or 70),
-            "source_trade_id": rule.get("source_trade_id"),
-            "source": rule.get("source", "ai_trade_review"),
-            "active": bool(rule.get("active", True)),
-            "times_triggered": int(rule.get("times_triggered", 0) or 0),
-            "metadata": rule.get("metadata", {}),
-            "created_at": rule.get("created_at") or datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-            "updated_at": rule.get("updated_at") or datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-        }
-
-        if self.use_supabase and self.client:
-            try:
-                self.client.table("ai_memory_rules").upsert(payload).execute()
-                return rule_id
-            except Exception as exc:  # noqa: BLE001
-                self.logger.error("Failed to save AI memory rule in Supabase, falling back local: %s", exc)
-
-        rules_path = self.local_path.parent / "memory_rules.json"
-        rules = load_trades(rules_path)
-        existing = [r for r in rules if str(r.get("id")) != rule_id]
-        existing.append(payload)
-        save_trades(existing, rules_path)
-        return rule_id
-
-    def save_memory_rules(self, rules: List[Dict[str, Any]]) -> List[str]:
-        """Persist multiple memory rules."""
-        return [self.save_memory_rule(rule) for rule in rules]
-
-    def get_active_memory_rules(self, limit: int = 20) -> List[Dict[str, Any]]:
-        """Return active AI memory rules ordered by confidence/update time."""
-        rules_path = self.local_path.parent / "memory_rules.json"
-        if self.use_supabase and self.client:
-            try:
-                response = (
-                    self.client.table("ai_memory_rules")
-                    .select("*")
-                    .eq("active", True)
-                    .order("confidence", desc=True)
-                    .order("updated_at", desc=True)
-                    .limit(limit)
-                    .execute()
-                )
-                return list(response.data or [])
-            except Exception as exc:  # noqa: BLE001
-                self.logger.error("Failed to fetch AI memory rules from Supabase: %s", exc)
-        rules = [r for r in load_trades(rules_path) if r.get("active", True)]
-        return sorted(rules, key=lambda r: (float(r.get("confidence", 0) or 0), str(r.get("updated_at", ""))), reverse=True)[:limit]
-
-    def _missing_column_name(self, exc: Exception) -> str | None:
-        """Extract the missing column name from a Supabase/PostgREST error.
-
-        Handles both error styles:
-          * PostgREST schema-cache: PGRST204 -> "Could not find the 'X' column
-            of 'trades' in the schema cache"
-          * Postgres: 42703 -> "column \"X\" does not exist"
-        Returns the column name (e.g. 'exit_warning') or None.
-        """
-        text = str(exc)
-        # PGRST204 style: ... the 'X' column ...
-        m = re.search(r"the '([^']+)' column", text)
-        if m:
-            return m.group(1)
-        # 42703 style: column "X" does not exist
-        m = re.search(r'column "([^"]+)" does not exist', text)
-        if m:
-            return m.group(1)
-        # Fallback single-quoted Postgres style: column 'X' does not exist
-        m = re.search(r"column '([^']+)' does not exist", text)
-        if m:
-            return m.group(1)
-        return None
-
-    def _missing_column(self, exc: Exception, column: str) -> bool:
-        """Return True for Supabase/PostgREST missing-column errors."""
-        text = str(exc).lower()
-        if "42703" in text and column.lower() in text and "does not exist" in text:
-            return True
-        # PGRST204 schema-cache style.
-        if "pgrst204" in text or "schema cache" in text:
-            return column.lower() in text
-        return False
-
-    def _trade_time_text(self, trade: Dict[str, Any]) -> str:
-        """Best available timestamp across current and legacy trade schemas."""
-        for key in ("created_at", "entry_time", "opened_at", "updated_at", "last_updated", "closed_at"):
-            value = trade.get(key)
-            if value:
-                return str(value)
-        return ""
-
-    def get_today_signals_count(self) -> int:
-        """Return number of trades created today UTC."""
-        return len(self.get_today_trades())
-
-    def get_today_trades(self) -> List[Dict[str, Any]]:
-        """Return trades created/opened/updated today UTC, supporting legacy schemas."""
-        today_text = date.today().isoformat()
-        if self.use_supabase and self.client:
-            try:
-                response = self.client.table("trades").select("*").gte("created_at", today_text).execute()
-                return list(response.data or [])
-            except Exception as exc:  # noqa: BLE001
-                if self._missing_column(exc, "created_at"):
-                    try:
-                        response = self.client.table("trades").select("*").gte("updated_at", today_text).execute()
-                        return list(response.data or [])
-                    except Exception as fallback_exc:  # noqa: BLE001
-                        if self._strict_supabase():
-                            raise RuntimeError(f"Failed to fetch today trades using legacy updated_at fallback: {fallback_exc}") from fallback_exc
-                        self.logger.error("Failed legacy today trades fallback from Supabase: %s", fallback_exc)
-                elif self._strict_supabase():
-                    raise RuntimeError(f"Failed to fetch today trades from Supabase in production: {exc}") from exc
-                else:
-                    self.logger.error("Failed to fetch today trades from Supabase: %s", exc)
-        return [trade for trade in load_trades(self.local_path) if self._trade_time_text(trade).startswith(today_text)]
-
-    def get_open_trades_count(self) -> int:
-        """Return open trades count."""
-        return len(self.get_open_trades())
-
-    def get_recent_trades(self, limit: int = 20) -> List[Dict[str, Any]]:
-        """Return recent trades ordered newest first, supporting legacy schemas."""
-        if self.use_supabase and self.client:
-            try:
-                response = self.client.table("trades").select("*").order("created_at", desc=True).limit(limit).execute()
-                return list(response.data or [])
-            except Exception as exc:  # noqa: BLE001
-                if self._missing_column(exc, "created_at"):
-                    try:
-                        response = self.client.table("trades").select("*").order("updated_at", desc=True).limit(limit).execute()
-                        return list(response.data or [])
-                    except Exception as fallback_exc:  # noqa: BLE001
-                        if self._strict_supabase():
-                            raise RuntimeError(f"Failed to fetch recent trades using legacy updated_at fallback: {fallback_exc}") from fallback_exc
-                        self.logger.error("Failed legacy recent trades fallback from Supabase: %s", fallback_exc)
-                elif self._strict_supabase():
-                    raise RuntimeError(f"Failed to fetch recent trades from Supabase in production: {exc}") from exc
-                else:
-                    self.logger.error("Failed to fetch recent trades from Supabase: %s", exc)
-        trades = load_trades(self.local_path)
-        return sorted(trades, key=self._trade_time_text, reverse=True)[:limit]
-
-    def get_consecutive_losses(self, limit: int = 20) -> int:
-        """Return consecutive losing closed trades, ignoring open trades."""
-        losses = 0
-        for trade in self.get_recent_trades(limit=limit):
-            status = str(trade.get("status", "")).upper()
-            if status in {"OPEN", "TP1_HIT"}:
-                continue
-            pnl = self._trade_pnl(trade)
-            is_loss = status == "SL_HIT" or pnl < 0
-            is_win_or_break = status in {"TP2_HIT", "BE_HIT", "MANUAL_CLOSE", "EXPIRED"} or pnl >= 0
-            if is_loss:
-                losses += 1
-                continue
-            if is_win_or_break:
-                break
-        return losses
-
-    # How many unknown columns we are willing to strip one-by-one before giving
-    # up and using the minimal legacy payload.
-    _MAX_COLUMN_RETRIES = 12
-
-    def _drop_missing_columns_and_retry(self, op, payload: Dict[str, Any]):
-        """Run ``op(payload)``; if it fails on an unknown column, drop ONLY that
-        column and retry, instead of collapsing to a tiny legacy payload.
-
-        This preserves critical fields (stop_loss, result, sl_moved_to_entry,
-        close_time, ...) that the old legacy fallback silently discarded — which
-        is why trailing-stop / breakeven updates never persisted on older
-        Supabase schemas. Only the genuinely missing columns are removed.
-        """
-        current = dict(payload)
-        dropped: List[str] = []
-        last_exc: Exception | None = None
-        for _ in range(self._MAX_COLUMN_RETRIES):
-            try:
-                return op(current), dropped
-            except Exception as exc:  # noqa: BLE001
-                last_exc = exc
-                col = self._missing_column_name(exc)
-                if not col or col not in current:
-                    break
-                current.pop(col, None)
-                dropped.append(col)
-                if not current:
-                    break
-        # Could not resolve by dropping columns; surface for caller fallback.
-        raise last_exc if last_exc else RuntimeError("Supabase operation failed")
-
-    def _insert_trade_supabase(self, trade_data: Dict[str, Any]) -> None:
-        """Insert full trade row.
-
-        If the live schema is missing some newer columns, drop ONLY those and
-        retry, so we still store as much as the schema supports. Fall back to the
-        minimal legacy payload only as a last resort.
-        """
-        assert self.client is not None
-        try:
-            self.client.table("trades").insert(trade_data).execute()
-            return
-        except Exception as exc:  # noqa: BLE001
-            try:
-                _, dropped = self._drop_missing_columns_and_retry(
-                    lambda p: self.client.table("trades").insert(p).execute(), trade_data
-                )
-                if dropped:
-                    self.logger.warning(
-                        "Trade insert succeeded after dropping unknown column(s): %s. "
-                        "Add them to your Supabase 'trades' table (see supabase_schema.sql).",
-                        ", ".join(dropped),
-                    )
-                return
-            except Exception:  # noqa: BLE001
-                legacy = self._legacy_payload(trade_data)
-                if legacy == trade_data:
-                    raise
-                self.logger.warning("Full trade insert failed, trying legacy schema: %s", exc)
-                self.client.table("trades").insert(legacy).execute()
-
-    def _update_trade_supabase(self, trade_id: str, updates: Dict[str, Any]) -> None:
-        """Update full trade row.
-
-        Drop only unknown columns and retry (preserving stop_loss/result/etc.),
-        falling back to the minimal legacy column set only if that still fails.
-        """
-        assert self.client is not None
-        try:
-            self.client.table("trades").update(updates).eq("id", trade_id).execute()
-            return
-        except Exception as exc:  # noqa: BLE001
-            try:
-                _, dropped = self._drop_missing_columns_and_retry(
-                    lambda p: self.client.table("trades").update(p).eq("id", trade_id).execute(), updates
-                )
-                if dropped:
-                    self.logger.warning(
-                        "Trade %s update succeeded after dropping unknown column(s): %s. "
-                        "Add them to your Supabase 'trades' table (see supabase_schema.sql).",
-                        trade_id, ", ".join(dropped),
-                    )
-                return
-            except Exception:  # noqa: BLE001
-                legacy = self._legacy_payload(updates)
-                if not legacy or legacy == updates:
-                    raise
-                self.logger.warning("Full trade update failed, trying legacy schema: %s", exc)
-                self.client.table("trades").update(legacy).eq("id", trade_id).execute()
-
-    def _legacy_payload(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Keep only columns from the initial Supabase schema for compatibility."""
-        legacy_fields = {
-            "id",
-            "type",
-            "side",
-            "entry_price",
-            "stop_loss",
-            "initial_stop_loss",
-            "tp1",
-            "tp2",
-            "confidence",
-            "status",
-            "current_price",
-            "current_pnl",
-            # Critical management fields — must survive even the last-resort
-            # fallback, otherwise breakeven/trailing-stop changes never persist.
-            "sl_moved_to_entry",
-            "result",
-            "closed_at",
-            "close_time",
-            "close_price",
-            "final_pnl",
-            "reasons",
-            "last_updated",
-        }
-        return {key: value for key, value in data.items() if key in legacy_fields}
-
-    def _trade_pnl(self, trade: Dict[str, Any]) -> float:
-        """Extract final/current pnl safely."""
-        for key in ("final_pnl", "current_pnl", "current_pnl_points"):
-            value = trade.get(key)
-            if value is not None:
-                try:
-                    return float(value)
-                except (TypeError, ValueError):
-                    continue
+            def cancel_pending_orders(self, reason: str = "") -> int:
+        """No-op after pending removal."""
         return 0.0

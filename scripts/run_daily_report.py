@@ -195,16 +195,15 @@ def main() -> None:
         open_trades = database.get_open_trades()
 
         # 3. Split today's trades into CLOSED vs OPEN for clear reporting.
-        # PENDING = not filled yet; CANCELLED = never traded. Neither is a live
+        # OPEN = not filled yet; CANCELLED = never traded. Neither is a live
         # position nor a realized (closed) trade, so exclude both from stats.
         open_statuses = {"OPEN", "TP1_HIT", "PARTIAL"}
-        non_trade_statuses = {"PENDING", "CANCELLED"}
+        non_trade_statuses = {"CANCELLED"}
         closed_today = [
             t for t in today_trades
             if str(t.get("status", "")).upper() not in open_statuses | non_trade_statuses
         ]
-        pending_today = [t for t in today_trades if str(t.get("status", "")).upper() == "PENDING"]
-
+        
         def _pts(trade) -> float:
             """Realized/floating PnL in POINTS (gold: 1 USD = 10 points).
 
@@ -296,11 +295,7 @@ def main() -> None:
             lines.append("🔄 <b>Open Trades:</b> none")
             lines.append("")
 
-        # ── Pending (un-filled limit/stop) orders ───────────────────────────
-        if pending_today:
-            lines.append(f"⏳ <b>Pending Orders:</b> {len(pending_today)} (waiting for entry touch)")
-            lines.append("")
-
+        # ──         if False:  #             lines.append(f"⏳ <b>
         # ── By direction (today) ────────────────────────────────────────────
         direction = stats.get("by_direction", {}) or {}
         buy = direction.get("BUY", {}) or {}
