@@ -9,23 +9,33 @@ from agents.trading_session_agent import TradingSessionAgent
 from utils.helpers import load_config
 
 
-def _local(hour: int, minute: int = 0) -> datetime:
-    # 2026-06-22 is Monday. Use an aware local datetime to avoid UTC confusion.
-    return datetime(2026, 6, 22, hour, minute, tzinfo=ZoneInfo("Asia/Hebron"))
+def _local(day: int, hour: int, minute: int = 0) -> datetime:
+    # 2026-06-22 is Monday. Use aware local datetimes to avoid UTC confusion.
+    return datetime(2026, 6, day, hour, minute, tzinfo=ZoneInfo("Asia/Hebron"))
 
 
-def test_config_trading_window_11_to_before_19_local() -> None:
+def test_config_trading_window_24h_on_weekdays() -> None:
     config = load_config()
     agent = TradingSessionAgent(config)
 
-    before = agent.check(now=_local(10, 59))
-    start = agent.check(now=_local(11, 0))
-    last_minute = agent.check(now=_local(18, 59))
-    after = agent.check(now=_local(19, 0))
+    monday_start = agent.check(now=_local(22, 0, 0))
+    monday_midday = agent.check(now=_local(22, 12, 0))
+    monday_end = agent.check(now=_local(22, 23, 59))
 
-    assert before["trading_allowed"] is False
-    assert start["trading_allowed"] is True
-    assert start["allow_signals"] is True
-    assert last_minute["trading_allowed"] is True
-    assert last_minute["allow_signals"] is True
-    assert after["trading_allowed"] is False
+    assert monday_start["trading_allowed"] is True
+    assert monday_start["allow_signals"] is True
+    assert monday_midday["trading_allowed"] is True
+    assert monday_midday["allow_signals"] is True
+    assert monday_end["trading_allowed"] is True
+    assert monday_end["allow_signals"] is True
+
+
+def test_config_trading_window_blocks_weekends() -> None:
+    config = load_config()
+    agent = TradingSessionAgent(config)
+
+    saturday = agent.check(now=_local(27, 12, 0))
+    sunday = agent.check(now=_local(28, 12, 0))
+
+    assert saturday["trading_allowed"] is False
+    assert sunday["trading_allowed"] is False

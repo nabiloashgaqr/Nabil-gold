@@ -94,9 +94,11 @@
     "timezone": "Asia/Hebron",
     "sessions": [
       {
-        "name": "Core Trading Window",
-        "start_hour": 11,
-        "end_hour": 18,
+        "name": "24H Weekday Trading",
+        "start_hour": 0,
+        "start_minute": 0,
+        "end_hour": 23,
+        "end_minute": 59,
         "days": [
           0,
           1,
@@ -106,28 +108,8 @@
         ],
         "quality": "HIGH",
         "allow_signals": true,
-        "allow_reports": false,
-        "description": "Signals window: 11:00 - 18:59 Asia/Hebron (Monday-Friday); effectively until 19:00 local.",
-        "start_minute": 0,
-        "end_minute": 59
-      },
-      {
-        "name": "Daily Report Session",
-        "start_hour": 22,
-        "end_hour": 23,
-        "days": [
-          0,
-          1,
-          2,
-          3,
-          4
-        ],
-        "quality": "LOW",
-        "allow_signals": false,
         "allow_reports": true,
-        "description": "End-of-day reports: 22:00 - 23:59 Asia/Hebron (Monday-Friday)",
-        "start_minute": 0,
-        "end_minute": 59
+        "description": "Signals allowed 24 hours on weekdays (Monday-Friday) in Asia/Hebron timezone. Weekends are blocked."
       }
     ],
     "min_quality_required": "HIGH",
@@ -136,7 +118,7 @@
     "exclude_weekends": false,
     "enforce_friday_cutoff": false,
     "friday_cutoff_minute": 0,
-    "description": "توليد الإشارات مسموح فقط من 11:00 صباحاً حتى قبل 19:00 مساءً بتوقيت Asia/Hebron، الإثنين-الجمعة. متابعة الصفقات المفتوحة تبقى منفصلة وتعمل عند وجود صفقة لحماية SL/TP/Trailing."
+    "description": "توليد الإشارات مسموح 24 ساعة خلال أيام العمل فقط (الإثنين-الجمعة) بتوقيت Asia/Hebron. لا إشارات يومي السبت والأحد. متابعة الصفقات المفتوحة تبقى منفصلة وتعمل عند وجود صفقة لحماية SL/TP/Trailing."
   },
   "signal_filters": {
     "require_trading_hours": true,

@@ -6,8 +6,8 @@
 days في config.json: 0=Sunday, 1=Monday, ..., 6=Saturday (مثل Python weekday())
 
 الSessions الحالية:
-- Core Trading Window (11:00-18:59): allow_signals=true, allow_reports=false
-- Report Session (22:00-23:59): allow_signals=false, allow_reports=true
+- 24H Weekday Trading (00:00-23:59 Monday-Friday): allow_signals=true, allow_reports=true
+- Weekends are blocked by session.days
 """
 
 from __future__ import annotations
