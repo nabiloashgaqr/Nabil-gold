@@ -18,6 +18,15 @@ on:
     - cron: "*/10 23 * * 0,1,2,3,4"      # 23:00 UTC (Sun-Thu) → 02:00 local Mon-Fri
     - cron: "*/10 0-19 * * 1,2,3,4,5"    # 00:00-19:59 UTC (Mon-Fri) → 03:00-22:59 local
   workflow_dispatch:
+    inputs:
+      send_status:
+        description: "Send WAIT / Market Status messages for this manual run"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 jobs:
   analyze:
@@ -56,6 +65,7 @@ jobs:
         run: |
           python scripts/run_analysis.py
         env:
+          SEND_STATUS_ON_MANUAL: ${{ github.event.inputs.send_status || 'false' }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

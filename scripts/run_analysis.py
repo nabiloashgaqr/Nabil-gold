@@ -52,29 +52,43 @@ def synthetic_timeframe_sources(data: Dict[str, Any]) -> list[str]:
     return synthetic
 
 
-def should_send_status(config: Dict[str, Any]) -> bool:
-    """Send status/no-signal Telegram messages on manual runs OR when enabled.
+def _manual_status_enabled() -> bool:
+    """Return True only when a human explicitly asks a workflow_dispatch run to
+    send WAIT/status messages.
 
-    Scheduled analysis runs every 10 minutes. We want blocked-signal reasons
-    (duplicate / dynamic-risk / limits) to be visible on scheduled runs too, so
-    the user can see *why* nothing arrived instead of guessing. This is the
-    applied recommendation: drive visibility from config.
+    External schedulers such as cron-job.org trigger workflows via
+    workflow_dispatch. Without this guard, every external trigger would look like
+    a "manual" run and would send a Market Status/WAIT message every 10 minutes.
+    The default is intentionally silent: send Telegram only when a real signal is
+    generated (or an error occurs).
+    """
+    if os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch":
+        return False
+    return str(os.environ.get("SEND_STATUS_ON_MANUAL", "false")).strip().lower() in {"1", "true", "yes", "y"}
+
+
+def should_send_status(config: Dict[str, Any]) -> bool:
+    """Send blocked/no-signal messages only when configured.
+
+    Important: workflow_dispatch is used by cron-job.org. Those external runs
+    must be silent unless they generate an actual trade signal; otherwise the bot
+    would spam a status message every 10 minutes.
     """
     if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
-        return True
+        return _manual_status_enabled()
     notif = config.get("notifications", {}) or {}
     # Either the general no-signal flag or the dedicated blocked-signal flag.
     return bool(notif.get("send_no_signal_updates", False)) or bool(notif.get("notify_on_blocked_signal", False))
 
 
 def should_send_hourly_status(config: Dict[str, Any]) -> bool:
-    """Send a clean market status update roughly once per hour.
-    This is now the PRIMARY periodic status message.
-    We deliberately avoid sending it every 10 min.
+    """Send a clean market status update roughly once per hour for native
+    schedule runs. workflow_dispatch runs are silent by default because they may
+    be driven by cron-job.org every 10 minutes.
     """
     from datetime import datetime, timezone
     if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
-        return True
+        return _manual_status_enabled()
     notif = config.get("notifications", {}) or {}
     if not (bool(notif.get("send_no_signal_updates", False)) or bool(notif.get("hourly_status", False))):
         return False
