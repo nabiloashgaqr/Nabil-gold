@@ -256,20 +256,22 @@
     "description": "نظام التعلم الذكي لتحديث أوزان الوكلاء"
   },
   "notifications": {
-    "send_no_signal_updates": true,
+    "send_no_signal_updates": false,
     "manual_run_status_updates": true,
-    "hourly_status": true,
+    "hourly_status": false,
     "hourly_status_interval_minutes": 60,
     "market_status_title": "Market Status",
     "status_every_analysis": false,
-    "hourly_market_status": true,
-    "notify_on_blocked_signal": true,
-    "description_notify_on_blocked_signal": "إذا true تُرسل أسباب حجب الإشارة (تكرار/مخاطر ديناميكية/حدود) على التشغيل المجدول أيضاً، لتوضيح سبب عدم وصول إشارة بدل التخمين.",
+    "hourly_market_status": false,
+    "notify_on_blocked_signal": false,
+    "description_notify_on_blocked_signal": "false في التشغيل العادي/الخارجي الصامت. رسائل الحالة/أسباب الرفض تُرسل فقط من Cron Job المخصص لحالة السوق عند send_status=true.",
     "notify_on_trade_update": false,
     "description_notify_on_trade_update": "إذا true يرسل Heartbeat مختصر حتى بدون أحداث. أحداث نقل الستوب/Trailing/TP/SL تُرسل دائماً فور تشغيل update_trades ولا تعتمد على هذا الخيار.",
     "heartbeat_on_trade_update": false,
     "description_heartbeat_on_trade_update": "false حتى لا يرسل النظام رسائل متابعة دورية بدون تغيير. سيتم إرسال Telegram فقط عند حدوث حدث فعلي: نقل SL للدخول، تحريك Trailing، TP، SL، BE، أو Fill.",
-    "heartbeat_interval_minutes": 60
+    "heartbeat_interval_minutes": 60,
+    "description_send_no_signal_updates": "false لأن Market Status أصبح يُرسل فقط من cron-job.org عبر workflow_dispatch مع input send_status=true.",
+    "description_hourly_status": "false لإيقاف حالة السوق الداخلية من المستودع. استخدم Cron Job خارجي كل ساعة مع send_status=true."
   },
   "duplicate_signal_filter": {
     "enabled": true,

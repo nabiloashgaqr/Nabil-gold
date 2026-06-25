@@ -293,13 +293,13 @@ Rule: 100-point gap / 30-point step.
 
 ### 3. Market Status
 
-يبقى مفعلاً كما هو مطلوب:
+حالة السوق لا تُرسل من إعدادات المستودع الداخلية، بل من Cron Job خارجي مخصص:
 
 ```text
-يرسل حالة السوق كل ساعة تقريباً
+يرسل حالة السوق كل ساعة عبر cron-job.org فقط
 ```
 
-يفيد في معرفة سبب WAIT أو عدم وصول إشارة.
+يفيد في معرفة سبب WAIT أو عدم وصول إشارة، بدون أن تتحول تشغيلات التحليل كل 5 دقائق إلى رسائل مزعجة.
 
 ### 4. التقرير اليومي
 
@@ -337,7 +337,7 @@ Rule: 100-point gap / 30-point step.
 |---|---|
 | التحليل والإشارات | كل 5 دقائق 24 ساعة خلال أيام العمل فقط، عبر cron-job.org (`workflow_dispatch`) |
 | تحديث الصفقات المفتوحة | كل 5 دقائق أيام العمل عبر cron-job.org (`workflow_dispatch`) — يعمل فعلياً فقط عند وجود صفقة نشطة/معلقة |
-| Market Status | كل ساعة |
+| Market Status | كل ساعة عبر cron-job.org فقط (`send_status=true`) |
 | التقرير اليومي + Learning | 23:00 بتوقيتك المحلي، الإثنين إلى الجمعة |
 | Dashboard | 23:15 بتوقيتك المحلي، الإثنين إلى الجمعة |
 | التقرير الأسبوعي | السبت 10:00 صباحاً بتوقيتك المحلي |
@@ -396,6 +396,33 @@ Body:
 ```
 
 > تحديث الصفقات يبدأ بفحص خفيف لـ Supabase. إذا لم توجد صفقة نشطة أو أمر معلق (`OPEN/PARTIAL/TP1_HIT/PENDING`) يتوقف قبل checkout/pip/جلب السعر، ولا يرسل Telegram. وإذا وُجدت صفقة، لا يرسل Telegram إلا عند حدوث تغيير فعلي مثل تحريك SL / Trailing / TP / SL / BE / Fill.
+
+#### Market Status — كل ساعة أيام العمل
+
+تم إيقاف حالة السوق الداخلية من `config.json`. حالة السوق تُرسل فقط من Cron Job خارجي مخصص.
+
+```cron
+2 * * * 1-5
+```
+
+يرسل POST إلى نفس Workflow التحليل:
+
+```text
+https://api.github.com/repos/nabiloashgaqr/Nabil-gold/actions/workflows/analyze.yml/dispatches
+```
+
+Body:
+
+```json
+{
+  "ref": "main",
+  "inputs": {
+    "send_status": "true"
+  }
+}
+```
+
+> هذا الـ Cron Job هو الوحيد المسؤول عن رسالة حالة السوق كل ساعة. تشغيلات التحليل العادية كل 5 دقائق تبقى صامتة عند عدم وجود صفقة.
 
 ### Workflows الرئيسية
 
@@ -617,14 +644,15 @@ Nabil-gold/
 ### حالة السوق
 
 ```json
-"hourly_status": true,
-"send_no_signal_updates": true
+"hourly_status": false,
+"send_no_signal_updates": false,
+"notify_on_blocked_signal": false
 ```
 
 معنى ذلك:
 
 ```text
-رسالة Market Status كل ساعة تقريباً.
+المستودع لا يرسل حالة السوق تلقائياً. حالة السوق تأتي فقط من cron-job.org كل ساعة عبر send_status=true.
 ```
 
 ---
