@@ -328,7 +328,9 @@
     "score_threshold": 1.25,
     "contrarian_min_confidence": 70,
     "block_strong_contrarian_below": 70,
-    "description": "فلتر اتجاه أعلى (Daily Bias): يمنع الصفقات المعاكسة للاتجاه اليومي/4H إلا إذا كانت ثقة الإشارة ≥70%. هذا ليس حد Groq (Groq يبقى 51%)."
+    "description": "فلتر اتجاه أعلى (Daily Bias): الصفقة المعاكسة للاتجاه 4H مسموحة إذا كانت ثقة الإشارة ≥70% مع وكيل مؤهل واحد، أو ≥65% إذا وافق وكيلان مؤهلان على نفس الاتجاه. حد Groq النهائي يبقى منفصلاً عند 51%.",
+    "contrarian_min_confidence_two_agents": 65,
+    "contrarian_min_agents_for_lower_confidence": 2
   },
   "ai_news_interpretation": {
     "enabled": true,

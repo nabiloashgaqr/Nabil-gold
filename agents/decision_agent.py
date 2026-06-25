@@ -837,12 +837,22 @@ Move conflicting evidence into opposing_evidence, or set final_signal = WAIT.
             bias = str(daily_bias.get('bias', 'NEUTRAL')).upper()
             bias_conf = float(daily_bias.get('confidence') or 0)
             db_settings = self.config.get('daily_bias_filter', {}) or {}
-            contrarian_min = float(db_settings.get('contrarian_min_confidence', 80) or 80)
+            # Counter-trend override rules:
+            #   • one qualified agent in the signal direction  -> require 70% (default)
+            #   • two or more qualified agents same direction  -> require 65% (default)
+            # This keeps a strong Daily Bias from blocking good reversal setups
+            # when more than one agent confirms the same counter-trend direction.
+            single_agent_min = float(db_settings.get('contrarian_min_confidence', 70) or 70)
+            multi_agent_min = float(db_settings.get('contrarian_min_confidence_two_agents', single_agent_min) or single_agent_min)
+            multi_agent_count = int(db_settings.get('contrarian_min_agents_for_lower_confidence', 2) or 2)
+            same_direction_agents = self._same_direction_vote_count(result, signal)
+            contrarian_min = multi_agent_min if same_direction_agents >= multi_agent_count else single_agent_min
             is_contrarian = (bias == 'BULLISH' and signal == 'SELL') or (bias == 'BEARISH' and signal == 'BUY')
             if is_contrarian and float(result.get('confidence') or 0) < contrarian_min:
                 warnings.append(
                     f"Daily Bias (4H) blocks counter-trend: bias={bias} ({bias_conf}%), signal={signal}. "
-                    f"Signal confidence must be ≥{contrarian_min}% to override (Groq threshold is separate at 51%)."
+                    f"Signal confidence must be ≥{contrarian_min}% to override "
+                    f"({same_direction_agents} qualified agent(s) support {signal}; Groq threshold is separate at 51%)."
                 )
                 signal = 'WAIT'
 
@@ -860,6 +870,26 @@ Move conflicting evidence into opposing_evidence, or set final_signal = WAIT.
         result['decision'] = signal
         result['warnings'] = warnings
         return result
+
+    def _same_direction_vote_count(self, result: Dict[str, Any], signal: str) -> int:
+        """Return how many qualified voting agents support the final signal.
+
+        ``votes`` already contains only agents that passed agent_min_confidence
+        filtering (default >=60%). Fall back to the classic counts for older
+        tests/legacy payloads.
+        """
+        signal = str(signal).upper()
+        votes = result.get('votes', {}) or {}
+        if isinstance(votes, dict):
+            side_votes = votes.get(signal, []) or []
+            if isinstance(side_votes, list):
+                return len(side_votes)
+        classic = result.get('classic', {}) or {}
+        if signal == 'BUY':
+            return int(classic.get('buy_count', 0) or 0)
+        if signal == 'SELL':
+            return int(classic.get('sell_count', 0) or 0)
+        return 0
 
     def _calculate_quality_score(self, analysis: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
         """Calculate a human-friendly signal quality score (0-100 + grade)."""
