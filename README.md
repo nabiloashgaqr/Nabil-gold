@@ -3,11 +3,11 @@
 <div align="center">
 
 ![Gold](https://img.shields.io/badge/XAU/USD-Gold-FFD700)
-![Python](https://img.shields.io/badge/Python-3.13+-green)
+![Python](https://img.shields.io/badge/Python-3.11%2B-green)
 ![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-Automated-orange)
-![Telegram](https://img.shields.io/badge/Telegram-Signals%2BReports-blue)
+![Telegram](https://img.shields.io/badge/Telegram-Signals%20%2B%20Reports-blue)
 ![Groq](https://img.shields.io/badge/AI-GroqCloud-purple)
-![Tests](https://img.shields.io/badge/Tests-248%20Passed-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-321%20Passed-brightgreen)
 ![Mode](https://img.shields.io/badge/Mode-Paper%20Trading-yellow)
 ![Status](https://img.shields.io/badge/Status-Learning%20Phase-orange)
 
@@ -15,253 +15,654 @@
 
 ---
 
-## ⚠️ تنبيه هام
+## ⚠️ تنبيه مهم
 
-**المشروع تعليمي / تجريبي فقط** لتداول الذهب **XAU/USD**.  
-**لا يُعد توصية مالية أو استثمارية بأي شكل من الأشكال.**
+هذا المشروع **تعليمي / تجريبي فقط** لتحليل وتتبّع تداول الذهب **XAU/USD**.
 
-الوضع الحالي: **Paper Trading** (صفقات افتراضية — لا يتم تنفيذ أوامر حقيقية على أي حساب).
-
----
-
-## 📋 جدول المحتويات
-
-- [نظرة عامة](#-نظرة-عامة)
-- [الحالة الحالية](#-الحالة-الحالية)
-- [آخر الإصلاحات الرئيسية](#-آخر-الإصلاحات-الرئيسية)
-- [كيف يعمل النظام](#-كيف-يعمل-النظام)
-- [الفلاتر والحماية](#-الفلاتر-والحماية)
-- [إدارة المخاطر](#-إدارة-المخاطر)
-- [ميزات الذكاء الاصطناعي](#-ميزات-الذكاء-الاصطناعي)
-- [التقارير والداشبورد](#-التقارير-والداشبورد)
-- [أوقات التشغيل](#-أوقات-التشغيل)
-- [هيكل المشروع](#-هيكل-المشروع)
-- [التشغيل والنشر](#-التشغيل-والنشر)
-- [الاختبارات](#-الاختبارات)
-- [خارطة الطريق](#-خارطة-الطريق)
+- لا يُعد توصية مالية أو استثمارية.
+- الوضع الحالي: **Paper Trading** فقط.
+- لا يتم تنفيذ أوامر حقيقية على أي حساب تداول.
+- أي نتائج أو تقارير هي لأغراض الاختبار والتعلّم فقط.
 
 ---
 
-## 🎯 نظرة عامة
+## 📌 ملخص سريع
 
-نظام آلي متقدم لتحليل سوق الذهب **XAU/USD** وإرسال إشارات احترافية إلى **Telegram**، يعمل بالكامل عبر **GitHub Actions** في وضع **One-Agent + Groq** (قرار Groq إجباري ونهائي).
+**Gold AI Signals** نظام آلي يعمل عبر GitHub Actions لتحليل الذهب وإرسال إشارات وتحديثات وتقارير إلى Telegram.
 
-**المميزات الأساسية:**
-- بيانات لحظية من Twelve Data + حماية ضد البيانات الوهمية
-- 13 وكيل ذكاء اصطناعي متخصص (فني + سلوكي + مخاطر + إدارة)
-- Groq Cloud كبوابة قرار نهائية مع آلية إعادة محاولة ذكية
-- قاعدة بيانات Supabase (13 جدول) + حلقة تعلم مستمرة كاملة
-- تقارير يومية وأسبوعية عالية الجودة (منظمة + بدون تكرار)
-- Trailing Stop تقدمي حقيقي + إدارة صفقات مفتوحة متقدمة
-- Dashboard HTML احترافي + Backtesting + Memory Rules
+الفكرة الأساسية:
+
+```text
+Market Data → Analysis Agents → Risk Filters → DecisionAgent + Groq → Telegram + Supabase
+```
+
+أهم ما يفعله النظام:
+
+- يجلب بيانات XAU/USD من Twelve Data.
+- يشغّل عدة وكلاء تحليل فني وسلوكي ومخاطر.
+- يستخدم Groq كقرار نهائي إجباري في وضع One-Agent + Groq.
+- يرسل إشارات منظمة إلى Telegram.
+- يتابع الصفقات المفتوحة كل 5 دقائق.
+- يحرّك الستوب تلقائياً حسب قواعد محددة.
+- يحفظ الصفقات في Supabase.
+- يرسل تقريراً يومياً وأسبوعياً.
+- يراجع الخسائر بالذكاء الاصطناعي ويستخرج Memory Rules.
 
 ---
 
 ## ✅ الحالة الحالية
 
-| المكون                        | الحالة          |
-|-------------------------------|-----------------|
-| Telegram + Groq + GitHub Actions | ✅ يعمل باستقرار |
-| الاختبارات                    | ✅ **248/248** ناجح |
-| Paper Trading                 | ✅ مفعّل       |
-| Groq كقرار نهائي (One-Agent + Groq) | ✅ إجباري     |
-| حلقة التعلم (Memory Rules + Learning Weights) | ✅ متصلة بالكامل |
-| Trailing Stop التقدمي         | ✅ حقيقي وفعّال |
-| **وضع التشغيل**               | 🟡 **مرحلة التعلم** (مؤقتة) |
-
-### 🟡 إعدادات مرحلة التعلم الحالية (مؤقتة)
-
-| الإعداد                              | القيمة الحالية | القيمة الافتراضية |
-|--------------------------------------|----------------|-------------------|
-| `max_open_trades`                    | 50             | 3                 |
-| `max_daily_signals`                  | 50             | 8                 |
-| `max_consecutive_losses`             | 999            | 3                 |
-| `dynamic_risk_management.enabled`    | `false`        | `true`            |
-| `min_confidence`                     | 60%            | 60%               |
-| `ai_trade_review.max_reviews_per_run`| 20             | 3                 |
-
-> **الهدف:** جمع بيانات كافية لتغذية نظام التعلم قبل التشديد التدريجي.
+| البند | الحالة |
+|---|---|
+| التشغيل | GitHub Actions |
+| وضع التداول | Paper Trading |
+| مصدر البيانات | Twelve Data |
+| القرار النهائي | Groq إلزامي |
+| قاعدة البيانات | Supabase |
+| رسائل Telegram | إشارات + تحديثات + تقارير + أخطاء |
+| تحديث الصفقات | كل 5 دقائق |
+| حالة السوق | رسالة كل ساعة |
+| التقرير اليومي | 23:00 بتوقيتك المحلي |
+| التقرير الأسبوعي | السبت 10:00 صباحاً بتوقيتك المحلي |
+| الاختبارات | 321 passed |
+| المرحلة | Learning Phase |
 
 ---
 
-## 🛠️ آخر الإصلاحات الرئيسية (يونيو 2026)
+## 🆕 آخر الإصلاحات والتعديلات المهمة
 
-### ✅ إصلاح مشكلة "Profit Factor: 0" (الأهم)
-- **المشكلة:** عند 8 صفقات رابحة (100% Win Rate) و +3250.3 نقطة صافية → كان يظهر **Profit Factor: 0**.
-- **السبب الجذري:** قسمة على `gross_loss = 0` في `dashboard.py` و `daily_report_agent.py` و `weekly_report.py`.
-- **الحل:** 
-  - حساب داخلي: `99.9` عند عدم وجود خسائر.
-  - عرض احترافي: **`∞`** مع ملاحظة توضيحية.
-- **التأثير:** الداشبورد + التقرير اليومي + التقرير الأسبوعي + Telegram كلها تعرض القيمة الصحيحة الآن.
+### 1. إدارة الصفقة والتريلنج
 
-### ✅ إعادة تنظيم شاملة لكل التقارير (Telegram)
-- إزالة التكرار والأقسام المكررة.
-- إزالة أسباب غير منطقية وتعليقات قديمة.
-- هيكل موحد واحترافي:
-  - **Statistics** → **Performance** (مع PF + ملاحظة)
-  - **Direction** → **Best Sources** → **Recommendations** (محدودة)
-  - **Data Quality Note** (جديد)
-- التقرير اليومي المدمج أصبح أكثر تنظيماً ووضوحاً.
-- Weekly Report أصبح يدعم Profit Factor بشكل كامل.
+تم اعتماد القاعدة التالية:
 
-**المرجع الكامل:** [`FIXES_PROFIT_FACTOR.md`](FIXES_PROFIT_FACTOR.md)
+```text
+عند ربح +100 نقطة → نقل SL إلى الدخول
+بعدها يبدأ Trailing مباشرة:
+Trailing gap = 100 نقطة
+Trailing step = 30 نقطة
+تحديث الصفقات = كل 5 دقائق
+```
+
+مثال BUY من 4000:
+
+| السعر | الحالة | الستوب |
+|---:|---|---:|
+| 4010 | +100 نقطة | 4000 دخول |
+| 4013 | +130 نقطة | 4003 |
+| 4016 | +160 نقطة | 4006 |
+| 4019 | +190 نقطة | 4009 |
+
+### 2. رسائل تحديث الصفقات
+
+تحديث الصفقات يعمل كل 5 دقائق، لكن Telegram لا يرسل إلا عند حدوث تغيير فعلي:
+
+- Order Filled
+- نقل SL إلى الدخول
+- تحريك Trailing Stop
+- TP1
+- TP2
+- SL Hit
+- Trailing SL Hit
+- Break-even
+- Expired / Manual Close
+
+ولا يرسل رسائل مزعجة للأحداث المعلوماتية فقط مثل:
+
+- NEAR_TP1
+- LONG_RUNNING
+- EXIT_WARNING
+
+### 3. رسالة الإشارة
+
+رسالة الإشارة أصبحت تحتوي سطر إدارة الصفقة داخل خطة الصفقة:
+
+```text
+Management: SL → entry after +100 pts · Trail gap 100 pts / step 30 pts · check 5m
+```
+
+### 4. تقارير Telegram
+
+- التقرير اليومي مدمج في رسالة واحدة.
+- التقرير الأسبوعي يعمل السبت 10:00 صباحاً بتوقيتك.
+- Profit Factor يعرض `∞` عندما لا توجد خسائر بدلاً من 0.
+- تم تعقيم نصوص Groq/AI حتى لا تكسر رموز مثل `< > &` رسائل Telegram HTML.
+- رسائل الأخطاء الآن تعرض Workflow / Job / Event / Run ID لتحديد مصدر المشكلة بسرعة.
+
+### 5. إصلاح Scale-in
+
+تم إصلاح مسار التعزيز Scale-in:
+
+- يرسل رسالة Telegram أولاً.
+- إذا وصلت الرسالة، يحفظ صفقة التعزيز في قاعدة البيانات.
+- إذا فشل الإرسال، لا ينشئ صفقة مخفية.
 
 ---
 
 ## 🧠 كيف يعمل النظام
 
-### وضع التشغيل: One-Agent + Groq (الأساسي)
-- وكيل واحد كافٍ لتوفير السياق.
-- **Groq فقط** يتخذ القرار النهائي (BUY / SELL / WAIT).
-- إذا فشل Groq أو قال WAIT → الإشارة تُحجب.
-- آلية إعادة محاولة ذكية (3 محاولات + exponential backoff).
+### وضع القرار الحالي: One-Agent + Groq
 
-### الوكلاء (13 وكيل)
-
-**وكلاء التحليل (5)**
-- `TechnicalAgent` — مؤشرات فنية
-- `ClassicalAgent` — أنماط كلاسيكية
-- `SMCAgent` — Smart Money Concepts
-- `PriceActionAgent` — حركة السعر والشموع
-- `MultiTimeframeAgent` — تحليل متعدد الإطارات
-
-**وكلاء الفلترة والسياق (4)**
-- `NewsRiskAgent`, `TradingSessionAgent`, `DailyBiasAgent`, `RiskManagementAgent`
-
-**وكلاء القرار والإدارة (4)**
-- `DecisionAgent`, `OpenTradesManager`, `DailyReportAgent`, `BaseAgent`
+- يكفي وجود وكيل اتجاهي واحد مؤهل لتوفير السياق.
+- الوكلاء تحت ثقة 60% يتم تجاهلهم.
+- Groq هو بوابة القرار النهائية.
+- Groq يحتاج ثقة لا تقل عن 51% لقبول BUY/SELL في وضع المراقبة.
+- إذا Groq فشل أو قال WAIT، لا يتم إرسال إشارة.
 
 ### خط الإشارة
+
+```text
+1. GitHub Action يعمل كل 10 دقائق داخل نافذة التداول
+2. جلب بيانات XAU/USD من Twelve Data
+3. تشغيل وكلاء التحليل
+4. تشغيل فلاتر الجلسة والأخبار والاتجاه اليومي والمخاطر
+5. DecisionAgent يجمع السياق ويرسل إلى Groq
+6. Groq يقرر BUY / SELL / WAIT
+7. إذا القرار BUY/SELL ومؤهل → إرسال Telegram
+8. بعد نجاح الإرسال → حفظ الصفقة في Supabase
+9. تحديث الصفقة لاحقاً كل 5 دقائق
 ```
-Market Data → Agents Analysis → Voting + Weights (من DB)
-    ↓
-Filters (News + Session + Bias + Risk + Duplicate)
-    ↓
-DecisionAgent → Groq (إجباري) → Signal
-    ↓
-Duplicate Filter → Telegram + Save to Supabase
-```
+
+---
+
+## 🤖 الوكلاء والخدمات
+
+### وكلاء التحليل
+
+| الوكيل | الوظيفة |
+|---|---|
+| `TechnicalAgent` | مؤشرات فنية: EMA / RSI / MACD / ATR / مستويات |
+| `ClassicalAgent` | نماذج كلاسيكية وشموع ودعم/مقاومة |
+| `SMCAgent` | Smart Money Concepts / Order Blocks / Liquidity / FVG |
+| `PriceActionAgent` | حركة السعر والشموع والزخم |
+| `MultiTimeframeAgent` | مقارنة 5m / 15m / 1H / 4H |
+
+### وكلاء الفلترة والسياق
+
+| الوكيل | الوظيفة |
+|---|---|
+| `TradingSessionAgent` | التحقق من وقت التداول والجلسة |
+| `NewsRiskAgent` | فلترة مخاطر الأخبار |
+| `DailyBiasAgent` | اتجاه أعلى 4H / Daily Bias |
+| `RiskManagementAgent` | حساب SL/TP/R:R/حجم الصفقة |
+
+### وكلاء القرار والإدارة
+
+| الوكيل | الوظيفة |
+|---|---|
+| `DecisionAgent` | القرار النهائي بالتعاون مع Groq |
+| `OpenTradesManager` | متابعة الصفقات المفتوحة وتحريك الستوب والتريلنج |
+| `DailyReportAgent` | إحصائيات التقرير اليومي |
+| `BaseAgent` | وظائف مشتركة للوكلاء |
 
 ---
 
 ## 🛡️ الفلاتر والحماية
 
-| الفلتر                    | الشرط                              | الحالة     |
-|---------------------------|------------------------------------|------------|
-| Groq Decision             | يقول BUY/SELL بثقة ≥ 60%           | ✅ فعّال   |
-| NewsRisk                  | لا أخبار HIGH قبل/بعد النافذة     | ✅ فعّال   |
-| Duplicate Signal          | لا إشارة مشابهة في آخر 90 دقيقة   | ✅ فعّال   |
-| Trading Session           | داخل ساعات التداول                 | ✅ فعّال   |
-| Daily Bias                | لا مخالفة قوية للاتجاه اليومي     | ✅ فعّال   |
-| Dynamic Risk (HALT/CAUTION) | بعد خسائر متتالية               | 🟡 معطّل (مرحلة تعلم) |
+| الفلتر | الحالة | الوصف |
+|---|---|---|
+| Groq Final Gate | ✅ فعال | لا إشارة بدون قرار Groq |
+| Trading Hours | ✅ فعال | يمنع إشارات خارج نافذة التداول |
+| News Risk | ✅ فعال | يمنع التداول حول الأخبار عالية الخطورة |
+| Daily Bias | ✅ فعال | يمنع عكس الاتجاه القوي إلا بثقة أعلى |
+| Duplicate Filter | ✅ فعال | يمنع تكرار الإشارات في نفس المنطقة |
+| Risk Management | ✅ فعال | يرفض الصفقة إذا فشل R:R أو ATR أو SL |
+| Dynamic Risk | 🟡 معطّل مؤقتاً | جاهز للتفعيل بعد مرحلة التعلم |
+| Synthetic Data Protection | ✅ فعال | يمنع الإنتاج من استخدام بيانات تجريبية إذا لم يسمح config |
 
 ---
 
-## 💰 إدارة المخاطر (ثلاث طبقات)
+## 💰 إدارة المخاطر والصفقة
 
-### 1. RiskManagementAgent (قبل الدخول)
-- حد أدنى لـ SL = **200 نقطة (20$)**.
-- إعادة حساب TP1/TP2 تلقائياً بنفس نسبة R:R.
-- ATR-based targets (TP1=×2.0، TP2=×3.5).
+### قبل الدخول
 
-### 2. Dynamic Risk (بعد الإشارة) — معطّل مؤقتاً
-- CAUTION / STRICT / HALT / DAILY_HALT (جاهز للتفعيل).
+`RiskManagementAgent` يحسب:
 
-### 3. Trade Management (أثناء الصفقة) — فعّال دائماً
-- Partial Close 50% عند TP1 + نقل SL إلى نقطة الدخول.
-- **Trailing Stop تقدمي حقيقي**: نقل SL للدخول بعد +100 نقطة، ثم Trailing بمسافة 100 نقطة وخطوة 30 نقطة مع إرسال تحديث Telegram عند كل نقل.
-- انتهاء تلقائي بعد 24 ساعة (مع استثناءات للصفقات الرابحة).
+- Entry
+- Stop Loss
+- TP1 / TP2 / TP3
+- R:R
+- Position Size تقديري
+- Trade Grade
 
----
+الإعدادات الحالية المهمة:
 
-## 🤖 ميزات الذكاء الاصطناعي
+| الإعداد | القيمة |
+|---|---:|
+| `min_confidence` | 60% |
+| `min_rr_ratio` | 1.5 |
+| `min_sl_distance_points` | 300 نقطة |
+| `max_rr_ratio` | 4.0 |
+| `default_risk_percent` | 1% |
+| `max_open_trades` | 50 مؤقتاً |
+| `max_daily_signals` | 50 مؤقتاً |
 
-- **Groq** كمحرك رئيسي + 3 prompts متخصصة.
-- **AI Memory Rules**: استخراج قواعد من مراجعة الصفقات الخاسرة.
-- **AI Trade Review**: مراجعة يومية تلقائية للخسائر.
-- **Learning Service**: تحديث أوزان الوكلاء يومياً من قاعدة البيانات.
-- تعقيم كامل للنصوص (ضد Prompt Injection).
+> ملاحظة: رفع `max_open_trades` و `max_daily_signals` مؤقت في مرحلة التعلم لجمع بيانات أكثر.
 
----
+### أثناء الصفقة
 
-## 📊 التقارير والداشبورد
-
-### التقرير اليومي (مدمج)
-- أداء اليوم + الصفقات المغلقة + المفتوحة.
-- Profit Factor مع عرض `∞` عند عدم وجود خسائر.
-- ملاحظات Data Quality + توصيات محدودة ومنظمة.
-
-### التقرير الأسبوعي (Groq)
-- يُرسل كل سبت 10:00 صباحاً بتوقيتك المحلي.
-- يحتوي الآن على Profit Factor بشكل صحيح.
-
-### Dashboard HTML
-- يُولد يومياً كـ GitHub Artifact.
-- يعرض Profit Factor كـ `∞` عند الاقتضاء.
-- جداول + بطاقات + قواعد الذاكرة + مراجعات الذكاء الاصطناعي.
+| الحدث | التصرف |
+|---|---|
+| +100 نقطة ربح | نقل SL إلى الدخول |
+| بعد نقل SL | يبدأ Trailing مباشرة |
+| كل +30 نقطة إضافية | تحريك SL بمقدار 30 نقطة مع الحفاظ على gap 100 نقطة |
+| TP1 | Partial / حماية حسب الخطة |
+| TP2 | إغلاق كربح |
+| SL | إغلاق كخسارة أو ربح مقفول إذا كان Trailing SL |
+| 24 ساعة | Expire إلا إذا الصفقة رابحة ومحمية |
 
 ---
 
-## ⏰ أوقات التشغيل (Asia/Hebron)
+## 💬 رسائل Telegram
 
-| المهمة                        | التوقيت                     |
-|-------------------------------|-----------------------------|
-| التحليل والإشارات             | كل 10 دقائق (09:00–22:59)   |
-| تحديث الصفقات المفتوحة        | كل 5 دقائق (إجباري للأحداث: نقل SL / Trailing / TP / SL) |
-| التقرير اليومي + Learning     | 23:00 بتوقيتك المحلي       |
-| Dashboard                     | 23:15 يومياً                |
-| Weekly Report                 | السبت 10:00 صباحاً بتوقيتك المحلي |
+### 1. رسالة الإشارة
+
+تحتوي على:
+
+- نوع الإشارة BUY/SELL
+- السعر والثقة والجودة
+- خطة الدخول
+- SL / TP1 / TP2
+- سطر إدارة الصفقة
+- أصوات الوكلاء
+- Groq final gate
+- أسباب الدخول
+- ملاحظات المخاطر
+- رقم الصفقة
+
+### 2. رسائل تحديث الصفقة
+
+تصل فقط عند تغيير فعلي:
+
+- نقل SL للدخول
+- تحريك Trailing
+- TP1 / TP2
+- SL / Trailing SL
+- BE
+- Fill
+
+مثال رسالة تريلنج محسنة:
+
+```text
+Trailing Stop Moved - XAU/USD
+Stop Loss: 4003.00
+Current PnL: +130 pts
+TP1 Progress: completed ✅
+Trailing stop moved to 4003.00, locking about +30 pts.
+Rule: 100-point gap / 30-point step.
+```
+
+### 3. Market Status
+
+يبقى مفعلاً كما هو مطلوب:
+
+```text
+يرسل حالة السوق كل ساعة تقريباً
+```
+
+يفيد في معرفة سبب WAIT أو عدم وصول إشارة.
+
+### 4. التقرير اليومي
+
+رسالة واحدة مدمجة تشمل:
+
+- أداء اليوم
+- الصفقات المغلقة
+- الصفقات المفتوحة
+- الأداء حسب الاتجاه
+- Learning Update
+- AI Trade Review
+
+### 5. التقرير الأسبوعي
+
+تقرير Groq أسبوعي يوم السبت 10:00 صباحاً بتوقيتك.
+
+### 6. رسائل الأخطاء
+
+أصبحت تحتوي على:
+
+- Workflow
+- Job
+- Event
+- Run ID
+- Repo / Ref
+- نص الخطأ
+
+---
+
+## ⏰ جدول التشغيل
+
+> التوقيت المحلي المستخدم في الإعدادات: `Asia/Hebron` وهو عملياً مناسب لتوقيتك المحلي الحالي.
+
+| المهمة | الجدولة |
+|---|---|
+| التحليل والإشارات | كل 10 دقائق داخل نافذة التداول |
+| تحديث الصفقات المفتوحة | كل 5 دقائق طوال أيام السوق |
+| Market Status | كل ساعة |
+| التقرير اليومي + Learning | 23:00 بتوقيتك المحلي، الإثنين إلى الجمعة |
+| Dashboard | 23:15 بتوقيتك المحلي، الإثنين إلى الجمعة |
+| التقرير الأسبوعي | السبت 10:00 صباحاً بتوقيتك المحلي |
+
+### Workflows الرئيسية
+
+| Workflow | الملف | الوظيفة |
+|---|---|---|
+| Gold Analysis Bot | `.github/workflows/analyze.yml` | تحليل وإرسال إشارات |
+| Update Open Trades | `.github/workflows/update_trades.yml` | متابعة الصفقات كل 5 دقائق |
+| Daily Report & Learning | `.github/workflows/daily_report.yml` | تقرير يومي + تعلم + مراجعة خسائر |
+| Weekly AI Performance Report | `.github/workflows/weekly_report.yml` | تقرير أسبوعي |
+| Dashboard | `.github/workflows/dashboard.yml` | توليد Dashboard HTML |
+| Tests | `.github/workflows/tests.yml` | تشغيل الاختبارات |
+
+---
+
+## 🗄️ قاعدة البيانات Supabase
+
+الملف الأساسي:
+
+```text
+supabase_schema_unified.sql
+```
+
+الجداول المهمة:
+
+| الجدول | الوظيفة |
+|---|---|
+| `trades` | الصفقات المفتوحة والمغلقة |
+| `signals` | أرشفة الإشارات |
+| `agent_weights` | أوزان الوكلاء المتعلمة |
+| `learning_history` | تاريخ التعلم |
+| `ai_trade_reviews` | مراجعات Groq للخسائر |
+| `ai_memory_rules` | قواعد الذاكرة المستخرجة |
+| `daily_reports` | تقارير يومية |
+| `weekly_reports` | تقارير أسبوعية |
+| `portfolio` | ملخص المحفظة الورقية |
+
+---
+
+## 🔐 Secrets المطلوبة في GitHub
+
+أضفها من:
+
+```text
+Repository → Settings → Secrets and variables → Actions
+```
+
+| السر | مطلوب | الوظيفة |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | ✅ | توكن بوت Telegram |
+| `TELEGRAM_CHAT_ID` | ✅ | القناة أو المجموعة |
+| `SUPABASE_URL` | ✅ | رابط Supabase |
+| `SUPABASE_KEY` | ✅ | Service Role Key أو Key مناسب |
+| `TWELVE_DATA_API_KEY` | ✅ | بيانات الذهب |
+| `GROQ_API_KEY` | ✅ | قرار Groq النهائي وتقارير AI |
+
+اختياري:
+
+```text
+OPENAI_API_KEY
+ANTHROPIC_API_KEY
+GEMINI_API_KEY
+```
+
+---
+
+## 🚀 طريقة النشر
+
+1. انسخ المستودع أو ارفعه إلى GitHub.
+2. أضف Secrets المطلوبة.
+3. افتح Supabase وشغّل:
+
+```sql
+supabase_schema_unified.sql
+```
+
+4. شغّل Workflow الاختبارات أولاً.
+5. شغّل Smoke Tests إن وجدت.
+6. شغّل Analysis يدوياً مرة.
+7. شغّل Update Trades يدوياً مرة.
+8. راقب رسائل Telegram.
+9. اترك النظام يعمل Paper Trading لعدة أسابيع قبل أي تشديد.
+
+---
+
+## 🧪 التشغيل المحلي
+
+### تثبيت المتطلبات
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+### تشغيل الاختبارات
+
+```bash
+python -m pytest -q
+```
+
+آخر نتيجة مؤكدة:
+
+```text
+321 passed, 1 warning
+```
+
+### تشغيل تحليل واحد محلياً
+
+```bash
+python main.py
+```
+
+أو:
+
+```bash
+python scripts/run_analysis.py
+```
+
+### تشغيل تحديث الصفقات
+
+```bash
+python scripts/run_trade_updates.py
+```
+
+### تشغيل التقرير اليومي
+
+```bash
+python scripts/run_daily_report.py
+```
+
+### تشغيل التقرير الأسبوعي
+
+```bash
+python scripts/run_weekly_report.py
+```
 
 ---
 
 ## 📁 هيكل المشروع
 
-```
+```text
 Nabil-gold/
-├── .github/workflows/     # 10 GitHub Actions
-├── agents/                # 13 وكيل
-├── services/              # 15 خدمة (AI, DB, Telegram, Reports...)
-├── scripts/               # أدوات التشغيل
-├── tests/                 # 248 اختبار
-├── config.json            # الإعدادات الرئيسية
+├── .github/workflows/              # GitHub Actions
+├── agents/                         # وكلاء التحليل والقرار وإدارة الصفقات
+│   ├── technical_agent.py
+│   ├── classical_agent.py
+│   ├── smc_agent.py
+│   ├── price_action_agent.py
+│   ├── multitimeframe_agent.py
+│   ├── decision_agent.py
+│   ├── risk_management_agent.py
+│   └── open_trades_manager.py
+├── services/                       # خدمات البيانات والذكاء والتقارير
+│   ├── ai_service.py
+│   ├── database.py
+│   ├── market_data.py
+│   ├── telegram_bot.py
+│   ├── learning_service.py
+│   ├── trade_review.py
+│   └── weekly_report.py
+├── scripts/                        # سكريبتات التشغيل
+│   ├── run_analysis.py
+│   ├── run_trade_updates.py
+│   ├── run_daily_report.py
+│   ├── run_weekly_report.py
+│   ├── run_learning.py
+│   └── run_trade_review.py
+├── tests/                          # اختبارات النظام
+├── config.json                     # الإعدادات الرئيسية
+├── .env.example                    # مثال المتغيرات
+├── requirements.txt
 ├── supabase_schema_unified.sql
-└── storage/               # التقارير والداشبورد
+└── README.md                       # هذا الملف الشامل
 ```
 
 ---
 
-## 🚀 التشغيل والنشر
+## ⚙️ أهم إعدادات config.json
 
-1. أضف الأسرار في GitHub (TELEGRAM, SUPABASE, GROQ, TWELVE_DATA).
-2. نفّذ سكريبت قاعدة البيانات.
-3. شغّل الـ Workflows بالترتيب (Tests → Smoke Tests → Daily Report...).
-4. ابدأ بـ Paper Trading لعدة أسابيع.
+### وضع التشغيل
+
+```json
+"trading_mode": "paper",
+"operation_mode": "observation"
+```
+
+### Groq
+
+```json
+"ai_service": {
+  "enabled": true,
+  "provider": "groq",
+  "model": "llama-3.3-70b-versatile"
+}
+```
+
+### إدارة الصفقة
+
+```json
+"trailing_stop": {
+  "enabled": true,
+  "early_breakeven_points": 100.0,
+  "trailing_distance": 100.0,
+  "trailing_step": 30.0
+}
+```
+
+### إشعارات الصفقات
+
+```json
+"notify_on_trade_update": false,
+"heartbeat_on_trade_update": false
+```
+
+معنى ذلك:
+
+```text
+لا رسائل متابعة للصفقات بدون تغيير فعلي.
+```
+
+### حالة السوق
+
+```json
+"hourly_status": true,
+"send_no_signal_updates": true
+```
+
+معنى ذلك:
+
+```text
+رسالة Market Status كل ساعة تقريباً.
+```
 
 ---
 
-## 🧪 الاختبارات
+## 📊 Profit Factor
 
-```bash
-python -m pytest tests/ -q
-# النتيجة: 248 passed
+تم إصلاح مشكلة ظهور Profit Factor = 0 عندما تكون كل الصفقات رابحة ولا توجد خسائر.
+
+القاعدة الحالية:
+
+```text
+إذا gross_loss = 0 و gross_profit > 0:
+داخلياً = 99.9
+عرضاً في Telegram/Dashboard = ∞
 ```
+
+هذا مطبق في:
+
+- Dashboard
+- Daily Report
+- Weekly Report
+- Telegram Reports
+
+---
+
+## 🧠 Learning + Memory Rules
+
+النظام يتعلم من الصفقات السابقة عبر:
+
+1. حساب أداء الوكلاء.
+2. تحديث الأوزان في Supabase.
+3. مراجعة الخسائر بواسطة Groq.
+4. استخراج Memory Rules.
+5. إدخال القواعد النشطة في Prompt القرارات القادمة.
+
+أثناء مرحلة التعلم تم تخفيف بعض القيود لجمع بيانات كافية:
+
+| الإعداد | القيمة الحالية | القيمة الافتراضية |
+|---|---:|---:|
+| `max_open_trades` | 50 | 3 |
+| `max_daily_signals` | 50 | 8 |
+| `max_consecutive_losses` | 999 | 3 |
+| `dynamic_risk_management.enabled` | false | true |
+| `ai_trade_review.max_reviews_per_run` | 20 | 3 |
+
+---
+
+## 🧯 التعامل مع الأخطاء
+
+أي خطأ مهم يرسل Telegram Alert يحتوي:
+
+```text
+Workflow
+Job
+Event
+Run ID
+Repo/Ref
+Error Message
+```
+
+كما أن رسائل Telegram تستخدم حماية:
+
+- HTML escaping للنصوص غير الموثوقة.
+- Retry عند فشل الإرسال.
+- fallback إلى plain text إذا فشل HTML parsing.
 
 ---
 
 ## 🧭 خارطة الطريق
 
-| الأولوية | البند                          |
-|----------|--------------------------------|
-| ⭐⭐     | تشديد مرحلة التعلم تدريجياً   |
-| ⭐⭐     | أوامر Telegram تفاعلية         |
-| ⭐       | GitHub Pages للداشبورد        |
-| ⭐       | دعم Groq في Backtesting        |
+| الأولوية | التطوير المقترح |
+|---|---|
+| ⭐⭐ | تشديد مرحلة التعلم تدريجياً بعد جمع عينة كافية |
+| ⭐⭐ | تفعيل Dynamic Risk تدريجياً |
+| ⭐⭐ | أوامر Telegram تفاعلية مثل `/status` و `/open` |
+| ⭐ | GitHub Pages للداشبورد |
+| ⭐ | دعم Backtesting مع Groq context |
+| ⭐ | ضبط تلقائي للصيفي/الشتوي داخل السكريبتات بدلاً من Cron ثابت |
+
+---
+
+## ✅ ملاحظات نهائية
+
+- هذا الملف هو **README الشامل الوحيد** للمشروع.
+- أي شرح مهم يجب إضافته هنا بدلاً من إنشاء ملفات Markdown متعددة.
+- النظام مخصص حالياً للمراقبة والتعلم وليس للتداول الحقيقي.
+- أفضل طريقة لتقييمه: تشغيل Paper Trading لعدة أسابيع ثم مراجعة التقارير الأسبوعية.
 
 ---
 
 <div align="center">
 
 **Gold AI Signals — Trade Smart, Test First 🏆**  
-*آخر تحديث: 2026-06-25*
+آخر تحديث: 2026-06-25
 
 </div>
