@@ -1,6 +1,6 @@
 """سكريبت التحليل الرئيسي.
 
-يعمل كل 10 دقائق عبر GitHub Actions. يجلب بيانات الذهب، يشغل الوكلاء (مع AI)،
+يعمل كل 5 دقائق عبر cron-job.org/GitHub Actions. يجلب بيانات الذهب، يشغل الوكلاء (مع AI)،
 يطبق إدارة المخاطر والقرار، ثم يحفظ ويرسل الإشارة إذا كانت مؤهلة.
 """
 
@@ -58,7 +58,7 @@ def _manual_status_enabled() -> bool:
 
     External schedulers such as cron-job.org trigger workflows via
     workflow_dispatch. Without this guard, every external trigger would look like
-    a "manual" run and would send a Market Status/WAIT message every 10 minutes.
+    a "manual" run and would send a Market Status/WAIT message every 5 minutes.
     The default is intentionally silent: send Telegram only when a real signal is
     generated (or an error occurs).
     """
@@ -72,7 +72,7 @@ def should_send_status(config: Dict[str, Any]) -> bool:
 
     Important: workflow_dispatch is used by cron-job.org. Those external runs
     must be silent unless they generate an actual trade signal; otherwise the bot
-    would spam a status message every 10 minutes.
+    would spam a status message every 5 minutes.
     """
     if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
         return _manual_status_enabled()
@@ -84,7 +84,7 @@ def should_send_status(config: Dict[str, Any]) -> bool:
 def should_send_hourly_status(config: Dict[str, Any]) -> bool:
     """Send a clean market status update roughly once per hour for native
     schedule runs. workflow_dispatch runs are silent by default because they may
-    be driven by cron-job.org every 10 minutes.
+    be driven by cron-job.org every 5 minutes.
     """
     from datetime import datetime, timezone
     if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":

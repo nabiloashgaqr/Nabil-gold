@@ -11,7 +11,7 @@ concurrency:
 on:
   # Scheduling is intentionally handled by cron-job.org now.
   # This workflow is triggered externally via workflow_dispatch so analysis can
-  # run every 10 minutes without relying on GitHub's best-effort schedule.
+  # run every 5 minutes without relying on GitHub's best-effort schedule.
   workflow_dispatch:
     inputs:
       send_status:

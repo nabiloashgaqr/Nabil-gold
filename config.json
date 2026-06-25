@@ -77,7 +77,7 @@
     }
   },
   "schedule": {
-    "analysis_interval_minutes": 10,
+    "analysis_interval_minutes": 5,
     "trade_update_interval_minutes": 5,
     "daily_report_time": "23:00",
     "timezone": "Asia/Hebron"
