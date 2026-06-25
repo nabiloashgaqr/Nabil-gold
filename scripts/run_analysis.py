@@ -372,6 +372,7 @@ async def _check_scale_in(
       - Ask Groq for quick confirmation
       - Bypass duplicate filter (intentional position building)
       - Respect news filter (if news blocks trading, no scale-in)
+      - New defaults: trigger=50pts, max=1, size=100% (per user config)
     """
     oe = config.get("order_execution", {}) or {}
     entry_style = str(oe.get("entry_style", "market")).lower()
@@ -395,9 +396,9 @@ async def _check_scale_in(
         logger.info("📊 Scale-in skipped: AI news blocks trading")
         return
 
-    trigger_points = int(fr.get("scale_in_trigger_points", 100) or 100)
-    max_scales = int(fr.get("scale_in_max", 2) or 2)
-    size_ratio = float(fr.get("scale_in_size_ratio", 0.5) or 0.5)
+    trigger_points = int(fr.get("scale_in_trigger_points", 50) or 50)
+    max_scales = int(fr.get("scale_in_max", 1) or 1)
+    size_ratio = float(fr.get("scale_in_size_ratio", 1.0) or 1.0)
     current_price = all_results.get("current_price", 0)
     if not current_price:
         return
