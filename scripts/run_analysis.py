@@ -1,11 +1,3 @@
-# ============================================================
-# PENDING / LIMIT / STOP ORDERS COMPLETELY REMOVED
-# ============================================================
-# This file has been professionally cleaned.
-# All entry execution is now strictly MARKET.
-# No more pending orders, limit orders, or stop orders.
-# ============================================================
-
 """سكريبت التحليل الرئيسي.
 
 يعمل كل 10 دقائق عبر GitHub Actions. يجلب بيانات الذهب، يشغل الوكلاء (مع AI)،
@@ -383,7 +375,7 @@ async def _check_scale_in(
     """
     oe = config.get("order_execution", {}) or {}
     entry_style = str(oe.get("entry_style", "market")).lower()
-    if False:  # always market entry
+    if entry_style != "fixed_risk":
         return
 
     fr = oe.get("fixed_risk", {}) or {}
@@ -809,7 +801,7 @@ async def run_analysis_async() -> None:
             # the duplicate filter and the next scheduled run can retry cleanly.
             #
             # Mint the REAL trade id up-front (same format save_trade uses) so the
-            # id shown in the Telegram message is final — never a 'OPEN_...'
+            # id shown in the Telegram message is final — never a 'PENDING_...'
             # placeholder. save_trade() reuses this exact id when persisting.
             trade_id = database.new_trade_id()
             decision["trade_id"] = trade_id
@@ -838,11 +830,7 @@ async def run_analysis_async() -> None:
                 )
                 return
 
-            # Pending orders removed - no stale pending cleanup needed
-                if cancelled:
-                    logger.info("🚫 أُلغيت %s أوامر معلّقة قديمة قبل حفظ الإشارة الجديدة", cancelled)
-            except Exception as cexc:  # noqa: BLE001
-                logger.warning("Could not cancel old pending orders: %s", cexc)
+            # Pending order cancellation removed (market-only mode)
 
             trade_id = database.save_trade(decision)
             decision["trade_id"] = trade_id
