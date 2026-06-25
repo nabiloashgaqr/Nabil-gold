@@ -96,7 +96,6 @@ def main() -> int:
 
         # Also check legacy ai_config section if present (for backward compatibility)
         ai_config = config.get("ai_service", {})
-        ai_enabled = bool(ai_config.get("enabled", False))
         fallback = bool(ai_config.get("fallback_to_classic", True))
         provider = str(ai_config.get("provider", "groq")).lower()
 

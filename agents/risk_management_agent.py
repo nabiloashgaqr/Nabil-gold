@@ -387,7 +387,6 @@ class RiskManagementAgent(BaseAgent):
         if entry_style == "fixed_risk":
             fr = oe.get("fixed_risk", {}) or {}
             max_risk_points = int(fr.get("max_risk_distance_points", 300) or 300)
-            max_risk_price = max_risk_points / 10.0  # convert points to price distance
 
             points_to_price = lambda p: p / 10.0  # 300 points = 30.00 in price
 

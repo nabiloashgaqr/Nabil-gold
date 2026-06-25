@@ -10,8 +10,8 @@ import logging
 import os
 import sys
 import html
-from datetime import datetime, timezone, timedelta
-from typing import Any, Dict
+from datetime import datetime, timezone
+from typing import Any, Dict, List
 
 # إضافة المسار الرئيسي للمشروع
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -539,8 +539,9 @@ Reply JSON only:
             "reasons": [f"Scale-in: {groq_reason}"],
         }
         scale_decision["signal"]["trade_id"] = scale_decision["trade_id"]
-
-                # Send Telegram notification
+        # Send Telegram notification first. Save the scale-in trade only if the
+        # user actually received the message; otherwise a failed Telegram send
+        # would create an invisible trade in the DB.
         scale_msg = (
             "📊 <b>SCALE-IN — {trade_type}</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
@@ -563,6 +564,7 @@ Reply JSON only:
             max_scales=max_scales,
             size_ratio=size_ratio,
         )
+        delivered = bool(telegram.send_message(scale_msg, urgent=True))
         if delivered:
             database.save_trade(scale_decision)
             logger.info("📊 Scale-in trade saved: %s", scale_decision["trade_id"])

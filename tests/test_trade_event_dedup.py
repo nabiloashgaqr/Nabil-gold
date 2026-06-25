@@ -67,8 +67,13 @@ def test_status_change_event_leads_title():
     assert "Take Profit 1 Hit" in tg.messages[0].split("\n")[0]
 
 
-def test_manager_sends_one_message_for_multi_event_trade():
-    """End-to-end through OpenTradesManager.update_trades."""
+def test_manager_suppresses_informational_only_events():
+    """End-to-end through OpenTradesManager.update_trades.
+
+    LONG_RUNNING / EXIT_WARNING are useful internal markers, but they are not
+    material trade-state changes. Production Telegram messages should be sent
+    only for real changes such as SL moved, trailing moved, TP, SL, BE, or fill.
+    """
     tg = _CapturingTelegram()
     # Config: long-running after 4h, expire after 8h -> at 4.4h open we get
     # LONG_RUNNING (and EXIT_WARNING if adverse). Use a deep adverse SELL.
@@ -86,9 +91,31 @@ def test_manager_sends_one_message_for_multi_event_trade():
         "entry_time": opened, "created_at": opened, "updates_sent": [],
     }
     # Adverse move (price up on a SELL) to also trigger EXIT_WARNING.
-    mgr.update_trades([trade], current_price=4140.0, telegram=tg, now=datetime.now(timezone.utc))
-    # At most ONE message even though multiple informational events fired.
-    assert len(tg.messages) <= 1
+    evaluations = mgr.update_trades([trade], current_price=4140.0, telegram=tg, now=datetime.now(timezone.utc))
+    assert set(evaluations[0]["events"]) == {"LONG_RUNNING", "EXIT_WARNING"}
+    assert evaluations[0]["notification_events"] == []
+    assert tg.messages == []
+
+
+def test_manager_sends_material_state_change_event():
+    """A real state change (TP1 + BE) must still send a Telegram message."""
+    tg = _CapturingTelegram()
+    mgr = OpenTradesManager(
+        {
+            "trade_management": {"auto_move_sl_to_entry_after_tp1": True, "expire_after_hours": 0},
+            "trailing_stop": {"enabled": False},
+        }
+    )
+    from datetime import datetime, timezone
+    trade = {
+        "id": "TRADE_TEST_TP1", "type": "BUY", "status": "OPEN",
+        "entry_price": 4000.0, "stop_loss": 3980.0, "tp1": 4010.0, "tp2": 4020.0,
+        "entry_time": datetime.now(timezone.utc).isoformat(), "updates_sent": [],
+    }
+    evaluations = mgr.update_trades([trade], current_price=4010.0, telegram=tg, now=datetime.now(timezone.utc))
+    assert evaluations[0]["notification_events"] == ["TP1_HIT", "MOVE_SL_TO_BE"]
+    assert len(tg.messages) == 1
+    assert "Take Profit 1 Hit" in tg.messages[0]
 
 
 # ── Status line dedup (no "A → A") ─────────────────────────────────────────

@@ -14,7 +14,6 @@ import logging
 import os
 import sys
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

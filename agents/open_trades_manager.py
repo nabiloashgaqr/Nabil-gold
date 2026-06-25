@@ -21,6 +21,23 @@ class OpenTradesManager(BaseAgent):
     name = "open_trades_manager"
     OPEN_STATUSES = {"OPEN", "TP1_HIT"}
     CLOSED_STATUSES = {"TP2_HIT", "SL_HIT", "BE_HIT", "EXPIRED", "MANUAL_CLOSE"}
+    # Telegram notifications are intentionally restricted to real trade-state
+    # changes. Informational markers such as NEAR_TP1 / LONG_RUNNING /
+    # EXIT_WARNING are still persisted in updates_sent to avoid repeated
+    # internal triggers, but they do not send Telegram messages. This matches
+    # the production rule: "send only when something actually changed".
+    NOTIFIABLE_EVENTS = {
+        "ORDER_FILLED",
+        "MOVE_SL_TO_BE",
+        "TRAILING_SL_UPDATED",
+        "TP1_HIT",
+        "TP2_HIT",
+        "SL_HIT",
+        "TRAILING_SL_HIT",
+        "BE_HIT",
+        "EXPIRED",
+        "MANUAL_CLOSE",
+    }
 
     def __init__(self, config: Dict[str, Any] | None = None) -> None:
         super().__init__(config or load_config())
@@ -83,27 +100,29 @@ class OpenTradesManager(BaseAgent):
             evaluations.append(evaluation)
             trade_id = str(trade.get("id", ""))
             events = evaluation.get("events", []) or []
+            notification_events = [event for event in events if event in self.NOTIFIABLE_EVENTS]
+            evaluation["notification_events"] = notification_events
 
             # Send critical trade-management notifications BEFORE writing the DB
             # update. If Supabase has a transient/schema issue, the user still
             # receives the important event (SL moved / trailing moved / TP / SL)
             # instead of silently missing it because the DB write happened first.
-            if telegram and events:
+            # Informational-only events are not sent to Telegram.
+            if telegram and notification_events:
                 delivered = False
                 try:
                     # Send ONE combined message per trade per cycle instead of a
-                    # separate message per event (avoids duplicate near-identical
-                    # messages when e.g. LONG_RUNNING + EXIT_WARNING fire together).
+                    # separate message per material state change.
                     if hasattr(telegram, "send_trade_events"):
                         delivered = bool(
                             telegram.send_trade_events(
-                                trade, events, current_price, evaluation.get("pnl_points", 0), evaluation
+                                trade, notification_events, current_price, evaluation.get("pnl_points", 0), evaluation
                             )
                         )
                     else:  # backward-compatible fallback
                         delivered = all(
                             bool(telegram.send_trade_event(trade, event, current_price, evaluation.get("pnl_points", 0), evaluation))
-                            for event in events
+                            for event in notification_events
                         )
                 except Exception as exc:  # noqa: BLE001
                     self.logger.exception("Failed to send trade-management Telegram event(s) for %s: %s", trade_id, exc)
@@ -113,7 +132,7 @@ class OpenTradesManager(BaseAgent):
                     self.logger.error(
                         "Mandatory trade update notification was not delivered for %s: %s",
                         trade_id,
-                        ",".join(events),
+                        ",".join(notification_events),
                     )
 
             if trade_id and database and evaluation.get("updates"):
