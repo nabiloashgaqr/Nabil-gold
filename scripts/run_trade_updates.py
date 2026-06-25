@@ -183,21 +183,21 @@ def main() -> None:
                 )
 
         # ── Hourly heartbeat / status message ───────────────────────────────
-        # A trade EVENT message is only sent when something actually happens
-        # (TP1/TP2/SL/BE/trailing/near-tp1). On a quiet hour there are no events,
-        # so without this the user sees nothing and assumes the bot is dead.
-        # Default behaviour: send a SHORT per-trade status every scheduled run,
-        # unless explicitly disabled. (notify_on_trade_update=false only silences
-        # the message, but heartbeat_on_trade_update keeps the once-an-hour pulse.)
+        # CRITICAL FIX: We deliberately suppress the "Trades Update" heartbeat
+        # when there are **zero open trades** on scheduled runs.
+        #
+        # Reason: It was sending useless "📭 No open trades." messages that
+        # collided in time with the much more useful "Market Status" from
+        # the analysis script (which already explains WAIT + reasons + Daily Bias).
+        #
+        # New rule:
+        # - Always send on manual runs (workflow_dispatch)
+        # - On scheduled runs: ONLY send if there is at least 1 open trade
         manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch" or force_update
         notif = config.get("notifications", {}) or {}
-        # Heartbeat is ON by default (the user wants at least one update per hour).
         heartbeat = bool(notif.get("heartbeat_on_trade_update", True))
         notify_updates = bool(notif.get("notify_on_trade_update", False))
-        # The workflow now runs every 30 min (24h). To keep the heartbeat to
-        # roughly ONCE per hour, only fire it in the first half of the hour on
-        # scheduled runs. Manual runs always send. Real TP/SL/trailing events are
-        # sent immediately above (this block only runs when total_events == 0).
+
         heartbeat_interval = int(notif.get("heartbeat_interval_minutes", 60) or 60)
         if manual:
             heartbeat_due = True
@@ -205,7 +205,23 @@ def main() -> None:
             heartbeat_due = True
         else:
             heartbeat_due = datetime.now(timezone.utc).minute < 30
-        should_send = (manual or notify_updates or heartbeat) and heartbeat_due and total_events == 0 and not eod_quiet
+
+        has_open_trades = len(open_trades) > 0
+
+        # Only send "Trades Update" if:
+        # - Manual run, OR
+        # - There are open trades (the only case where the message has value)
+        #
+        # We deliberately suppress the useless "📭 No open trades." message
+        # because the analysis script already sends a much richer "Market Status"
+        # (with Groq confidence, agents, Daily Bias, reasons, etc.).
+        should_send = (
+            (manual or notify_updates or (heartbeat and has_open_trades))
+            and heartbeat_due
+            and total_events == 0
+            and not eod_quiet
+        )
+
         if should_send:
             telegram.send_message(
                 _build_status_message(open_trades, evaluations, float(current_price))

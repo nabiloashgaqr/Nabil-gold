@@ -68,8 +68,9 @@ def should_send_status(config: Dict[str, Any]) -> bool:
 
 
 def should_send_hourly_status(config: Dict[str, Any]) -> bool:
-    """Send a clean market status update roughly once per hour (user preference).
-    Runs every 10 min, so we only send when minute < 10.
+    """Send a clean market status update roughly once per hour.
+    This is now the PRIMARY periodic status message.
+    We deliberately avoid sending it every 10 min.
     """
     from datetime import datetime, timezone
     if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
@@ -79,8 +80,6 @@ def should_send_hourly_status(config: Dict[str, Any]) -> bool:
         return False
     now = datetime.now(timezone.utc)
     interval = int(notif.get("hourly_status_interval_minutes", 60) or 60)
-    # Map the interval onto the 10-minute schedule: only fire in the first slot
-    # of each interval window so we send ~once per interval, never every run.
     if interval <= 10:
         return True
     return now.minute < 10
@@ -846,7 +845,6 @@ async def run_analysis_async() -> None:
             if should_send_hourly_status(config):
                 warnings = _dedupe_warnings(decision.get("warnings") or [])
                 warnings_text = "\n".join(f"• {html.escape(str(w))}" for w in warnings[:6]) or "• No special warnings"
-                # Ensure price exactly 2 decimal places
                 price_text = f"{float(decision.get('current_price', all_results.get('current_price', 0))):.2f}"
                 ai = decision.get("ai", {}) or {}
                 classic = decision.get("classic", {}) or {}
@@ -863,7 +861,7 @@ async def run_analysis_async() -> None:
                     reason_lines.append(f"• Groq accepted direction at {groq_c:.0f}%")
 
                 if groq_reason:
-                    reason_lines.append(f"• {groq_reason[:150]}")
+                    reason_lines.append(f"• {groq_reason[:160]}")
 
                 opp_agent = (classic.get("strongest_directional") or {}).get("agent")
                 opp_conf = (classic.get("strongest_directional") or {}).get("confidence", 0)
@@ -881,6 +879,9 @@ async def run_analysis_async() -> None:
                     if sup or res:
                         reason_lines.append(f"• Levels: Support {sup}  •  Resistance {res}")
 
+                open_count = len(database.get_open_trades())
+                open_note = f"• Open trades: {open_count}" if open_count > 0 else "• No open trades"
+
                 reason_text = "\n".join(reason_lines)
 
                 telegram.send_message(
@@ -890,7 +891,7 @@ async def run_analysis_async() -> None:
                     f"🎯 Decision: WAIT\n"
                     f"📊 Groq: {groq_c:.0f}%  •  Agents ≥{agent_thr}%  •  Groq ≥{groq_thr}%\n\n"
                     f"<b>Reason:</b>\n{html.escape(reason_text)}\n\n"
-                    f"<b>Notes:</b>\n{warnings_text}\n"
+                    f"<b>Notes:</b>\n{html.escape(open_note)}\n{warnings_text}\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
                     "<i>Periodic market status • Next check in ~10 min</i>"
                 )

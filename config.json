@@ -276,14 +276,14 @@
     "hourly_status": true,
     "hourly_status_interval_minutes": 60,
     "market_status_title": "Market Status",
-    "status_every_analysis": true,
+    "status_every_analysis": false,
     "hourly_market_status": true,
     "notify_on_blocked_signal": true,
-    "description_notify_on_blocked_signal": "إذا true تُرسل أسباب حجب الإشارة (تكرار/مخاطر ديناميكية/حدود) على التشغيل المجدول أيضاً، لتوضيح سبب عدم وصول إشارة بدل التخمين. التشغيل اليدوي يرسلها دائماً.",
+    "description_notify_on_blocked_signal": "إذا true تُرسل أسباب حجب الإشارة (تكرار/مخاطر ديناميكية/حدود) على التشغيل المجدول أيضاً، لتوضيح سبب عدم وصول إشارة بدل التخمين.",
     "notify_on_trade_update": false,
-    "description_notify_on_trade_update": "إذا true تُرسل رسالة تأكيد مختصرة بعد كل تحديث صفقات حتى عند عدم وجود أحداث (TP/SL/breakeven/trailing). التشغيل اليدوي يرسلها دائماً. الافتراضي false لتجنّب رسالة كل ساعة.",
+    "description_notify_on_trade_update": "إذا true تُرسل رسالة تأكيد مختصرة بعد كل تحديث صفقات حتى عند عدم وجود أحداث. الافتراضي false.",
     "heartbeat_on_trade_update": true,
-    "description_heartbeat_on_trade_update": "إذا true تُرسل رسالة حالة مختصرة لكل صفقة مفتوحة (ربح/خسارة بالنقاط والدولار + التقدم نحو TP1) في كل تشغيل ساعي لتحديث الصفقات حتى لو لم يقع حدث TP/SL. اجعلها false لإيقاف النبض الساعي تماماً. تُكتم تلقائياً في وضع نهاية اليوم EOD_QUIET."
+    "description_heartbeat_on_trade_update": "يرسل تحديث مختصر للصفقات المفتوحة فقط عند وجود صفقات مفتوحة (لن يرسل 'No open trades'). هذا يمنع التكرار مع Market Status."
   },
   "duplicate_signal_filter": {
     "enabled": true,
