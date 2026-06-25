@@ -315,7 +315,11 @@ class TelegramService:
         lines.append(f"• <b>Order:</b> {kind_label} — <code>{html.escape(ot_pretty)}</code>")
 
         if entry_kind == "MARKET":
-            lines.append(f"• <b>Entry zone:</b> {format_price(entry_low)} – {format_price(entry_high)}")
+            # Market entry: single clean price (not zone) + explicit "Sell Market only"
+            entry_line = f"• <b>Entry:</b> {format_price(entry_price)}"
+            if trade_type == "SELL":
+                entry_line += "  <b>Sell Market only</b>"
+            lines.append(entry_line)
         else:
             # Pending order: show the entry ZONE, the fill point inside it, and
             # the live market reference so it's clear it's a resting order.
@@ -330,6 +334,19 @@ class TelegramService:
                 lines.append(f"   <i>{entry_basis}</i>")
 
         lines.append(f"• <b>Stop loss:</b> {format_price(stop_loss)}{sl_suffix}")
+
+        # Nearest Resistance + distance (always try to show for better context)
+        risk = decision.get("risk", {}) or {}
+        levels = risk.get("key_levels", {}) or {}
+        nearest_res = levels.get("nearest_resistance") or decision.get("nearest_resistance")
+        if nearest_res:
+            try:
+                res_price = float(nearest_res)
+                dist_pts = abs(res_price - float(current_price)) * 10.0
+                lines.append(f"• <b>Nearest Resistance:</b> {format_price(res_price)}  ({dist_pts:.0f} pts away)")
+            except (TypeError, ValueError):
+                pass
+
         lines.append("• <b>Take profit:</b>")
         # tp_block already has its own bullet lines; indent them under the header.
         for tl in tp_block.split("\n"):

@@ -42,7 +42,7 @@
     "atr_multiplier_sl": 1.5,
     "atr_multiplier_tp1": 2.0,
     "atr_multiplier_tp2": 3.5,
-    "min_sl_distance_points": 200,
+    "min_sl_distance_points": 300,
     "description_min_sl_distance_points": "حد أدنى لمسافة SL (200 نقطة = 20$) لأن الذهب يتحرك 50-100 نقطة بثواني؛ SL أضيق من هذا يُفتح بالضوضاء وليس بانعكاس حقيقي. عند تفعيله يُعاد حساب TP1/TP2/TP3 بنفس نسبة R:R المُعتمدة من ATR للحفاظ على min_rr_ratio.",
     "account_capital": 10000,
     "max_rr_ratio": 4.0,
