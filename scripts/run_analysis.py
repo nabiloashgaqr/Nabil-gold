@@ -358,6 +358,108 @@ def _dedupe_warnings(warnings: list) -> list:
     return result
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _is_news_hard_block(decision: Dict[str, Any], all_results: Dict[str, Any]) -> bool:
+    """True when WAIT is caused by a hard news filter, not by Groq weakness.
+
+    In that case the market-status message should not show "Groq: 0%" because
+    the 0% is the post-filter confidence after the news override. The clearer
+    message is: NEWS BLOCK / Groq skipped or overridden.
+    """
+    warnings = [str(w).lower() for w in (decision.get("warnings") or [])]
+    if any(w.startswith("news blocked") or w.startswith("ai news blocked") for w in warnings):
+        return True
+
+    news = all_results.get("news", {}) or {}
+    if news.get("can_trade") is False or str(news.get("market_status", "")).upper() in {"DANGER", "HIGH_VOLATILITY"}:
+        return True
+
+    news_ai = all_results.get("news_ai", {}) or news.get("ai_interpretation", {}) or {}
+    if news_ai.get("available"):
+        if bool(news_ai.get("block_trading", False)):
+            return True
+        if str(news_ai.get("allowed_direction", "BOTH")).upper() == "NONE":
+            return True
+        if str(news_ai.get("risk_level", "")).upper() == "EXTREME":
+            return True
+    return False
+
+
+def _build_market_status_message(
+    decision: Dict[str, Any],
+    all_results: Dict[str, Any],
+    database: DatabaseService,
+) -> str:
+    """Build the hourly/explicit Market Status Telegram message.
+
+    Special-case hard news blocks so the message explains that news overrode the
+    trade decision instead of misleadingly displaying "Groq: 0%".
+    """
+    warnings = _dedupe_warnings(decision.get("warnings") or [])
+    warnings_text = "\n".join(f"• {html.escape(str(w))}" for w in warnings[:6]) or "• No special warnings"
+    price_text = f"{_safe_float(decision.get('current_price', all_results.get('current_price', 0))):.2f}"
+    ai = decision.get("ai", {}) or {}
+    classic = decision.get("classic", {}) or {}
+
+    agent_thr = decision.get("agent_min_confidence", 60)
+    groq_thr = decision.get("groq_min_confidence", 51)
+    groq_c = _safe_float(ai.get('confidence', decision.get('confidence', 0)))
+    groq_reason = ai.get("reasoning") or ai.get("opposite_risk") or ai.get("risk_notes") or ""
+    news_hard_block = _is_news_hard_block(decision, all_results)
+
+    reason_lines = []
+    if news_hard_block:
+        gate_line = f"📊 Gate: NEWS BLOCK  •  Groq: skipped/overridden  •  Agents ≥{agent_thr}%"
+        reason_lines.append("• News hard block active — trading is paused during the event cooling window")
+        reason_lines.append("• Groq decision is skipped/overridden until the news filter clears")
+    else:
+        gate_line = f"📊 Groq: {groq_c:.0f}%  •  Agents ≥{agent_thr}%  •  Groq ≥{groq_thr}%"
+        if groq_c < _safe_float(groq_thr, 51.0):
+            reason_lines.append(f"• Groq returned {groq_c:.0f}% — below {_safe_float(groq_thr, 51.0):.0f}% threshold")
+        else:
+            reason_lines.append(f"• Groq accepted direction at {groq_c:.0f}%")
+        if groq_reason:
+            reason_lines.append(f"• {str(groq_reason)[:160]}")
+
+    opp_agent = (classic.get("strongest_directional") or {}).get("agent")
+    opp_conf = (classic.get("strongest_directional") or {}).get("confidence", 0)
+    if opp_agent and opp_conf:
+        reason_lines.append(f"• Strongest agent: {opp_agent} ({opp_conf}%)")
+
+    tech = all_results.get("technical", {}) or {}
+    t = tech.get("technical", {}) or {}
+    if t.get("rsi"):
+        reason_lines.append(f"• RSI: {t['rsi']}")
+    levels = t.get("key_levels") or {}
+    if isinstance(levels, dict):
+        sup = levels.get("nearest_support")
+        res = levels.get("nearest_resistance")
+        if sup or res:
+            reason_lines.append(f"• Levels: Support {sup}  •  Resistance {res}")
+
+    open_count = len(database.get_open_trades())
+    open_note = f"• Open trades: {open_count}" if open_count > 0 else "• No open trades"
+    reason_text = "\n".join(reason_lines)
+
+    return (
+        "🟡 <b>Gold AI Signals — Market Status</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"📈 Price: {price_text}\n"
+        "🎯 Decision: WAIT\n"
+        f"{gate_line}\n\n"
+        f"<b>Reason:</b>\n{html.escape(reason_text)}\n\n"
+        f"<b>Notes:</b>\n{html.escape(open_note)}\n{warnings_text}\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "<i>Periodic market status • Next market status in ~1 hour</i>"
+    )
+
+
 def run_agent(agent_name: str, agent: Any, data: Dict[str, Any]) -> Dict[str, Any]:
     """Run one agent safely so one failure does not stop the workflow."""
     try:
@@ -859,58 +961,7 @@ async def run_analysis_async() -> None:
                 decision.get("warnings"),
             )
             if should_send_hourly_status(config):
-                warnings = _dedupe_warnings(decision.get("warnings") or [])
-                warnings_text = "\n".join(f"• {html.escape(str(w))}" for w in warnings[:6]) or "• No special warnings"
-                price_text = f"{float(decision.get('current_price', all_results.get('current_price', 0))):.2f}"
-                ai = decision.get("ai", {}) or {}
-                classic = decision.get("classic", {}) or {}
-
-                agent_thr = decision.get("agent_min_confidence", 60)
-                groq_thr = decision.get("groq_min_confidence", 51)
-                groq_c = ai.get('confidence', decision.get('confidence', 0))
-                groq_reason = ai.get("reasoning") or ai.get("opposite_risk") or ai.get("risk_notes") or ""
-
-                reason_lines = []
-                if groq_c < groq_thr:
-                    reason_lines.append(f"• Groq returned {groq_c:.0f}% — below {groq_thr}% threshold")
-                else:
-                    reason_lines.append(f"• Groq accepted direction at {groq_c:.0f}%")
-
-                if groq_reason:
-                    reason_lines.append(f"• {groq_reason[:160]}")
-
-                opp_agent = (classic.get("strongest_directional") or {}).get("agent")
-                opp_conf = (classic.get("strongest_directional") or {}).get("confidence", 0)
-                if opp_agent and opp_conf:
-                    reason_lines.append(f"• Strongest agent: {opp_agent} ({opp_conf}%)")
-
-                tech = all_results.get("technical", {}) or {}
-                t = tech.get("technical", {}) or {}
-                if t.get("rsi"):
-                    reason_lines.append(f"• RSI: {t['rsi']}")
-                levels = t.get("key_levels") or {}
-                if isinstance(levels, dict):
-                    sup = levels.get("nearest_support")
-                    res = levels.get("nearest_resistance")
-                    if sup or res:
-                        reason_lines.append(f"• Levels: Support {sup}  •  Resistance {res}")
-
-                open_count = len(database.get_open_trades())
-                open_note = f"• Open trades: {open_count}" if open_count > 0 else "• No open trades"
-
-                reason_text = "\n".join(reason_lines)
-
-                telegram.send_message(
-                    "🟡 <b>Gold AI Signals — Market Status</b>\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n"
-                    f"📈 Price: {price_text}\n"
-                    f"🎯 Decision: WAIT\n"
-                    f"📊 Groq: {groq_c:.0f}%  •  Agents ≥{agent_thr}%  •  Groq ≥{groq_thr}%\n\n"
-                    f"<b>Reason:</b>\n{html.escape(reason_text)}\n\n"
-                    f"<b>Notes:</b>\n{html.escape(open_note)}\n{warnings_text}\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n"
-                    "<i>Periodic market status • Next market status in ~1 hour</i>"
-                )
+                telegram.send_message(_build_market_status_message(decision, all_results, database))
 
         # ── Fixed-risk scale-in check ──
         # After main signal handling, check if we should scale into any open trade
