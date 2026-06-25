@@ -211,15 +211,15 @@ def main() -> None:
 
         has_open_trades = len(open_trades) > 0
 
-        # Only send "Trades Update" if:
-        # - Manual run, OR
-        # - There are open trades (the only case where the message has value)
-        #
-        # We deliberately suppress the useless "📭 No open trades." message
-        # because the analysis script already sends a much richer "Market Status"
-        # (with Groq confidence, agents, Daily Bias, reasons, etc.).
+        # Only send the optional "Trades Update" heartbeat when explicitly
+        # enabled. It must NOT be forced by a manual run: the production rule is
+        # "message only on real change" (SL moved / trailing moved / TP / SL / BE
+        # / order fill). Those event messages are already sent above by
+        # OpenTradesManager. With heartbeat_on_trade_update=false and
+        # notify_on_trade_update=false, no Telegram message is sent when there is
+        # no trade-state change.
         should_send = (
-            (manual or notify_updates or (heartbeat and has_open_trades))
+            (notify_updates or (heartbeat and has_open_trades))
             and heartbeat_due
             and total_events == 0
             and not eod_quiet
