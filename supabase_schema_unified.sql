@@ -1,13 +1,53 @@
--- =====================================================
--- Gold AI Signals - Supabase Schema v2
--- Compatible with current Python services.
--- Recommended: use SUPABASE_KEY as a Service Role key in GitHub Secrets.
--- Do NOT expose this database for public writes with anon keys.
--- =====================================================
+-- ============================================================
+-- Gold AI Signals - UNIFIED Supabase Schema (Single Source of Truth)
+-- ============================================================
+-- Version: 2026-06-25 (consolidated)
+--
+-- This is the ONE AND ONLY SQL file for the project.
+-- All other .sql files have been consolidated here.
+--
+-- HOW TO USE:
+--   1. For fresh install or full reset:
+--      - Run the entire file (it includes optional RESET section)
+--   2. For safe incremental update (recommended in production):
+--      - Run only from "=== SCHEMA SECTION ===" onwards
+--
+-- Recommended: Use SUPABASE_KEY (service_role) in GitHub Secrets.
+-- ============================================================
+
+-- ============================================================
+-- OPTIONAL RESET SECTION (Run this first only if you need a clean slate)
+-- WARNING: This will DROP all data in the listed tables!
+-- ============================================================
+
+-- Uncomment the block below if you want a full reset:
+--
+-- DROP VIEW  IF EXISTS active_trades_view CASCADE;
+-- DROP VIEW  IF EXISTS daily_pnl_summary  CASCADE;
+--
+-- DROP TABLE IF EXISTS agent_evaluations CASCADE;
+-- DROP TABLE IF EXISTS learning_history  CASCADE;
+-- DROP TABLE IF EXISTS agent_weights     CASCADE;
+-- DROP TABLE IF EXISTS session_log       CASCADE;
+-- DROP TABLE IF EXISTS risk_settings     CASCADE;
+-- DROP TABLE IF EXISTS news_log          CASCADE;
+-- DROP TABLE IF EXISTS daily_reports     CASCADE;
+-- DROP TABLE IF EXISTS portfolio         CASCADE;
+-- DROP TABLE IF EXISTS ai_trade_reviews  CASCADE;
+-- DROP TABLE IF EXISTS ai_memory_rules   CASCADE;
+-- DROP TABLE IF EXISTS weekly_reports    CASCADE;
+-- DROP TABLE IF EXISTS trades            CASCADE;
+-- DROP TABLE IF EXISTS signals           CASCADE;
+
+-- ============================================================
+-- SCHEMA SECTION (Always run this)
+-- ============================================================
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+-- =====================================================
 -- 1) Signals table (optional audit trail)
+-- =====================================================
 CREATE TABLE IF NOT EXISTS signals (
     id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     signal_type VARCHAR(10) NOT NULL CHECK (signal_type IN ('BUY', 'SELL', 'WAIT')),
@@ -25,16 +65,7 @@ CREATE TABLE IF NOT EXISTS signals (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- =====================================================
--- SELF-HEAL block for EXISTING signals tables
--- -----------------------------------------------------
--- An older 'signals' table created before these columns existed will be
--- missing them (CREATE TABLE IF NOT EXISTS above is skipped when the table
--- already exists). That is why "column is_active does not exist" was raised
--- by the index below. These ALTERs add any missing column without touching
--- existing data and are safe to re-run. No NOT NULL is forced here so the
--- statements never fail on tables that already contain rows.
--- =====================================================
+-- Self-heal for existing signals tables
 ALTER TABLE signals ADD COLUMN IF NOT EXISTS signal_type      VARCHAR(10);
 ALTER TABLE signals ADD COLUMN IF NOT EXISTS symbol           VARCHAR(20) DEFAULT 'XAU/USD';
 ALTER TABLE signals ADD COLUMN IF NOT EXISTS entry_price      DECIMAL(18, 4);
@@ -53,7 +84,9 @@ CREATE INDEX IF NOT EXISTS idx_signals_active ON signals(is_active) WHERE is_act
 CREATE INDEX IF NOT EXISTS idx_signals_created ON signals(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_signals_type ON signals(signal_type);
 
--- 2) Trades table: matches services.database.DatabaseService payload.
+-- =====================================================
+-- 2) Trades table (core table - matches Python DatabaseService)
+-- =====================================================
 CREATE TABLE IF NOT EXISTS trades (
     id TEXT PRIMARY KEY,
     signal_id TEXT REFERENCES signals(id) ON DELETE SET NULL,
@@ -75,7 +108,7 @@ CREATE TABLE IF NOT EXISTS trades (
     paper_lot_size DECIMAL(18, 6),
     status VARCHAR(30) DEFAULT 'OPEN' CHECK (status IN (
         'OPEN', 'PARTIAL', 'TP1_HIT', 'TP2_HIT', 'SL_HIT', 'BE_HIT',
-        'MANUAL_CLOSE', 'EXPIRED', 'CLOSED', 'PENDING', 'CANCELLED'
+        'MANUAL_CLOSE', 'EXPIRED', 'CLOSED', 'CANCELLED'
     )),
 
     current_price DECIMAL(18, 4),
@@ -106,21 +139,9 @@ CREATE TABLE IF NOT EXISTS trades (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- =====================================================
--- SELF-HEAL block for EXISTING trades tables
--- -----------------------------------------------------
--- CREATE TABLE IF NOT EXISTS above is skipped entirely when the table already
--- exists, so an older table created before these columns were added will be
--- MISSING them (this is what causes errors like PGRST204
--- "Could not find the 'confidence' column of 'trades'" and
--- "column symbol does not exist" raised by the indexes below).
--- The ALTER ... ADD COLUMN IF NOT EXISTS statements MUST run BEFORE the
--- CREATE INDEX statements that reference these columns. They add any missing
--- column without touching existing data, and are safe to re-run any time.
--- =====================================================
+-- Self-heal for existing trades tables (very important for production)
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS signal_id           TEXT;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS type                VARCHAR(10);
--- 'side' is written by the Python code alongside 'type' and was never in the base schema:
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS side                VARCHAR(10);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS symbol              VARCHAR(20) DEFAULT 'XAU/USD';
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_price         DECIMAL(18, 4);
@@ -142,11 +163,8 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS final_pnl           DECIMAL(18, 4);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS sl_moved_to_entry   BOOLEAN DEFAULT FALSE;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS partial_close       BOOLEAN DEFAULT FALSE;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS updates_sent        JSONB DEFAULT '[]'::jsonb;
--- Trade-management telemetry written by OpenTradesManager (added later).
--- Without these, hourly updates hit "Could not find the 'exit_warning' column"
--- (PGRST204) and fall back to a reduced payload.
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS exit_warning            BOOLEAN DEFAULT FALSE;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS management_phase        VARCHAR(40);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS exit_warning        BOOLEAN DEFAULT FALSE;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS management_phase    VARCHAR(40);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS max_favorable_excursion DECIMAL(18, 4) DEFAULT 0;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS max_adverse_excursion   DECIMAL(18, 4) DEFAULT 0;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS result              VARCHAR(30);
@@ -162,13 +180,15 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS close_price         DECIMAL(18, 4);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS last_updated        TIMESTAMPTZ DEFAULT NOW();
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS updated_at          TIMESTAMPTZ DEFAULT NOW();
 
--- Indexes come AFTER the heal block so they never reference a missing column.
+-- Indexes (after self-heal)
 CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_created ON trades(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_trades_open ON trades(status) WHERE status IN ('OPEN', 'PARTIAL', 'TP1_HIT');
 
--- AI Memory Rules table
+-- =====================================================
+-- 3) AI Memory Rules
+-- =====================================================
 CREATE TABLE IF NOT EXISTS ai_memory_rules (
     id TEXT PRIMARY KEY,
     rule_text TEXT NOT NULL,
@@ -183,23 +203,13 @@ CREATE TABLE IF NOT EXISTS ai_memory_rules (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
--- SELF-HEAL: ensure columns exist on an older ai_memory_rules table.
-ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS rule_text       TEXT;
-ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS category        VARCHAR(80) DEFAULT 'AI_REVIEW_LESSON';
-ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS applies_to      VARCHAR(20) DEFAULT 'BOTH';
-ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS confidence      INTEGER DEFAULT 70;
-ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS source_trade_id TEXT;
-ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS source          VARCHAR(80) DEFAULT 'ai_trade_review';
-ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS active          BOOLEAN DEFAULT TRUE;
-ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS times_triggered INTEGER DEFAULT 0;
-ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS metadata        JSONB DEFAULT '{}'::jsonb;
-ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS created_at      TIMESTAMPTZ DEFAULT NOW();
-ALTER TABLE ai_memory_rules ADD COLUMN IF NOT EXISTS updated_at      TIMESTAMPTZ DEFAULT NOW();
 
 CREATE INDEX IF NOT EXISTS idx_ai_memory_rules_active ON ai_memory_rules(active, confidence DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_memory_rules_source_trade ON ai_memory_rules(source_trade_id);
 
--- AI trade reviews table
+-- =====================================================
+-- 4) AI Trade Reviews
+-- =====================================================
 CREATE TABLE IF NOT EXISTS ai_trade_reviews (
     id TEXT PRIMARY KEY,
     trade_id TEXT,
@@ -210,19 +220,13 @@ CREATE TABLE IF NOT EXISTS ai_trade_reviews (
     review JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
--- SELF-HEAL: ensure columns exist on an older ai_trade_reviews table.
-ALTER TABLE ai_trade_reviews ADD COLUMN IF NOT EXISTS trade_id    TEXT;
-ALTER TABLE ai_trade_reviews ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ DEFAULT NOW();
-ALTER TABLE ai_trade_reviews ADD COLUMN IF NOT EXISTS provider    VARCHAR(50);
-ALTER TABLE ai_trade_reviews ADD COLUMN IF NOT EXISTS model       VARCHAR(100);
-ALTER TABLE ai_trade_reviews ADD COLUMN IF NOT EXISTS tokens_used INTEGER DEFAULT 0;
-ALTER TABLE ai_trade_reviews ADD COLUMN IF NOT EXISTS review      JSONB DEFAULT '{}'::jsonb;
-ALTER TABLE ai_trade_reviews ADD COLUMN IF NOT EXISTS created_at  TIMESTAMPTZ DEFAULT NOW();
 
 CREATE INDEX IF NOT EXISTS idx_ai_trade_reviews_trade ON ai_trade_reviews(trade_id);
 CREATE INDEX IF NOT EXISTS idx_ai_trade_reviews_reviewed ON ai_trade_reviews(reviewed_at DESC);
 
--- 3) Portfolio summary
+-- =====================================================
+-- 5) Portfolio
+-- =====================================================
 CREATE TABLE IF NOT EXISTS portfolio (
     id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     balance DECIMAL(18, 4) DEFAULT 10000.00,
@@ -239,7 +243,9 @@ CREATE TABLE IF NOT EXISTS portfolio (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4) Daily reports
+-- =====================================================
+-- 6) Daily Reports
+-- =====================================================
 CREATE TABLE IF NOT EXISTS daily_reports (
     id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     report_date DATE NOT NULL,
@@ -258,13 +264,12 @@ CREATE TABLE IF NOT EXISTS daily_reports (
     recommendations TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
--- SELF-HEAL: ensure columns exist on an older daily_reports table.
-ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS report_date  DATE;
-ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS created_at   TIMESTAMPTZ DEFAULT NOW();
 
 CREATE INDEX IF NOT EXISTS idx_daily_reports_date ON daily_reports(report_date DESC);
 
--- 5) News log
+-- =====================================================
+-- 7) News Log
+-- =====================================================
 CREATE TABLE IF NOT EXISTS news_log (
     id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     headline TEXT NOT NULL,
@@ -276,14 +281,13 @@ CREATE TABLE IF NOT EXISTS news_log (
     sentiment VARCHAR(20) DEFAULT 'NEUTRAL',
     logged_at TIMESTAMPTZ DEFAULT NOW()
 );
--- SELF-HEAL: ensure columns exist on an older news_log table.
-ALTER TABLE news_log ADD COLUMN IF NOT EXISTS impact    VARCHAR(20);
-ALTER TABLE news_log ADD COLUMN IF NOT EXISTS logged_at TIMESTAMPTZ DEFAULT NOW();
 
 CREATE INDEX IF NOT EXISTS idx_news_impact ON news_log(impact);
 CREATE INDEX IF NOT EXISTS idx_news_logged ON news_log(logged_at DESC);
 
--- 6) Risk settings
+-- =====================================================
+-- 8) Risk Settings
+-- =====================================================
 CREATE TABLE IF NOT EXISTS risk_settings (
     id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     setting_key VARCHAR(50) UNIQUE NOT NULL,
@@ -291,12 +295,11 @@ CREATE TABLE IF NOT EXISTS risk_settings (
     description TEXT,
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
--- SELF-HEAL: ensure columns + UNIQUE(setting_key) exist on an older risk_settings table
--- (required by the ON CONFLICT (setting_key) seed below).
-ALTER TABLE risk_settings ADD COLUMN IF NOT EXISTS setting_key   VARCHAR(50);
-ALTER TABLE risk_settings ADD COLUMN IF NOT EXISTS setting_value JSONB;
-ALTER TABLE risk_settings ADD COLUMN IF NOT EXISTS description   TEXT;
-ALTER TABLE risk_settings ADD COLUMN IF NOT EXISTS updated_at    TIMESTAMPTZ DEFAULT NOW();
+
+-- Self-heal + seed
+ALTER TABLE risk_settings ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE risk_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -306,12 +309,6 @@ BEGIN
     END IF;
 END $$;
 
--- Seed default risk settings (OPTIONAL / cosmetic only).
--- NOTE: the Python code does NOT read this table — risk settings come from
--- config.json. An older risk_settings table may use a different column layout
--- (e.g. a NOT NULL 'setting_name' instead of 'setting_key'), which would make
--- this seed fail. Since the seed is non-essential, it is wrapped so that ANY
--- failure here is ignored and the rest of the schema script still completes.
 DO $$
 BEGIN
     INSERT INTO risk_settings (setting_key, setting_value, description) VALUES
@@ -321,12 +318,13 @@ BEGIN
     ('min_confidence_threshold', '{"value": 60, "unit": "percent"}', 'الحد الأدنى للثقة'),
     ('max_drawdown_stop', '{"value": 10, "unit": "percent"}', 'وقف السحب الأقصى')
     ON CONFLICT (setting_key) DO NOTHING;
-EXCEPTION
-    WHEN OTHERS THEN
-        RAISE NOTICE 'Skipped risk_settings seed (table has a different/legacy layout): %', SQLERRM;
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'Skipped risk_settings seed: %', SQLERRM;
 END $$;
 
--- 7) Sessions
+-- =====================================================
+-- 9) Session Log
+-- =====================================================
 CREATE TABLE IF NOT EXISTS session_log (
     id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     session_name VARCHAR(100) NOT NULL,
@@ -340,7 +338,9 @@ CREATE TABLE IF NOT EXISTS session_log (
     ended_at TIMESTAMPTZ
 );
 
--- 8) Learning tables
+-- =====================================================
+-- 10) Learning & Agent Performance
+-- =====================================================
 CREATE TABLE IF NOT EXISTS agent_weights (
     id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     agent_name VARCHAR(50) UNIQUE NOT NULL,
@@ -379,7 +379,7 @@ CREATE TABLE IF NOT EXISTS agent_evaluations (
     evaluated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- SELF-HEAL: ensure columns exist on older learning tables.
+-- Self-heal learning tables
 ALTER TABLE agent_weights ADD COLUMN IF NOT EXISTS agent_name        VARCHAR(50);
 ALTER TABLE agent_weights ADD COLUMN IF NOT EXISTS weight            DECIMAL(7, 6) DEFAULT 0.15;
 ALTER TABLE agent_weights ADD COLUMN IF NOT EXISTS win_rate          DECIMAL(5, 2) DEFAULT 0;
@@ -388,13 +388,10 @@ ALTER TABLE agent_weights ADD COLUMN IF NOT EXISTS trend             VARCHAR(20)
 ALTER TABLE agent_weights ADD COLUMN IF NOT EXISTS learning_score    DECIMAL(7, 6) DEFAULT 0.5;
 ALTER TABLE agent_weights ADD COLUMN IF NOT EXISTS updated_at        TIMESTAMPTZ DEFAULT NOW();
 ALTER TABLE agent_weights ADD COLUMN IF NOT EXISTS created_at        TIMESTAMPTZ DEFAULT NOW();
--- agent_name must be UNIQUE for the ON CONFLICT seed below; add the constraint
--- only if it is missing (wrapped so re-runs never error).
+
 DO $$
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'agent_weights_agent_name_key'
-    ) THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agent_weights_agent_name_key') THEN
         ALTER TABLE agent_weights ADD CONSTRAINT agent_weights_agent_name_key UNIQUE (agent_name);
     END IF;
 END $$;
@@ -417,23 +414,20 @@ CREATE INDEX IF NOT EXISTS idx_learning_history_date ON learning_history(report_
 CREATE INDEX IF NOT EXISTS idx_agent_evaluations_agent ON agent_evaluations(agent_name);
 CREATE INDEX IF NOT EXISTS idx_agent_evaluations_trade ON agent_evaluations(trade_closed_at DESC);
 
--- Seed default agent weights. Wrapped so a legacy agent_weights layout never
--- aborts the whole script; the learning loop will recreate/refresh weights anyway.
+-- Seed default weights
 DO $$
 BEGIN
     INSERT INTO agent_weights (agent_name, weight) VALUES
-    ('technical', 0.20),
-    ('classical', 0.20),
-    ('smc', 0.25),
-    ('price_action', 0.15),
-    ('multitimeframe', 0.20)
+    ('technical', 0.20), ('classical', 0.20), ('smc', 0.25),
+    ('price_action', 0.15), ('multitimeframe', 0.20)
     ON CONFLICT (agent_name) DO NOTHING;
-EXCEPTION
-    WHEN OTHERS THEN
-        RAISE NOTICE 'Skipped agent_weights seed (table has a different/legacy layout): %', SQLERRM;
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'Skipped agent_weights seed: %', SQLERRM;
 END $$;
 
--- 9) Timestamp trigger
+-- =====================================================
+-- 11) Timestamp triggers
+-- =====================================================
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -454,7 +448,9 @@ CREATE TRIGGER update_portfolio_timestamp BEFORE UPDATE ON portfolio FOR EACH RO
 DROP TRIGGER IF EXISTS update_risk_settings_timestamp ON risk_settings;
 CREATE TRIGGER update_risk_settings_timestamp BEFORE UPDATE ON risk_settings FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
--- 10) Views
+-- =====================================================
+-- 12) Views
+-- =====================================================
 DROP VIEW IF EXISTS active_trades_view;
 CREATE VIEW active_trades_view AS
 SELECT * FROM trades WHERE status IN ('OPEN', 'PARTIAL', 'TP1_HIT');
@@ -468,23 +464,13 @@ SELECT
     COUNT(*) FILTER (WHERE COALESCE(final_pnl, current_pnl, 0) < 0) AS losing_trades,
     SUM(COALESCE(final_pnl, current_pnl, 0)) AS total_pnl
 FROM trades
-WHERE status NOT IN ('OPEN', 'PARTIAL', 'TP1_HIT', 'PENDING')
+WHERE status NOT IN ('OPEN', 'PARTIAL', 'TP1_HIT')
 GROUP BY DATE(COALESCE(entry_time, created_at))
 ORDER BY trade_date DESC;
 
--- 11) RLS: enabled and locked by default. Service Role bypasses RLS.
-ALTER TABLE signals ENABLE ROW LEVEL SECURITY;
-ALTER TABLE trades ENABLE ROW LEVEL SECURITY;
-ALTER TABLE portfolio ENABLE ROW LEVEL SECURITY;
-ALTER TABLE daily_reports ENABLE ROW LEVEL SECURITY;
-ALTER TABLE news_log ENABLE ROW LEVEL SECURITY;
-ALTER TABLE risk_settings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE session_log ENABLE ROW LEVEL SECURITY;
-ALTER TABLE agent_weights ENABLE ROW LEVEL SECURITY;
-ALTER TABLE learning_history ENABLE ROW LEVEL SECURITY;
-ALTER TABLE agent_evaluations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ai_trade_reviews ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ai_memory_rules ENABLE ROW LEVEL SECURITY;
+-- =====================================================
+-- 13) Weekly Reports
+-- =====================================================
 CREATE TABLE IF NOT EXISTS weekly_reports (
     id BIGSERIAL PRIMARY KEY,
     week_start DATE NOT NULL,
@@ -498,15 +484,31 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- If you intentionally use anon key for a private bot, create restricted policies manually.
--- Recommended GitHub Secret: SUPABASE_KEY = service_role key, not anon key.
+CREATE INDEX IF NOT EXISTS idx_weekly_reports_week_start ON weekly_reports (week_start DESC);
 
 -- =====================================================
--- Reload PostgREST schema cache immediately so newly added columns
--- (e.g. confidence) are recognised without waiting — clears PGRST204.
+-- 14) Row Level Security (RLS)
+-- Service Role (SUPABASE_KEY) bypasses RLS automatically.
+-- ============================================================
+ALTER TABLE signals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE trades ENABLE ROW LEVEL SECURITY;
+ALTER TABLE portfolio ENABLE ROW LEVEL SECURITY;
+ALTER TABLE daily_reports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE news_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE risk_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE session_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_weights ENABLE ROW LEVEL SECURITY;
+ALTER TABLE learning_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_evaluations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ai_trade_reviews ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ai_memory_rules ENABLE ROW LEVEL SECURITY;
+
+-- =====================================================
+-- Final: Reload PostgREST schema cache
 -- =====================================================
 NOTIFY pgrst, 'reload schema';
 
 -- =====================================================
--- ✅ Schema v2 ready.
--- =====================================================
+-- ✅ UNIFIED SCHEMA READY (Single File)
+-- All previous duplicate SQL files have been consolidated.
+-- ============================================================
