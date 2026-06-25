@@ -94,9 +94,9 @@
     "timezone": "Asia/Hebron",
     "sessions": [
       {
-        "name": "Early Asia to Late NY",
-        "start_hour": 2,
-        "end_hour": 22,
+        "name": "Core Trading Window",
+        "start_hour": 11,
+        "end_hour": 18,
         "days": [
           0,
           1,
@@ -107,7 +107,7 @@
         "quality": "HIGH",
         "allow_signals": true,
         "allow_reports": false,
-        "description": "Signals window: 02:00 - 22:00 Asia/Hebron (Monday-Friday)",
+        "description": "Signals window: 11:00 - 18:59 Asia/Hebron (Monday-Friday); effectively until 19:00 local.",
         "start_minute": 0,
         "end_minute": 59
       },
@@ -125,7 +125,7 @@
         "quality": "LOW",
         "allow_signals": false,
         "allow_reports": true,
-        "description": "End-of-day reports: 22:00 - 23:00 Asia/Hebron (Monday-Friday)",
+        "description": "End-of-day reports: 22:00 - 23:59 Asia/Hebron (Monday-Friday)",
         "start_minute": 0,
         "end_minute": 59
       }
@@ -135,7 +135,8 @@
     "friday_cutoff_hour": 23,
     "exclude_weekends": false,
     "enforce_friday_cutoff": false,
-    "friday_cutoff_minute": 0
+    "friday_cutoff_minute": 0,
+    "description": "توليد الإشارات مسموح فقط من 11:00 صباحاً حتى قبل 19:00 مساءً بتوقيت Asia/Hebron، الإثنين-الجمعة. متابعة الصفقات المفتوحة تبقى منفصلة وتعمل عند وجود صفقة لحماية SL/TP/Trailing."
   },
   "signal_filters": {
     "require_trading_hours": true,

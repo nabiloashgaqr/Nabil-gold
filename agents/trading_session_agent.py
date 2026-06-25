@@ -5,9 +5,9 @@
 
 days في config.json: 0=Sunday, 1=Monday, ..., 6=Saturday (مثل Python weekday())
 
-الSessions:
-- Trading Session (11-17): allow_signals=true, allow_reports=false
-- Report Session (22-23): allow_signals=false, allow_reports=true
+الSessions الحالية:
+- Core Trading Window (11:00-18:59): allow_signals=true, allow_reports=false
+- Report Session (22:00-23:59): allow_signals=false, allow_reports=true
 """
 
 from __future__ import annotations
