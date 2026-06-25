@@ -78,7 +78,7 @@
   },
   "schedule": {
     "analysis_interval_minutes": 10,
-    "trade_update_interval_minutes": 60,
+    "trade_update_interval_minutes": 5,
     "daily_report_time": "23:00",
     "timezone": "Asia/Hebron"
   },
@@ -154,13 +154,15 @@
     "auto_move_sl_to_entry_after_tp1": true,
     "trailing_stop_enabled": true,
     "trailing_activation_at": "TP1",
-    "trailing_distance_points": 15,
+    "trailing_distance_points": 100,
     "partial_close_at_tp1": true,
     "partial_close_percentage": 50,
     "update_outside_trading_hours": true,
     "description_update_outside_trading_hours": "متابعة الصفقات المفتوحة (SL/TP/breakeven/trailing) تعمل على مدار الساعة حتى خارج نافذة توليد الإشارات (02:00-22:00). الذهب يتحرك 24/5 وقد تضرب الصفقة هدفاً/وقفاً في أي وقت. توليد الإشارات الجديدة يبقى مقيّداً بالنافذة، لكن إدارة الصفقات القائمة لا تتوقف.",
     "keep_protected_winners_open": true,
-    "description_expire": "expire_after_hours=24: تُغلق الصفقة تلقائياً بعد 24 ساعة. keep_protected_winners_open=true: لا تُغلق صفقة رابحة وقفها مُؤمّن عند الدخول أو أفضل حتى لو انتهت المدة — يُترك الستوب/التريلينغ يديرها بدل قطعها بالساعة."
+    "description_expire": "expire_after_hours=24: تُغلق الصفقة تلقائياً بعد 24 ساعة. keep_protected_winners_open=true: لا تُغلق صفقة رابحة وقفها مُؤمّن عند الدخول أو أفضل حتى لو انتهت المدة — يُترك الستوب/التريلينغ يديرها بدل قطعها بالساعة.",
+    "trailing_step_points": 30,
+    "description_trailing_stop": "إجباري: عند ربح +100 نقطة ينقل SL إلى الدخول فوراً. بعدها يبدأ Trailing مباشرة بمسافة ثابتة 100 نقطة خلف السعر، ويتحرك كلما تحرك السعر 30 نقطة لصالح الصفقة (step=30). يتم إرسال Telegram عند كل نقل SL/Trailing/TP/SL."
   },
   "performance": {
     "track_win_rate_per_agent": true,
@@ -173,12 +175,12 @@
     "tp1_trigger_pct": 50.0,
     "partial_close_pct": 50.0,
     "trailing_distance": 100.0,
-    "trailing_step": 5.0,
+    "trailing_step": 30.0,
     "tp2_trigger_pct": 100.0,
     "tp2_distance": 15.0,
     "min_profit_lock": 0.0,
     "early_breakeven_points": 100.0,
-    "description_early_breakeven": "early_breakeven_points: عند بلوغ الربح هذا العدد من النقاط (100 = 10$) يُنقل الستوب إلى الدخول فوراً دون انتظار TP1. بعدها يبدأ trailing بمسافة trailing_distance (100 نقطة = 10$) خلف السعر، يتحرك فقط بالاتجاه الرابح ولا يتراجع. 0 يعطّل النقل المبكر (نقل عند TP1 فقط). نقاط الذهب: 10 نقاط = 1$."
+    "description_early_breakeven": "early_breakeven_points=100: عند وصول الصفقة إلى +100 نقطة (10$) يُنقل الستوب إلى الدخول فوراً دون انتظار TP1. بعدها يبدأ Trailing مباشرة بمسافة trailing_distance=100 نقطة خلف السعر، ولا يتحرك إلا كل trailing_step=30 نقطة لصالح الصفقة؛ أي يبقى الفرق بين السعر والستوب حوالي 100 نقطة، وكل تحرك جديد للستوب يرسل تحديث Telegram إجباري. نقاط الذهب: 10 نقاط = 1$."
   },
   "news_feed": {
     "enabled": false,
@@ -281,9 +283,10 @@
     "notify_on_blocked_signal": true,
     "description_notify_on_blocked_signal": "إذا true تُرسل أسباب حجب الإشارة (تكرار/مخاطر ديناميكية/حدود) على التشغيل المجدول أيضاً، لتوضيح سبب عدم وصول إشارة بدل التخمين.",
     "notify_on_trade_update": false,
-    "description_notify_on_trade_update": "إذا true تُرسل رسالة تأكيد مختصرة بعد كل تحديث صفقات حتى عند عدم وجود أحداث. الافتراضي false.",
-    "heartbeat_on_trade_update": true,
-    "description_heartbeat_on_trade_update": "يرسل تحديث مختصر للصفقات المفتوحة فقط عند وجود صفقات مفتوحة (لن يرسل 'No open trades'). هذا يمنع التكرار مع Market Status."
+    "description_notify_on_trade_update": "إذا true يرسل Heartbeat مختصر حتى بدون أحداث. أحداث نقل الستوب/Trailing/TP/SL تُرسل دائماً فور تشغيل update_trades ولا تعتمد على هذا الخيار.",
+    "heartbeat_on_trade_update": false,
+    "description_heartbeat_on_trade_update": "false حتى لا يرسل النظام رسائل متابعة دورية بدون تغيير. سيتم إرسال Telegram فقط عند حدوث حدث فعلي: نقل SL للدخول، تحريك Trailing، TP، SL، BE، أو Fill.",
+    "heartbeat_interval_minutes": 60
   },
   "duplicate_signal_filter": {
     "enabled": true,
@@ -338,9 +341,9 @@
     "rsi_period": 14,
     "slope_lookback": 12,
     "score_threshold": 1.25,
-  "contrarian_min_confidence": 75,
-  "block_strong_contrarian_below": 75,
-  "description": "فلتر اتجاه أعلى (Daily Bias): يمنع الصفقات المعاكسة للاتجاه اليومي/4H إلا إذا كانت ثقة الإشارة ≥75%. هذا ليس حد Groq (Groq يبقى 51%)."
+    "contrarian_min_confidence": 75,
+    "block_strong_contrarian_below": 75,
+    "description": "فلتر اتجاه أعلى (Daily Bias): يمنع الصفقات المعاكسة للاتجاه اليومي/4H إلا إذا كانت ثقة الإشارة ≥75%. هذا ليس حد Groq (Groq يبقى 51%)."
   },
   "ai_news_interpretation": {
     "enabled": true,
