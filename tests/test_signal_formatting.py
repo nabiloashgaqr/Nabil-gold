@@ -9,7 +9,6 @@ These lock in the cleanup of the signal report:
 
 from __future__ import annotations
 
-import re
 from typing import Any, Dict
 
 from services.telegram_bot import TelegramService
@@ -104,6 +103,14 @@ def test_agent_votes_have_direction_markers_and_groq_gate():
     assert "← decision gate" in text
     # Directional dots present.
     assert "🔴" in text and "⚪" in text
+
+
+def test_signal_includes_trade_management_rule():
+    text = _capture_signal(_full_decision())
+    assert "Management:" in text
+    assert "SL → entry after +100 pts" in text
+    assert "Trail gap 100 pts / step 30 pts" in text
+    assert "check 5m" in text
 
 
 def test_buy_uses_green_header_emoji():

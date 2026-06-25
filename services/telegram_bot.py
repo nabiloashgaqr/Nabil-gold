@@ -340,6 +340,7 @@ class TelegramService:
                 lines.append(f"   <i>{entry_basis}</i>")
 
         lines.append(f"• <b>Stop loss:</b> {format_price(stop_loss)}{sl_suffix}")
+        lines.append(self._format_management_line())
 
         # Nearest Resistance + distance (always try to show for better context)
         risk = decision.get("risk", {}) or {}
@@ -359,6 +360,22 @@ class TelegramService:
             lines.append(f"  {tl}")
         return "\n".join(lines)
 
+    def _format_management_line(self) -> str:
+        """One compact line explaining the automatic SL/trailing rules in the
+        signal message itself, so the user knows how the trade will be managed
+        before any later Telegram updates arrive.
+        """
+        ts = self.config.get("trailing_stop", {}) or {}
+        schedule = self.config.get("schedule", {}) or {}
+        be = float(ts.get("early_breakeven_points", 100.0) or 100.0)
+        distance = float(ts.get("trailing_distance", 100.0) or 100.0)
+        step = float(ts.get("trailing_step", 30.0) or 30.0)
+        interval = int(schedule.get("trade_update_interval_minutes", 5) or 5)
+        return (
+            f"• <b>Management:</b> SL → entry after +{be:.0f} pts · "
+            f"Trail gap {distance:.0f} pts / step {step:.0f} pts · check {interval}m"
+        )
+
     @staticmethod
     def _status_text(old_status: Any, new_status: Any) -> str:
         """Render the status line. Show a transition 'A → B' only when it really
@@ -368,6 +385,23 @@ class TelegramService:
         if old == new:
             return html.escape(new)
         return f"{html.escape(old)} → {html.escape(new)}"
+
+    @staticmethod
+    def _progress_to_tp1_text(progress: Any) -> str:
+        """Render TP1 progress without ugly values above 100%.
+
+        Once TP1 is reached, later trailing updates can naturally have progress
+        >100%. Showing "130%" is noisy, so display a completed marker instead.
+        """
+        if progress is None:
+            return ""
+        try:
+            pct = float(progress) * 100.0
+        except (TypeError, ValueError):
+            return ""
+        if pct >= 100:
+            return "📊 <b>TP1 Progress:</b> completed ✅"
+        return f"📊 <b>Progress to TP1:</b> {max(pct, 0.0):.0f}%"
 
     @staticmethod
     def _clean_ai_field(value: Any) -> str:
@@ -555,8 +589,9 @@ class TelegramService:
         note = self._trade_event_note(event_type, trade, current_price, evaluation)
         display_stop_loss = (evaluation.get("updates", {}) or {}).get("stop_loss", trade.get("stop_loss"))
         extra_lines = []
-        if progress is not None:
-            extra_lines.append(f"📊 <b>Progress to TP1:</b> {float(progress) * 100:.0f}%")
+        progress_text = self._progress_to_tp1_text(progress)
+        if progress_text:
+            extra_lines.append(progress_text)
         if hours_open is not None:
             extra_lines.append(f"⏱ <b>Time open:</b> {float(hours_open):.1f}h")
         extra_text = "\n".join(extra_lines)
@@ -580,7 +615,7 @@ class TelegramService:
 
 ⚠️ Educational paper-trading update only. Not financial advice.
 """.strip()
-        return self.send_message(text, urgent=event_type in {"TP1_HIT", "TP2_HIT", "SL_HIT", "BE_HIT", "EXPIRED", "TRAILING_SL_HIT"})
+        return self.send_message(text, urgent=event_type in {"ORDER_FILLED", "MOVE_SL_TO_BE", "TRAILING_SL_UPDATED", "TP1_HIT", "TP2_HIT", "SL_HIT", "BE_HIT", "EXPIRED", "TRAILING_SL_HIT"})
 
     # Display priority: the most important event leads the combined message.
     _EVENT_PRIORITY = (
@@ -644,8 +679,9 @@ class TelegramService:
         display_stop_loss = (evaluation.get("updates", {}) or {}).get("stop_loss", trade.get("stop_loss"))
 
         extra_lines = []
-        if progress is not None:
-            extra_lines.append(f"📊 <b>Progress to TP1:</b> {float(progress) * 100:.0f}%")
+        progress_text = self._progress_to_tp1_text(progress)
+        if progress_text:
+            extra_lines.append(progress_text)
         if hours_open is not None:
             extra_lines.append(f"⏱ <b>Time open:</b> {float(hours_open):.1f}h")
         extra_text = "\n".join(extra_lines)
@@ -677,12 +713,28 @@ class TelegramService:
 
 ⚠️ Educational paper-trading update only. Not financial advice.
 """.strip()
-        urgent = any(e in {"TP1_HIT", "TP2_HIT", "SL_HIT", "BE_HIT", "EXPIRED", "TRAILING_SL_HIT"} for e in ordered)
+        urgent = any(e in {"ORDER_FILLED", "MOVE_SL_TO_BE", "TRAILING_SL_UPDATED", "TP1_HIT", "TP2_HIT", "SL_HIT", "BE_HIT", "EXPIRED", "TRAILING_SL_HIT"} for e in ordered)
         return self.send_message(text, urgent=urgent)
 
     def send_trade_update(self, trade: Dict[str, Any], new_status: str, current_price: float, pnl_points: float) -> bool:
         """Backward-compatible wrapper for status-change updates."""
         return self.send_trade_event(trade, new_status, current_price, pnl_points, {"old_status": trade.get("status", "OPEN"), "new_status": new_status})
+
+    @staticmethod
+    def _locked_profit_text(trade: Dict[str, Any], evaluation: Dict[str, Any]) -> str:
+        """Return a compact locked-profit text based on the updated stop."""
+        try:
+            entry = float(trade.get("entry_price"))
+            new_sl = float((evaluation.get("updates", {}) or {}).get("stop_loss"))
+        except (TypeError, ValueError):
+            return ""
+        trade_type = str(trade.get("type") or trade.get("side") or "BUY").upper()
+        locked_pts = (new_sl - entry) * 10.0 if trade_type == "BUY" else (entry - new_sl) * 10.0
+        if locked_pts > 0:
+            return f"locking about +{locked_pts:.0f} pts"
+        if abs(locked_pts) < 0.5:
+            return "protected at breakeven"
+        return ""
 
     def _trade_event_note(self, event_type: str, trade: Dict[str, Any], current_price: float, evaluation: Dict[str, Any]) -> str:
         """Return an English note for a trade-management event."""
@@ -711,7 +763,12 @@ class TelegramService:
             return "⌛ Trade expired according to trade-management rules."
         if event_type == "TRAILING_SL_UPDATED":
             new_sl = evaluation.get("updates", {}).get("stop_loss")
-            return f"📈 Trailing stop moved to {format_price(new_sl)}. The stop now trails price with a 100-point gap and 30-point step."
+            lock_text = self._locked_profit_text(trade, evaluation)
+            lock_suffix = f", {lock_text}" if lock_text else ""
+            return (
+                f"📈 Trailing stop moved to {format_price(new_sl)}{lock_suffix}. "
+                f"Rule: 100-point gap / 30-point step."
+            )
         if event_type == "TRAILING_SL_HIT":
             return "🔒 Price pulled back to the trailed stop - the locked-in profit beyond breakeven has been secured."
         return "🔄 New trade update."

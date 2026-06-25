@@ -441,6 +441,8 @@
     "max_chars": 3500,
     "send_telegram": true,
     "storage_path": "storage/weekly_report.json",
-    "timezone": "Asia/Hebron"
+    "timezone": "Asia/Hebron",
+    "report_time": "10:00",
+    "description": "Weekly AI Performance Report — يرسل السبت 10:00 صباحاً بتوقيتك المحلي"
   }
 }

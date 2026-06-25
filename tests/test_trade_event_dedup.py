@@ -128,6 +128,23 @@ def test_status_no_arrow_when_unchanged():
     assert "Status:</b> TP1_HIT" in msg or "Status: TP1_HIT" in msg
 
 
+def test_trailing_message_caps_tp1_progress_and_shows_locked_profit():
+    tg = _CapturingTelegram()
+    trade = {"id": "TBUY", "type": "BUY", "entry_price": 4000.0, "stop_loss": 3980.0, "tp1": 4010.0, "tp2": 4020.0}
+    tg.send_trade_event(
+        trade,
+        "TRAILING_SL_UPDATED",
+        4013.0,
+        130.0,
+        {"old_status": "OPEN", "new_status": "OPEN", "progress_to_tp1": 1.3, "updates": {"stop_loss": 4003.0}},
+    )
+    msg = tg.messages[0]
+    assert "130%" not in msg
+    assert "TP1 Progress:</b> completed" in msg
+    assert "locking about +30 pts" in msg
+    assert "100-point gap / 30-point step" in msg
+
+
 def test_status_shows_arrow_when_changed():
     tg = _CapturingTelegram()
     tg.send_trade_event(_trade(), "TP1_HIT", 4074.0, 268.0,

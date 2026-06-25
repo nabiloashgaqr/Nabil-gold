@@ -1,6 +1,7 @@
 """Weekly AI Performance Report — entry point.
 
-Runs every Sunday at 23:30 Asia/Hebron via GitHub Actions.
+Runs every Saturday at 10:00 local time (Asia/Hebron / Asia-Jerusalem) via
+GitHub Actions.
 """
 from __future__ import annotations
 
@@ -24,9 +25,9 @@ logger = logging.getLogger(__name__)
 
 
 def _should_run_now(config: dict) -> bool:
-    """Run if today matches configured day_of_week (default Sunday = 6)."""
+    """Run if today matches configured day_of_week (default Saturday = 5)."""
     wr = config.get("weekly_report") or {}
-    target_day = int(wr.get("day_of_week", 6))  # 0=Mon ... 6=Sun
+    target_day = int(wr.get("day_of_week", 5))  # 0=Mon ... 5=Sat ... 6=Sun
     tz_name = str(wr.get("timezone") or config.get("schedule", {}).get("timezone") or "Asia/Hebron")
     try:
         local_now = datetime.now(ZoneInfo(tz_name))

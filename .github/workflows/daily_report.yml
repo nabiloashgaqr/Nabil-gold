@@ -6,9 +6,9 @@ concurrency:
 
 on:
   schedule:
-    # Daily Report at 23:00 Asia/Hebron (20:00 UTC in summer)
-    # Monday to Friday only (1-5)
-    - cron: "0 19 * * 1-5"  # 23:00 Asia/Hebron, Mon-Fri
+    # Daily Report at 23:00 local time (Asia/Hebron/Asia-Jerusalem)
+    # Summer time: 20:00 UTC. Monday to Friday only (1-5).
+    - cron: "0 20 * * 1-5"  # 23:00 local, Mon-Fri
   workflow_dispatch:
 
 jobs:
