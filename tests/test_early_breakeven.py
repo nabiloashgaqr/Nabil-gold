@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from agents.open_trades_manager import OpenTradesManager
 
 
-def _mgr(early=100.0, distance=100.0, step=5.0):
+def _mgr(early=100.0, distance=100.0, step=30.0):
     cfg = {
         "trade_management": {"expire_after_hours": 0, "time_warning_hours": 999,
                              "auto_move_sl_to_entry_after_tp1": True},
@@ -59,6 +59,32 @@ def test_trailing_after_early_breakeven_buy():
     ev = _mgr().evaluate_trade(t, 4015.0, now=NOW)  # +150 pts, trail 100 behind -> 4005
     assert "TRAILING_SL_UPDATED" in ev["events"]
     assert ev["updates"]["stop_loss"] == 4005.0
+
+
+def test_required_trailing_rule_100_gap_30_step_buy():
+    """Production rule: +100pts -> SL to entry; every extra 30pts moves SL 30pts.
+
+    With a 100-point trailing gap, at +130pts the stop should be +30pts, and at
+    +160pts the stop should be +60pts. Exact 30-point steps must trigger.
+    """
+    mgr = _mgr(early=100.0, distance=100.0, step=30.0)
+
+    ev_be = mgr.evaluate_trade(_buy_trade(), 4010.0, now=NOW)  # +100 pts
+    assert ev_be["events"] == ["MOVE_SL_TO_BE"]
+    assert ev_be["updates"]["stop_loss"] == 4000.0
+
+    t = _buy_trade()
+    t.update({"sl_moved_to_entry": True, "stop_loss": 4000.0})
+    ev_130 = mgr.evaluate_trade(t, 4013.0, now=NOW)  # +130 pts
+    assert "TRAILING_SL_UPDATED" in ev_130["events"]
+    assert ev_130["updates"]["stop_loss"] == 4003.0
+    assert round((4013.0 - ev_130["updates"]["stop_loss"]) * 10, 1) == 100.0
+
+    t.update({"stop_loss": 4003.0})
+    ev_160 = mgr.evaluate_trade(t, 4016.0, now=NOW)  # +160 pts
+    assert "TRAILING_SL_UPDATED" in ev_160["events"]
+    assert ev_160["updates"]["stop_loss"] == 4006.0
+    assert round((4016.0 - ev_160["updates"]["stop_loss"]) * 10, 1) == 100.0
 
 
 def test_trailing_never_moves_backward():
