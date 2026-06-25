@@ -137,9 +137,21 @@ def main() -> None:
         )
 
     try:
-        market_data = MarketDataService(config)
         telegram = TelegramService(config)
         database = DatabaseService(config)
+
+        # Critical quota/cost optimization: do not fetch market data, initialize
+        # trade management, or consume Twelve Data calls when there is no active
+        # trade/pending order to manage. This still starts a tiny GitHub workflow
+        # when triggered externally, but the workflow pre-check should normally
+        # skip the heavy steps before Python dependencies are installed.
+        open_trades = database.get_open_trades()
+        logger.info("عدد الصفقات النشطة/المعلقة: %s", len(open_trades))
+        if not open_trades:
+            logger.info("لا توجد صفقات مفتوحة أو أوامر معلقة — تخطي تحديث الصفقات بدون Telegram وبدون جلب سعر.")
+            return
+
+        market_data = MarketDataService(config)
         manager = OpenTradesManager(config)
 
         # Use an OHLC payload instead of blind quote fallback so production never
@@ -154,9 +166,6 @@ def main() -> None:
         if not current_price:
             logger.error("فشل في جلب السعر")
             return
-
-        open_trades = database.get_open_trades()
-        logger.info("عدد الصفقات المفتوحة: %s", len(open_trades))
 
         # In the consolidated end-of-day digest, suppress this script's own
         # Telegram messages (trade events + confirmation). DB updates still run;

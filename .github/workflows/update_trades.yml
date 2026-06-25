@@ -11,6 +11,15 @@ on:
   # This workflow is triggered externally via workflow_dispatch so trade updates
   # can run every 5 minutes without relying on GitHub's best-effort schedule.
   workflow_dispatch:
+    inputs:
+      force_update:
+        description: "Run update even if the lightweight Supabase pre-check finds no active trades"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 jobs:
   update-trades:
@@ -18,20 +27,93 @@ jobs:
     timeout-minutes: 20
 
     steps:
+      - name: 🔎 Check active trades first
+        id: active_trades
+        shell: bash
+        env:
+          FORCE_UPDATE: ${{ github.event.inputs.force_update || 'false' }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.parse
+          import urllib.request
+          import urllib.error
+
+          def set_output(name: str, value: str) -> None:
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+                  fh.write(f"{name}={value}\n")
+
+          force = str(os.environ.get("FORCE_UPDATE", "false")).strip().lower() in {"1", "true", "yes", "y"}
+          if force:
+              print("force_update=true — running trade update regardless of pre-check.")
+              set_output("has_active", "true")
+              sys.exit(0)
+
+          url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
+          key = os.environ.get("SUPABASE_KEY") or ""
+          if not url or not key:
+              # Do not silently skip when secrets are missing. Let the normal
+              # validation step fail with a clear error.
+              print("Supabase secrets missing; continuing so validate_setup can fail loudly.")
+              set_output("has_active", "true")
+              sys.exit(0)
+
+          query = urllib.parse.urlencode({
+              "select": "id,status",
+              "status": "in.(OPEN,PARTIAL,TP1_HIT,PENDING)",
+              "limit": "1",
+          })
+          request = urllib.request.Request(
+              f"{url}/rest/v1/trades?{query}",
+              headers={
+                  "apikey": key,
+                  "Authorization": f"Bearer {key}",
+                  "Accept": "application/json",
+              },
+              method="GET",
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  payload = json.loads(response.read().decode("utf-8") or "[]")
+          except Exception as exc:  # noqa: BLE001
+              # If the lightweight pre-check cannot verify state, run the normal
+              # workflow rather than risking missed SL/TP/trailing management.
+              print(f"Pre-check failed ({exc}); running trade update as a safe fallback.")
+              set_output("has_active", "true")
+              sys.exit(0)
+
+          has_active = bool(payload)
+          print(f"Active trades/pending orders found: {has_active}")
+          set_output("has_active", "true" if has_active else "false")
+          PY
+
+      - name: ⏭️ Skip heavy update when no active trades
+        if: steps.active_trades.outputs.has_active != 'true'
+        run: |
+          echo "No OPEN/PARTIAL/TP1_HIT/PENDING trades found in Supabase. Skipping checkout, pip install, market data fetch, and Telegram."
+
       - name: 📥 Checkout
+        if: steps.active_trades.outputs.has_active == 'true'
         uses: actions/checkout@v4
 
       - name: 🐍 Setup Python
+        if: steps.active_trades.outputs.has_active == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
 
       - name: 📦 Install Dependencies
+        if: steps.active_trades.outputs.has_active == 'true'
         run: |
           pip install -r requirements.txt
 
       - name: 🔎 Validate Production Setup
+        if: steps.active_trades.outputs.has_active == 'true'
         run: |
           python scripts/validate_setup.py update-trades
         env:
@@ -42,6 +124,7 @@ jobs:
           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
 
       - name: 🔄 Update Trades
+        if: steps.active_trades.outputs.has_active == 'true'
         run: |
           python scripts/run_trade_updates.py
         env:
@@ -55,4 +138,4 @@ jobs:
       - name: ✅ Success Log
         if: always()
         run: |
-          echo "Trade update completed at $(date)"
+          echo "Trade update workflow completed at $(date). has_active=${{ steps.active_trades.outputs.has_active }}"

@@ -391,7 +391,7 @@ Body:
 }
 ```
 
-> تحديث الصفقات أيضاً لا يرسل Telegram إلا عند حدوث تغيير فعلي مثل تحريك SL / Trailing / TP / SL / BE / Fill.
+> تحديث الصفقات يبدأ بفحص خفيف لـ Supabase. إذا لم توجد صفقة نشطة أو أمر معلق (`OPEN/PARTIAL/TP1_HIT/PENDING`) يتوقف قبل checkout/pip/جلب السعر، ولا يرسل Telegram. وإذا وُجدت صفقة، لا يرسل Telegram إلا عند حدوث تغيير فعلي مثل تحريك SL / Trailing / TP / SL / BE / Fill.
 
 ### Workflows الرئيسية
 

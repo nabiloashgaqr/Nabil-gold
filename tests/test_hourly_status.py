@@ -51,3 +51,27 @@ def test_status_message_caps_long_lists():
     evals = [{"trade_id": t["id"], "pnl_points": 1.0, "new_status": "OPEN"} for t in trades]
     msg = _plain(ru._build_status_message(trades, evals, 4000.0))
     assert "and 5 more" in msg
+
+
+def test_update_trades_main_skips_market_data_when_no_active_trades(monkeypatch):
+    """No active trade means no price fetch / no heavy update work."""
+    monkeypatch.setattr(ru, "load_config", lambda: {"trade_management": {"update_outside_trading_hours": True}})
+
+    class _Session:
+        def check(self):
+            return {"trading_allowed": True, "current_session": "Test", "session_quality": "HIGH"}
+
+    class _DB:
+        def get_open_trades(self):
+            return []
+
+    monkeypatch.setattr(ru, "TradingSessionAgent", lambda *_a, **_k: _Session())
+    monkeypatch.setattr(ru, "DatabaseService", lambda *_a, **_k: _DB())
+    monkeypatch.setattr(ru, "TelegramService", lambda *_a, **_k: object())
+
+    def _market_data_should_not_be_called(*_a, **_k):
+        raise AssertionError("MarketDataService should not be initialized when no active trades exist")
+
+    monkeypatch.setattr(ru, "MarketDataService", _market_data_should_not_be_called)
+
+    ru.main()
