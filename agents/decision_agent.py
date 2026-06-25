@@ -841,7 +841,8 @@ Move conflicting evidence into opposing_evidence, or set final_signal = WAIT.
             is_contrarian = (bias == 'BULLISH' and signal == 'SELL') or (bias == 'BEARISH' and signal == 'BUY')
             if is_contrarian and float(result.get('confidence') or 0) < contrarian_min:
                 warnings.append(
-                    f"Daily Bias blocks counter-trend trade: bias={bias} ({bias_conf}%), signal={signal}, required_conf={contrarian_min}%"
+                    f"Daily Bias (4H) blocks counter-trend: bias={bias} ({bias_conf}%), signal={signal}. "
+                    f"Signal confidence must be ≥{contrarian_min}% to override (Groq threshold is separate at 51%)."
                 )
                 signal = 'WAIT'
 
