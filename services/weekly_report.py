@@ -47,6 +47,7 @@ class WeeklyStats:
     avg_loss_points: float = 0.0
     largest_win_points: float = 0.0
     largest_loss_points: float = 0.0
+    profit_factor: float = 99.9
     best_day: str = "—"
     best_day_pnl: float = 0.0
     worst_day: str = "—"
@@ -62,6 +63,7 @@ class WeeklyStats:
     duplicate_blocked_signals: int = 0
 
     def to_prompt_dict(self) -> Dict[str, Any]:
+        pf_display = "∞" if self.profit_factor >= 99 else round(self.profit_factor, 2)
         return {
             "week": f"{self.week_start} → {self.week_end}",
             "lookback_days": self.lookback_days,
@@ -73,6 +75,7 @@ class WeeklyStats:
             "break_even": self.break_even,
             "win_rate_pct": round(self.win_rate, 1),
             "net_pnl_points": round(self.net_pnl_points, 1),
+            "profit_factor": pf_display,
             "avg_win_points": round(self.avg_win_points, 2),
             "avg_loss_points": round(self.avg_loss_points, 2),
             "largest_win_points": round(self.largest_win_points, 2),
@@ -176,6 +179,14 @@ class WeeklyReportService:
         total_resolved = stats.wins + stats.losses + stats.break_even
         stats.win_rate = (stats.wins / total_resolved * 100.0) if total_resolved else 0.0
 
+        # Profit Factor: 99.9 / ∞ for no-loss case (consistent with dashboard / daily)
+        gross_profit = sum(wins) if wins else 0.0
+        gross_loss = abs(sum(losses)) if losses else 0.0
+        if gross_loss > 0:
+            stats.profit_factor = round(gross_profit / gross_loss, 2)
+        else:
+            stats.profit_factor = 99.9 if gross_profit > 0 else 0.0
+
         # ---- Per day ---------------------------------------------------- #
         day_buckets: Dict[str, Dict[str, Any]] = {}
         for trade in closed:
@@ -259,7 +270,7 @@ class WeeklyReportService:
             "📊 Real data for the past week (do NOT invent numbers, use only this data):\n"
             f"```json\n{data}\n```\n\n"
             "✍️ Write a concise report in English with the following sections, in order:\n"
-            "1) 📈 Performance summary (5 points: total, wins, net, largest win, largest loss)\n"
+            "1) 📈 Performance summary (total, wins, net, largest win/loss, Profit Factor)\n"
             "2) 🤖 Agent performance (per agent: name + win rate + pnl + weight recommendation)\n"
             "3) 📅 Best and worst day (day + pnl + trade count)\n"
             "4) 🌍 Session performance (London / NY / Asian, best/worst)\n"
@@ -387,6 +398,8 @@ class WeeklyReportService:
     # ------------------------------------------------------------------ #
     def _fallback_message(self, stats: WeeklyStats) -> str:
         """Used when Groq is not available; a simple text-only summary."""
+        pf = stats.profit_factor
+        pf_display = "∞" if pf >= 99 or (pf in (0, 99.9) and stats.losses == 0 and stats.wins > 0) else pf
         lines = [
             "═══════════════════════════════════",
             "📊 Weekly Report",
@@ -397,6 +410,7 @@ class WeeklyReportService:
             f"✅ Wins: {stats.wins}    ❌ Losses: {stats.losses}    ⚪ Break-even: {stats.break_even}",
             f"🎯 Win rate: {stats.win_rate:.1f}%",
             f"💰 Net points: {stats.net_pnl_points:+.2f}",
+            f"⚖️ Profit Factor: {pf_display}",
             f"🏆 Largest win: {stats.largest_win_points:+.2f}",
             f"💔 Largest loss: {stats.largest_loss_points:+.2f}",
             "",

@@ -74,7 +74,7 @@ def summarize_trades(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         "losses": len(losses),
         "win_rate": round((len(wins) / len(closed) * 100) if closed else 0, 2),
         "net_points": round(net, 2),
-        "profit_factor": round(gross_profit / gross_loss, 2) if gross_loss else 0,
+        "profit_factor": round(gross_profit / gross_loss, 2) if gross_loss > 0 else (99.9 if gross_profit > 0 else 0),
         "buy_count": len(buy_trades),
         "sell_count": len(sell_trades),
         "buy_net": round(sum(_pnl(t) for t in buy_trades), 2),
@@ -84,12 +84,14 @@ def summarize_trades(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def _render_cards(summary: Dict[str, Any]) -> str:
+    pf = summary["profit_factor"]
+    pf_display = "∞" if pf >= 99 or (pf in (0, 99.9) and summary.get("losses", 0) == 0 and summary.get("wins", 0) > 0) else pf
     cards = [
         ("Total Trades", summary["total"], "📊"),
         ("Open", summary["open"], "🟡"),
         ("Win Rate", f"{summary['win_rate']}%", "✅"),
         ("Net Points", f"{summary['net_points']:+}", "💰"),
-        ("Profit Factor", summary["profit_factor"], "⚖️"),
+        ("Profit Factor", pf_display, "⚖️"),
         ("Avg Confidence", f"{summary['avg_confidence']}%", "🎯"),
     ]
     return "\n".join(
@@ -252,15 +254,24 @@ def save_dashboard(html_text: str, path: str | Path = "storage/dashboard.html") 
 
 
 def format_dashboard_telegram(summary: Dict[str, Any]) -> str:
+    pf = summary.get("profit_factor", 0)
+    if pf >= 99 or pf == 0 and summary.get("losses", 0) == 0 and summary.get("wins", 0) > 0:
+        pf_display = "∞"
+        pf_note = " (All profitable trades → ∞)"
+    else:
+        pf_display = pf
+        pf_note = ""
+    net = summary.get("net_points", 0)
     return "\n".join(
         [
             "📊 <b>Dashboard Updated</b>",
             "━━━━━━━━━━━━━━━━━━━━",
             f"Trades: {summary.get('total', 0)} | Open: {summary.get('open', 0)}",
             f"Win Rate: {summary.get('win_rate', 0)}%",
-            f"Net Points: {summary.get('net_points', 0):+}",
-            f"Profit Factor: {summary.get('profit_factor', 0)}",
+            f"Net Points: {net:+}",
+            f"Profit Factor: {pf_display}{pf_note}",
             "dashboard.html was generated as a GitHub Actions artifact.",
             "━━━━━━━━━━━━━━━━━━━━",
+            "📌 Note: PF=∞ when no losing trades (gross_loss=0).",
         ]
     )

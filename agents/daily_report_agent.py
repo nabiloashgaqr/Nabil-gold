@@ -36,7 +36,10 @@ class DailyReportAgent(BaseAgent):
         pnl_values = [self._pnl(t) for t in trades]
         gross_profit = sum(x for x in pnl_values if x > 0)
         gross_loss = abs(sum(x for x in pnl_values if x < 0))
-        profit_factor = round(gross_profit / gross_loss, 2) if gross_loss else (round(gross_profit, 2) if gross_profit else 0)
+        if gross_loss > 0:
+            profit_factor = round(gross_profit / gross_loss, 2)
+        else:
+            profit_factor = 99.9 if gross_profit > 0 else 0
         win_rate = round((len(winners) / total) * 100, 1) if total else 0
         best = max(pnl_values) if pnl_values else 0
         worst = min(pnl_values) if pnl_values else 0
@@ -70,40 +73,47 @@ class DailyReportAgent(BaseAgent):
         title_en = "Weekly Report" if "أسبوع" in title or "Weekly" in title else "Daily Report"
         agent_lines = self._format_ranked(stats.get("by_agent", {}), empty="No agent-source data yet")
         direction = stats.get("by_direction", {})
-        recommendations = "\n".join(f"• {html.escape(str(x))}" for x in stats.get("recommendations", [])[:6]) or "• Not enough data for recommendations yet"
-        return f"""
-📋 <b>{html.escape(title_en)} - XAU/USD</b>
+        pf = stats.get("profit_factor", 0)
+        pf_display = "∞" if pf >= 99 or (pf in (0, 99.9) and stats.get("losses", 0) == 0 and stats.get("wins", 0) > 0) else pf
+        pf_note = " (All profitable so far → ∞)" if pf_display == "∞" else ""
+        recommendations = "\n".join(f"• {html.escape(str(x))}" for x in stats.get("recommendations", [])[:4]) or "• Not enough data yet"
+
+        # Data quality note (prevents repetition & illogical reasons)
+        total = stats.get("total", 0)
+        dq_note = ""
+        if total >= 5 and stats.get("losses", 0) == 0:
+            dq_note = "• Data Quality: 100% win sample. PF shown as ∞ (no losses realized)."
+        elif total < 5:
+            dq_note = "• Data Quality: Small sample (keep paper trading)."
+
+        return f"""📋 <b>{html.escape(title_en)} - XAU/USD</b>
 ━━━━━━━━━━━━━━━━━━━━━
 📅 <b>Date:</b> {html.escape(date.today().isoformat())}
 
-📊 <b>Statistics:</b>
-• Total trades: {stats['total']}
-• Wins: {stats['wins']} ✅
-• Losses: {stats['losses']} ❌
-• Breakeven: {stats['breakeven']} ➖
-• Open: {stats['open']} 🔄
-• Win rate: {stats['win_rate']}%
+📊 <b>Statistics</b>
+• Trades: {stats['total']} (Open: {stats['open']})
+• Win Rate: {stats['win_rate']}%   ({stats['wins']}W / {stats['losses']}L / {stats['breakeven']}BE)
 
-💰 <b>Results:</b>
-• Net points: {stats['net_points']:+.1f}
-• Best trade: {stats['best_trade']:+.1f}
-• Worst trade: {stats['worst_trade']:+.1f}
-• Avg win: {stats['avg_win']:.1f}
-• Avg loss: -{stats['avg_loss']:.1f}
-• Profit Factor: {stats['profit_factor']}
+💰 <b>Performance</b>
+• Net: {stats['net_points']:+.1f} pts
+• Best: {stats['best_trade']:+.1f}   |   Worst: {stats['worst_trade']:+.1f}
+• Avg Win: {stats['avg_win']:.1f}   |   Avg Loss: -{stats['avg_loss']:.1f}
+• Profit Factor: {pf_display}{pf_note}
 
-🧭 <b>By Direction:</b>
-• BUY: {direction.get('BUY', {}).get('count', 0)} | Net {direction.get('BUY', {}).get('net', 0):+}
-• SELL: {direction.get('SELL', {}).get('count', 0)} | Net {direction.get('SELL', {}).get('net', 0):+}
+🧭 <b>Direction</b>
+• BUY: {direction.get('BUY', {}).get('count', 0)} trades → {direction.get('BUY', {}).get('net', 0):+}
+• SELL: {direction.get('SELL', {}).get('count', 0)} trades → {direction.get('SELL', {}).get('net', 0):+}
 
-🤖 <b>Signal Source / Agent Performance:</b>
+🤖 <b>Best Sources</b>
 {agent_lines}
 
-🧠 <b>Recommendations:</b>
+🧠 <b>Recommendations</b>
 {recommendations}
+{dq_note}
 
-⚠️ <b>Reminder:</b> Paper-trading educational system. Not financial advice.
+⚠️ Paper-trading only. Not financial advice.
 """.strip()
+
 
     def _by_direction(self, trades: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         out = {"BUY": {"count": 0, "net": 0.0}, "SELL": {"count": 0, "net": 0.0}}

@@ -246,12 +246,16 @@ def main() -> None:
         )
         lines.append(f"• Win rate: {stats.get('win_rate', 0)}%")
         lines.append(f"• Net: {net_pts:+.0f} pts ({_usd(net_pts):+.1f}$)")
+        pf = stats.get("profit_factor", 0)
+        pf_display = "∞" if pf >= 99 or (pf in (0, 99.9) and stats.get("losses", 0) == 0 and stats.get("wins", 0) > 0) else pf
         if stats.get("total", 0):
             lines.append(
-                f"• Best {float(stats.get('best_trade', 0)):+.0f} pts · "
-                f"Worst {float(stats.get('worst_trade', 0)):+.0f} pts · "
-                f"PF {stats.get('profit_factor', 0)}"
+                f"• Best: {float(stats.get('best_trade', 0)):+.0f} pts | "
+                f"Worst: {float(stats.get('worst_trade', 0)):+.0f} pts | "
+                f"PF: {pf_display}"
             )
+        if stats.get("losses", 0) == 0 and stats.get("wins", 0) > 0:
+            lines.append("• Note: All trades profitable → PF shown as ∞ (no gross loss)")
         lines.append("")
 
         # ── Closed trades today ─────────────────────────────────────────────
@@ -295,7 +299,6 @@ def main() -> None:
             lines.append("🔄 <b>Open Trades:</b> none")
             lines.append("")
 
-        # ──         if False:  #             lines.append(f"⏳ <b>
         # ── By direction (today) ────────────────────────────────────────────
         direction = stats.get("by_direction", {}) or {}
         buy = direction.get("BUY", {}) or {}
