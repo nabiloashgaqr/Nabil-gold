@@ -203,7 +203,7 @@ Management: SL → entry after +100 pts · Trail gap 100 pts / step 30 pts · ch
 | Groq Final Gate | ✅ فعال | لا إشارة بدون قرار Groq |
 | Trading Hours | ✅ فعال | يمنع إشارات خارج نافذة التداول |
 | News Risk | ✅ فعال | يمنع التداول حول الأخبار عالية الخطورة |
-| Daily Bias | ✅ فعال | يمنع عكس الاتجاه القوي إلا بثقة أعلى |
+| Daily Bias | ✅ فعال | يمنع عكس الاتجاه القوي إلا إذا كانت ثقة الإشارة ≥70% |
 | Duplicate Filter | ✅ فعال | يمنع تكرار الإشارات في نفس المنطقة |
 | Risk Management | ✅ فعال | يرفض الصفقة إذا فشل R:R أو ATR أو SL |
 | Dynamic Risk | 🟡 معطّل مؤقتاً | جاهز للتفعيل بعد مرحلة التعلم |

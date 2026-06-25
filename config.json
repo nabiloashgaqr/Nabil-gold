@@ -326,9 +326,9 @@
     "rsi_period": 14,
     "slope_lookback": 12,
     "score_threshold": 1.25,
-    "contrarian_min_confidence": 75,
-    "block_strong_contrarian_below": 75,
-    "description": "فلتر اتجاه أعلى (Daily Bias): يمنع الصفقات المعاكسة للاتجاه اليومي/4H إلا إذا كانت ثقة الإشارة ≥75%. هذا ليس حد Groq (Groq يبقى 51%)."
+    "contrarian_min_confidence": 70,
+    "block_strong_contrarian_below": 70,
+    "description": "فلتر اتجاه أعلى (Daily Bias): يمنع الصفقات المعاكسة للاتجاه اليومي/4H إلا إذا كانت ثقة الإشارة ≥70%. هذا ليس حد Groq (Groq يبقى 51%)."
   },
   "ai_news_interpretation": {
     "enabled": true,
