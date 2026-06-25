@@ -246,6 +246,7 @@ class TelegramService:
                 stop_loss=signal.get("stop_loss"),
                 sl_suffix=sl_suffix,
                 tp_block=tp_block,
+                decision=decision,
             ),
             thin,
             votes_block,
@@ -296,6 +297,7 @@ class TelegramService:
         stop_loss: Any,
         sl_suffix: str,
         tp_block: str,
+        decision: Dict[str, Any] | None = None,   # for nearest resistance etc.
     ) -> str:
         """Render the TRADE PLAN section with smart entry execution.
 
@@ -310,16 +312,20 @@ class TelegramService:
             dist_txt = ""
 
         lines = ["🎯 <b>TRADE PLAN</b>"]
-        # Order-type line, broker-style label too.
-        ot_pretty = order_type.replace("_", " ").title()
-        lines.append(f"• <b>Order:</b> {kind_label} — <code>{html.escape(ot_pretty)}</code>")
+        # Order line - simplified as requested: "⚡ Sell Market" or "⚡ Buy Market"
+        if entry_kind == "MARKET":
+            if trade_type == "SELL":
+                order_line = "• <b>Order:</b> ⚡ Sell Market"
+            else:
+                order_line = "• <b>Order:</b> ⚡ Buy Market"
+        else:
+            ot_pretty = order_type.replace("_", " ").title()
+            order_line = f"• <b>Order:</b> {kind_label} — <code>{html.escape(ot_pretty)}</code>"
+        lines.append(order_line)
 
         if entry_kind == "MARKET":
-            # Market entry: single clean price (not zone) + explicit "Sell Market only"
-            entry_line = f"• <b>Entry:</b> {format_price(entry_price)}"
-            if trade_type == "SELL":
-                entry_line += "  <b>Sell Market only</b>"
-            lines.append(entry_line)
+            # Market entry: single clean price only (no extra text)
+            lines.append(f"• <b>Entry:</b> {format_price(entry_price)}")
         else:
             # Pending order: show the entry ZONE, the fill point inside it, and
             # the live market reference so it's clear it's a resting order.
