@@ -43,14 +43,19 @@ class OpenTradesManager(BaseAgent):
         # real schema (tp1/tp2, status, sl_moved_to_entry) instead.
         ts_config = self.config.get("trailing_stop", {})
         self.trailing_enabled = bool(ts_config.get("enabled", False))
-        self.trailing_distance = float(ts_config.get("trailing_distance", 20.0))
-        self.trailing_step = float(ts_config.get("trailing_step", 5.0))
+        # Required production behaviour:
+        #   1) at +100 points -> move SL to entry immediately;
+        #   2) after that, keep a 100-point trailing gap;
+        #   3) move the SL only in 30-point steps.
+        # Values remain configurable, but the defaults now match the live rule.
+        self.trailing_distance = float(ts_config.get("trailing_distance", 100.0))
+        self.trailing_step = float(ts_config.get("trailing_step", 30.0))
         self.trailing_min_profit_lock = float(ts_config.get("min_profit_lock", 0.0))
 
         # Early breakeven: move SL to entry once the trade is +N points in
-        # profit, WITHOUT waiting for TP1. 0/absent disables it (legacy
-        # behaviour = breakeven only after TP1). Points convention: 10 pts = $1.
-        self.early_breakeven_points = float(ts_config.get("early_breakeven_points", 0.0))
+        # profit, WITHOUT waiting for TP1. Production default is 100 points.
+        # Points convention: 10 pts = $1.
+        self.early_breakeven_points = float(ts_config.get("early_breakeven_points", 100.0))
 
         # Fixed-risk mode: track scale-in info
         oe = self.config.get("order_execution", {}) or {}
@@ -77,19 +82,42 @@ class OpenTradesManager(BaseAgent):
             evaluation = self.evaluate_trade(trade, current_price, now=now)
             evaluations.append(evaluation)
             trade_id = str(trade.get("id", ""))
-            if trade_id and database and evaluation.get("updates"):
-                database.update_trade(trade_id, evaluation["updates"])
-            if telegram:
-                events = evaluation.get("events", []) or []
-                if events:
+            events = evaluation.get("events", []) or []
+
+            # Send critical trade-management notifications BEFORE writing the DB
+            # update. If Supabase has a transient/schema issue, the user still
+            # receives the important event (SL moved / trailing moved / TP / SL)
+            # instead of silently missing it because the DB write happened first.
+            if telegram and events:
+                delivered = False
+                try:
                     # Send ONE combined message per trade per cycle instead of a
                     # separate message per event (avoids duplicate near-identical
                     # messages when e.g. LONG_RUNNING + EXIT_WARNING fire together).
                     if hasattr(telegram, "send_trade_events"):
-                        telegram.send_trade_events(trade, events, current_price, evaluation.get("pnl_points", 0), evaluation)
+                        delivered = bool(
+                            telegram.send_trade_events(
+                                trade, events, current_price, evaluation.get("pnl_points", 0), evaluation
+                            )
+                        )
                     else:  # backward-compatible fallback
-                        for event in events:
-                            telegram.send_trade_event(trade, event, current_price, evaluation.get("pnl_points", 0), evaluation)
+                        delivered = all(
+                            bool(telegram.send_trade_event(trade, event, current_price, evaluation.get("pnl_points", 0), evaluation))
+                            for event in events
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    self.logger.exception("Failed to send trade-management Telegram event(s) for %s: %s", trade_id, exc)
+                    delivered = False
+                evaluation["notification_delivered"] = delivered
+                if not delivered:
+                    self.logger.error(
+                        "Mandatory trade update notification was not delivered for %s: %s",
+                        trade_id,
+                        ",".join(events),
+                    )
+
+            if trade_id and database and evaluation.get("updates"):
+                database.update_trade(trade_id, evaluation["updates"])
         return evaluations
 
     def evaluate_trade(self, trade: Dict[str, Any], current_price: float, now: datetime | None = None) -> Dict[str, Any]:
@@ -523,15 +551,18 @@ class OpenTradesManager(BaseAgent):
         distance = self.trailing_distance / 10.0
         step = self.trailing_step / 10.0
         min_lock = self.trailing_min_profit_lock / 10.0
+        epsilon = 1e-9
         if trade_type == "BUY":
             candidate = current_price - distance
             candidate = max(candidate, entry + min_lock)
-            if candidate > current_stop_loss + step:
+            # Move exactly on the configured step too: +30 pts should move 30 pts,
+            # not require +31 due to a strict > comparison.
+            if candidate >= current_stop_loss + step - epsilon:
                 return candidate
         else:
             candidate = current_price + distance
             candidate = min(candidate, entry - min_lock)
-            if candidate < current_stop_loss - step:
+            if candidate <= current_stop_loss - step + epsilon:
                 return candidate
         return None
 
