@@ -553,6 +553,7 @@ class TelegramService:
         progress = evaluation.get("progress_to_tp1")
         hours_open = evaluation.get("hours_open")
         note = self._trade_event_note(event_type, trade, current_price, evaluation)
+        display_stop_loss = (evaluation.get("updates", {}) or {}).get("stop_loss", trade.get("stop_loss"))
         extra_lines = []
         if progress is not None:
             extra_lines.append(f"📊 <b>Progress to TP1:</b> {float(progress) * 100:.0f}%")
@@ -567,7 +568,7 @@ class TelegramService:
 🆔 <b>ID:</b> <code>{html.escape(str(trade.get('id')))}</code>
 📊 <b>Type:</b> {html.escape(str(trade.get('type')))}
 📍 <b>Entry:</b> {format_price(trade.get('entry_price'))}
-🛑 <b>Stop Loss:</b> {format_price(trade.get('stop_loss'))}
+🛑 <b>Stop Loss:</b> {format_price(display_stop_loss)}
 🎯 <b>TP1:</b> {format_price(trade.get('tp1'))}
 🎯 <b>TP2:</b> {format_price(trade.get('tp2'))}
 💰 <b>Current Price:</b> {format_price(current_price)}
@@ -584,8 +585,10 @@ class TelegramService:
     # Display priority: the most important event leads the combined message.
     _EVENT_PRIORITY = (
         "TP2_HIT", "SL_HIT", "TRAILING_SL_HIT", "BE_HIT", "TP1_HIT",
-        "ORDER_FILLED", "MOVE_SL_TO_BE", "EXPIRED", "MANUAL_CLOSE",
-        "TRAILING_SL_UPDATED", "EXIT_WARNING", "NEAR_TP1", "LONG_RUNNING",
+        # If a jump causes BE + trailing in the same cycle, lead with the final
+        # actual stop movement, while TP/SL outcomes still outrank everything.
+        "TRAILING_SL_UPDATED", "ORDER_FILLED", "MOVE_SL_TO_BE", "EXPIRED", "MANUAL_CLOSE",
+        "EXIT_WARNING", "NEAR_TP1", "LONG_RUNNING",
     )
 
     def send_trade_events(
@@ -638,6 +641,7 @@ class TelegramService:
         new_status = evaluation.get("new_status", old_status)
         progress = evaluation.get("progress_to_tp1")
         hours_open = evaluation.get("hours_open")
+        display_stop_loss = (evaluation.get("updates", {}) or {}).get("stop_loss", trade.get("stop_loss"))
 
         extra_lines = []
         if progress is not None:
@@ -661,7 +665,7 @@ class TelegramService:
 🆔 <b>ID:</b> <code>{html.escape(str(trade.get('id')))}</code>
 📊 <b>Type:</b> {html.escape(str(trade.get('type')))}
 📍 <b>Entry:</b> {format_price(trade.get('entry_price'))}
-🛑 <b>Stop Loss:</b> {format_price(trade.get('stop_loss'))}
+🛑 <b>Stop Loss:</b> {format_price(display_stop_loss)}
 🎯 <b>TP1:</b> {format_price(trade.get('tp1'))}
 🎯 <b>TP2:</b> {format_price(trade.get('tp2'))}
 💰 <b>Current Price:</b> {format_price(current_price)}
@@ -687,9 +691,12 @@ class TelegramService:
         if event_type == "NEAR_TP1":
             return f"💡 Price reached about 80% of TP1 distance ({format_price(trade.get('tp1'))}). Monitor trade management."
         if event_type == "TP1_HIT":
-            return "✅ TP1 reached. Consider partial profit and monitor TP2."
+            return "✅ TP1 reached. Partial-profit / breakeven protection is applied according to the trade plan."
         if event_type == "MOVE_SL_TO_BE":
-            return f"💡 Suggested: move SL to entry {format_price(trade.get('entry_price'))} to protect the trade."
+            # If BE and trailing happen in the same cycle, the final displayed SL
+            # may already be beyond entry. This note should still describe the
+            # breakeven trigger itself, so use the entry price here.
+            return f"💡 Stop Loss moved automatically to breakeven/entry {format_price(trade.get('entry_price'))} after the +100-point protection trigger."
         if event_type == "TP2_HIT":
             return "🏆 TP2 reached. Trade completed successfully."
         if event_type == "SL_HIT":
@@ -704,7 +711,7 @@ class TelegramService:
             return "⌛ Trade expired according to trade-management rules."
         if event_type == "TRAILING_SL_UPDATED":
             new_sl = evaluation.get("updates", {}).get("stop_loss")
-            return f"📈 Trailing stop moved to {format_price(new_sl)} to lock in more profit as price advances."
+            return f"📈 Trailing stop moved to {format_price(new_sl)}. The stop now trails price with a 100-point gap and 30-point step."
         if event_type == "TRAILING_SL_HIT":
             return "🔒 Price pulled back to the trailed stop - the locked-in profit beyond breakeven has been secured."
         return "🔄 New trade update."
