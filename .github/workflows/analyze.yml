@@ -5,18 +5,13 @@ concurrency:
   # IMPORTANT: never cancel a run that is already in progress.
   # This is a signal bot: a run that is mid-analysis may be about to save a
   # trade and send a Telegram signal. cancel-in-progress:true would silently
-  # kill it (e.g. when a manual run or a delayed/queued cron starts), which is
-  # a classic cause of "signal never arrived on the scheduled run".
+  # kill it (e.g. when a manual run or a delayed external cron starts).
   cancel-in-progress: false
 
 on:
-  schedule:
-    # Signals window: 02:00 → 22:00 Asia/Hebron, Monday-Friday
-    # Runs every 10 minutes. Internal session filter enforces exact local time.
-    # 02:00 local = 23:00 UTC (previous day)
-    # 22:00 local = 19:00 UTC
-    - cron: "*/10 23 * * 0,1,2,3,4"      # 23:00 UTC (Sun-Thu) → 02:00 local Mon-Fri
-    - cron: "*/10 0-19 * * 1,2,3,4,5"    # 00:00-19:59 UTC (Mon-Fri) → 03:00-22:59 local
+  # Scheduling is intentionally handled by cron-job.org now.
+  # This workflow is triggered externally via workflow_dispatch so analysis can
+  # run every 10 minutes without relying on GitHub's best-effort schedule.
   workflow_dispatch:
     inputs:
       send_status:

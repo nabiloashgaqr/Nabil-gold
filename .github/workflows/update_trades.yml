@@ -7,16 +7,9 @@ concurrency:
   cancel-in-progress: false
 
 on:
-  schedule:
-    # Open-trade MANAGEMENT must run around the clock on trading days — gold
-    # moves 24/5, so a trade can hit TP1/SL/trailing at any hour, including
-    # outside the signal-generation window.
-    # Run every 5 minutes (GitHub Actions minimum practical cron) so SL/TP/
-    # trailing notifications do NOT wait for an hourly heartbeat.
-    # The script itself manages open trades regardless of session because
-    # trade_management.update_outside_trading_hours = true.
-    - cron: "*/5 * * * 1,2,3,4,5"     # every 5 min, Mon-Fri (all hours UTC)
-    - cron: "*/5 22,23 * * 0"         # Sunday 22:00-23:59 UTC (market open, Mon local)
+  # Scheduling is intentionally handled by cron-job.org now.
+  # This workflow is triggered externally via workflow_dispatch so trade updates
+  # can run every 5 minutes without relying on GitHub's best-effort schedule.
   workflow_dispatch:
 
 jobs:

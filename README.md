@@ -28,7 +28,7 @@
 
 ## 📌 ملخص سريع
 
-**Gold AI Signals** نظام آلي يعمل عبر GitHub Actions لتحليل الذهب وإرسال إشارات وتحديثات وتقارير إلى Telegram.
+**Gold AI Signals** نظام آلي يعمل عبر GitHub Actions، وتتم جدولة التحليل وتحديث الصفقات خارجياً عبر **cron-job.org** لضمان تشغيل منتظم أكثر، ثم تُرسل الإشارات والتحديثات والتقارير إلى Telegram.
 
 الفكرة الأساسية:
 
@@ -54,7 +54,7 @@ Market Data → Analysis Agents → Risk Filters → DecisionAgent + Groq → Te
 
 | البند | الحالة |
 |---|---|
-| التشغيل | GitHub Actions |
+| التشغيل | GitHub Actions عبر cron-job.org للتحليل والتحديث |
 | وضع التداول | Paper Trading |
 | مصدر البيانات | Twelve Data |
 | القرار النهائي | Groq إلزامي |
@@ -335,19 +335,70 @@ Rule: 100-point gap / 30-point step.
 
 | المهمة | الجدولة |
 |---|---|
-| التحليل والإشارات | كل 10 دقائق داخل نافذة التداول |
-| تحديث الصفقات المفتوحة | كل 5 دقائق طوال أيام السوق |
+| التحليل والإشارات | كل 10 دقائق أيام العمل عبر cron-job.org (`workflow_dispatch`) |
+| تحديث الصفقات المفتوحة | كل 5 دقائق أيام العمل عبر cron-job.org (`workflow_dispatch`) |
 | Market Status | كل ساعة |
 | التقرير اليومي + Learning | 23:00 بتوقيتك المحلي، الإثنين إلى الجمعة |
 | Dashboard | 23:15 بتوقيتك المحلي، الإثنين إلى الجمعة |
 | التقرير الأسبوعي | السبت 10:00 صباحاً بتوقيتك المحلي |
 
+### جدولة cron-job.org الحالية
+
+تم إيقاف `schedule` الداخلي في GitHub لملفي التحليل والتحديث، وأصبح التشغيل الأساسي عبر cron-job.org فقط:
+
+#### Analysis — كل 10 دقائق أيام العمل
+
+```cron
+*/10 * * * 1-5
+```
+
+يرسل POST إلى:
+
+```text
+https://api.github.com/repos/nabiloashgaqr/Nabil-gold/actions/workflows/analyze.yml/dispatches
+```
+
+Body:
+
+```json
+{
+  "ref": "main",
+  "inputs": {
+    "send_status": "false"
+  }
+}
+```
+
+> مهم: `send_status=false` يعني يحلل فقط، ولا يرسل Telegram إلا إذا وُجدت صفقة فعلية أو حدث خطأ.
+
+#### Update Trades — كل 5 دقائق أيام العمل
+
+```cron
+*/5 * * * 1-5
+```
+
+يرسل POST إلى:
+
+```text
+https://api.github.com/repos/nabiloashgaqr/Nabil-gold/actions/workflows/update_trades.yml/dispatches
+```
+
+Body:
+
+```json
+{
+  "ref": "main"
+}
+```
+
+> تحديث الصفقات أيضاً لا يرسل Telegram إلا عند حدوث تغيير فعلي مثل تحريك SL / Trailing / TP / SL / BE / Fill.
+
 ### Workflows الرئيسية
 
 | Workflow | الملف | الوظيفة |
 |---|---|---|
-| Gold Analysis Bot | `.github/workflows/analyze.yml` | تحليل وإرسال إشارات |
-| Update Open Trades | `.github/workflows/update_trades.yml` | متابعة الصفقات كل 5 دقائق |
+| Gold Analysis Bot | `.github/workflows/analyze.yml` | تحليل وإرسال إشارات — بدون schedule داخلي، يُشغّل عبر cron-job.org |
+| Update Open Trades | `.github/workflows/update_trades.yml` | متابعة الصفقات — بدون schedule داخلي، يُشغّل عبر cron-job.org |
 | Daily Report & Learning | `.github/workflows/daily_report.yml` | تقرير يومي + تعلم + مراجعة خسائر |
 | Weekly AI Performance Report | `.github/workflows/weekly_report.yml` | تقرير أسبوعي |
 | Dashboard | `.github/workflows/dashboard.yml` | توليد Dashboard HTML |
