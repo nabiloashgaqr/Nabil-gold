@@ -620,7 +620,7 @@ async def run_analysis_async() -> None:
                     f"<b>Reason:</b>\n• {html.escape(str(session.get('reason', 'Outside trading hours')))}\n"
                     f"<b>Session:</b> {html.escape(str(session.get('current_session') or 'N/A'))}\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
-                    "<i>Periodic market status • Next check in ~10 min</i>"
+                    "<i>Periodic market status • Next market status in ~1 hour</i>"
                 )
             return  # ══ لا تحليل خارج الجلسات ══
 
@@ -909,7 +909,7 @@ async def run_analysis_async() -> None:
                     f"<b>Reason:</b>\n{html.escape(reason_text)}\n\n"
                     f"<b>Notes:</b>\n{html.escape(open_note)}\n{warnings_text}\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
-                    "<i>Periodic market status • Next check in ~10 min</i>"
+                    "<i>Periodic market status • Next market status in ~1 hour</i>"
                 )
 
         # ── Fixed-risk scale-in check ──
