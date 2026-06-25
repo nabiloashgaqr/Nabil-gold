@@ -9,6 +9,7 @@
 - حفظ الإشارات الفاشلة للتعلم منها
 """
 
+import html
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional
@@ -514,13 +515,15 @@ class LearningService:
         ]
         
         if last_report.top_performers:
-            lines.append(f"🏆 Top performers: {', '.join(last_report.top_performers)}")
+            top = ", ".join(html.escape(str(name), quote=False) for name in last_report.top_performers)
+            lines.append(f"🏆 Top performers: {top}")
         
         lines.append("")
         lines.append("🤖 Agent performance:")
         
         for name, record in sorted(last_report.agents_performance.items(), key=lambda x: -x[1].win_rate):
             emoji = "🟢" if record.trend == "IMPROVING" else "🔴" if record.trend == "DECLINING" else "🟡"
+            safe_name = html.escape(str(name), quote=False)
             
             # عرض التتابع
             streak = ""
@@ -530,13 +533,13 @@ class LearningService:
                 streak = f" ❄️{record.consecutive_losses}"
             
             lines.append(
-                f"{emoji} {name}: {record.win_rate:.0f}% "
+                f"{emoji} {safe_name}: {record.win_rate:.0f}% "
                 f"({record.current_weight*100:.0f}%→{record.adjusted_weight*100:.0f}%){streak}"
             )
         
         lines.extend([
             "",
-            f"📝 Changes: {last_report.changes_summary}",
+            f"📝 Changes: {html.escape(str(last_report.changes_summary), quote=False)}",
             "━━━━━━━━━━━━━━━━━━━━"
         ])
         

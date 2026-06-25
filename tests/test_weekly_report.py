@@ -272,6 +272,17 @@ class TestSendToTelegram:
         assert ok is True
         assert telegram_mock.send_message.call_count == 1
 
+    def test_escapes_ai_html_before_telegram_send(self, telegram_mock):
+        cfg = _make_config(send_telegram=True)
+        svc = WeeklyReportService(cfg, MagicMock(), telegram=telegram_mock,
+                                  ai_service=None)
+        ok = svc.send_to_telegram("Groq says price < support & risk > normal")
+        assert ok is True
+        sent = telegram_mock.send_message.call_args.args[0]
+        assert "&lt; support" in sent
+        assert "&amp;" in sent
+        assert "&gt; normal" in sent
+
     def test_splits_long_message_into_parts(self, telegram_mock):
         cfg = _make_config(send_telegram=True)
         svc = WeeklyReportService(cfg, MagicMock(), telegram=telegram_mock,

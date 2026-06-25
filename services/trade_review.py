@@ -8,6 +8,7 @@ limited per run to control API usage.
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import logging
 from datetime import datetime, timezone
@@ -165,6 +166,14 @@ Reply in JSON only, no Markdown:
         return {"enabled": True, "reviewed": reviewed, "errors": errors, "candidates": len(trades)}
 
 
+def _safe_html(value: Any, limit: int | None = None) -> str:
+    """Escape untrusted review/Groq text for Telegram HTML mode."""
+    text = "" if value is None else str(value)
+    if limit is not None:
+        text = text[:limit]
+    return html.escape(text, quote=False)
+
+
 def format_trade_review_summary(result: Dict[str, Any]) -> str:
     """Format review result for Telegram."""
     if not result.get("enabled", True):
@@ -188,16 +197,16 @@ def format_trade_review_summary(result: Dict[str, Any]) -> str:
         review = item.get("review", {}) or {}
         suggestions = review.get("rule_suggestions") or []
         if isinstance(suggestions, list):
-            suggestions_text = "\n".join(f"• {s}" for s in suggestions[:2])
+            suggestions_text = "\n".join(f"• {_safe_html(s, 220)}" for s in suggestions[:2])
         else:
-            suggestions_text = f"• {suggestions}"
+            suggestions_text = f"• {_safe_html(suggestions, 220)}"
         lines.extend(
             [
                 "",
-                f"🔻 Trade: <code>{item.get('trade_id')}</code>",
-                f"├ Category: {review.get('failure_category', 'OTHER')}",
-                f"├ Cause: {review.get('root_cause', 'N/A')}",
-                f"└ Review confidence: {review.get('confidence_in_review', 'N/A')}%",
+                f"🔻 Trade: <code>{_safe_html(item.get('trade_id'))}</code>",
+                f"├ Category: {_safe_html(review.get('failure_category', 'OTHER'), 80)}",
+                f"├ Cause: {_safe_html(review.get('root_cause', 'N/A'), 260)}",
+                f"└ Review confidence: {_safe_html(review.get('confidence_in_review', 'N/A'), 12)}%",
                 f"🧠 New memory rules: {len(item.get('memory_rule_ids', []) or [])}",
             ]
         )
@@ -208,7 +217,7 @@ def format_trade_review_summary(result: Dict[str, Any]) -> str:
         lines.append("")
         lines.append(f"⚠️ Review errors: {len(errors)}")
         for error in errors[:2]:
-            lines.append(f"• {error.get('trade_id')}: {error.get('error')}")
+            lines.append(f"• {_safe_html(error.get('trade_id'))}: {_safe_html(error.get('error'), 260)}")
     lines.append("━━━━━━━━━━━━━━━━━━━━")
     return "\n".join(lines)
 

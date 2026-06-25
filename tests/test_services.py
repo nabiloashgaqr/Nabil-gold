@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -15,7 +14,7 @@ sys.path.append(str(ROOT))
 from services.market_data import MarketDataService
 from services.database import DatabaseService
 from services.telegram_bot import TelegramService
-from utils.helpers import load_config, load_trades, save_trades, save_trade
+from utils.helpers import load_trades, save_trades, save_trade
 
 
 # ───────────────────────────── MarketDataService ─────────────────────────────
@@ -286,6 +285,34 @@ def test_telegram_error_alert():
     service = TelegramService({"telegram": {"bot_token": None, "chat_id": None}})
     result = service.send_error_alert("Test error message")
     assert result is False
+
+
+def test_telegram_error_alert_includes_workflow_context_and_escapes(monkeypatch):
+    """Error alerts should show where the failure happened and escape HTML."""
+    service = TelegramService({"telegram": {"bot_token": None, "chat_id": None}})
+    captured = {}
+
+    def _fake_send(text: str, urgent: bool = False, **_kwargs) -> bool:
+        captured["text"] = text
+        captured["urgent"] = urgent
+        return True
+
+    monkeypatch.setattr(service, "send_message", _fake_send)
+    monkeypatch.setenv("GITHUB_WORKFLOW", "Update <Trades>")
+    monkeypatch.setenv("GITHUB_JOB", "update-trades")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "schedule")
+    monkeypatch.setenv("GITHUB_RUN_ID", "123")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("GITHUB_REF_NAME", "main")
+
+    assert service.send_error_alert("Broken <tag> & failure") is True
+    text = captured["text"]
+    assert captured["urgent"] is True
+    assert "Workflow:" in text and "Update &lt;Trades&gt;" in text
+    assert "Job:" in text and "update-trades" in text
+    assert "Run:" in text and "123 (attempt 2)" in text
+    assert "Broken &lt;tag&gt; &amp; failure" in text
 
 
 def test_telegram_daily_report():
