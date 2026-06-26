@@ -15,7 +15,11 @@
     "api_keys": {
       "twelve_data": "ENV:TWELVE_DATA_API_KEY"
     },
-    "allow_synthetic_in_production": false
+    "allow_synthetic_in_production": false,
+    "resample_timeframes_from_base": true,
+    "base_timeframe": "5m",
+    "base_outputsize": 2500,
+    "description_resample_timeframes_from_base": "Fetch one 5m series per symbol then locally resample 15m/1H/4H to reduce Twelve Data API calls and avoid synthetic fallback due rate limits."
   },
   "telegram": {
     "bot_token": "ENV:TELEGRAM_BOT_TOKEN",

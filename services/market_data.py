@@ -55,13 +55,26 @@ class MarketDataService:
         self.session = requests.Session()
 
     def get_gold_data(self, outputsize: int = 220) -> Dict[str, Any] | None:
-        """Return normalized data for all configured timeframes."""
+        """Return normalized data for all configured timeframes.
+
+        To keep multi-asset operation within API limits, production config can
+        fetch one base 5m series per symbol and locally resample 15m/1H/4H.
+        """
         timeframes = self.config.get("timeframes", ["5m", "15m", "1H", "4H"])
         primary_tf = self.config.get("primary_timeframe", "15m")
-        tf_payloads: Dict[str, Dict[str, Any]] = {}
+        data_cfg = self.config.get("data_source", {}) or {}
 
-        for timeframe in timeframes:
-            tf_payloads[timeframe] = self.get_ohlcv(timeframe=timeframe, outputsize=outputsize)
+        if data_cfg.get("resample_timeframes_from_base", False):
+            base_tf = str(data_cfg.get("base_timeframe", "5m"))
+            base_outputsize = int(data_cfg.get("base_outputsize", max(outputsize, 2500)) or max(outputsize, 2500))
+            base_payload = self.get_ohlcv(timeframe=base_tf, outputsize=base_outputsize)
+            if not base_payload:
+                return None
+            tf_payloads = self._build_resampled_payloads(base_payload, timeframes)
+        else:
+            tf_payloads: Dict[str, Dict[str, Any]] = {}
+            for timeframe in timeframes:
+                tf_payloads[timeframe] = self.get_ohlcv(timeframe=timeframe, outputsize=outputsize)
 
         primary_payload = tf_payloads.get(primary_tf) or next(iter(tf_payloads.values()), None)
         if not primary_payload:
@@ -96,8 +109,60 @@ class MarketDataService:
         self._cache[cache_key] = {"cached_at": time.time(), "payload": payload}
         return payload
 
+    def _build_resampled_payloads(self, base_payload: Dict[str, Any], timeframes: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Build requested timeframe payloads from a single lower-timeframe series."""
+        base_tf = str(base_payload.get("timeframe", "5m"))
+        base_minutes = int(self.TF_MINUTES.get(base_tf, 5) or 5)
+        base_data = list(base_payload.get("data", []) or [])
+        payloads: Dict[str, Dict[str, Any]] = {}
+        for tf in timeframes:
+            tf_minutes = int(self.TF_MINUTES.get(tf, base_minutes) or base_minutes)
+            if tf == base_tf or tf_minutes <= base_minutes:
+                candles = base_data
+            else:
+                candles = self._resample_candles(base_data, tf_minutes)
+            if not candles:
+                candles = base_data[-1:] if base_data else []
+            payloads[tf] = {
+                "symbol": self.symbol,
+                "timeframe": tf,
+                "data": candles,
+                "current_price": float(candles[-1]["close"]) if candles else base_payload.get("current_price"),
+                "spread_points": base_payload.get("spread_points"),
+                "last_updated": base_payload.get("last_updated"),
+                "source": base_payload.get("source", "unknown"),
+                "resampled_from": base_tf if tf != base_tf else None,
+            }
+        return payloads
+
+    def _resample_candles(self, candles: List[Dict[str, Any]], timeframe_minutes: int) -> List[Dict[str, Any]]:
+        """Resample candles by UTC time buckets."""
+        buckets: Dict[int, List[Dict[str, Any]]] = {}
+        bucket_seconds = timeframe_minutes * 60
+        for candle in candles:
+            try:
+                dt = self._parse_dt(str(candle.get("time")))
+                bucket = int(dt.timestamp()) // bucket_seconds * bucket_seconds
+                buckets.setdefault(bucket, []).append(candle)
+            except Exception:
+                continue
+        out: List[Dict[str, Any]] = []
+        for bucket in sorted(buckets):
+            group = sorted(buckets[bucket], key=lambda c: str(c.get("time")))
+            if not group:
+                continue
+            out.append({
+                "time": datetime.fromtimestamp(bucket, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                "open": float(group[0]["open"]),
+                "high": max(float(c["high"]) for c in group),
+                "low": min(float(c["low"]) for c in group),
+                "close": float(group[-1]["close"]),
+                "volume": sum(float(c.get("volume") or 0) for c in group),
+            })
+        return out
+
     def get_current_price(self) -> float | None:
-        """Return current gold price, using Twelve quote first then OHLC fallback."""
+        """Return current price, using Twelve quote first then OHLC fallback."""
         if self.api_key and self.api_key != "YOUR_API_KEY":
             try:
                 self._rate_limit()
