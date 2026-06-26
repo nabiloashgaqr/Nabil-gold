@@ -252,7 +252,7 @@ class WeeklyReportService:
     def build_prompt(self, stats: WeeklyStats) -> str:
         data = json.dumps(stats.to_prompt_dict(), ensure_ascii=False, indent=2)
         return (
-            "You are the weekly performance analyst for a Gold AI Signals system "
+            "You are the weekly performance analyst for a SmartSignal system "
             "(XAU/USD, Paper Trading).\n\n"
             "📊 Real data for the past week (do NOT invent numbers, use only this data):\n"
             f"```json\n{data}\n```\n\n"
@@ -281,7 +281,7 @@ class WeeklyReportService:
         if stats.total_trades < self.min_trades:
             message = (
                 "═══════════════════════════════════\n"
-                "📊 Weekly Report\n"
+                "📊 SmartSignal — Weekly Report\n"
                 f"Week: {stats.week_start} → {stats.week_end}\n"
                 "═══════════════════════════════════\n\n"
                 f"⚪ Quiet week: only {stats.total_trades} trades total "
@@ -355,7 +355,7 @@ class WeeklyReportService:
         pf_display = "∞" if pf >= 99 or (pf in (0, 99.9) and stats.losses == 0 and stats.wins > 0) else pf
         lines = [
             "═══════════════════════════════════",
-            "📊 Weekly Report",
+            "📊 SmartSignal — Weekly Report",
             f"Week: {stats.week_start} → {stats.week_end}",
             "═══════════════════════════════════",
             "",

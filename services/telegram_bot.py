@@ -257,7 +257,7 @@ class TelegramService:
         sections.append(divider)
         sections.append(
             f"<i>Mode: {mode_text} · Decision: {html.escape(rule_text)}</i>\n"
-            f"<i>Educational signal only — not financial advice.</i>\n"
+            f"<i>Paper trading only — not financial advice.</i>\n"
             f"🆔 <code>{html.escape(str(trade_id))}</code>"
         )
         text = "\n".join(sections).strip()
@@ -598,7 +598,7 @@ class TelegramService:
 
 {note}
 
-⚠️ Educational paper-trading update only. Not financial advice.
+⚠️ Paper trading only.
 """.strip()
         return self.send_message(text, urgent=event_type in {"ORDER_FILLED", "MOVE_SL_TO_BE", "TRAILING_SL_UPDATED", "TP1_HIT", "TP2_HIT", "SL_HIT", "BE_HIT", "EXPIRED", "TRAILING_SL_HIT"})
 
@@ -697,7 +697,7 @@ class TelegramService:
 
 {notes_text}
 
-⚠️ Educational paper-trading update only. Not financial advice.
+⚠️ Paper trading only.
 """.strip()
         urgent = any(e in {"ORDER_FILLED", "MOVE_SL_TO_BE", "TRAILING_SL_UPDATED", "TP1_HIT", "TP2_HIT", "SL_HIT", "BE_HIT", "EXPIRED", "TRAILING_SL_HIT"} for e in ordered)
         return self.send_message(text, urgent=urgent)
@@ -772,7 +772,7 @@ class TelegramService:
             return False
 
         text = (
-            "🚨 <b>Gold AI Signals Error</b>\n"
+            "🚨 <b>SmartSignal Error</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
             f"<code>{html.escape(str(error_message)[:2000])}</code>"
         )
