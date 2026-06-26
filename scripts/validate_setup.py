@@ -116,6 +116,8 @@ def _test_twelvedata_key() -> tuple[bool, str]:
         status_code = getattr(exc.response, "status_code", "?")
         if status_code == 401:
             return False, "Twelve Data rejected the API key (HTTP 401)."
+        if status_code == 429:
+            return True, "Twelve Data rate-limited (HTTP 429) — key is valid, try again in 1 minute"
         return False, f"Twelve Data HTTP error {status_code}: {exc}"
     except Exception as exc:
         return False, f"Twelve Data connection failed: {exc}"
