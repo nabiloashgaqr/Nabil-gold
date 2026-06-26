@@ -22,6 +22,7 @@ except Exception:  # pragma: no cover - dependency may be absent in local Python
     create_client = None  # type: ignore[assignment]
 
 from utils.helpers import load_config, load_trades, save_trades
+from utils.instruments import price_decimals
 
 
 class DatabaseService:
@@ -98,9 +99,11 @@ class DatabaseService:
             trade_id = self.new_trade_id()
         signal = decision.get("signal", {})
         entry = signal.get("entry", {})
+        symbol = str(decision.get("symbol") or signal.get("symbol") or self.config.get("symbol", "XAU/USD"))
+        decimals = price_decimals(symbol)
         entry_price = float(entry.get("price") or ((float(entry.get("low", 0)) + float(entry.get("high", 0))) / 2) or 0)
         now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-        stop_loss = round(float(signal.get("stop_loss", 0)), 2)
+        stop_loss = round(float(signal.get("stop_loss", 0)), decimals)
 
         # ── Market vs pending (LIMIT/STOP) order ────────────────────────────
         # A smart entry may place the order AWAY from the current price
@@ -115,12 +118,13 @@ class DatabaseService:
         trade_data = {
             "id": trade_id,
             "type": decision.get("decision", signal.get("type")),
-            "entry_price": round(entry_price, 2),
+            "symbol": symbol,
+            "entry_price": round(entry_price, decimals),
             "entry_time": now_iso,
             "stop_loss": stop_loss,
             "initial_stop_loss": stop_loss,
-            "tp1": round(float(signal.get("tp1", 0)), 2),
-            "tp2": round(float(signal.get("tp2", 0)), 2),
+            "tp1": round(float(signal.get("tp1", 0)), decimals),
+            "tp2": round(float(signal.get("tp2", 0)), decimals),
             "confidence": int(decision.get("confidence", 0)),
             "trading_mode": decision.get("trading_mode", "paper"),
             "paper_trading": bool(decision.get("paper_trading", True)),
@@ -129,7 +133,7 @@ class DatabaseService:
             "status": initial_status,
             "order_kind": order_kind,
             "order_type": signal.get("order_type") or entry.get("order_type"),
-            "current_price": round(current_price, 2),
+            "current_price": round(current_price, decimals),
             "current_pnl": 0,
             "current_pnl_points": 0,
             "sl_moved_to_entry": False,

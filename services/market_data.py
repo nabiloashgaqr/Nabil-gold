@@ -1,8 +1,7 @@
-"""Market data service for XAU/USD.
+"""Market data service for all configured instruments.
 
-يجلب بيانات الذهب من Twelve Data عند توفر المفتاح داخل GitHub Secrets، ومعه
-fallback تجريبي يولد بيانات OHLCV اصطناعية حتى لا يفشل الاختبار أو Workflow
-عند غياب المفتاح. في الإنتاج يجب استخدام مصدر بيانات حقيقي.
+Fetches OHLCV data from Twelve Data. A synthetic fallback exists for local tests;
+production workflows block synthetic prices unless explicitly allowed.
 """
 
 from __future__ import annotations
@@ -194,24 +193,39 @@ class MarketDataService:
         start = now - timedelta(minutes=minutes * outputsize)
         seed = int(now.strftime("%Y%m%d%H")) + minutes
         rng = random.Random(seed)
-        base = 2350.0 + math.sin(seed / 1000) * 20
+        base_prices = {
+            "XAU/USD": 2350.0,
+            "EUR/USD": 1.0850,
+            "GBP/USD": 1.2700,
+            "USD/JPY": 155.00,
+            "USD/CHF": 0.9000,
+            "USD/CAD": 1.3600,
+            "AUD/USD": 0.6650,
+            "WTI/USD": 75.00,
+        }
+        base = base_prices.get(str(self.symbol).upper(), 1.0000) * (1 + math.sin(seed / 1000) * 0.002)
+        from utils.instruments import price_decimals
+        decimals = price_decimals(self.symbol)
         candles: List[Dict[str, Any]] = []
         close = base
         for i in range(outputsize):
             dt = start + timedelta(minutes=minutes * i)
-            drift = math.sin(i / 12) * 0.45 + math.sin(i / 37) * 0.25
-            noise = rng.uniform(-1.2, 1.2)
+            scale = max(base * 0.00035, 0.00005)
+            if str(self.symbol).upper() in {"XAU/USD", "WTI/USD"}:
+                scale = max(base * 0.0008, 0.03)
+            drift = (math.sin(i / 12) * 0.45 + math.sin(i / 37) * 0.25) * scale
+            noise = rng.uniform(-1.2, 1.2) * scale
             open_price = close
-            close = max(1000.0, open_price + drift + noise)
-            high = max(open_price, close) + rng.uniform(0.2, 2.2)
-            low = min(open_price, close) - rng.uniform(0.2, 2.2)
+            close = max(0.0001, open_price + drift + noise)
+            high = max(open_price, close) + rng.uniform(0.2, 2.2) * scale
+            low = min(open_price, close) - rng.uniform(0.2, 2.2) * scale
             candles.append(
                 {
                     "time": dt.isoformat().replace("+00:00", "Z"),
-                    "open": round(open_price, 2),
-                    "high": round(high, 2),
-                    "low": round(low, 2),
-                    "close": round(close, 2),
+                    "open": round(open_price, decimals),
+                    "high": round(high, decimals),
+                    "low": round(low, decimals),
+                    "close": round(close, decimals),
                     "volume": int(1000 + rng.random() * 1200),
                 }
             )

@@ -23,6 +23,7 @@ from services.database import DatabaseService
 from services.market_data import MarketDataService
 from services.telegram_bot import TelegramService
 from utils.helpers import load_config, setup_logging
+from utils.instruments import config_for_instrument, normalize_symbol
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -151,22 +152,6 @@ def main() -> None:
             logger.info("لا توجد صفقات مفتوحة أو أوامر معلقة — تخطي تحديث الصفقات بدون Telegram وبدون جلب سعر.")
             return
 
-        market_data = MarketDataService(config)
-        manager = OpenTradesManager(config)
-
-        # Use an OHLC payload instead of blind quote fallback so production never
-        # manages/closes trades using synthetic_demo prices if the market API fails.
-        price_payload = market_data.get_ohlcv(config.get("primary_timeframe", "15m"), outputsize=60)
-        allow_synthetic = bool(config.get("data_source", {}).get("allow_synthetic_in_production", False))
-        if os.environ.get("GITHUB_ACTIONS") == "true" and price_payload.get("source") == "synthetic_demo" and not allow_synthetic:
-            logger.error("تم إيقاف تحديث الصفقات: السعر من synthetic_demo. راجع TWELVE_DATA_API_KEY.")
-            telegram.send_error_alert("Trade updates stopped: price is from synthetic_demo. Check TWELVE_DATA_API_KEY.")
-            return
-        current_price = price_payload.get("current_price")
-        if not current_price:
-            logger.error("فشل في جلب السعر")
-            return
-
         # In the consolidated end-of-day digest, suppress this script's own
         # Telegram messages (trade events + confirmation). DB updates still run;
         # the daily report aggregates everything into one message. We achieve
@@ -174,13 +159,40 @@ def main() -> None:
         eod_quiet = os.environ.get("EOD_QUIET", "").lower() in {"1", "true", "yes"}
         telegram_for_events = None if eod_quiet else telegram
 
-        evaluations = manager.update_trades(
-            open_trades=open_trades,
-            current_price=float(current_price),
-            database=database,
-            telegram=telegram_for_events,
-            now=datetime.now(timezone.utc),
-        )
+        # Group active trades by symbol and fetch each market price separately.
+        # This is mandatory now that the bot supports Gold, FX pairs, and WTI.
+        grouped: dict[str, list] = {}
+        for trade in open_trades:
+            symbol = normalize_symbol(trade.get("symbol") or config.get("symbol", "XAU/USD"))
+            grouped.setdefault(symbol, []).append(trade)
+
+        evaluations = []
+        current_price = 0.0
+        for symbol, symbol_trades in grouped.items():
+            symbol_config = config_for_instrument(config, {"symbol": symbol})
+            market_data = MarketDataService(symbol_config)
+            manager = OpenTradesManager(symbol_config)
+
+            # Use an OHLC payload instead of blind quote fallback so production never
+            # manages/closes trades using synthetic_demo prices if the market API fails.
+            price_payload = market_data.get_ohlcv(symbol_config.get("primary_timeframe", "15m"), outputsize=60)
+            allow_synthetic = bool(symbol_config.get("data_source", {}).get("allow_synthetic_in_production", False))
+            if os.environ.get("GITHUB_ACTIONS") == "true" and price_payload.get("source") == "synthetic_demo" and not allow_synthetic:
+                logger.error("تم إيقاف تحديث صفقات %s: السعر من synthetic_demo. راجع TWELVE_DATA_API_KEY.", symbol)
+                telegram.send_error_alert(f"Trade updates stopped for {symbol}: price is from synthetic_demo. Check TWELVE_DATA_API_KEY.")
+                continue
+            symbol_price = price_payload.get("current_price")
+            if not symbol_price:
+                logger.error("فشل في جلب السعر للرمز %s", symbol)
+                continue
+            current_price = float(symbol_price)
+            evaluations.extend(manager.update_trades(
+                open_trades=symbol_trades,
+                current_price=current_price,
+                database=database,
+                telegram=telegram_for_events,
+                now=datetime.now(timezone.utc),
+            ))
         total_events = 0
         for evaluation in evaluations:
             if evaluation.get("events"):

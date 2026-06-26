@@ -13,6 +13,7 @@ from typing import Any, Dict, List
 
 from agents.base_agent import BaseAgent
 from utils.helpers import calculate_pips, load_config
+from utils.instruments import points_to_price
 
 
 class OpenTradesManager(BaseAgent):
@@ -143,6 +144,7 @@ class OpenTradesManager(BaseAgent):
         """Return updates/events for a single trade without external side effects."""
         now = now or datetime.now(timezone.utc)
         trade_type = str(trade.get("type", "BUY")).upper()
+        symbol = str(trade.get("symbol") or self.config.get("symbol", "XAU/USD"))
         old_status = str(trade.get("status", "OPEN")).upper()
         entry = self._f(trade.get("entry_price"))
         stop_loss = self._f(trade.get("stop_loss"))
@@ -159,9 +161,9 @@ class OpenTradesManager(BaseAgent):
         # actually touches the entry. Only then does it become OPEN. This fixes
         # phantom fills/profits where a far LIMIT was treated as already filled.
         if old_status == "PENDING":
-            return self._evaluate_pending(trade, current_price, now, trade_type, entry, tp1)
+            return self._evaluate_pending(trade, current_price, now, trade_type, entry, tp1, symbol)
 
-        pnl_points = calculate_pips(entry, current_price, trade_type)
+        pnl_points = calculate_pips(entry, current_price, trade_type, symbol)
         max_favorable_excursion = max(previous_mfe, pnl_points)
         max_adverse_excursion = min(previous_mae, pnl_points)
         management_phase = self._management_phase(old_status, sl_moved_to_entry, partial_close, pnl_points)
@@ -211,7 +213,7 @@ class OpenTradesManager(BaseAgent):
             # early-breakeven mechanism while still OPEN.
             new_status = "SL_HIT"
             events.append("TRAILING_SL_HIT")
-            trailing_exit_pnl = calculate_pips(entry, stop_loss, trade_type)
+            trailing_exit_pnl = calculate_pips(entry, stop_loss, trade_type, symbol)
             result = "WIN" if trailing_exit_pnl > 0 else "BREAKEVEN"
             close_price = stop_loss
             final_pnl = round(trailing_exit_pnl, 1)
@@ -287,7 +289,7 @@ class OpenTradesManager(BaseAgent):
                 and "EXPIRED" not in events
             ):
                 base_stop = new_stop_loss if new_stop_loss is not None else stop_loss
-                trailing_candidate = self._compute_trailing_stop(trade_type, current_price, base_stop, entry)
+                trailing_candidate = self._compute_trailing_stop(trade_type, current_price, base_stop, entry, symbol)
                 if trailing_candidate is not None:
                     new_stop_loss = trailing_candidate
                     if "TRAILING_SL_UPDATED" not in events:
@@ -434,7 +436,7 @@ class OpenTradesManager(BaseAgent):
             return current_price <= entry
         return current_price >= entry
 
-    def _evaluate_pending(self, trade, current_price, now, trade_type, entry, tp1):
+    def _evaluate_pending(self, trade, current_price, now, trade_type, entry, tp1, symbol):
         """Activate a pending order on touch, else keep it waiting (no PnL).
 
         Cancellation of stale pending orders is handled by the signal pipeline
@@ -504,7 +506,7 @@ class OpenTradesManager(BaseAgent):
             pass  # Handled by the next analysis cycle via decision_agent
 
         # Still waiting — report distance to entry, no PnL.
-        dist_pts = abs(calculate_pips(current_price, entry, trade_type))
+        dist_pts = abs(calculate_pips(current_price, entry, trade_type, symbol))
         return {
             "trade_id": trade.get("id"),
             "old_status": "PENDING",
@@ -554,7 +556,7 @@ class OpenTradesManager(BaseAgent):
         return stop_loss <= entry + epsilon
 
     def _compute_trailing_stop(
-        self, trade_type: str, current_price: float, current_stop_loss: float, entry: float
+        self, trade_type: str, current_price: float, current_stop_loss: float, entry: float, symbol: str | None = None
     ) -> float | None:
         """Progressive trailing stop, only ever moving in the profitable direction.
 
@@ -567,9 +569,9 @@ class OpenTradesManager(BaseAgent):
         tiny updates every run. Never moves the stop below the configured
         min_profit_lock above/below entry.
         """
-        distance = self.trailing_distance / 10.0
-        step = self.trailing_step / 10.0
-        min_lock = self.trailing_min_profit_lock / 10.0
+        distance = points_to_price(self.trailing_distance, symbol)
+        step = points_to_price(self.trailing_step, symbol)
+        min_lock = points_to_price(self.trailing_min_profit_lock, symbol)
         epsilon = 1e-9
         if trade_type == "BUY":
             candidate = current_price - distance

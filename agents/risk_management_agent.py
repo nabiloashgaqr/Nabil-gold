@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Tuple
 
 from agents.base_agent import BaseAgent
 from utils.helpers import calculate_pips, load_config
+from utils.instruments import points_to_price, price_to_points
 
 class RiskManagementAgent(BaseAgent):
     """Evaluate risk parameters and approve/reject a potential trade."""
@@ -22,6 +23,7 @@ class RiskManagementAgent(BaseAgent):
         self.settings = self.config.get("risk_settings", {})
         self.filters = self.config.get("filters", {})
         self.weights = self.config.get("agent_weights", {"technical": 0.20, "classical": 0.20, "smc": 0.25, "price_action": 0.15, "multitimeframe": 0.15})
+        self.symbol = self.config.get("symbol", "XAU/USD")
 
     def evaluate(self, results: Dict[str, Any]) -> Dict[str, Any]:
         """Evaluate a setup returned by analytical agents."""
@@ -65,7 +67,7 @@ class RiskManagementAgent(BaseAgent):
             # configured ATR multipliers (tp_mult/sl_mult) applied to the new,
             # wider stop distance - otherwise R:R would shrink and min_rr_ratio
             # would start rejecting trades purely because SL got floored.
-            min_sl_distance = self._f(self.settings.get("min_sl_distance_points"), 0.0) / 10.0
+            min_sl_distance = points_to_price(self._f(self.settings.get("min_sl_distance_points"), 0.0), self.symbol)
             if min_sl_distance > 0 and abs(entry_price - stop_loss) < min_sl_distance:
                 sl_mult = self._f(self.settings.get("atr_multiplier_sl"), 1.5) or 1.5
                 tp1_ratio = self._f(self.settings.get("atr_multiplier_tp1"), 2.0) / sl_mult
@@ -150,18 +152,18 @@ class RiskManagementAgent(BaseAgent):
                     "order_type": self._classify_order(direction, entry_price, current_price),
                     "basis": entry_basis,
                     "current_price": round(current_price, 2),
-                    "distance_points": abs(calculate_pips(current_price, entry_price, direction)) if entry_price != current_price else 0.0,
+                    "distance_points": abs(calculate_pips(current_price, entry_price, direction, self.symbol)) if entry_price != current_price else 0.0,
                 },
                 "stop_loss": {
                     "price": round(stop_loss, 2),
-                    "distance_points": abs(calculate_pips(entry_price, stop_loss, direction)),
+                    "distance_points": abs(calculate_pips(entry_price, stop_loss, direction, self.symbol)),
                     "method": sl_method,
                     "buffer_added": round(buffer, 2),
                 },
                 "take_profit": {
-                    "tp1": {"price": round(tp1, 2), "distance_points": abs(calculate_pips(entry_price, tp1, direction)), "rr_ratio": round(rr_tp1, 2)},
-                    "tp2": {"price": round(tp2, 2), "distance_points": abs(calculate_pips(entry_price, tp2, direction)), "rr_ratio": round(rr_tp2, 2)},
-                    "tp3": {"price": round(tp3, 2), "distance_points": abs(calculate_pips(entry_price, tp3, direction)), "rr_ratio": round(rr_tp3, 2)},
+                    "tp1": {"price": round(tp1, 2), "distance_points": abs(calculate_pips(entry_price, tp1, direction, self.symbol)), "rr_ratio": round(rr_tp1, 2)},
+                    "tp2": {"price": round(tp2, 2), "distance_points": abs(calculate_pips(entry_price, tp2, direction, self.symbol)), "rr_ratio": round(rr_tp2, 2)},
+                    "tp3": {"price": round(tp3, 2), "distance_points": abs(calculate_pips(entry_price, tp3, direction, self.symbol)), "rr_ratio": round(rr_tp3, 2)},
                 },
                 "risk_metrics": {
                     "atr": round(atr, 2),
@@ -177,7 +179,7 @@ class RiskManagementAgent(BaseAgent):
                 },
                 "trade_grade": risk_profile,
                 "position_size": position_size,
-                "trailing_stop": {"activate_at": "TP1", "move_sl_to": "entry", "trail_distance": round(max(atr * 10, 10), 1)},
+                "trailing_stop": {"activate_at": "TP1", "move_sl_to": "entry", "trail_distance": round(max(price_to_points(atr, self.symbol), 10), 1)},
                 "summary": self._summary(approved, rejection_reason, stop_loss, tp1, tp2, rr_tp2),
             }
         except Exception as exc:  # noqa: BLE001
@@ -313,12 +315,12 @@ class RiskManagementAgent(BaseAgent):
             return f"{direction}_MARKET"
 
         if entry_style == "hybrid":
-            threshold = self._f(oe.get("market_threshold_points", 30), 30) / 10.0
+            threshold = points_to_price(self._f(oe.get("market_threshold_points", 30), 30), self.symbol)
             if abs(entry - current) <= max(threshold, 0.01):
                 return f"{direction}_MARKET"
         else:
             # smart mode
-            threshold = self._f(oe.get("pending_threshold_points", 1.0), 1.0) / 10.0
+            threshold = points_to_price(self._f(oe.get("pending_threshold_points", 1.0), 1.0), self.symbol)
             if abs(entry - current) <= max(threshold, 0.01):
                 return f"{direction}_MARKET"
 
@@ -388,7 +390,7 @@ class RiskManagementAgent(BaseAgent):
             fr = oe.get("fixed_risk", {}) or {}
             max_risk_points = int(fr.get("max_risk_distance_points", 300) or 300)
 
-            points_to_price = lambda p: p / 10.0  # 300 points = 30.00 in price
+            to_price = lambda p: points_to_price(p, self.symbol)
 
             if direction == "SELL":
                 # Find nearest resistance above current price
@@ -415,16 +417,16 @@ class RiskManagementAgent(BaseAgent):
                                 best_level = zone_high
 
                 if best_level is not None and best_distance is not None:
-                    dist_points = best_distance * 10  # convert to points
+                    dist_points = abs(price_to_points(best_distance, self.symbol))
                     if dist_points <= max_risk_points:
-                        sl_price = best_level + (fr.get("sl_buffer_points", 20) / 10.0)
+                        sl_price = best_level + (points_to_price(fr.get("sl_buffer_points", 20), self.symbol))
                         return _market(
                             f"SELL fixed_risk: resistance at {best_level:.2f} "
                             f"({dist_points:.0f}pts away ≤ {max_risk_points}pts). "
                             f"SL@{sl_price:.2f} (above level+buffer)"
                         )
                     else:
-                        target_price = best_level - points_to_price(max_risk_points)
+                        target_price = best_level - to_price(max_risk_points)
                         return _wait(
                             f"SELL waiting: resistance at {best_level:.2f} is "
                             f"{dist_points:.0f}pts away > {max_risk_points}pts. "
@@ -456,16 +458,16 @@ class RiskManagementAgent(BaseAgent):
                                 best_level = zone_low
 
                 if best_level is not None and best_distance is not None:
-                    dist_points = best_distance * 10
+                    dist_points = abs(price_to_points(best_distance, self.symbol))
                     if dist_points <= max_risk_points:
-                        sl_price = best_level - (fr.get("sl_buffer_points", 20) / 10.0)
+                        sl_price = best_level - (points_to_price(fr.get("sl_buffer_points", 20), self.symbol))
                         return _market(
                             f"BUY fixed_risk: support at {best_level:.2f} "
                             f"({dist_points:.0f}pts away ≤ {max_risk_points}pts). "
                             f"SL@{sl_price:.2f} (below level+buffer)"
                         )
                     else:
-                        target_price = best_level + points_to_price(max_risk_points)
+                        target_price = best_level + to_price(max_risk_points)
                         return _wait(
                             f"BUY waiting: support at {best_level:.2f} is "
                             f"{dist_points:.0f}pts away > {max_risk_points}pts. "
@@ -476,9 +478,9 @@ class RiskManagementAgent(BaseAgent):
         # ── smart / hybrid modes (existing logic) ────────────────────────
         enabled = bool(se.get("enabled", True))
         fill_at = str(se.get("fill_at", "mid")).lower()
-        zone_width = self._f(se.get("zone_width_points", 50), 50) / 10.0
-        min_pts = self._f(se.get("min_pullback_points", 60), 60) / 10.0
-        max_pts = self._f(se.get("max_pullback_points", 350), 350) / 10.0
+        zone_width = points_to_price(self._f(se.get("zone_width_points", 50), 50), self.symbol)
+        min_pts = points_to_price(self._f(se.get("min_pullback_points", 60), 60), self.symbol)
+        max_pts = points_to_price(self._f(se.get("max_pullback_points", 350), 350), self.symbol)
 
         if not enabled:
             return _market("Smart entry disabled")
@@ -497,7 +499,7 @@ class RiskManagementAgent(BaseAgent):
             return round(entry, 2), kind, basis, zone
 
         if entry_style == "hybrid":
-            market_threshold = self._f(oe.get("market_threshold_points", 30), 30) / 10.0
+            market_threshold = points_to_price(self._f(oe.get("market_threshold_points", 30), 30), self.symbol)
             smc = results.get("smc", {}) or {}
             order_blocks = smc.get("order_blocks", []) or []
             want_type = "bullish" if direction == "BUY" else "bearish"

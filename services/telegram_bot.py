@@ -15,7 +15,8 @@ from typing import Any, Dict, List
 
 import requests
 
-from utils.helpers import format_price, load_config
+from utils.helpers import calculate_pips, format_price, load_config
+from utils.instruments import price_to_points
 
 
 class TelegramService:
@@ -110,6 +111,7 @@ class TelegramService:
           * compact footer (mode, decision rule, disclaimer, id)
         """
         signal = decision.get("signal", {}) or {}
+        symbol = str(decision.get("symbol") or signal.get("symbol") or self.config.get("symbol", "XAU/USD"))
         trade_type = str(decision.get("decision", signal.get("type", "WAIT"))).upper()
         emoji = "🟢" if trade_type == "BUY" else "🔴" if trade_type == "SELL" else "🟡"
         entry = signal.get("entry", {}) or {}
@@ -157,7 +159,7 @@ class TelegramService:
         # ── Price / confidence / quality (single line) ─────────────────────
         confidence = int(float(decision.get("confidence", 0) or 0))
         quality = decision.get("quality", {}) or {}
-        snapshot_bits = [f"Price {format_price(current_price)}", f"Confidence {confidence}%"]
+        snapshot_bits = [f"Price {format_price(current_price, symbol)}", f"Confidence {confidence}%"]
         if quality.get("grade"):
             snapshot_bits.append(f"Quality {html.escape(str(quality.get('grade')))} ({float(quality.get('score', 0)):.0f}%)")
         snapshot_line = " · ".join(snapshot_bits)
@@ -170,7 +172,7 @@ class TelegramService:
             price = signal.get(key)
             if price in (None, 0, "", "0"):
                 continue
-            tp_lines.append(f"• <b>{label}:</b> {format_price(price)}")
+            tp_lines.append(f"• <b>{label}:</b> {format_price(price, symbol)}")
         tp_block = "\n".join(tp_lines) if tp_lines else "• —"
 
         # ── Agent votes table (all five analysis agents) ─────────────────
@@ -222,7 +224,7 @@ class TelegramService:
         divider = "━━━━━━━━━━━━━━━━━━━━━"
         thin = "──────────────────"
         sections = [
-            f"📊 <b>XAU/USD SIGNAL — {trade_type}</b> {emoji}",
+            f"📊 <b>{html.escape(symbol)} SIGNAL — {trade_type}</b> {emoji}",
             divider,
             f"🕒 {html.escape(header_line)}",
             f"📈 {snapshot_line}",
@@ -242,6 +244,7 @@ class TelegramService:
                 sl_suffix=sl_suffix,
                 tp_block=tp_block,
                 decision=decision,
+                symbol=symbol,
             ),
             thin,
             votes_block,
@@ -293,6 +296,7 @@ class TelegramService:
         sl_suffix: str,
         tp_block: str,
         decision: Dict[str, Any] | None = None,   # for nearest resistance etc.
+        symbol: str | None = None,
     ) -> str:
         """Render the TRADE PLAN section with smart entry execution.
 
@@ -320,21 +324,21 @@ class TelegramService:
 
         if entry_kind == "MARKET":
             # Market entry: single clean price only (no extra text)
-            lines.append(f"• <b>Entry:</b> {format_price(entry_price)}")
+            lines.append(f"• <b>Entry:</b> {format_price(entry_price, symbol)}")
         else:
             # Pending order: show the entry ZONE, the fill point inside it, and
             # the live market reference so it's clear it's a resting order.
             has_zone = entry_low not in (None, 0) and entry_high not in (None, 0) and float(entry_high) > float(entry_low)
             if has_zone:
-                lines.append(f"• <b>Entry zone:</b> {format_price(entry_low)} – {format_price(entry_high)}")
-                lines.append(f"• <b>Fill @</b> {format_price(entry_price)} (zone mid){dist_txt}")
+                lines.append(f"• <b>Entry zone:</b> {format_price(entry_low, symbol)} – {format_price(entry_high, symbol)}")
+                lines.append(f"• <b>Fill @</b> {format_price(entry_price, symbol)} (zone mid){dist_txt}")
             else:
-                lines.append(f"• <b>Entry @</b> {format_price(entry_price)}{dist_txt}")
-            lines.append(f"• <b>Market now:</b> {format_price(current_price)}")
+                lines.append(f"• <b>Entry @</b> {format_price(entry_price, symbol)}{dist_txt}")
+            lines.append(f"• <b>Market now:</b> {format_price(current_price, symbol)}")
             if entry_basis:
                 lines.append(f"   <i>{entry_basis}</i>")
 
-        lines.append(f"• <b>Stop loss:</b> {format_price(stop_loss)}{sl_suffix}")
+        lines.append(f"• <b>Stop loss:</b> {format_price(stop_loss, symbol)}{sl_suffix}")
         lines.append(self._format_management_line())
 
         # Nearest Resistance + distance (always try to show for better context)
@@ -344,8 +348,8 @@ class TelegramService:
         if nearest_res:
             try:
                 res_price = float(nearest_res)
-                dist_pts = abs(res_price - float(current_price)) * 10.0
-                lines.append(f"• <b>Nearest Resistance:</b> {format_price(res_price)}  ({dist_pts:.0f} pts away)")
+                dist_pts = abs(price_to_points(res_price - float(current_price), symbol))
+                lines.append(f"• <b>Nearest Resistance:</b> {format_price(res_price, symbol)}  ({dist_pts:.0f} pts away)")
             except (TypeError, ValueError):
                 pass
 
@@ -561,6 +565,7 @@ class TelegramService:
             "ORDER_FILLED": "🎯 Pending Order Filled",
         }
         title = event_titles.get(event_type, "🔄 Trade Update")
+        symbol = str(trade.get("symbol") or self.config.get("symbol", "XAU/USD"))
         pnl_emoji = "✅" if pnl_points > 0 else "➖" if pnl_points == 0 else "❌"
         old_status = evaluation.get("old_status", trade.get("status", "OPEN"))
         new_status = evaluation.get("new_status", old_status)
@@ -577,16 +582,16 @@ class TelegramService:
         extra_text = "\n".join(extra_lines)
 
         text = f"""
-{title} - <b>XAU/USD</b>
+{title} - <b>{html.escape(symbol)}</b>
 ━━━━━━━━━━━━━━━━━━━━━
 
 🆔 <b>ID:</b> <code>{html.escape(str(trade.get('id')))}</code>
 📊 <b>Type:</b> {html.escape(str(trade.get('type')))}
-📍 <b>Entry:</b> {format_price(trade.get('entry_price'))}
-🛑 <b>Stop Loss:</b> {format_price(display_stop_loss)}
-🎯 <b>TP1:</b> {format_price(trade.get('tp1'))}
-🎯 <b>TP2:</b> {format_price(trade.get('tp2'))}
-💰 <b>Current Price:</b> {format_price(current_price)}
+📍 <b>Entry:</b> {format_price(trade.get('entry_price'), symbol)}
+🛑 <b>Stop Loss:</b> {format_price(display_stop_loss, symbol)}
+🎯 <b>TP1:</b> {format_price(trade.get('tp1'), symbol)}
+🎯 <b>TP2:</b> {format_price(trade.get('tp2'), symbol)}
+💰 <b>Current Price:</b> {format_price(current_price, symbol)}
 📈 <b>Current PnL:</b> {pnl_points:+.1f} pts {pnl_emoji}
 📌 <b>Status:</b> {self._status_text(old_status, new_status)}
 {extra_text}
@@ -650,6 +655,7 @@ class TelegramService:
             key=lambda e: self._EVENT_PRIORITY.index(e) if e in self._EVENT_PRIORITY else len(self._EVENT_PRIORITY),
         )
         title = event_titles.get(ordered[0], "🔄 Trade Update")
+        symbol = str(trade.get("symbol") or self.config.get("symbol", "XAU/USD"))
 
         pnl_emoji = "✅" if pnl_points > 0 else "➖" if pnl_points == 0 else "❌"
         old_status = evaluation.get("old_status", trade.get("status", "OPEN"))
@@ -675,16 +681,16 @@ class TelegramService:
         notes_text = "\n".join(note_lines)
 
         text = f"""
-{title} - <b>XAU/USD</b>
+{title} - <b>{html.escape(symbol)}</b>
 ━━━━━━━━━━━━━━━━━━━━━
 
 🆔 <b>ID:</b> <code>{html.escape(str(trade.get('id')))}</code>
 📊 <b>Type:</b> {html.escape(str(trade.get('type')))}
-📍 <b>Entry:</b> {format_price(trade.get('entry_price'))}
-🛑 <b>Stop Loss:</b> {format_price(display_stop_loss)}
-🎯 <b>TP1:</b> {format_price(trade.get('tp1'))}
-🎯 <b>TP2:</b> {format_price(trade.get('tp2'))}
-💰 <b>Current Price:</b> {format_price(current_price)}
+📍 <b>Entry:</b> {format_price(trade.get('entry_price'), symbol)}
+🛑 <b>Stop Loss:</b> {format_price(display_stop_loss, symbol)}
+🎯 <b>TP1:</b> {format_price(trade.get('tp1'), symbol)}
+🎯 <b>TP2:</b> {format_price(trade.get('tp2'), symbol)}
+💰 <b>Current Price:</b> {format_price(current_price, symbol)}
 📈 <b>Current PnL:</b> {pnl_points:+.1f} pts {pnl_emoji}
 📌 <b>Status:</b> {self._status_text(old_status, new_status)}
 {extra_text}
@@ -709,7 +715,8 @@ class TelegramService:
         except (TypeError, ValueError):
             return ""
         trade_type = str(trade.get("type") or trade.get("side") or "BUY").upper()
-        locked_pts = (new_sl - entry) * 10.0 if trade_type == "BUY" else (entry - new_sl) * 10.0
+        symbol = str(trade.get("symbol") or "XAU/USD")
+        locked_pts = calculate_pips(entry, new_sl, trade_type, symbol)
         if locked_pts > 0:
             return f"locking about +{locked_pts:.0f} pts"
         if abs(locked_pts) < 0.5:
@@ -718,17 +725,18 @@ class TelegramService:
 
     def _trade_event_note(self, event_type: str, trade: Dict[str, Any], current_price: float, evaluation: Dict[str, Any]) -> str:
         """Return an English note for a trade-management event."""
+        symbol = str(trade.get("symbol") or self.config.get("symbol", "XAU/USD"))
         if event_type == "ORDER_FILLED":
-            return f"🎯 Pending order filled at {format_price(trade.get('entry_price'))}. Position is now live and being managed."
+            return f"🎯 Pending order filled at {format_price(trade.get('entry_price'), symbol)}. Position is now live and being managed."
         if event_type == "NEAR_TP1":
-            return f"💡 Price reached about 80% of TP1 distance ({format_price(trade.get('tp1'))}). Monitor trade management."
+            return f"💡 Price reached about 80% of TP1 distance ({format_price(trade.get('tp1'), symbol)}). Monitor trade management."
         if event_type == "TP1_HIT":
             return "✅ TP1 reached. Partial-profit / breakeven protection is applied according to the trade plan."
         if event_type == "MOVE_SL_TO_BE":
             # If BE and trailing happen in the same cycle, the final displayed SL
             # may already be beyond entry. This note should still describe the
             # breakeven trigger itself, so use the entry price here.
-            return f"💡 Stop Loss moved automatically to breakeven/entry {format_price(trade.get('entry_price'))} after the +100-point protection trigger."
+            return f"💡 Stop Loss moved automatically to breakeven/entry {format_price(trade.get('entry_price'), symbol)} after the +100-point protection trigger."
         if event_type == "TP2_HIT":
             return "🏆 TP2 reached. Trade completed successfully."
         if event_type == "SL_HIT":

@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS signals (
     id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     signal_type VARCHAR(10) NOT NULL CHECK (signal_type IN ('BUY', 'SELL', 'WAIT')),
     symbol VARCHAR(20) NOT NULL DEFAULT 'XAU/USD',
-    entry_price DECIMAL(18, 4),
+    entry_price DECIMAL(18, 6),
     confidence_score DECIMAL(5, 2) DEFAULT 0,
     quality VARCHAR(20),
     session_name VARCHAR(100),
@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS signals (
 -- Self-heal for existing signals tables
 ALTER TABLE signals ADD COLUMN IF NOT EXISTS signal_type      VARCHAR(10);
 ALTER TABLE signals ADD COLUMN IF NOT EXISTS symbol           VARCHAR(20) DEFAULT 'XAU/USD';
-ALTER TABLE signals ADD COLUMN IF NOT EXISTS entry_price      DECIMAL(18, 4);
+ALTER TABLE signals ADD COLUMN IF NOT EXISTS entry_price      DECIMAL(18, 6);
 ALTER TABLE signals ADD COLUMN IF NOT EXISTS confidence_score DECIMAL(5, 2) DEFAULT 0;
 ALTER TABLE signals ADD COLUMN IF NOT EXISTS quality          VARCHAR(20);
 ALTER TABLE signals ADD COLUMN IF NOT EXISTS session_name     VARCHAR(100);
@@ -92,35 +92,35 @@ CREATE TABLE IF NOT EXISTS trades (
     trade_type VARCHAR(10) GENERATED ALWAYS AS (type) STORED,
     symbol VARCHAR(20) NOT NULL DEFAULT 'XAU/USD',
 
-    entry_price DECIMAL(18, 4) NOT NULL,
+    entry_price DECIMAL(18, 6) NOT NULL,
     entry_time TIMESTAMPTZ,
-    stop_loss DECIMAL(18, 4),
-    initial_stop_loss DECIMAL(18, 4),
-    tp1 DECIMAL(18, 4),
-    tp2 DECIMAL(18, 4),
+    stop_loss DECIMAL(18, 6),
+    initial_stop_loss DECIMAL(18, 6),
+    tp1 DECIMAL(18, 6),
+    tp2 DECIMAL(18, 6),
 
     confidence INTEGER DEFAULT 0,
     trading_mode VARCHAR(20) DEFAULT 'paper' CHECK (trading_mode IN ('paper', 'live', 'demo', 'manual')),
     paper_trading BOOLEAN DEFAULT TRUE,
-    paper_balance_start DECIMAL(18, 4),
+    paper_balance_start DECIMAL(18, 6),
     paper_lot_size DECIMAL(18, 6),
     status VARCHAR(30) DEFAULT 'OPEN' CHECK (status IN (
         'OPEN', 'PARTIAL', 'TP1_HIT', 'TP2_HIT', 'SL_HIT', 'BE_HIT',
         'MANUAL_CLOSE', 'EXPIRED', 'CLOSED', 'CANCELLED'
     )),
 
-    current_price DECIMAL(18, 4),
-    current_pnl DECIMAL(18, 4) DEFAULT 0,
-    current_pnl_points DECIMAL(18, 4) DEFAULT 0,
-    final_pnl DECIMAL(18, 4),
+    current_price DECIMAL(18, 6),
+    current_pnl DECIMAL(18, 6) DEFAULT 0,
+    current_pnl_points DECIMAL(18, 6) DEFAULT 0,
+    final_pnl DECIMAL(18, 6),
 
     sl_moved_to_entry BOOLEAN DEFAULT FALSE,
     partial_close BOOLEAN DEFAULT FALSE,
     updates_sent JSONB DEFAULT '[]'::jsonb,
     exit_warning BOOLEAN DEFAULT FALSE,
     management_phase VARCHAR(40),
-    max_favorable_excursion DECIMAL(18, 4) DEFAULT 0,
-    max_adverse_excursion DECIMAL(18, 4) DEFAULT 0,
+    max_favorable_excursion DECIMAL(18, 6) DEFAULT 0,
+    max_adverse_excursion DECIMAL(18, 6) DEFAULT 0,
     result VARCHAR(30),
     reasons JSONB DEFAULT '[]'::jsonb,
     signal_snapshot JSONB DEFAULT '{}'::jsonb,
@@ -129,7 +129,7 @@ CREATE TABLE IF NOT EXISTS trades (
     opened_at TIMESTAMPTZ GENERATED ALWAYS AS (entry_time) STORED,
     closed_at TIMESTAMPTZ,
     close_time TIMESTAMPTZ,
-    close_price DECIMAL(18, 4),
+    close_price DECIMAL(18, 6),
     last_updated TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -139,36 +139,36 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS signal_id           TEXT;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS type                VARCHAR(10);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS side                VARCHAR(10);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS symbol              VARCHAR(20) DEFAULT 'XAU/USD';
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_price         DECIMAL(18, 4);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_price         DECIMAL(18, 6);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_time          TIMESTAMPTZ;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS stop_loss           DECIMAL(18, 4);
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS initial_stop_loss   DECIMAL(18, 4);
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS tp1                 DECIMAL(18, 4);
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS tp2                 DECIMAL(18, 4);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS stop_loss           DECIMAL(18, 6);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS initial_stop_loss   DECIMAL(18, 6);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS tp1                 DECIMAL(18, 6);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS tp2                 DECIMAL(18, 6);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS confidence          INTEGER DEFAULT 0;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS trading_mode        VARCHAR(20) DEFAULT 'paper';
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS paper_trading       BOOLEAN DEFAULT TRUE;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS paper_balance_start DECIMAL(18, 4);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS paper_balance_start DECIMAL(18, 6);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS paper_lot_size      DECIMAL(18, 6);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS status              VARCHAR(30) DEFAULT 'OPEN';
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS current_price       DECIMAL(18, 4);
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS current_pnl         DECIMAL(18, 4) DEFAULT 0;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS current_pnl_points  DECIMAL(18, 4) DEFAULT 0;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS final_pnl           DECIMAL(18, 4);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS current_price       DECIMAL(18, 6);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS current_pnl         DECIMAL(18, 6) DEFAULT 0;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS current_pnl_points  DECIMAL(18, 6) DEFAULT 0;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS final_pnl           DECIMAL(18, 6);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS sl_moved_to_entry   BOOLEAN DEFAULT FALSE;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS partial_close       BOOLEAN DEFAULT FALSE;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS updates_sent        JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS exit_warning        BOOLEAN DEFAULT FALSE;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS management_phase    VARCHAR(40);
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS max_favorable_excursion DECIMAL(18, 4) DEFAULT 0;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS max_adverse_excursion   DECIMAL(18, 4) DEFAULT 0;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS max_favorable_excursion DECIMAL(18, 6) DEFAULT 0;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS max_adverse_excursion   DECIMAL(18, 6) DEFAULT 0;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS result              VARCHAR(30);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS reasons             JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS signal_snapshot     JSONB DEFAULT '{}'::jsonb;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS created_at          TIMESTAMPTZ DEFAULT NOW();
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS closed_at           TIMESTAMPTZ;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS close_time          TIMESTAMPTZ;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS close_price         DECIMAL(18, 4);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS close_price         DECIMAL(18, 6);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS last_updated        TIMESTAMPTZ DEFAULT NOW();
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS updated_at          TIMESTAMPTZ DEFAULT NOW();
 
@@ -183,17 +183,17 @@ CREATE INDEX IF NOT EXISTS idx_trades_open ON trades(status) WHERE status IN ('O
 -- =====================================================
 CREATE TABLE IF NOT EXISTS portfolio (
     id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-    balance DECIMAL(18, 4) DEFAULT 10000.00,
-    equity DECIMAL(18, 4) DEFAULT 10000.00,
-    available_margin DECIMAL(18, 4) DEFAULT 10000.00,
-    used_margin DECIMAL(18, 4) DEFAULT 0,
+    balance DECIMAL(18, 6) DEFAULT 10000.00,
+    equity DECIMAL(18, 6) DEFAULT 10000.00,
+    available_margin DECIMAL(18, 6) DEFAULT 10000.00,
+    used_margin DECIMAL(18, 6) DEFAULT 0,
     open_positions INTEGER DEFAULT 0,
     total_trades INTEGER DEFAULT 0,
     winning_trades INTEGER DEFAULT 0,
     losing_trades INTEGER DEFAULT 0,
     win_rate DECIMAL(5, 2) DEFAULT 0,
-    total_pnl DECIMAL(18, 4) DEFAULT 0,
-    max_drawdown DECIMAL(18, 4) DEFAULT 0,
+    total_pnl DECIMAL(18, 6) DEFAULT 0,
+    max_drawdown DECIMAL(18, 6) DEFAULT 0,
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -211,7 +211,7 @@ CREATE TABLE IF NOT EXISTS daily_reports (
     closed_trades INTEGER DEFAULT 0,
     winning_trades INTEGER DEFAULT 0,
     losing_trades INTEGER DEFAULT 0,
-    daily_pnl DECIMAL(18, 4) DEFAULT 0,
+    daily_pnl DECIMAL(18, 6) DEFAULT 0,
     win_rate DECIMAL(5, 2) DEFAULT 0,
     market_summary TEXT,
     technical_summary TEXT,

@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
+from utils.instruments import point_size, price_decimals
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.json"
@@ -68,19 +70,21 @@ def get_env_or_config(config: Dict[str, Any], dotted_path: str, env_name: str | 
     return current
 
 
-def format_price(price: float | int | str | None) -> str:
-    """Format XAU/USD price with two decimals."""
+def format_price(price: float | int | str | None, symbol: str | None = None) -> str:
+    """Format a price using instrument-specific decimals."""
+    decimals = price_decimals(symbol) if symbol else 2
     try:
-        return f"{float(price):.2f}"
+        return f"{float(price):.{decimals}f}"
     except (TypeError, ValueError):
-        return "0.00"
+        return f"{0:.{decimals}f}"
 
 
-def calculate_pips(entry: float, exit_price: float, trade_type: str = "BUY") -> float:
-    """Calculate gold points. Convention: 1.00 USD move = 10 points."""
+def calculate_pips(entry: float, exit_price: float, trade_type: str = "BUY", symbol: str | None = None) -> float:
+    """Calculate broker-style points for any configured instrument."""
+    ps = point_size(symbol)
     if trade_type.upper() == "SELL":
-        return round((entry - exit_price) * 10, 1)
-    return round((exit_price - entry) * 10, 1)
+        return round((entry - exit_price) / ps, 1)
+    return round((exit_price - entry) / ps, 1)
 
 
 def now_utc() -> datetime:

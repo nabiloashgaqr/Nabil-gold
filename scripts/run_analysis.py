@@ -32,6 +32,7 @@ from services.market_data import MarketDataService
 from services.telegram_bot import TelegramService
 from services.learning_service import get_learning_service
 from utils.helpers import load_config, setup_logging
+from utils.instruments import enabled_instruments, config_for_instrument, price_to_points, points_to_price
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -245,14 +246,19 @@ def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService,
     cooldown_after_win = float(cooldown_cfg.get('after_win_minutes', max(legacy_cooldown * 0.33, 20)))
     lookback_hours = float(cooldown_cfg.get('lookback_hours', 6))
 
+    symbol = str(decision.get("symbol") or (decision.get("signal", {}) or {}).get("symbol") or config.get("symbol", "XAU/USD"))
+
     def _points_away(prev_price: float) -> float:
-        return abs(entry_price - prev_price) * 10.0
+        return abs(price_to_points(entry_price - prev_price, symbol=symbol))
 
     # ── Collect same-direction candidates (open + recently closed) ─────────
     candidates: List[Dict[str, Any]] = []
     seen_ids: set = set()
 
     def _add(trade: Dict[str, Any]) -> None:
+        trade_symbol = str(trade.get('symbol') or config.get('symbol', 'XAU/USD')).upper()
+        if trade_symbol != str(symbol).upper():
+            return
         tid = str(trade.get('id', ''))
         if tid and tid in seen_ids:
             return
@@ -528,7 +534,7 @@ async def _check_scale_in(
             else:
                 resistance_levels.append(max(top, bottom))
 
-    trigger_price = trigger_points / 10.0  # convert points to price distance
+    trigger_price = points_to_price(trigger_points, config.get("symbol"))  # convert points to price distance
 
     # Check each open trade for scale-in opportunity
     for trade in open_trades:
@@ -634,10 +640,9 @@ async def _check_scale_in(
             logger.error("📊 Scale-in %s failed: Telegram delivery error", trade_type)
 
 
-async def run_analysis_async() -> None:
-    """الدالة الرئيسية للتحليل (async)"""
+async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
+    """Run one analysis cycle for one configured symbol."""
 
-    config = load_config()
     telegram = TelegramService(config)
 
     try:
@@ -741,6 +746,9 @@ async def run_analysis_async() -> None:
         except Exception:
             learning_service = None
         decision = await DecisionAgent(config, learning_service=learning_service).decide_async(all_results)
+        decision["symbol"] = config.get("symbol", "XAU/USD")
+        if decision.get("signal"):
+            decision["signal"]["symbol"] = decision["symbol"]
 
         decision["dynamic_risk"] = all_results.get("dynamic_risk", {})
         logger.info(
@@ -896,6 +904,16 @@ async def run_analysis_async() -> None:
     except Exception as exc:  # noqa: BLE001
         logger.exception("خطأ في التحليل")
         telegram.send_error_alert(str(exc))
+
+
+async def run_analysis_async() -> None:
+    """Run analysis for all enabled instruments."""
+    base_config = load_config()
+    instruments = enabled_instruments(base_config)
+    for instrument in instruments:
+        cfg = config_for_instrument(base_config, instrument)
+        logger.info("▶️ Running analysis for %s", cfg.get("symbol"))
+        await _run_analysis_for_config(cfg)
 
 
 def main() -> None:

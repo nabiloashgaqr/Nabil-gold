@@ -20,7 +20,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agents.daily_report_agent import DailyReportAgent
 from services.database import DatabaseService
 from services.telegram_bot import TelegramService
-from utils.helpers import load_config, setup_logging
+from utils.helpers import calculate_pips, load_config, setup_logging
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -220,8 +220,8 @@ def main() -> None:
             typ = str(trade.get("type") or trade.get("trade_type") or "BUY").upper()
             entry = float(trade.get("entry_price", 0) or 0)
             px = float(trade.get("close_price") or trade.get("current_price") or entry or 0)
-            move = (px - entry) if typ == "BUY" else (entry - px)
-            return move * 10.0
+            symbol = str(trade.get("symbol") or "XAU/USD")
+            return calculate_pips(entry, px, typ, symbol)
 
         def _usd(points: float) -> float:
             return points / 10.0
@@ -285,7 +285,8 @@ def main() -> None:
                 typ = str(t.get("type") or t.get("trade_type", "BUY")).upper()
                 entry = float(t.get("entry_price", 0) or 0)
                 curr = float(t.get("current_price", entry) or entry)
-                p = (curr - entry) * 10.0 if typ == "BUY" else (entry - curr) * 10.0
+                symbol = str(t.get("symbol") or "XAU/USD")
+                p = calculate_pips(entry, curr, typ, symbol)
                 total_pts += p
                 sign = "🟢" if p > 0 else "🔴" if p < 0 else "➖"
                 lines.append(f"{sign} {typ} @ {entry:.2f} → {curr:.2f}  {p:+.0f} pts ({_usd(p):+.1f}$)")
