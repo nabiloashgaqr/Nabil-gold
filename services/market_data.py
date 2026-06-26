@@ -1,7 +1,8 @@
 """Market data service for all configured instruments.
 
-Fetches OHLCV data from **Finnhub only** (primary and exclusive).
-No Twelve Data fallback.
+Fetches OHLCV data from **Twelve Data** (primary and exclusive).
+Free tier: 800 calls/day — enough for 8 symbols every 5 minutes.
+
 A synthetic fallback exists **only** for local tests / development;
 production workflows block synthetic prices unless explicitly allowed.
 """
@@ -22,11 +23,9 @@ from utils.helpers import load_config
 
 
 class MarketDataService:
-    """Fetch and normalize OHLCV data — Finnhub ONLY."""
+    """Fetch and normalize OHLCV data — Twelve Data only."""
 
-    # Finnhub
-    FINNHUB_URL = "https://finnhub.io/api/v1/forex/candle"
-    FINNHUB_QUOTE_URL = "https://finnhub.io/api/v1/quote"
+    TWELVEDATA_URL = "https://api.twelvedata.com/time_series"
 
     TF_MINUTES = {
         "5m": 5,
@@ -37,49 +36,33 @@ class MarketDataService:
         "1D": 1440,
     }
 
-    # Finnhub resolution map
-    FINNHUB_RESOLUTION = {
-        "1m": "1",
-        "5m": "5",
-        "15m": "15",
-        "30m": "30",
-        "1H": "60",
-        "4H": "240",
-        "1D": "D",
+    TWELVEDATA_INTERVAL = {
+        "1m": "1min",
+        "5m": "5min",
+        "15m": "15min",
+        "30m": "30min",
+        "1H": "1h",
+        "4H": "4h",
+        "1D": "1day",
     }
 
-    SYMBOL_MAP_FINNHUB = {
-        "XAU/USD": "OANDA:XAU_USD",
-        "EUR/USD": "OANDA:EUR_USD",
-        "GBP/USD": "OANDA:GBP_USD",
-        "USD/JPY": "OANDA:USD_JPY",
-        "USD/CHF": "OANDA:USD_CHF",
-        "USD/CAD": "OANDA:USD_CAD",
-        "AUD/USD": "OANDA:AUD_USD",
-        "WTI/USD": "OANDA:WTICO_USD",
-        "USOIL": "OANDA:WTICO_USD",
-        "WTICO_USD": "OANDA:WTICO_USD",
+    SYMBOL_MAP = {
+        "XAU/USD": "XAU/USD",
+        "WTI/USD": "WTI/USD",
+        "USOIL": "WTI/USD",
+        "WTICO_USD": "WTI/USD",
     }
-
-    WTI_FALLBACKS = [
-        "OANDA:WTICO_USD",
-        "OANDA:WTI_USD",
-        "OANDA:BCO_USD",
-        "OANDA:XBR_USD",
-        "OANDA:XTI_USD",
-    ]
 
     def __init__(self, config: Dict[str, Any] | None = None) -> None:
         self.config = config or load_config()
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.finnhub_key = (
-            os.environ.get("FINNHUB_API_KEY")
-            or self._get_cfg_key("finnhub")
-            or self._get_cfg_key("FINNHUB_API_KEY")
+        self.api_key = (
+            os.environ.get("TWELVEDATA_API_KEY")
+            or self._get_cfg_key("twelvedata")
+            or self._get_cfg_key("TWELVEDATA_API_KEY")
         )
-        # Twelve Data completely removed. Only Finnhub is used.
         self.symbol = self.config.get("symbol", "XAU/USD")
-        self.finnhub_symbol = self._map_symbol(self.symbol)
+        self.td_symbol = self.SYMBOL_MAP.get(self.symbol.upper(), self.symbol)
         self._last_request_at = 0.0
         self._cache: Dict[str, Dict[str, Any]] = {}
         self.session = requests.Session()
@@ -91,17 +74,6 @@ class MarketDataService:
         if isinstance(val, str) and val.startswith("ENV:"):
             return os.environ.get(val.replace("ENV:", "", 1))
         return val if isinstance(val, str) else None
-
-    def _map_symbol(self, symbol: str) -> str:
-        s = symbol.upper().strip()
-        if s in self.SYMBOL_MAP_FINNHUB:
-            return self.SYMBOL_MAP_FINNHUB[s]
-        if "/" in s:
-            base, quote = s.split("/", 1)
-            return f"OANDA:{base}_{quote}"
-        if s.startswith("OANDA:"):
-            return s
-        return f"OANDA:{s.replace('/', '_')}"
 
     def get_gold_data(self, outputsize: int = 220) -> Dict[str, Any] | None:
         timeframes = self.config.get("timeframes", ["5m", "15m", "1H", "4H"])
@@ -137,15 +109,97 @@ class MarketDataService:
         cached = self._cache.get(cache_key)
         if cached and time.time() - float(cached.get("cached_at", 0)) < 60:
             return cached["payload"]
+
         payload: Dict[str, Any] | None = None
-        if self.finnhub_key and self.finnhub_key != "YOUR_API_KEY":
-            payload = self._fetch_finnhub_data(timeframe, outputsize)
+        if self.api_key and self.api_key != "YOUR_API_KEY":
+            payload = self._fetch_data(timeframe, outputsize)
+
         if payload is None:
-            self.logger.warning("Using synthetic demo data for %s %s. Configure FINNHUB_API_KEY for live prices.", self.symbol, timeframe)
+            self.logger.warning("Using synthetic demo data for %s %s. Configure TWELVEDATA_API_KEY.", self.symbol, timeframe)
             payload = self._generate_synthetic_data(timeframe, outputsize)
+
         self._cache[cache_key] = {"cached_at": time.time(), "payload": payload}
         return payload
 
+    # ── Twelve Data fetch ───────────────────────────────────────────
+    def _fetch_data(self, timeframe: str, outputsize: int) -> Dict[str, Any] | None:
+        interval = self.TWELVEDATA_INTERVAL.get(timeframe)
+        if not interval:
+            self.logger.warning("Twelve Data: unsupported timeframe %s", timeframe)
+            return None
+
+        params = {
+            "symbol": self.td_symbol,
+            "interval": interval,
+            "outputsize": min(outputsize, 5000),
+            "apikey": self.api_key,
+        }
+
+        for attempt in range(2):
+            try:
+                self._rate_limit()
+                resp = self.session.get(self.TWELVEDATA_URL, params=params, timeout=25)
+                resp.raise_for_status()
+                raw = resp.json()
+
+                if raw.get("status") == "error":
+                    self.logger.warning("Twelve Data error: %s", raw.get("message", "unknown"))
+                    return None
+
+                values = raw.get("values", [])
+                if not values:
+                    self.logger.warning("Twelve Data: no data for %s %s", self.symbol, timeframe)
+                    return None
+
+                candles = self._normalize_values(values)
+                if not candles:
+                    return None
+
+                if len(candles) > outputsize:
+                    candles = candles[-outputsize:]
+
+                current_price = float(candles[-1]["close"])
+                return {
+                    "symbol": self.symbol,
+                    "timeframe": timeframe,
+                    "data": candles,
+                    "current_price": current_price,
+                    "spread_points": None,
+                    "last_updated": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                    "source": "twelvedata",
+                }
+            except Exception as exc:
+                self.logger.warning("Twelve Data attempt %s failed %s %s: %s", attempt + 1, self.symbol, timeframe, exc)
+                time.sleep(0.5 * (attempt + 1))
+
+        return None
+
+    def _normalize_values(self, values: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        from utils.instruments import price_decimals
+        decimals = price_decimals(self.symbol)
+        candles: List[Dict[str, Any]] = []
+        for item in values:
+            try:
+                time_str = str(item.get("datetime", ""))
+                dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                candles.append({
+                    "time": dt.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                    "open": round(float(item["open"]), decimals),
+                    "high": round(float(item["high"]), decimals),
+                    "low": round(float(item["low"]), decimals),
+                    "close": round(float(item["close"]), decimals),
+                    "volume": float(item.get("volume", 0) or 0),
+                })
+            except (ValueError, KeyError, TypeError):
+                continue
+        candles.sort(key=lambda x: x["time"])
+        return candles
+
+    def get_current_price(self) -> float | None:
+        payload = self.get_ohlcv(self.config.get("primary_timeframe", "15m"), outputsize=5)
+        return float(payload["current_price"]) if payload else None
+
+    # ── Resampling ──────────────────────────────────────────────────
     def _build_resampled_payloads(self, base_payload: Dict[str, Any], timeframes: List[str]) -> Dict[str, Dict[str, Any]]:
         base_tf = str(base_payload.get("timeframe", "5m"))
         base_minutes = int(self.TF_MINUTES.get(base_tf, 5) or 5)
@@ -196,84 +250,7 @@ class MarketDataService:
             })
         return out
 
-    def get_current_price(self) -> float | None:
-        if self.finnhub_key and self.finnhub_key != "YOUR_API_KEY":
-            try:
-                self._rate_limit()
-                q = self._fetch_finnhub_data("1m" if "1m" in self.FINNHUB_RESOLUTION else "5m", outputsize=2)
-                if q and q.get("current_price"):
-                    return float(q["current_price"])
-            except Exception as exc:
-                self.logger.debug("Finnhub quote fallback failed: %s", exc)
-        payload = self.get_ohlcv(self.config.get("primary_timeframe", "15m"), outputsize=60)
-        return float(payload["current_price"]) if payload else None
-
-    def _fetch_finnhub_data(self, timeframe: str, outputsize: int) -> Dict[str, Any] | None:
-        resolution = self.FINNHUB_RESOLUTION.get(timeframe)
-        if not resolution:
-            self.logger.warning("Finnhub: unsupported timeframe %s", timeframe)
-            return None
-        tf_minutes = self.TF_MINUTES.get(timeframe, 15)
-        if resolution == "D":
-            tf_minutes = 1440
-        end_ts = int(time.time())
-        start_ts = end_ts - int(outputsize * tf_minutes * 60 * 1.8)
-        symbols_to_try = [self.finnhub_symbol]
-        if self.symbol.upper().startswith("WTI"):
-            symbols_to_try = self.WTI_FALLBACKS
-        for sym in symbols_to_try:
-            for attempt in range(2):
-                try:
-                    self._rate_limit()
-                    params = {"symbol": sym, "resolution": resolution, "from": start_ts, "to": end_ts, "token": self.finnhub_key}
-                    resp = self.session.get(self.FINNHUB_URL, params=params, timeout=25)
-                    resp.raise_for_status()
-                    raw = resp.json()
-                    if raw.get("s") != "ok" or not raw.get("c"):
-                        if attempt == 0:
-                            params["from"] = start_ts - outputsize * tf_minutes * 60 * 3
-                            continue
-                        self.logger.debug("Finnhub no_data %s %s: %s", sym, timeframe, raw.get("s"))
-                        break
-                    candles = self._normalize_finnhub_values(raw)
-                    if not candles:
-                        break
-                    if len(candles) > outputsize:
-                        candles = candles[-outputsize:]
-                    current_price = float(candles[-1]["close"])
-                    return {"symbol": self.symbol, "timeframe": timeframe, "data": candles, "current_price": current_price, "spread_points": None, "last_updated": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"), "source": "finnhub", "finnhub_symbol": sym}
-                except Exception as exc:
-                    self.logger.warning("Finnhub attempt %s failed %s %s: %s", attempt + 1, sym, timeframe, exc)
-                    time.sleep(0.5 * (attempt + 1))
-        return None
-
-    def _normalize_finnhub_values(self, raw: Dict[str, Any]) -> List[Dict[str, Any]]:
-        try:
-            closes = raw.get("c", [])
-            opens = raw.get("o", [])
-            highs = raw.get("h", [])
-            lows = raw.get("l", [])
-            volumes = raw.get("v", [])
-            times = raw.get("t", [])
-            n = min(len(closes), len(opens), len(highs), len(lows), len(times))
-            candles: List[Dict[str, Any]] = []
-            from utils.instruments import price_decimals
-            decimals = price_decimals(self.symbol)
-            for i in range(n):
-                try:
-                    ts = int(times[i])
-                    dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-                    candles.append({"time": dt.replace(microsecond=0).isoformat().replace("+00:00", "Z"), "open": round(float(opens[i]), decimals), "high": round(float(highs[i]), decimals), "low": round(float(lows[i]), decimals), "close": round(float(closes[i]), decimals), "volume": float(volumes[i]) if i < len(volumes) else 0.0})
-                except Exception:
-                    continue
-            candles.sort(key=lambda x: x["time"])
-            return candles
-        except Exception as exc:
-            self.logger.debug("Finnhub normalize failed: %s", exc)
-            return []
-
-    # Twelve Data completely removed (Finnhub only)
-
+    # ── Helpers ─────────────────────────────────────────────────────
     def _parse_dt(self, value: str) -> datetime:
         value = value.replace("Z", "+00:00")
         try:
@@ -290,7 +267,7 @@ class MarketDataService:
         start = now - timedelta(minutes=minutes * outputsize)
         seed = int(now.strftime("%Y%m%d%H")) + minutes
         rng = random.Random(seed)
-        base_prices = {"XAU/USD": 2350.0, "EUR/USD": 1.0850, "GBP/USD": 1.2700, "USD/JPY": 155.00, "USD/CHF": 0.9000, "USD/CAD": 1.3600, "AUD/USD": 0.6650, "WTI/USD": 75.00}
+        base_prices = {"XAU/USD": 3350.0, "WTI/USD": 75.00}
         base = base_prices.get(str(self.symbol).upper(), 1.0000) * (1 + math.sin(seed / 1000) * 0.002)
         from utils.instruments import price_decimals
         decimals = price_decimals(self.symbol)
