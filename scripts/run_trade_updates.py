@@ -63,7 +63,7 @@ def _build_status_message(open_trades, evaluations, current_price: float) -> str
     now_txt = datetime.now(timezone.utc).strftime("%H:%M UTC")
     if not open_trades:
         return (
-            "🔄 <b>Trades Update</b> · " + now_txt + "\n"
+            "🔄 <b>Trade Update</b> · " + now_txt + "\n"
             f"Price {current_price:.2f}\n"
             "📭 No open trades."
         )
@@ -72,7 +72,7 @@ def _build_status_message(open_trades, evaluations, current_price: float) -> str
     by_id = {str(ev.get("trade_id")): ev for ev in (evaluations or [])}
 
     lines = [
-        f"🔄 <b>Trades Update</b> · {now_txt}",
+        f"🔄 <b>Trade Update</b> · {now_txt}",
         f"Price {current_price:.2f} · {len(open_trades)} open",
         "───────────────",
     ]

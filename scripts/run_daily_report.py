@@ -97,14 +97,14 @@ def send_open_trades_report(db: DatabaseService, telegram: TelegramService) -> N
 
         if not trades:
             telegram.send_message(
-                "📊 <b>Open Trades Report</b>\n\n"
+                "📊 <b>Open Positions</b>\n\n"
                 "❌ No open trades currently"
             )
             return
 
         lines = [
             "━━━━━━━━━━━━━━━━━━━━",
-            "📊 <b>Open Trades Report</b>",
+            "📊 <b>Open Positions</b>",
             f"📅 Report time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC",
             f"📈 Open trades: {len(trades)}",
             "━━━━━━━━━━━━━━━━━━━━",
@@ -228,7 +228,7 @@ def main() -> None:
 
         # Build one clean consolidated message.
         lines = [
-            "📊 <b>Gold AI Signals — Daily Summary</b>",
+            "📊 <b>SmartSignal — Daily Summary</b>",
             "━━━━━━━━━━━━━━━━━━━━━",
             f"📅 {datetime.now(timezone.utc).strftime('%Y-%m-%d')} (Asia/Hebron)",
             "",

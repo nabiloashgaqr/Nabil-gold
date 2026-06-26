@@ -445,7 +445,7 @@ def _build_market_status_message(
     reason_text = "\n".join(reason_lines)
 
     return (
-        "🟡 <b>Gold AI Signals — Market Status</b>\n"
+        "🟡 <b>SmartSignal — Market Status</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         f"📈 Price: {price_text}\n"
         "🎯 Decision: WAIT\n"
@@ -453,7 +453,7 @@ def _build_market_status_message(
         f"<b>Reason:</b>\n{html.escape(reason_text)}\n\n"
         f"<b>Notes:</b>\n{html.escape(open_note)}\n{warnings_text}\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "<i>Periodic market status • Next market status in ~1 hour</i>"
+        "<i>Market status • Next market status in ~1 hour</i>"
     )
 
 
@@ -611,7 +611,7 @@ async def _check_scale_in(
         # user actually received the message; otherwise a failed Telegram send
         # would create an invisible trade in the DB.
         scale_msg = (
-            "📊 <b>SCALE-IN — {trade_type}</b>\n"
+            "📊 <b>Scale-In — {trade_type}</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
             "Parent trade: <code>{parent_id}</code>\n"
             "Original entry: {entry_price}\n"
@@ -665,7 +665,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 # Price may not be fetched yet; use placeholder or skip price if unavailable
                 price_text = "N/A"
                 telegram.send_message(
-                    "🟡 <b>Gold AI Signals — Market Status</b>\n"
+                    "🟡 <b>SmartSignal — Market Status</b>\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
                     f"📈 Price: {price_text}\n"
                     f"🎯 Decision: WAIT\n"
@@ -673,7 +673,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                     f"<b>Reason:</b>\n• {html.escape(str(session.get('reason', 'Outside trading hours')))}\n"
                     f"<b>Session:</b> {html.escape(str(session.get('current_session') or 'N/A'))}\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
-                    "<i>Periodic market status • Next market status in ~1 hour</i>"
+                    "<i>Market status • Next market status in ~1 hour</i>"
                 )
             return  # ══ لا تحليل خارج الجلسات ══
 
