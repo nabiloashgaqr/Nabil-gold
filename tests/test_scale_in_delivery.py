@@ -80,7 +80,7 @@ def test_scale_in_sends_message_then_saves_trade() -> None:
     asyncio.run(_check_scale_in(config, all_results, open_trades, db, tg))
 
     assert len(tg.messages) == 1
-    assert "SCALE-IN" in tg.messages[0]
+    assert "Scale-In" in tg.messages[0]
     assert "TRADE_PARENT" in tg.messages[0]
     assert len(db.saved) == 1
     assert db.saved[0]["trade_id"] == "TRADE_TEST_SCALE_IN"
