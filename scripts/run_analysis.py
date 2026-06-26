@@ -907,21 +907,13 @@ async def run_analysis_async() -> None:
     telegram = TelegramService(base_config)
 
     # Pre-check: verify data API key works before running any symbol.
-    # This prevents duplicate error messages when multiple symbols fail.
     from services.market_data import MarketDataService
     test_service = MarketDataService(base_config)
     test_payload = test_service.get_ohlcv("5m", outputsize=3)
     if test_payload and test_payload.get("source") == "synthetic_demo":
         allow_synth = bool(base_config.get("data_source", {}).get("allow_synthetic_in_production", False))
         if os.environ.get("GITHUB_ACTIONS") == "true" and not allow_synth:
-            telegram.send_error_alert(
-                "🚨 Synthetic data detected — API key missing or invalid\n"
-                "━━━━━━━━━━━━━━━━━━━━━\n"
-                "TWELVEDATA_API_KEY is missing or wrong\n\n"
-                "1. Register: https://twelvedata.com/register\n"
-                "2. Add key to GitHub Secrets\n"
-                "━━━━━━━━━━━━━━━━━━━━━"
-            )
+            telegram.send_error_alert("TWELVEDATA_API_KEY is missing or invalid")
             logger.error("TWELVEDATA_API_KEY not working — aborting all symbols")
             return
 

@@ -180,8 +180,8 @@ def main() -> None:
             price_payload = market_data.get_ohlcv(base_tf, outputsize=5)
             allow_synthetic = bool(symbol_config.get("data_source", {}).get("allow_synthetic_in_production", False))
             if os.environ.get("GITHUB_ACTIONS") == "true" and price_payload.get("source") == "synthetic_demo" and not allow_synthetic:
-                logger.error("Trade updates stopped for %s: price is from synthetic_demo. Check TWELVEDATA_API_KEY.", symbol)
-                telegram.send_error_alert(f"Trade updates stopped for {symbol}: price is from synthetic_demo. Check TWELVEDATA_API_KEY.")
+                logger.error("Trade updates stopped for %s: TWELVEDATA_API_KEY is missing or invalid", symbol)
+                telegram.send_error_alert(f"Trade updates stopped: TWELVEDATA_API_KEY is missing or invalid")
                 continue
             symbol_price = price_payload.get("current_price")
             if not symbol_price:
