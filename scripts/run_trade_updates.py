@@ -173,9 +173,11 @@ def main() -> None:
             market_data = MarketDataService(symbol_config)
             manager = OpenTradesManager(symbol_config)
 
-            # Use an OHLC payload instead of blind quote fallback so production never
-            # manages/closes trades using synthetic_demo prices if the market API fails.
-            price_payload = market_data.get_ohlcv(symbol_config.get("primary_timeframe", "15m"), outputsize=60)
+            # Use the SAME base timeframe as analysis (5m) to benefit from
+            # the 60-second cache. Only need current price for trade management,
+            # not full 15m OHLCV data.
+            base_tf = symbol_config.get("data_source", {}).get("base_timeframe", "5m")
+            price_payload = market_data.get_ohlcv(base_tf, outputsize=5)
             allow_synthetic = bool(symbol_config.get("data_source", {}).get("allow_synthetic_in_production", False))
             if os.environ.get("GITHUB_ACTIONS") == "true" and price_payload.get("source") == "synthetic_demo" and not allow_synthetic:
                 logger.error("تم إيقاف تحديث صفقات %s: السعر من synthetic_demo. راجع TWELVEDATA_API_KEY.", symbol)
