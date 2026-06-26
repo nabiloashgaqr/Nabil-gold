@@ -1,7 +1,4 @@
-"""
-🤖 Technical Agent - Gold AI Signals
-وكيل التحليل الفني المدعوم بالذكاء الاصطناعي
-"""
+"""Technical Agent - classic indicator-based analysis."""
 
 import logging
 from typing import Dict, Any, List, Tuple
@@ -11,24 +8,15 @@ from utils.indicators import calculate_ema, calculate_rsi, calculate_macd, calcu
 logger = logging.getLogger(__name__)
 
 class TechnicalAgent(BaseAgent):
-    """
-    🤖 وكيل التحليل الفني
+    """Classic technical-analysis agent using indicators and key levels."""
     
-    يجمع بين:
-    1️⃣ المؤشرات الفنية الكلاسيكية (RSI, EMA, MACD)
-    2️⃣ الذكاء الاصطناعي (ChatGPT/Claude/Grok/Gemini)
-    
-    للحصول على تحليل دقيق ومتكامل
-    """
-    
-    def __init__(self, config: Dict, ai_service=None):
+    def __init__(self, config: Dict, **_kwargs):
         super().__init__(config)
-        self.ai_service = ai_service
         self.weight = config.get('agent_weights', {}).get('technical', 0.2)
     
     def analyze(self, data: Dict) -> Dict[str, Any]:
         """
-        🔍 تحليل الشارت باستخدام المؤشرات + AI (sync version)
+        🔍 تحليل الشارت باستخدام المؤشرات
         
         Args:
             data: {
@@ -45,15 +33,13 @@ class TechnicalAgent(BaseAgent):
                 'confidence': 0-100,
                 'reasoning': '...',
                 'indicators': {...},
-                'ai_analysis': {...},
                 'final_decision': '...'
             }
         """
-        # Use synchronous fallback if AI not available
         return self._sync_analyze(data)
     
     def _sync_analyze(self, data: Dict) -> Dict[str, Any]:
-        """التحليل المتزامن (بدون AI)"""
+        """التحليل الفني المتزامن"""
         
         candles = data.get('data', data.get('candles', []))
         indicators = data.get('indicators', {})
@@ -67,48 +53,14 @@ class TechnicalAgent(BaseAgent):
             'confidence': self._calculate_classic_confidence(technical_analysis),
             'weight': self.weight,
             'technical': technical_analysis,
-            'ai': {'available': False, 'reason': 'sync mode'},
             'reasoning': technical_analysis.get('trend', 'N/A'),
             'timestamp': self.now_iso()
         }
     
     async def analyze_async(self, data: Dict) -> Dict[str, Any]:
-        """
-        🔍 تحليل الشارت باستخدام المؤشرات + AI (async version)
-        """
-        
-        symbol = data.get('symbol', 'XAUUSD')
-        candles = data.get('data', data.get('candles', []))
-        price_data = data.get('price_data', {})
-        indicators = data.get('indicators', {})
-        timeframe = data.get('timeframe', '1h')
-        
-        # 1️⃣ التحليل الفني الكلاسيكي
-        technical_analysis = self._technical_analysis(candles, indicators)
-        
-        # 2️⃣ التحليل بالذكاء الاصطناعي (async)
-        ai_analysis = {}
-        if self.ai_service:
-            ai_analysis = await self._ai_analysis(
-                symbol, price_data, indicators, timeframe
-            )
-        
-        # 3️⃣ دمج التحليلات
-        final_signal, final_confidence = self._combine_analysis(
-            technical_analysis, ai_analysis
-        )
-        
-        return {
-            'agent': 'technical',
-            'signal': final_signal,
-            'confidence': final_confidence,
-            'weight': self.weight,
-            'technical': technical_analysis,
-            'ai': ai_analysis,
-            'reasoning': ai_analysis.get('reasoning', technical_analysis.get('trend', 'N/A')),
-            'timestamp': self.now_iso()
-        }
-    
+        """Async compatibility wrapper; uses the same classic analysis."""
+        return self._sync_analyze(data)
+
     def _technical_analysis(self, candles: list, indicators: Dict) -> Dict:
         """
         📊 التحليل الفني الكلاسيكي المطور v3.0
@@ -361,92 +313,6 @@ class TechnicalAgent(BaseAgent):
             return 'NONE'
         return 'NONE'
 
-    async def _ai_analysis(
-        self,
-        symbol: str,
-        price_data: Dict,
-        indicators: Dict,
-        timeframe: str
-    ) -> Dict:
-        """
-        🤖 التحليل بالذكاء الاصطناعي
-        """
-        
-        if not self.ai_service:
-            return {'available': False, 'error': 'AI service not configured'}
-        
-        try:
-            response = await self.ai_service.analyze_chart(
-                symbol=symbol,
-                price_data=price_data,
-                technical_indicators=indicators,
-                timeframe=timeframe,
-                agent_type='technical'
-            )
-            
-            if response.success:
-                parsed = self.ai_service.parse_json_response(response.content)
-                
-                if parsed:
-                    return {
-                        'available': True,
-                        'signal': parsed.get('signal', 'WAIT'),
-                        'confidence': parsed.get('confidence', 50),
-                        'reasoning': parsed.get('reasoning', ''),
-                        'entry_zone': parsed.get('entry_zone', ''),
-                        'stop_loss': parsed.get('stop_loss', ''),
-                        'take_profit_1': parsed.get('take_profit_1', ''),
-                        'take_profit_2': parsed.get('take_profit_2', ''),
-                        'risk_reward': parsed.get('risk_reward', ''),
-                        'provider': response.provider,
-                        'model': response.model,
-                        'tokens_used': response.tokens_used,
-                        'cost': response.cost
-                    }
-            
-            return {
-                'available': True,
-                'error': response.error,
-                'signal': 'WAIT',
-                'confidence': 50
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ خطأ في تحليل AI: {e}")
-            return {
-                'available': False,
-                'error': str(e),
-                'signal': 'WAIT',
-                'confidence': 50
-            }
-    
-    def _combine_analysis(
-        self,
-        technical: Dict,
-        ai: Dict
-    ) -> tuple:
-        """
-        🔄 دمج التحليل الكلاسيكي مع AI
-        """
-        
-        classic_signal = technical.get('classic_signal', 'WAIT')
-        classic_confidence = self._calculate_classic_confidence(technical)
-        
-        ai_signal = ai.get('signal', 'WAIT') if ai.get('available') else 'WAIT'
-        ai_confidence = ai.get('confidence', 50) if ai.get('available') else 0
-        
-        # إذا AI متاح، نعطيه وزن أكبر
-        if ai.get('available'):
-            # 60% AI + 40% كلاسيكي
-            final_signal = ai_signal if ai_confidence > 60 else classic_signal
-            final_confidence = (ai_confidence * 0.6) + (classic_confidence * 0.4)
-        else:
-            # بدون AI، نستخدم الكلاسيكي فقط
-            final_signal = classic_signal
-            final_confidence = classic_confidence
-        
-        return final_signal, round(final_confidence, 1)
-    
     def _calculate_classic_confidence(self, technical: Dict) -> float:
         """حساب ثقة التحليل الكلاسيكي"""
         
@@ -480,8 +346,6 @@ class TechnicalAgent(BaseAgent):
         """تلخيص التحليل لرسالة تيليجرام"""
         
         technical = result.get('technical', {})
-        ai = result.get('ai', {})
-        
         lines = [
             "📊 *Technical Analysis*",
             f"├ Trend: {technical.get('trend', 'N/A')}",
@@ -490,16 +354,5 @@ class TechnicalAgent(BaseAgent):
             f"├ Support: {technical.get('support', 'N/A')}",
             f"└ Resistance: {technical.get('resistance', 'N/A')}"
         ]
-        
-        if ai.get('available'):
-            lines.extend([
-                "",
-                f"🤖 *AI Analysis ({ai.get('provider', 'AI')})*",
-                f"├ Signal: {ai.get('signal', 'N/A')}",
-                f"├ Confidence: {ai.get('confidence', 'N/A')}%",
-                f"├ SL: {ai.get('stop_loss', 'N/A')}",
-                f"├ TP1: {ai.get('take_profit_1', 'N/A')}",
-                f"└ R/R: {ai.get('risk_reward', 'N/A')}"
-            ])
         
         return "\n".join(lines)

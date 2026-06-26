@@ -104,7 +104,7 @@ class TelegramService:
           * header (instrument, direction, time, session, run source)
           * one price/confidence/quality line
           * ENTRY / STOP / TAKE PROFIT block (with per-TP R:R)
-          * AGENT VOTES table (all five analysis agents + the Groq final gate)
+          * AGENT VOTES table (all five analysis agents)
           * WHY THIS TRADE (a single merged rationale, de-duplicated)
           * RISK NOTE / INVALIDATION (one line each, only if present)
           * compact footer (mode, decision rule, disclaimer, id)
@@ -173,7 +173,7 @@ class TelegramService:
             tp_lines.append(f"• <b>{label}:</b> {format_price(price)}")
         tp_block = "\n".join(tp_lines) if tp_lines else "• —"
 
-        # ── Agent votes table (all five + Groq final gate) ─────────────────
+        # ── Agent votes table (all five analysis agents) ─────────────────
         votes_block = self._format_agent_votes(decision, ai, trade_type, confidence)
 
         # ── WHY THIS TRADE — single merged, de-duplicated rationale ────────
@@ -186,7 +186,7 @@ class TelegramService:
             extra_lines.append(f"⚠️ <b>Risk note:</b> {risk_notes}")
         invalidation = self._clean_ai_field(ai.get("invalidation"))
         # Drop the invalidation line when it's just a restatement of the stop
-        # loss (Groq often returns the same level). It only adds value when it
+        # loss. It only adds value when it
         # gives DIFFERENT information (a different price, or a candle-close
         # condition). We compare any number it contains to the SL price.
         if invalidation and not self._invalidation_is_just_stop(invalidation, signal.get("stop_loss")):
@@ -215,12 +215,7 @@ class TelegramService:
         paper_trading = bool(decision.get("paper_trading", signal.get("paper_trading", trading_mode == "paper")))
         mode_text = "Paper Trading" if paper_trading else "Live / Manual Tracking"
         decision_mode = decision.get("decision_mode", "")
-        if decision.get("one_agent_groq_mode") or str(decision_mode) == "One-Agent + Groq":
-            rule_text = "One-Agent + Groq"
-        elif decision_mode:
-            rule_text = str(decision_mode)
-        else:
-            rule_text = "Groq final gate"
+        rule_text = str(decision_mode or "5-Agent Weighted Consensus")
         trade_id = decision.get("trade_id", signal.get("trade_id", "not saved yet"))
 
         # Assemble sections, dropping any empty ones so we never emit blank gaps.
@@ -405,7 +400,7 @@ class TelegramService:
 
     @staticmethod
     def _clean_ai_field(value: Any) -> str:
-        """Return a one-line, escaped AI field, or '' for empty/placeholder text."""
+        """Return a one-line, escaped text field, or '' for empty/placeholder text."""
         if value is None:
             return ""
         text = " ".join(str(value).split())
@@ -444,12 +439,7 @@ class TelegramService:
         return True
 
     def _format_agent_votes(self, decision: Dict[str, Any], ai: Dict[str, Any], final_type: str, final_conf: int) -> str:
-        """Build the AGENT VOTES table for all five analysis agents + Groq.
-
-        Reads the structured ``votes`` produced by DecisionAgent, where each
-        agent appears under its decided direction with its confidence. Agents
-        that produced no vote are shown as WAIT/—.
-        """
+        """Build the AGENT VOTES table for all five analysis agents."""
         votes = decision.get("votes", {}) or {}
         # Flatten votes -> {agent_name: (signal, confidence)}
         per_agent: Dict[str, tuple] = {}
@@ -473,34 +463,24 @@ class TelegramService:
             side, conf = per_agent.get(key, ("WAIT", None))
             lines.append(_row(label, side, conf))
 
-        if ai.get("available"):
-            ai_signal = str(ai.get("signal", final_type) or final_type).upper()
-            ai_conf = ai.get("confidence", final_conf)
-            try:
-                ai_conf_val: Any = int(float(ai_conf))
-            except (TypeError, ValueError):
-                ai_conf_val = final_conf
-            lines.append("·" * 18)
-            lines.append(_row("Groq (final)", ai_signal, ai_conf_val, "  ← decision gate"))
         return "\n".join(lines)
 
     def _format_why_this_trade(self, decision: Dict[str, Any], ai: Dict[str, Any]) -> str:
         """Merge the multiple overlapping rationale sources into one section.
 
         Previously the message repeated essentially the same idea up to three
-        times (classical reasoning + risk summary + Groq entry_reason + Groq
-        supportive_evidence). Here we collect candidate bullet points from the
+        times (classical reasoning + risk summary + supporting evidence). Here we collect candidate bullet points from the
         strongest sources, normalise them, drop near-duplicates, and cap the
         list so the section stays short.
         """
         candidates: List[str] = []
 
-        # 1) Groq's primary entry rationale (usually the richest single line).
+        # 1) Primary entry rationale.
         entry_reason = self._clean_ai_field(ai.get("entry_reason"))
         if entry_reason:
             candidates.append(entry_reason)
 
-        # 2) Groq's explicit supportive evidence bullets.
+        # 2) Explicit supportive evidence bullets.
         supportive = ai.get("supportive_evidence") or ai.get("evidence") or []
         if isinstance(supportive, (list, tuple)):
             for item in supportive:
@@ -528,7 +508,7 @@ class TelegramService:
         if direction in {"BUY", "SELL"} and agree and total:
             candidates.append(f"{agree} of {total} agents agree on direction")
 
-        # 5) Fallback to the classical reasoning summary if Groq gave nothing.
+        # 5) Fallback to the classical reasoning summary if no details are present.
         if not candidates:
             for reason in decision.get("reasons", []) or []:
                 cleaned = self._clean_ai_field(reason)

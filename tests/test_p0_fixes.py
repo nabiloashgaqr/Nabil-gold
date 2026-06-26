@@ -46,7 +46,7 @@ def test_decision_agent_counts_neutral_as_wait_vote() -> None:
     config = {
         "risk_settings": {"min_confidence": 60},
         "agent_weights": {"technical": 0.2, "classical": 0.2, "smc": 0.25, "price_action": 0.15, "multitimeframe": 0.2},
-        "groq_observation_mode": {"agent_min_confidence": 60, "min_groq_confidence": 51},
+        "external_model_observation_mode": {"agent_min_confidence": 60, "min_external_model_confidence": 51},
     }
 
     da = DecisionAgent(config)

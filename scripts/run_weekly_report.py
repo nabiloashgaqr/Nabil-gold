@@ -1,4 +1,4 @@
-"""Weekly AI Performance Report — entry point.
+"""Weekly Performance Report — entry point.
 
 Runs every Saturday at 10:00 local time (Asia/Hebron / Asia-Jerusalem) via
 GitHub Actions.
@@ -14,7 +14,6 @@ from zoneinfo import ZoneInfo
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from services.ai_service import get_ai_service
 from services.database import DatabaseService
 from services.telegram_bot import TelegramService
 from services.weekly_report import WeeklyReportService
@@ -50,17 +49,9 @@ async def main_async() -> int:
     telegram = TelegramService(config)
     database = DatabaseService(config)
 
-    ai_service = None
-    if bool((config.get("ai_service") or {}).get("enabled", False)):
-        try:
-            ai_service = get_ai_service(config)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("AI service init failed: %s (continuing with deterministic weekly report)", exc)
-
     service = WeeklyReportService(
         config=config,
         database=database,
-        ai_service=ai_service,
         telegram=telegram,
     )
 

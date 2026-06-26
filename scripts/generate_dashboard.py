@@ -25,13 +25,11 @@ def main() -> None:
     output = os.environ.get("DASHBOARD_OUTPUT", "storage/dashboard.html")
 
     trades = db.get_recent_trades(limit=limit)
-    reviews = db.get_recent_trade_reviews(limit=20)
-    memory_rules = db.get_active_memory_rules(limit=20)
-    html_text = render_dashboard(trades, reviews, memory_rules)
+    html_text = render_dashboard(trades)
     output_path = save_dashboard(html_text, output)
     summary = summarize_trades(trades)
 
-    logger.info("Dashboard generated: %s | trades=%s | reviews=%s | memory_rules=%s", output_path, len(trades), len(reviews), len(memory_rules))
+    logger.info("Dashboard generated: %s | trades=%s", output_path, len(trades))
     print(f"Dashboard generated: {output_path}")
     print(summary)
 

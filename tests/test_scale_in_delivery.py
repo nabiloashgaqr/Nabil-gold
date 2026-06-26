@@ -77,7 +77,7 @@ def test_scale_in_sends_message_then_saves_trade() -> None:
     db = _FakeDB()
     tg = _FakeTelegram()
 
-    asyncio.run(_check_scale_in(config, all_results, open_trades, db, tg, _FakeAI()))
+    asyncio.run(_check_scale_in(config, all_results, open_trades, db, tg))
 
     assert len(tg.messages) == 1
     assert "SCALE-IN" in tg.messages[0]
@@ -111,7 +111,7 @@ def test_scale_in_not_saved_if_telegram_delivery_fails() -> None:
     db = _FakeDB()
     tg = _FailingTelegram()
 
-    asyncio.run(_check_scale_in(config, all_results, open_trades, db, tg, _FakeAI()))
+    asyncio.run(_check_scale_in(config, all_results, open_trades, db, tg))
 
     assert len(tg.messages) == 1
     assert db.saved == []

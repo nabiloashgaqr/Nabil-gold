@@ -37,7 +37,7 @@ def test_market_status_news_block_does_not_show_zero_confidence_gate() -> None:
 
     assert "Gate: NEWS BLOCK" in msg
     assert "Consensus overridden" in msg
-    assert "Groq" not in msg
+    assert "external model" not in msg
     assert "returned 0%" not in msg
     assert "News hard block active" in msg
     assert "News blocked:" in msg

@@ -60,11 +60,9 @@ def _patch_common(monkeypatch, telegram, database):
         "risk_settings": {"max_daily_signals": 50, "max_open_trades": 50},
         "duplicate_signal_filter": {"enabled": False},
         "trading_hours": {"enabled": False},
-        "ai_service": {"enabled": False},
         "trading_mode": "paper",
         "paper_trading": {"enabled": True},
         "operation_mode": "observation",
-        "groq_observation_mode": {"enabled": True, "allow_single_agent_context": True},
     }
     monkeypatch.setattr(ra, "load_config", lambda: config)
     monkeypatch.setattr(ra, "TelegramService", lambda *_a, **_k: telegram)
@@ -86,7 +84,6 @@ def _patch_common(monkeypatch, telegram, database):
     monkeypatch.setattr(ra, "MarketDataService", lambda *_a, **_k: fake_md)
 
     # No AI service init.
-    monkeypatch.setattr(ra, "get_ai_service", lambda *_a, **_k: None)
     monkeypatch.setattr(ra, "get_learning_service", lambda *_a, **_k: None)
 
     # Stub the analysis agents (run_agent just returns WAIT-ish dicts).

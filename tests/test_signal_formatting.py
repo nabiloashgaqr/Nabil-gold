@@ -4,7 +4,7 @@ These lock in the cleanup of the signal report:
   * no literal backslash-n ("\\n") leaks into the rendered text
   * sections are separated by real newlines
   * empty optional sections (RISK) are dropped, never left as blank gaps
-  * agent votes render with directional markers and the Groq final gate
+  * agent votes render with directional markers and the external model final gate
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ def _full_decision() -> Dict[str, Any]:
         },
         "daily_bias": {"bias": "BEARISH", "confidence": 95},
         "dynamic_risk": {"level": "NORMAL"},
-        "decision_mode": "One-Agent + Groq",
+        "decision_mode": "5-Agent Weighted Consensus",
         "trading_mode": "paper", "paper_trading": True,
         "trade_id": "TRADE_TEST_FMT",
     }
@@ -97,10 +97,9 @@ def test_empty_risk_section_dropped_without_gap():
     assert "\n\n\n" not in text
 
 
-def test_agent_votes_have_direction_markers_and_groq_gate():
+def test_agent_votes_have_direction_markers():
     text = _capture_signal(_full_decision())
     assert "AGENT VOTES" in text
-    assert "← decision gate" in text
     # Directional dots present.
     assert "🔴" in text and "⚪" in text
 

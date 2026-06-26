@@ -44,7 +44,7 @@ def sample_market_data(count: int = 240) -> dict:
 def test_technical_agent_returns_required_keys() -> None:
     """اختبار الوكيل الفني"""
     config = load_config()
-    result = TechnicalAgent(config, ai_service=None).analyze(sample_market_data())
+    result = TechnicalAgent(config, ).analyze(sample_market_data())
     
     assert result["agent"] == "technical"
     assert result["signal"] in {"BUY", "SELL", "WAIT"}
@@ -54,7 +54,7 @@ def test_technical_agent_returns_required_keys() -> None:
 def test_classical_agent_returns_levels() -> None:
     """اختبار الوكيل الكلاسيكي"""
     config = load_config()
-    result = ClassicalAgent(config, ai_service=None).analyze(sample_market_data())
+    result = ClassicalAgent(config, ).analyze(sample_market_data())
     
     assert result["agent"] == "classical"
     assert "support_levels" in result or "support" in result
@@ -65,8 +65,8 @@ def test_decision_agent_waits_without_three_agent_agreement() -> None:
     config = load_config()
     data = sample_market_data()
     
-    technical = TechnicalAgent(config, ai_service=None).analyze(data)
-    classical = ClassicalAgent(config, ai_service=None).analyze(data)
+    technical = TechnicalAgent(config, ).analyze(data)
+    classical = ClassicalAgent(config, ).analyze(data)
     
     results = {
         "technical": technical,
@@ -79,7 +79,7 @@ def test_decision_agent_waits_without_three_agent_agreement() -> None:
     }
     results["risk"] = RiskManagementAgent(config).evaluate(results)
     
-    decision = DecisionAgent(config, ai_service=None).analyze(results)
+    decision = DecisionAgent(config, ).analyze(results)
     
     assert decision["signal"] in {"WAIT", "BUY", "SELL"}
     assert "confidence" in decision

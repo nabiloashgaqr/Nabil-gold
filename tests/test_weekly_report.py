@@ -218,47 +218,20 @@ class TestGenerateReport:
     async def test_returns_few_trades_message(self, database_mock, telegram_mock):
         cfg = _make_config(min_trades_for_report=10)
         svc = WeeklyReportService(cfg, database_mock, telegram=None,
-                                  ai_service=None)
+                                  )
         result = await svc.generate_report(now=datetime(2026, 6, 21, tzinfo=timezone.utc))
         assert result["status"] == "ok_too_few_trades"
         assert "Quiet week" in result["report_text"]
 
     @pytest.mark.asyncio
-    async def test_uses_fallback_when_no_ai_service(self, database_mock, telegram_mock):
+    async def test_uses_fallback_when_no_external_service(self, database_mock, telegram_mock):
         cfg = _make_config(min_trades_for_report=0)
         svc = WeeklyReportService(cfg, database_mock, telegram=telegram_mock,
-                                  ai_service=None)
+                                  )
         result = await svc.generate_report(now=datetime(2026, 6, 21, tzinfo=timezone.utc))
-        assert result["status"] == "ok_no_ai"
+        assert result["status"] == "ok"
         assert "Total trades" in result["report_text"]
 
-    @pytest.mark.asyncio
-    async def test_calls_groq_and_uses_response(self, database_mock, telegram_mock):
-        # Mock AI service with AsyncMock for _call_ai
-        ai = MagicMock()
-        response = MagicMock(success=True, content="📊 تقرير\n🎯 التوصيات\n1) قلّل weight X\n",
-                              tokens_used=123, cost=0.001, error=None)
-        ai._call_ai = AsyncMock(return_value=response)
-
-        cfg = _make_config(min_trades_for_report=0)
-        svc = WeeklyReportService(cfg, database_mock, telegram=telegram_mock, ai_service=ai)
-        result = await svc.generate_report(now=datetime(2026, 6, 21, tzinfo=timezone.utc))
-        ai._call_ai.assert_called_once()
-        assert result["status"] == "ok"
-        assert result["tokens_used"] == 123
-        assert any("weight" in r for r in result["recommendations"])
-
-    @pytest.mark.asyncio
-    async def test_handles_groq_failure_gracefully(self, database_mock, telegram_mock):
-        ai = MagicMock()
-        response = MagicMock(success=False, content="", error="rate limited")
-        ai._call_ai = AsyncMock(return_value=response)
-
-        cfg = _make_config(min_trades_for_report=0)
-        svc = WeeklyReportService(cfg, database_mock, telegram=telegram_mock, ai_service=ai)
-        result = await svc.generate_report(now=datetime(2026, 6, 21, tzinfo=timezone.utc))
-        assert result["status"] == "ok_groq_failed"
-        assert "rate limited" in result["error"]
 
 
 # -------------------- send_to_telegram -------------------- #
@@ -267,7 +240,7 @@ class TestSendToTelegram:
     def test_sends_single_message_when_short(self, telegram_mock):
         cfg = _make_config(send_telegram=True)
         svc = WeeklyReportService(cfg, MagicMock(), telegram=telegram_mock,
-                                  ai_service=None)
+                                  )
         ok = svc.send_to_telegram("Short message")
         assert ok is True
         assert telegram_mock.send_message.call_count == 1
@@ -275,8 +248,8 @@ class TestSendToTelegram:
     def test_escapes_ai_html_before_telegram_send(self, telegram_mock):
         cfg = _make_config(send_telegram=True)
         svc = WeeklyReportService(cfg, MagicMock(), telegram=telegram_mock,
-                                  ai_service=None)
-        ok = svc.send_to_telegram("Groq says price < support & risk > normal")
+                                  )
+        ok = svc.send_to_telegram("external model says price < support & risk > normal")
         assert ok is True
         sent = telegram_mock.send_message.call_args.args[0]
         assert "&lt; support" in sent
@@ -286,7 +259,7 @@ class TestSendToTelegram:
     def test_splits_long_message_into_parts(self, telegram_mock):
         cfg = _make_config(send_telegram=True)
         svc = WeeklyReportService(cfg, MagicMock(), telegram=telegram_mock,
-                                  ai_service=None)
+                                  )
         text = ("line\n" * 1000)
         ok = svc.send_to_telegram(text)
         assert ok is True
@@ -298,13 +271,13 @@ class TestSendToTelegram:
 
     def test_returns_false_when_telegram_disabled(self, telegram_mock):
         cfg = _make_config(send_telegram=False)
-        svc = WeeklyReportService(cfg, MagicMock(), telegram=telegram_mock, ai_service=None)
+        svc = WeeklyReportService(cfg, MagicMock(), telegram=telegram_mock, )
         assert svc.send_to_telegram("anything") is False
         telegram_mock.send_message.assert_not_called()
 
     def test_returns_false_when_telegram_none(self):
         cfg = _make_config()
-        svc = WeeklyReportService(cfg, MagicMock(), telegram=None, ai_service=None)
+        svc = WeeklyReportService(cfg, MagicMock(), telegram=None, )
         assert svc.send_to_telegram("anything") is False
 
 
@@ -313,7 +286,7 @@ class TestSendToTelegram:
 class TestSave:
     def test_saves_to_storage_path(self, database_mock, tmp_path):
         cfg = _make_config(storage_path=str(tmp_path / "weekly.json"))
-        svc = WeeklyReportService(cfg, database_mock, telegram=None, ai_service=None)
+        svc = WeeklyReportService(cfg, database_mock, telegram=None, )
         svc._save({"status": "ok_no_ai", "report_text": "x", "recommendations": []})
         saved = json.loads((tmp_path / "weekly.json").read_text(encoding="utf-8"))
         assert saved["status"] == "ok_no_ai"

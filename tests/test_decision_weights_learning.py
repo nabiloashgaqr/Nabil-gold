@@ -36,7 +36,7 @@ def base_config():
             "price_action": 0.15,
             "multitimeframe": 0.20,
         },
-        "groq_observation_mode": {"enabled": True, "allow_single_agent_context": True},
+        "external_model_observation_mode": {"enabled": True, "allow_single_agent_context": True},
     }
 
 
@@ -81,7 +81,7 @@ async def test_analyze_async_applies_db_learned_weights():
     ]
     db = FakeDatabase(rows=rows)
     learning_service = LearningService(db, base_config())
-    agent = DecisionAgent(base_config(), ai_service=None, learning_service=learning_service)
+    agent = DecisionAgent(base_config(), learning_service=learning_service)
 
     # Before analyze_async runs, weights are still the static config defaults.
     assert agent.current_weights["technical"] == 0.20
@@ -95,7 +95,7 @@ async def test_analyze_async_applies_db_learned_weights():
 
 @pytest.mark.asyncio
 async def test_analyze_async_keeps_config_weights_when_no_learning_service():
-    agent = DecisionAgent(base_config(), ai_service=None, learning_service=None)
+    agent = DecisionAgent(base_config(), learning_service=None)
     config_weights = dict(agent.current_weights)
 
     await agent.analyze_async(minimal_agents_results())
@@ -107,7 +107,7 @@ async def test_analyze_async_keeps_config_weights_when_no_learning_service():
 async def test_analyze_async_falls_back_to_existing_weights_on_db_error():
     db = FakeDatabase(raise_error=True)
     learning_service = LearningService(db, base_config())
-    agent = DecisionAgent(base_config(), ai_service=None, learning_service=learning_service)
+    agent = DecisionAgent(base_config(), learning_service=learning_service)
     config_weights = dict(agent.current_weights)
 
     # Must not raise - DB errors should degrade gracefully, not crash analysis.
@@ -127,7 +127,7 @@ async def test_analyze_async_ignores_empty_db_result():
     wipe out the perfectly good config-based weights with an empty dict."""
     db = FakeDatabase(rows=[])
     learning_service = LearningService(db, base_config())
-    agent = DecisionAgent(base_config(), ai_service=None, learning_service=learning_service)
+    agent = DecisionAgent(base_config(), learning_service=learning_service)
     config_weights = dict(agent.current_weights)
 
     await agent.analyze_async(minimal_agents_results())

@@ -256,8 +256,8 @@ class NewsRiskAgent(BaseAgent):
             clean = dict(event)
             # Event titles/forecast/previous may originate from a third-party
             # feed (ForexFactory) or operator-supplied NEWS_EVENTS_JSON. Both
-            # eventually get embedded into Groq prompts (news_interpreter,
-            # DecisionAgent), so they are sanitized once here for every
+            # eventually get embedded into downstream decision/status text, so
+            # they are sanitized once here for every
             # source rather than relying on each downstream consumer to do it.
             for text_field in ("event", "name", "forecast", "previous"):
                 if text_field in clean and clean[text_field]:

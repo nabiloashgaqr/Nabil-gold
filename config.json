@@ -55,26 +55,7 @@
     "min_agents_agree": 2,
     "min_agreement_percentage": 1,
     "allow_all_signals": false,
-    "description": "Classic consensus mode: enter only when at least two qualified agents agree and their weighted confidence is >=65%. Opposing agents subtract from the directional edge/confidence.",
-    "experimental_single_agent": {
-      "enabled": false,
-      "min_confidence": 1,
-      "bypass_groq_min_confidence": false,
-      "description": "Disabled in classic consensus mode.",
-      "bypass_risk_rejection": false,
-      "fallback_levels_enabled": true,
-      "fallback_atr": 2.0,
-      "fallback_rr_tp1": 2.0,
-      "fallback_rr_tp2": 3.5,
-      "force_signal_on_wait": false,
-      "force_signal_source_priority": [
-        "daily_bias",
-        "multitimeframe",
-        "technical",
-        "last_candle"
-      ],
-      "force_signal_confidence": 45
-    },
+    "description": "Classic consensus mode: enter only when at least two qualified agents agree and their net weighted confidence after opposition penalty is >=65%.",
     "min_consensus_confidence": 65,
     "strong_single_agent_confidence": 0,
     "strong_single_agent_enabled": false,
@@ -188,14 +169,6 @@
     "allow_mock": false,
     "note": "No live provider is configured here. Use NewsRiskAgent with NEWS_EVENTS_JSON or storage/news_events.json until a real provider is added."
   },
-  "ai_service": {
-    "enabled": false,
-    "provider": "none",
-    "model": "classic-consensus",
-    "fallback_to_classic": true,
-    "description": "Disabled. Final decisions are made by 5-agent weighted consensus; no Groq/API dependency."
-  },
-  "ai_providers": {},
   "learning": {
     "enabled": true,
     "update_frequency_days": 1,
@@ -258,20 +231,6 @@
     "track_virtual_pnl": true,
     "description": "وضع تجريبي: يتم حفظ ومتابعة الصفقات افتراضياً بدون تنفيذ حقيقي"
   },
-  "ai_trade_review": {
-    "enabled": false,
-    "max_reviews_per_run": 20,
-    "recent_trades_limit": 60,
-    "review_only_losses": true,
-    "description": "Disabled after removing Groq dependency."
-  },
-  "ai_memory_rules": {
-    "enabled": false,
-    "max_active_rules_in_prompt": 0,
-    "min_confidence_to_apply": 60,
-    "advisory_mode": true,
-    "description": "Disabled because AI trade review/Groq is removed."
-  },
   "daily_bias_filter": {
     "enabled": true,
     "timeframe": "4H",
@@ -285,12 +244,6 @@
     "description": "فلتر اتجاه أعلى (Daily Bias): الصفقات المعاكسة للاتجاه 4H تحتاج موافقة وكيلين مؤهلين على نفس الاتجاه وثقة إشارة ≥75%. الوكلاء المعارضون يخصمون من قوة الإشارة.",
     "contrarian_min_confidence_two_agents": 75,
     "contrarian_min_agents_for_lower_confidence": 2
-  },
-  "ai_news_interpretation": {
-    "enabled": false,
-    "block_on_extreme": true,
-    "respect_allowed_direction": true,
-    "description": "Disabled. News filtering is rule-based via NewsRiskAgent only."
   },
   "dynamic_risk_management": {
     "enabled": false,
@@ -318,18 +271,6 @@
     "high_risk_day_tier1_count": 3,
     "description": "تصنيف أخبار Tier 1/2 مع نوافذ منع وتحذير مخصصة للذهب"
   },
-  "groq_observation_mode": {
-    "enabled": false,
-    "min_groq_confidence": 0,
-    "allow_single_agent_context": false,
-    "disable_forced_observation": true,
-    "block_on_ai_contradiction": false,
-    "min_supportive_evidence_items": 0,
-    "retry_on_contradiction": false,
-    "max_retry": 0,
-    "agent_min_confidence": 60,
-    "description": "Disabled. Replaced by classic 5-agent weighted consensus."
-  },
   "order_execution": {
     "enabled": true,
     "mode": "paper",
@@ -350,7 +291,7 @@
       "description_scale_in_size_ratio": "نسبة حجم التعزيز مقارنة بالصفقة الأصلية. 0.5 = نصف الحجم. 1.0 = نفس الحجم.",
       "description": "fixed_risk zone logic kept for entry levels, but always MARKET execution.",
       "note": "Zone logic kept only for SL/TP calculation. Execution always MARKET.",
-      "description_scale_in": "Disabled in classic consensus mode to avoid unconfirmed scale-ins after removing Groq."
+      "description_scale_in": "Disabled in classic consensus mode to avoid unconfirmed scale-ins."
     },
     "allowed_order_types": [
       "BUY_MARKET",
@@ -362,9 +303,8 @@
   "operation_mode": "classic_consensus",
   "operation_modes": {
     "classic_consensus": {
-      "description": "No AI/Groq. Final signal from 5-agent weighted consensus + risk/news/session/duplicate filters.",
+      "description": "Final signal from 5-agent weighted consensus + risk/news/session/duplicate filters.",
       "requires_three_agents": false,
-      "groq_observation": false,
       "paper_only": true
     }
   },

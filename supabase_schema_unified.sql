@@ -33,8 +33,6 @@
 -- DROP TABLE IF EXISTS news_log          CASCADE;
 -- DROP TABLE IF EXISTS daily_reports     CASCADE;
 -- DROP TABLE IF EXISTS portfolio         CASCADE;
--- DROP TABLE IF EXISTS ai_trade_reviews  CASCADE;
--- DROP TABLE IF EXISTS ai_memory_rules   CASCADE;
 -- DROP TABLE IF EXISTS weekly_reports    CASCADE;
 -- DROP TABLE IF EXISTS trades            CASCADE;
 -- DROP TABLE IF EXISTS signals           CASCADE;
@@ -126,9 +124,6 @@ CREATE TABLE IF NOT EXISTS trades (
     result VARCHAR(30),
     reasons JSONB DEFAULT '[]'::jsonb,
     signal_snapshot JSONB DEFAULT '{}'::jsonb,
-    ai_reviewed BOOLEAN DEFAULT FALSE,
-    ai_review JSONB,
-    memory_rule_ids TEXT[] DEFAULT ARRAY[]::TEXT[],
 
     created_at TIMESTAMPTZ DEFAULT NOW(),
     opened_at TIMESTAMPTZ GENERATED ALWAYS AS (entry_time) STORED,
@@ -170,9 +165,6 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS max_adverse_excursion   DECIMAL(18, 
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS result              VARCHAR(30);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS reasons             JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS signal_snapshot     JSONB DEFAULT '{}'::jsonb;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS ai_reviewed         BOOLEAN DEFAULT FALSE;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS ai_review           JSONB;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS memory_rule_ids     TEXT[] DEFAULT ARRAY[]::TEXT[];
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS created_at          TIMESTAMPTZ DEFAULT NOW();
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS closed_at           TIMESTAMPTZ;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS close_time          TIMESTAMPTZ;
@@ -187,45 +179,7 @@ CREATE INDEX IF NOT EXISTS idx_trades_created ON trades(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_trades_open ON trades(status) WHERE status IN ('OPEN', 'PARTIAL', 'TP1_HIT');
 
 -- =====================================================
--- 3) AI Memory Rules
--- =====================================================
-CREATE TABLE IF NOT EXISTS ai_memory_rules (
-    id TEXT PRIMARY KEY,
-    rule_text TEXT NOT NULL,
-    category VARCHAR(80) DEFAULT 'AI_REVIEW_LESSON',
-    applies_to VARCHAR(20) DEFAULT 'BOTH' CHECK (applies_to IN ('BUY', 'SELL', 'BOTH')),
-    confidence INTEGER DEFAULT 70,
-    source_trade_id TEXT,
-    source VARCHAR(80) DEFAULT 'ai_trade_review',
-    active BOOLEAN DEFAULT TRUE,
-    times_triggered INTEGER DEFAULT 0,
-    metadata JSONB DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_ai_memory_rules_active ON ai_memory_rules(active, confidence DESC);
-CREATE INDEX IF NOT EXISTS idx_ai_memory_rules_source_trade ON ai_memory_rules(source_trade_id);
-
--- =====================================================
--- 4) AI Trade Reviews
--- =====================================================
-CREATE TABLE IF NOT EXISTS ai_trade_reviews (
-    id TEXT PRIMARY KEY,
-    trade_id TEXT,
-    reviewed_at TIMESTAMPTZ DEFAULT NOW(),
-    provider VARCHAR(50),
-    model VARCHAR(100),
-    tokens_used INTEGER DEFAULT 0,
-    review JSONB NOT NULL DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_ai_trade_reviews_trade ON ai_trade_reviews(trade_id);
-CREATE INDEX IF NOT EXISTS idx_ai_trade_reviews_reviewed ON ai_trade_reviews(reviewed_at DESC);
-
--- =====================================================
--- 5) Portfolio
+-- 3) Portfolio
 -- =====================================================
 CREATE TABLE IF NOT EXISTS portfolio (
     id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
@@ -244,7 +198,7 @@ CREATE TABLE IF NOT EXISTS portfolio (
 );
 
 -- =====================================================
--- 6) Daily Reports
+-- 4) Daily Reports
 -- =====================================================
 CREATE TABLE IF NOT EXISTS daily_reports (
     id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
@@ -268,7 +222,7 @@ CREATE TABLE IF NOT EXISTS daily_reports (
 CREATE INDEX IF NOT EXISTS idx_daily_reports_date ON daily_reports(report_date DESC);
 
 -- =====================================================
--- 7) News Log
+-- 5) News Log
 -- =====================================================
 CREATE TABLE IF NOT EXISTS news_log (
     id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
@@ -286,7 +240,7 @@ CREATE INDEX IF NOT EXISTS idx_news_impact ON news_log(impact);
 CREATE INDEX IF NOT EXISTS idx_news_logged ON news_log(logged_at DESC);
 
 -- =====================================================
--- 8) Risk Settings
+-- 6) Risk Settings
 -- =====================================================
 CREATE TABLE IF NOT EXISTS risk_settings (
     id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
@@ -323,7 +277,7 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 
 -- =====================================================
--- 9) Session Log
+-- 7) Session Log
 -- =====================================================
 CREATE TABLE IF NOT EXISTS session_log (
     id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
@@ -339,7 +293,7 @@ CREATE TABLE IF NOT EXISTS session_log (
 );
 
 -- =====================================================
--- 10) Learning & Agent Performance
+-- 8) Learning & Agent Performance
 -- =====================================================
 CREATE TABLE IF NOT EXISTS agent_weights (
     id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
@@ -426,7 +380,7 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 
 -- =====================================================
--- 11) Timestamp triggers
+-- 9) Timestamp triggers
 -- =====================================================
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$
@@ -449,7 +403,7 @@ DROP TRIGGER IF EXISTS update_risk_settings_timestamp ON risk_settings;
 CREATE TRIGGER update_risk_settings_timestamp BEFORE UPDATE ON risk_settings FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- =====================================================
--- 12) Views
+-- 10) Views
 -- =====================================================
 DROP VIEW IF EXISTS active_trades_view;
 CREATE VIEW active_trades_view AS
@@ -469,7 +423,7 @@ GROUP BY DATE(COALESCE(entry_time, created_at))
 ORDER BY trade_date DESC;
 
 -- =====================================================
--- 13) Weekly Reports
+-- 11) Weekly Reports
 -- =====================================================
 CREATE TABLE IF NOT EXISTS weekly_reports (
     id BIGSERIAL PRIMARY KEY,
@@ -487,7 +441,7 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
 CREATE INDEX IF NOT EXISTS idx_weekly_reports_week_start ON weekly_reports (week_start DESC);
 
 -- =====================================================
--- 14) Row Level Security (RLS)
+-- 12) Row Level Security (RLS)
 -- Service Role (SUPABASE_KEY) bypasses RLS automatically.
 -- ============================================================
 ALTER TABLE signals ENABLE ROW LEVEL SECURITY;
@@ -500,8 +454,6 @@ ALTER TABLE session_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_weights ENABLE ROW LEVEL SECURITY;
 ALTER TABLE learning_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_evaluations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ai_trade_reviews ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ai_memory_rules ENABLE ROW LEVEL SECURITY;
 
 -- =====================================================
 -- Final: Reload PostgREST schema cache

@@ -1,9 +1,6 @@
 """Tests for the consolidated end-of-day digest.
 
-Goal: at end of day the user gets ONE message, not four. The learning and AI
-trade-review sub-scripts run in EOD_QUIET mode (no standalone Telegram message)
-and hand their summaries to the daily report via storage/eod_*.txt, which folds
-them into a single consolidated message and cleans up the files.
+Goal: at end of day the user gets ONE message. The learning sub-script runs in EOD_QUIET mode and hands its summary to the daily report via storage/eod_*.txt, which folds it into a single consolidated message and cleans up the file.
 """
 
 from __future__ import annotations
@@ -20,10 +17,6 @@ def _seed_eod(tmp_path: Path, monkeypatch):
     storage.mkdir()
     (storage / "eod_learning.txt").write_text(
         "📊 Learning Update\n━━━━━━\nTrades analyzed: 12 | Win rate: 58%\nNew weights saved.\n",
-        encoding="utf-8",
-    )
-    (storage / "eod_review.txt").write_text(
-        "🧠 AI Trade Review (Losses)\n━━━━━━\nReviewed: 2 trade(s)\n🔻 Trade: TRADE_X\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(rd, "_eod_dir", lambda: storage)
@@ -59,8 +52,6 @@ def test_single_message_contains_all_sections(tmp_path, monkeypatch):
     # One message with performance + open trades + learning + review folded in.
     assert "Daily Summary" in text
     assert "Learning Update" in text
-    assert "AI Trade Review" in text
-    assert "Reviewed: 2 trade(s)" in text
 
 
 def test_eod_files_cleaned_up(tmp_path, monkeypatch):

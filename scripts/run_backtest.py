@@ -1,8 +1,7 @@
 """Run a lightweight XAU/USD backtest and send/report results.
 
 Default mode uses available Twelve Data if configured, otherwise synthetic demo
-candles. It intentionally disables AI/Groq for historical loops to avoid API
-cost. Live signal generation remains Groq-mandatory.
+candles.
 """
 
 from __future__ import annotations

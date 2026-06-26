@@ -1,6 +1,6 @@
 """سكريبت التحليل الرئيسي.
 
-يعمل كل 5 دقائق عبر cron-job.org/GitHub Actions. يجلب بيانات الذهب، يشغل الوكلاء (مع AI)،
+يعمل كل 5 دقائق عبر cron-job.org/GitHub Actions. يجلب بيانات الذهب، يشغل الوكلاء،
 يطبق إدارة المخاطر والقرار، ثم يحفظ ويرسل الإشارة إذا كانت مؤهلة.
 """
 
@@ -29,9 +29,7 @@ from agents.trading_session_agent import TradingSessionAgent
 from services.database import DatabaseService
 from services.dynamic_risk import DynamicRiskManager, should_block_signal
 from services.market_data import MarketDataService
-from services.news_interpreter import NewsInterpreter
 from services.telegram_bot import TelegramService
-from services.ai_service import get_ai_service
 from services.learning_service import get_learning_service
 from utils.helpers import load_config, setup_logging
 
@@ -328,12 +326,10 @@ def _dedupe_warnings(warnings: list) -> list:
     """Collapse duplicate / overlapping warnings before showing them in Telegram.
 
     The decision pipeline can raise two near-identical warnings for the same
-    cause - e.g. the rule-based NewsRiskAgent ("News blocked: ...") AND the Groq
-    news interpreter ("AI News blocked trading: ...") both fire for the same
-    upcoming event. Showing both is noise. This:
+    cause - e.g. repeated news-block warnings from different safety layers.
+    Showing duplicates is noise. This:
       * drops exact duplicates,
-      * keeps only the FIRST news-block warning (rule-based, most concise) and
-        drops any later AI-news one when both are present,
+      * keeps only the FIRST news-block warning,
       * preserves the order of all other warnings.
     """
     seen: set = set()
@@ -471,7 +467,6 @@ async def _check_scale_in(
     open_trades: List[Dict[str, Any]],
     database: DatabaseService,
     telegram: TelegramService,
-    ai_service: Any | None = None,
 ) -> None:
     """Check for scale-in opportunities in fixed_risk mode.
 
@@ -479,7 +474,7 @@ async def _check_scale_in(
       - Only in fixed_risk entry_style
       - Only if there's an open trade
       - Only if price has approached the key level (within trigger distance)
-      - Rule-based confirmation (AI disabled)
+      - Rule-based confirmation
       - Bypass duplicate filter (intentional position building)
       - Respect news filter (if news blocks trading, no scale-in)
       - New defaults: trigger=50pts, max=1, size=100% (per user config)
@@ -501,11 +496,6 @@ async def _check_scale_in(
     if news.get("can_trade") is False or str(news.get("market_status", "")).upper() == "DANGER":
         logger.info("📊 Scale-in skipped: news filter blocks trading")
         return
-    news_ai = all_results.get("news_ai", {}) or {}
-    if news_ai.get("available") and (bool(news_ai.get("block_trading", False)) or str(news_ai.get("risk_level", "")).upper() == "EXTREME"):
-        logger.info("📊 Scale-in skipped: AI news blocks trading")
-        return
-
     trigger_points = int(fr.get("scale_in_trigger_points", 50) or 50)
     max_scales = int(fr.get("scale_in_max", 1) or 1)
     size_ratio = float(fr.get("scale_in_size_ratio", 1.0) or 1.0)
@@ -561,7 +551,6 @@ async def _check_scale_in(
 
         # Check if price is near a key level
         near_level = False
-        level_price = 0.0
         level_name = ""
 
         if trade_type == "SELL":
@@ -570,7 +559,6 @@ async def _check_scale_in(
                 distance = res - current_price
                 if 0 < distance <= trigger_price:
                     near_level = True
-                    level_price = res
                     level_name = f"resistance at {res:.2f}"
                     break
         else:  # BUY
@@ -578,7 +566,6 @@ async def _check_scale_in(
                 distance = current_price - sup
                 if 0 < distance <= trigger_price:
                     near_level = True
-                    level_price = sup
                     level_name = f"support at {sup:.2f}"
                     break
 
@@ -586,45 +573,9 @@ async def _check_scale_in(
             logger.debug("📊 No scale-in: %s trade not near any level (trigger=%dpts)", trade_type, trigger_points)
             continue
 
-        # Rule-based scale-in confirmation (AI disabled in classic consensus mode)
+        # Rule-based scale-in confirmation.
         scale_ok = True
-        scale_reason = ""
-        if ai_service:
-            try:
-                scale_prompt = f"""Quick scale-in check. We have an open {trade_type} position entered at {entry:.2f}.
-Current price is {current_price:.2f}, approaching {level_name}.
-The level is {abs(level_price - current_price):.2f}$ away.
-Should we add another {trade_type} position (scale-in)?
-
-News context: {str(all_results.get('news', {}))[:200]}
-News context: {str(news_ai)[:200]}
-
-Reply JSON only:
-{{"scale_in": true/false, "confidence": 0-100, "reason": "brief reason"}}"""
-                if hasattr(ai_service, '_call_ai'):
-                    resp = await ai_service._call_ai(scale_prompt, 'decision')
-                else:
-                    resp = await ai_service.analyze_chart(
-                        symbol='XAUUSD', price_data={}, technical_indicators={},
-                        timeframe='15m', agent_type='decision'
-                    )
-                if resp.success and hasattr(resp, 'content'):
-                    import json as _json
-                    try:
-                        parsed = _json.loads(resp.content)
-                        scale_ok = bool(parsed.get("scale_in", False))
-                        scale_confidence = float(parsed.get("confidence", 0) or 0)
-                        scale_reason = str(parsed.get("reason", ""))
-                        if scale_ok and scale_confidence < 60:
-                            scale_ok = False
-                            scale_reason = f"low confidence ({scale_confidence:.0f}%)"
-                    except Exception:
-                        scale_ok = False
-                        scale_reason = "parse failed"
-            except Exception as exc:
-                logger.warning("📊 Scale-in confirmation failed: %s", exc)
-                scale_ok = False
-                scale_reason = str(exc)
+        scale_reason = f"near {level_name}"
 
         if not scale_ok:
             logger.info("📊 Scale-in rejected for %s: %s", trade_type, scale_reason)
@@ -725,20 +676,6 @@ async def run_analysis_async() -> None:
         market_data = MarketDataService(config)
         database = DatabaseService(config)
 
-        # ── تهيئة خدمة AI ──
-        ai_service = None
-        ai_config = config.get("ai_service", {})
-
-        if ai_config.get("enabled", False):
-            try:
-                ai_service = get_ai_service(config)
-                logger.info("🤖 AI Service مفعّل: %s", ai_config.get("provider", "unknown"))
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("⚠️ فشل تهيئة AI: %s", exc)
-                if not bool(ai_config.get("fallback_to_classic", True)):
-                    telegram.send_error_alert(f"AI initialization failed while fallback is disabled: {exc}")
-                    return
-
         logger.info("جلب بيانات السوق...")
         data = market_data.get_gold_data()
         if not data:
@@ -767,11 +704,11 @@ async def run_analysis_async() -> None:
 
         # ── تشغيل وكلاء التحليل ──
         all_results: Dict[str, Any] = {
-            "technical": run_agent("technical", TechnicalAgent(config, ai_service), data),
-            "classical": run_agent("classical", ClassicalAgent(config, ai_service), data),
-            "smc": run_agent("smc", SMCAgent(config, ai_service), data),
-            "price_action": run_agent("price_action", PriceActionAgent(config, ai_service), data),
-            "multitimeframe": run_agent("multitimeframe", MultiTimeframeAgent(config, ai_service), data),
+            "technical": run_agent("technical", TechnicalAgent(config), data),
+            "classical": run_agent("classical", ClassicalAgent(config), data),
+            "smc": run_agent("smc", SMCAgent(config), data),
+            "price_action": run_agent("price_action", PriceActionAgent(config), data),
+            "multitimeframe": run_agent("multitimeframe", MultiTimeframeAgent(config), data),
             "current_price": data["current_price"],
             "spread_points": data.get("spread_points"),
             "portfolio": {
@@ -781,29 +718,14 @@ async def run_analysis_async() -> None:
             },
         }
 
-        # ── تشغيل وكلاء إضافية (بدون AI) ──
+        # ── تشغيل وكلاء إضافية ──
         all_results["session"] = session
         all_results["news"] = NewsRiskAgent(config).check()
         all_results["daily_bias"] = run_agent("daily_bias", DailyBiasAgent(config), data)
-        if config.get("ai_news_interpretation", {}).get("enabled", True):
-            all_results["news_ai"] = await NewsInterpreter(config).interpret(
-                all_results["news"],
-                {
-                    "current_price": all_results.get("current_price"),
-                    "daily_bias": all_results.get("daily_bias"),
-                    "technical_summary": all_results.get("technical", {}).get("summary"),
-                },
-            )
-            all_results["news"]["ai_interpretation"] = all_results["news_ai"]
         all_results["risk"] = RiskManagementAgent(config).evaluate(all_results)
         all_results["dynamic_risk"] = DynamicRiskManager(config).evaluate(database)
-        all_results["memory_rules"] = database.get_active_memory_rules(
-            limit=int(config.get("ai_memory_rules", {}).get("max_active_rules_in_prompt", 8))
-        )
-        logger.info("🧠 قواعد الذاكرة النشطة المحملة: %s", len(all_results["memory_rules"]))
-
-        # ── تشغيل وكيل القرار (مع AI) ──
-        logger.info("تشغيل وكيل القرار (AI-enabled)...")
+        # ── تشغيل وكيل القرار ──
+        logger.info("تشغيل وكيل القرار (5-agent consensus)...")
 
         # --- 1) LearningService wired ---
         learning_service = None
@@ -818,7 +740,7 @@ async def run_analysis_async() -> None:
                 logger.warning("⚠️ فشل تحميل الأوزان من DB: %s (fallback إلى config)", w_exc)
         except Exception:
             learning_service = None
-        decision = await DecisionAgent(config, ai_service, learning_service).decide_async(all_results)
+        decision = await DecisionAgent(config, learning_service=learning_service).decide_async(all_results)
 
         decision["dynamic_risk"] = all_results.get("dynamic_risk", {})
         logger.info(
@@ -965,7 +887,6 @@ async def run_analysis_async() -> None:
                     open_trades=open_trades_for_scale,
                     database=database,
                     telegram=telegram,
-                    ai_service=ai_service,
                 )
         except Exception as scale_exc:
             logger.warning("⚠️ Scale-in check failed: %s", scale_exc)

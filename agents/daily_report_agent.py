@@ -157,7 +157,7 @@ class DailyReportAgent(BaseAgent):
         if win_rate < 45 and total >= 5:
             recs.append("Low win rate; raise confidence/quality thresholds or block D/E signals.")
         if net < 0:
-            recs.append("Net points negative; review AI Trade Reviews and Memory Rules before adding risk.")
+            recs.append("Net points negative; review losing setups before adding risk.")
         if profit_factor and profit_factor < 1:
             recs.append("Profit Factor below 1; reduce experimental signals or tighten Risk Grade.")
         if by_agent:

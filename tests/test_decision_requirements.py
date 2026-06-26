@@ -1,7 +1,7 @@
 """
-🔬 اختبارات متطلبات الإشارة – One-Agent + Groq Observation Mode
+🔬 اختبارات متطلبات الإشارة – One-Agent + external model Observation Mode
 - وكيل واحد اتجاهي كافٍ
-- Groq هو البوابة النهائية
+- external model هو البوابة النهائية
 """
 
 import pytest
@@ -16,13 +16,13 @@ def mock_config():
             "min_agents_agree": 1,
             "min_agreement_percentage": 1,
             "allow_all_signals": True,
-            "description": "One-Agent + Groq mode"
+            "description": "One-Agent + external model mode"
         },
         "agent_weights": {
             "technical": 0.20, "classical": 0.20, "smc": 0.25,
             "price_action": 0.15, "multitimeframe": 0.20
         },
-        "groq_observation_mode": {"enabled": True, "allow_single_agent_context": True}
+        "external_model_observation_mode": {"enabled": True, "allow_single_agent_context": True}
     }
 
 
@@ -183,7 +183,7 @@ def test_signal_message_format(agent):
                 {'agent': 'smc', 'confidence': 88, 'weight': 0.25, 'score': 0.22, 'adjusted_confidence': 88},
             ], 'SELL': [], 'WAIT': []},
         'classic': {'buy_count': 3, 'sell_count': 0, 'buy_agreement_pct': 100.0, 'sell_agreement_pct': 0, 'total_voting_agents': 3, 'decision': 'BUY', 'confidence': 85, 'rejection_reason': None},
-        'ai': {'available': True, 'provider': 'groq', 'consensus_strength': 'Strong'},
+        'ai': {'available': True, 'provider': 'external_model', 'consensus_strength': 'Strong'},
         'learning': {'enabled': True, 'overall_win_rate': 65.5},
         'risk_assessment': {'score': 0, 'assessment': 'Acceptable ✅', 'factors': []},
         'weights': {'technical': 0.20, 'classical': 0.20, 'smc': 0.25, 'price_action': 0.15, 'multitimeframe': 0.20}

@@ -1,9 +1,7 @@
 """Backtesting utilities for Gold AI Signals.
 
-This first backtesting engine intentionally runs in classic/offline mode by
-default. It reuses the existing analytical agents and risk engine, then simulates
-TP2/SL/expiry on future candles. AI/Groq is not called by default to avoid high
-API usage across many historical candles.
+Runs the existing analytical agents and risk engine, then simulates TP2/SL/expiry
+on future candles.
 """
 
 from __future__ import annotations
@@ -63,10 +61,6 @@ class BacktestEngine:
 
     def _backtest_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         cfg = copy.deepcopy(config)
-        # Backtesting many candles with Groq is expensive; use classic mode unless
-        # a future explicit AI backtest option is added.
-        cfg.setdefault("ai_service", {})["enabled"] = False
-        cfg["ai_service"]["fallback_to_classic"] = True
         cfg.setdefault("trading_hours", {})["enabled"] = False
         cfg.setdefault("news_feed", {})["enabled"] = False
         return cfg
@@ -122,11 +116,11 @@ class BacktestEngine:
             "source": "backtest",
         }
         results: Dict[str, Any] = {
-            "technical": TechnicalAgent(self.config, ai_service=None).analyze(payload),
-            "classical": ClassicalAgent(self.config, ai_service=None).analyze(payload),
-            "smc": SMCAgent(self.config, ai_service=None).analyze(payload),
-            "price_action": PriceActionAgent(self.config, ai_service=None).analyze(payload),
-            "multitimeframe": MultiTimeframeAgent(self.config, ai_service=None).analyze(payload),
+            "technical": TechnicalAgent(self.config).analyze(payload),
+            "classical": ClassicalAgent(self.config).analyze(payload),
+            "smc": SMCAgent(self.config).analyze(payload),
+            "price_action": PriceActionAgent(self.config).analyze(payload),
+            "multitimeframe": MultiTimeframeAgent(self.config).analyze(payload),
             "current_price": current_price,
             "spread_points": 2.0,
             "portfolio": {"open_trades_count": 0, "today_signals_count": 0, "consecutive_losses": 0},
@@ -137,7 +131,7 @@ class BacktestEngine:
         return results
 
     def _make_decision(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        agent = DecisionAgent(self.config, ai_service=None)
+        agent = DecisionAgent(self.config)
         analysis = agent.analyze(context)
         return agent._to_trade_decision(analysis, context)  # Internal formatter reused intentionally.
 
@@ -303,7 +297,6 @@ def format_backtest_telegram(report: Dict[str, Any]) -> str:
             f"SELL: {by_signal.get('SELL', {}).get('count', 0)} | Net {by_signal.get('SELL', {}).get('net_points', 0):+}",
             f"Grades: {report.get('summary', {}).get('by_grade', {})}",
             "━━━━━━━━━━━━━━━━━━━━",
-            "Note: backtesting is Classic/offline and does not use Groq by default to avoid API usage.",
             "If the trade count is 0, the current conditions produced no qualified signals on the tested sample.",
         ]
     )

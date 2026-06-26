@@ -17,9 +17,8 @@ class BaseAgent(ABC):
 
     name: str = "base"
 
-    def __init__(self, config: Dict[str, Any] | None = None, ai_service: Any = None) -> None:
+    def __init__(self, config: Dict[str, Any] | None = None) -> None:
         self.config = config or {}
-        self.ai_service = ai_service
         self.logger = logging.getLogger(self.__class__.__name__)
 
     def now_iso(self) -> str:

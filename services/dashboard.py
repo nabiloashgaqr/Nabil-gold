@@ -1,13 +1,12 @@
 """HTML dashboard generator for Gold AI Signals.
 
-Creates a self-contained HTML dashboard from recent trades and AI reviews.
+Creates a self-contained HTML dashboard from recent trades.
 No external assets/CDNs are used so the artifact can be opened offline.
 """
 
 from __future__ import annotations
 
 import html
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -133,61 +132,11 @@ def _render_trades_table(trades: List[Dict[str, Any]]) -> str:
     return "\n".join(rows)
 
 
-def _render_reviews(reviews: List[Dict[str, Any]]) -> str:
-    if not reviews:
-        return "<div class='empty-box'>No AI trade reviews yet.</div>"
-    blocks = []
-    for item in reviews[:12]:
-        review = item.get("review", {}) or {}
-        if isinstance(review, str):
-            try:
-                review = json.loads(review)
-            except Exception:  # noqa: BLE001
-                review = {"root_cause": review}
-        suggestions = review.get("rule_suggestions") or []
-        if isinstance(suggestions, list):
-            suggestions_html = "".join(f"<li>{html.escape(str(x))}</li>" for x in suggestions[:3])
-        else:
-            suggestions_html = f"<li>{html.escape(str(suggestions))}</li>"
-        blocks.append(
-            f"""
-            <div class="review">
-              <div class="review-head">🔻 <code>{html.escape(str(item.get('trade_id', '')))}</code> · {html.escape(str(review.get('failure_category', 'OTHER')))}</div>
-              <div class="review-cause">{html.escape(str(review.get('root_cause', 'No root cause available')))}</div>
-              <ul>{suggestions_html}</ul>
-            </div>
-            """
-        )
-    return "\n".join(blocks)
-
-
-
-
-def _render_memory_rules(rules: List[Dict[str, Any]]) -> str:
-    if not rules:
-        return "<div class='empty-box'>No active memory rules yet.</div>"
-    blocks = []
-    for rule in rules[:16]:
-        blocks.append(
-            f"""
-            <div class="review">
-              <div class="review-head">🧠 {html.escape(str(rule.get('category', 'MEMORY')))} · {html.escape(str(rule.get('applies_to', 'BOTH')))} · {html.escape(str(rule.get('confidence', 0)))}%</div>
-              <div class="review-cause">{html.escape(str(rule.get('rule_text', '')))}</div>
-              <div class="muted">Source trade: <code>{html.escape(str(rule.get('source_trade_id', 'N/A')))}</code></div>
-            </div>
-            """
-        )
-    return "\n".join(blocks)
-
-def render_dashboard(trades: List[Dict[str, Any]], reviews: List[Dict[str, Any]] | None = None, memory_rules: List[Dict[str, Any]] | None = None) -> str:
-    reviews = reviews or []
-    memory_rules = memory_rules or []
+def render_dashboard(trades: List[Dict[str, Any]]) -> str:
     summary = summarize_trades(trades)
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     cards = _render_cards(summary)
     rows = _render_trades_table(sorted(trades, key=lambda t: str(t.get("created_at", "")), reverse=True))
-    reviews_html = _render_reviews(reviews)
-    memory_rules_html = _render_memory_rules(memory_rules)
     return f"""<!doctype html>
 <html lang="ar" dir="rtl">
 <head>
@@ -232,14 +181,6 @@ def render_dashboard(trades: List[Dict[str, Any]], reviews: List[Dict[str, Any]]
         <thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Entry</th><th>Current</th><th>SL</th><th>TP1</th><th>TP2</th><th>PnL</th><th>Conf</th><th>Mode</th><th>Created</th></tr></thead>
         <tbody>{rows}</tbody>
       </table></div>
-    </div>
-    <div class="panel">
-      <h2>🧠 Active Memory Rules</h2>
-      {memory_rules_html}
-    </div>
-    <div class="panel">
-      <h2>🧠 AI Trade Reviews</h2>
-      {reviews_html}
     </div>
   </div>
 </body>

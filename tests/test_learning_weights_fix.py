@@ -140,16 +140,11 @@ class TestLoadWeightsAsyncIntegration:
 
 
 class TestConfigUpdate:
-    """Verify the config change for max_reviews_per_run."""
+    """Verify removed external-review config."""
 
-    def test_config_has_updated_review_limits(self):
+    def test_external_review_config_removed(self):
         import json
         with open("config.json", encoding="utf-8") as f:
             cfg = json.load(f)
-        review_cfg = cfg.get("ai_trade_review", {})
-        # Was 3, raised to 20 to handle more daily signals
-        assert review_cfg.get("max_reviews_per_run") >= 15, \
-            f"max_reviews_per_run should be raised, got {review_cfg.get('max_reviews_per_run')}"
-        # recent_trades_limit raised to 50 to cover more history
-        assert review_cfg.get("recent_trades_limit") >= 40, \
-            f"recent_trades_limit should be raised, got {review_cfg.get('recent_trades_limit')}"
+        assert "removed_review_config" not in cfg
+

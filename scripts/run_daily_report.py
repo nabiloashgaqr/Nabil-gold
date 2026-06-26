@@ -58,7 +58,7 @@ def _compact_section(text: str, max_lines: int = 8, skip_first_title: bool = Tru
     section stays short inside the single consolidated message.
 
     ``skip_first_title`` drops the section's own leading title line (e.g.
-    "📊 Learning Update" / "🧠 AI Trade Review (Losses)") because the daily
+    "📊 Learning Update") because the daily
     report already prints its own header above it — avoids a doubled heading.
     """
     out = []
@@ -173,7 +173,6 @@ def main() -> None:
     - Performance stats
     - Open trades
     - Key learning insights (if any)
-    - Recent AI Trade Review highlights (if any)
 
     This avoids sending 4 separate messages.
     """
@@ -313,11 +312,10 @@ def main() -> None:
         learning_insight = ""
 
         # ── Merge end-of-day sections produced by the quiet sub-scripts ──────
-        # run_learning.py and run_trade_review.py (with EOD_QUIET=true) write
-        # their summaries to storage/eod_*.txt instead of sending their own
+        # run_learning.py (with EOD_QUIET=true) writes
+        # its summary to storage/eod_*.txt instead of sending its own
         # Telegram message. We fold them into this single consolidated report.
         learning_section = _read_eod_section("learning")
-        review_section = _read_eod_section("review")
 
         # Only show the lightweight insight when the richer learning section is
         # absent (avoids two "Learning" blocks).
@@ -329,11 +327,6 @@ def main() -> None:
             lines.append("🧠 <b>Learning Update</b>")
             lines.append(_compact_section(learning_section, max_lines=8))
             lines.append("")
-        if review_section:
-            lines.append("🔎 <b>AI Trade Review</b>")
-            lines.append(_compact_section(review_section, max_lines=10))
-            lines.append("")
-
         lines.append("⚠️ Paper-trading only • Educational")
         lines.append("━━━━━━━━━━━━━━━━━━━━━")
 

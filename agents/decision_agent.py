@@ -1,1204 +1,491 @@
-"""
-🤖 Decision Agent - Gold AI Signals
-وكيل اتخاذ القرار النهائي المدعوم بالذكاء الاصطناعي والتعلم الذكي
+"""Decision Agent — classic 5-agent weighted consensus.
+
+No external model final gate is used. The final signal is calculated from the
+five analysis agents only:
+
+- Technical
+- Classical
+- SMC
+- Price Action
+- Multi-Timeframe
+
+Rules:
+- Ignore agents below ``agent_min_confidence`` (default 60%).
+- A normal entry needs at least 2 qualified agents in the same direction.
+- Their net weighted confidence after subtracting opposition must be >=65%.
+- Counter-trend trades against Daily Bias need at least 2 qualified agents and
+  net confidence >=75%.
 """
 
+from __future__ import annotations
+
 import logging
-from typing import Dict, List, Any
-from .base_agent import BaseAgent
-from services.memory_rules import format_memory_rules_for_prompt
-from services.agent_playbooks import format_agent_playbooks_for_prompt
+from typing import Any, Dict
+
+from agents.base_agent import BaseAgent
 
 logger = logging.getLogger(__name__)
 
+
 class DecisionAgent(BaseAgent):
-    """
-    🤖 وكيل اتخاذ القرار
-    
-    يجمع آراء جميع الوكلاء:
-    - الوكلاء الكلاسيكيين (technical, smc, price_action...)
-    - الوكلاء المدعومين بالـ AI
-    
-    ثم يستخدم AI + التعلم الذكي لاتخاذ القرار النهائي
-    
-    🧠 نظام التعلم:
-    - يقيم أداء الوكلاء يومياً
-    - يزيد وزن الفائزين
-    - يقلل وزن الخاسرين
-    - يتعلم من الأخطاء
-    """
-    
-    def __init__(self, config: Dict, ai_service=None, learning_service=None):
+    """Final decision from weighted consensus + safety filters."""
+
+    name = "decision"
+
+    def __init__(self, config: Dict[str, Any], learning_service: Any = None, **_kwargs):
         super().__init__(config)
-        self.ai_service = ai_service
         self.learning_service = learning_service
-        self.min_confidence = config.get('risk_settings', {}).get('min_confidence', 60)
-        self.min_rr_ratio = config.get('risk_settings', {}).get('min_rr_ratio', 1.5)
-        
-        # متطلبات الإشارة الجديدة
-        signal_req = config.get('signal_requirements', {})
-        self.min_agents_agree = signal_req.get('min_agents_agree', 3)
-        self.min_agreement_pct = signal_req.get('min_agreement_percentage', 60)
-        self.allow_all_signals = signal_req.get('allow_all_signals', True)
-        
-        # الأوزان الافتراضية (تحدث بواسطة التعلم)
+        self.min_confidence = float(config.get("risk_settings", {}).get("min_confidence", 65) or 65)
+        self.min_rr_ratio = float(config.get("risk_settings", {}).get("min_rr_ratio", 1.5) or 1.5)
+
+        signal_req = config.get("signal_requirements", {}) or {}
+        self.min_agents_agree = int(signal_req.get("min_agents_agree", 2) or 2)
+        self.min_agreement_pct = float(signal_req.get("min_agreement_percentage", 1) or 1)
+        self.allow_all_signals = bool(signal_req.get("allow_all_signals", False))
+        self.agent_min_confidence = int(signal_req.get("agent_min_confidence", 60) or 60)
+        self.min_consensus_confidence = float(signal_req.get("min_consensus_confidence", self.min_confidence) or self.min_confidence)
+
         self.default_weights = {
-            'technical': 0.20,
-            'classical': 0.20,
-            'smc': 0.25,
-            'price_action': 0.15,
-            'multitimeframe': 0.15,
-            'news_risk': 0.15
+            "technical": 0.20,
+            "classical": 0.20,
+            "smc": 0.25,
+            "price_action": 0.15,
+            "multitimeframe": 0.20,
         }
-        
-        # تحميل الأوزان المتعلمة
         self.current_weights = self._load_weights()
-        self.voting_agents = {"technical", "classical", "smc", "price_action", "multitimeframe"}
-        
-        # Classic consensus mode: no external AI final gate.
-        # Agents below this confidence are ignored. Entry is allowed only when
-        # at least ``min_agents_agree`` agents agree and their weighted
-        # confidence is above ``min_consensus_confidence``. Opposing agents
-        # subtract from edge/confidence.
-        consensus_cfg = config.get('signal_requirements', {}) or {}
-        legacy_obs = config.get('groq_observation_mode', {}) or {}
-        self.agent_min_confidence = int(consensus_cfg.get('agent_min_confidence', legacy_obs.get('agent_min_confidence', 60)))
-        self.min_consensus_confidence = float(consensus_cfg.get('min_consensus_confidence', self.min_confidence) or self.min_confidence)
-        self.strong_single_agent_confidence = float(consensus_cfg.get('strong_single_agent_confidence', 70) or 70)
-        self.strong_single_agent_enabled = bool(consensus_cfg.get('strong_single_agent_enabled', False))
-        
+        self.voting_agents = set(self.default_weights)
+
     def _load_weights(self) -> Dict[str, float]:
-        """تحميل الأوزان (من learning service أولاً، ثم config).
-
-        الترتيب:
-        1. learning_service.current_weights (من DB بعد run_learning.py)
-        2. config['agent_weights'] (الثابت في config.json)
-        3. self.default_weights (الاحتياطي الأخير)
-
-        كانت هذه الدالة تقرأ من config.json فقط، فكانت أوزان
-        run_learning.py المحفوظة في DB تُحسب ولا تُستخدم فعلاً.
-        """
-        # 1) الأوزان من learning service (من Supabase بعد تحليل يومي)
         if self.learning_service is not None:
-            db_weights = getattr(self.learning_service, 'current_weights', None)
+            db_weights = getattr(self.learning_service, "current_weights", None)
             if db_weights:
-                return dict(db_weights)
-
-        # 2) الأوزان الثابتة من config.json
-        config_weights = self.config.get('agent_weights', {})
+                return {k: float(v) for k, v in dict(db_weights).items()}
+        config_weights = self.config.get("agent_weights", {}) or {}
         if config_weights:
-            return config_weights.copy()
-
-        # 3) الافتراضي الأخير
+            return {k: float(v) for k, v in config_weights.items()}
         return self.default_weights.copy()
-    
-    def update_weights(self, new_weights: Dict[str, float]):
-        """تحديث الأوزان بناءً على التعلم"""
-        self.current_weights = new_weights.copy()
-        logger.info(f"🔄 تم تحديث أوزان الوكلاء: {new_weights}")
-    
+
+    def update_weights(self, new_weights: Dict[str, float]) -> None:
+        self.current_weights = {k: float(v) for k, v in new_weights.items()}
+        logger.info("Updated agent weights: %s", self.current_weights)
+
     def get_adjusted_confidence(self, agent_name: str, base_confidence: float) -> float:
-        """
-        🧠 تعديل الثقة بناءً على أداء الوكيل
-        
-        إذا كان الوكيل يتعلم جيداً → زيادة الثقة
-        إذا كان الوكيل يتراجع → تقليل الثقة
-        """
-        
         if not self.learning_service:
             return base_confidence
-        
-        # الحصول على توصية التعلم
         recommendation = self.learning_service.get_agent_recommendation(agent_name)
-        
         if recommendation == "INCREASE_CONFIDENCE":
-            # زيادة الثقة بنسبة 10%
             return min(base_confidence * 1.1, 95)
-        elif recommendation == "DECREASE_CONFIDENCE":
-            # تقليل الثقة بنسبة 10%
+        if recommendation == "DECREASE_CONFIDENCE":
             return max(base_confidence * 0.9, 50)
-        
         return base_confidence
-    
-    def analyze(self, data: Dict) -> Dict[str, Any]:
-        """
-        🎯 اتخاذ القرار النهائي (sync version)
-        """
-        
-        agents_results = data.get('all_agents_results', data)
-        indicators = data.get('indicators', {})
-        session_info = data.get('session', data.get('session_info', {}))
-        
-        # 1️⃣ تجميع أصوات الوكلاء (مع weights متعلمة)
+
+    def analyze(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        agents_results = data.get("all_agents_results", data)
+        indicators = data.get("indicators", {})
+        session_info = data.get("session", data.get("session_info", {}))
+
         votes = self._collect_votes(agents_results)
-        
-        # 2️⃣ التحليل الكلاسيكي للقرارات
-        classic_decision = self._classic_decision(votes)
-        
-        # 3️⃣ القرار النهائي (بدون AI async)
-        final_signal, final_confidence, reasoning = self._final_decision(
-            classic_decision, {}, session_info
-        )
-        
-        # 4️⃣ إضافة معلومات التعلم
-        learning_info = self._get_learning_info()
-        
+        classic = self._classic_decision(votes)
+        final_signal, final_confidence, reasoning = self._final_decision(classic, session_info)
         result = {
-            'agent': 'decision',
-            'signal': final_signal,
-            'decision': final_signal,
-            'confidence': final_confidence,
-            'reasoning': reasoning,
-            'votes': votes,
-            'weights': self.current_weights.copy(),
-            'classic': classic_decision,
-            'ai': {'available': False, 'reason': 'sync mode'},
-            'learning': learning_info,
-            'risk_assessment': self._assess_risk(final_signal, indicators),
-            'timestamp': self.now_iso()
+            "agent": self.name,
+            "signal": final_signal,
+            "decision": final_signal,
+            "confidence": final_confidence,
+            "reasoning": reasoning,
+            "votes": votes,
+            "weights": self.current_weights.copy(),
+            "classic": classic,
+            "learning": self._get_learning_info(),
+            "risk_assessment": self._assess_risk(final_signal, indicators),
+            "timestamp": self.now_iso(),
         }
         return self._apply_safety_filters(result, agents_results)
-    
-    async def analyze_async(self, data: Dict) -> Dict[str, Any]:
-        """
-        🎯 اتخاذ القرار النهائي (async version مع AI + Learning)
-        """
-        
-        agents_results = data.get('all_agents_results', data)
-        price_data = data.get('price_data') or data
-        indicators = data.get('indicators', {})
-        session_info = data.get('session', data.get('session_info', {}))
-        memory_rules = agents_results.get('memory_rules', []) if isinstance(agents_results, dict) else []
-        daily_bias = agents_results.get('daily_bias', {}) if isinstance(agents_results, dict) else {}
-        news_ai = agents_results.get('news_ai', {}) if isinstance(agents_results, dict) else {}
-        dynamic_risk = agents_results.get('dynamic_risk', {}) if isinstance(agents_results, dict) else {}
 
-        # run_learning.py computes and saves new agent_weights to the DB daily,
-        # but nothing ever read them back before this - _load_weights() only ever
-        # returned the static config.json value, so the learning loop had no
-        # effect on live decisions. Refresh from the DB here, falling back to
-        # the config/default weights already in self.current_weights if the
-        # learning service is unavailable or the DB has no rows yet.
+    async def analyze_async(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        agents_results = data.get("all_agents_results", data)
         if self.learning_service is not None:
             try:
-                learned_weights = await self.learning_service.load_current_weights()
-                if learned_weights:
-                    self.current_weights = learned_weights
+                learned = await self.learning_service.load_current_weights()
+                if learned:
+                    self.current_weights = {k: float(v) for k, v in learned.items()}
             except Exception as exc:  # noqa: BLE001
-                logger.warning(f"⚠️ تعذر تحميل الأوزان المتعلمة من قاعدة البيانات، استخدام أوزان config: {exc}")
+                logger.warning("Could not load learned weights, using current/config weights: %s", exc)
+        return self.analyze({**data, "all_agents_results": agents_results})
 
-        # 1️⃣ تجميع أصوات الوكلاء (مع weights متعلمة)
-        votes = self._collect_votes(agents_results)
-        
-        # 2️⃣ التحليل الكلاسيكي للقرارات
-        classic_decision = self._classic_decision(votes)
-        
-        # 3️⃣ التحليل بالذكاء الاصطناعي (async)
-        ai_decision = {}
-        if self.ai_service:
-            ai_decision = await self._ai_decision(
-                votes, price_data, indicators, session_info, memory_rules, daily_bias, news_ai, dynamic_risk, agents_results
-            )
-        
-        # 4️⃣ القرار النهائي
-        final_signal, final_confidence, reasoning = self._final_decision(
-            classic_decision, ai_decision, session_info
-        )
-        
-        # 5️⃣ معلومات التعلم
-        learning_info = self._get_learning_info()
-        
-        result = {
-            'agent': 'decision',
-            'signal': final_signal,
-            'decision': final_signal,
-            'confidence': final_confidence,
-            'reasoning': reasoning,
-            'votes': votes,
-            'weights': self.current_weights.copy(),
-            'classic': classic_decision,
-            'ai': ai_decision,
-            'learning': learning_info,
-            'risk_assessment': self._assess_risk(final_signal, indicators),
-            'timestamp': self.now_iso()
-        }
-        return self._apply_safety_filters(result, agents_results)
-    
-    def _collect_votes(self, agents_results: Dict) -> Dict:
-        """
-        🗳️ تجميع أصوات الوكلاء (مع weights متعلمة)
-        """
-        
-        votes = {
-            'BUY': [],
-            'SELL': [],
-            'WAIT': []
-        }
-        
+    def _collect_votes(self, agents_results: Dict[str, Any]) -> Dict[str, list]:
+        votes = {"BUY": [], "SELL": [], "WAIT": []}
         for agent_name, result in agents_results.items():
-            if agent_name not in self.voting_agents:
+            if agent_name not in self.voting_agents or not isinstance(result, dict):
                 continue
-            if isinstance(result, dict):
-                signal = str(result.get('signal') or result.get('direction') or 'WAIT').upper()
-                if signal in {"NEUTRAL", "HOLD", "NO_TRADE", "NONE", ""}:
-                    signal = "WAIT"
-                confidence = result.get('confidence', 50)
-            else:
-                continue
-
-            # === NEW RULE: Skip agents below agent_min_confidence (default 60%) ===
+            signal = str(result.get("signal") or result.get("direction") or "WAIT").upper()
+            if signal in {"NEUTRAL", "HOLD", "NO_TRADE", "NONE", ""}:
+                signal = "WAIT"
+            if signal not in votes:
+                signal = "WAIT"
+            try:
+                confidence = float(result.get("confidence", 0) or 0)
+            except (TypeError, ValueError):
+                confidence = 0
             if confidence < self.agent_min_confidence:
                 continue
-            
-            # الحصول على weight (متعلم أو افتراضي)
-            weight = self.current_weights.get(agent_name, 0.15)
-            
-            # 🧠 تعديل الثقة بناءً على التعلم
-            adjusted_confidence = self.get_adjusted_confidence(agent_name, confidence)
-            
-            # وزن الثقة مع وزن الوكيل
-            weighted_score = (adjusted_confidence / 100) * weight
-            
-            if signal in votes:
-                votes[signal].append({
-                    'agent': agent_name,
-                    'confidence': confidence,
-                    'adjusted_confidence': adjusted_confidence,
-                    'weight': weight,
-                    'score': weighted_score,
-                    'learning_adjusted': confidence != adjusted_confidence
-                })
-        
+            weight = float(self.current_weights.get(agent_name, self.default_weights.get(agent_name, 0.15)) or 0.15)
+            adjusted = self.get_adjusted_confidence(agent_name, confidence)
+            score = (adjusted / 100.0) * weight
+            votes[signal].append({
+                "agent": agent_name,
+                "confidence": confidence,
+                "adjusted_confidence": adjusted,
+                "weight": weight,
+                "score": score,
+                "learning_adjusted": confidence != adjusted,
+            })
         return votes
-    
 
-    def _classic_decision(self, votes: Dict) -> Dict:
-        """Weighted 5-agent consensus decision (no external AI/Groq).
+    def _classic_decision(self, votes: Dict[str, list]) -> Dict[str, Any]:
+        buy = self._direction_metrics("BUY", votes)
+        sell = self._direction_metrics("SELL", votes)
+        candidates = [("BUY", buy), ("SELL", sell)]
+        valid = [(side, m) for side, m in candidates if m["valid"]]
 
-        Directional edge is calculated by adding same-direction weighted scores
-        and subtracting the opposite side's weighted scores:
-
-            BUY edge  = BUY_score  - SELL_score
-            SELL edge = SELL_score - BUY_score
-
-        A signal is valid only when at least min_agents_agree agents support it
-        and their weighted average confidence is >= min_consensus_confidence.
-        """
-        buy_metrics = self._direction_metrics('BUY', votes)
-        sell_metrics = self._direction_metrics('SELL', votes)
-
-        candidates = []
-        for side, metrics in (('BUY', buy_metrics), ('SELL', sell_metrics)):
-            if metrics['valid']:
-                candidates.append((side, metrics))
-
-        decision = 'WAIT'
+        decision = "WAIT"
         confidence = 50.0
         rejection_reason = None
-
-        if candidates:
-            # Highest positive edge wins. If tied, prefer higher adjusted confidence.
-            decision, selected = max(candidates, key=lambda item: (item[1]['edge'], item[1]['confidence']))
-            confidence = selected['confidence']
+        if valid:
+            decision, selected = max(valid, key=lambda item: (item[1]["edge"], item[1]["confidence"]))
+            confidence = selected["confidence"]
         else:
-            total_voting = len(votes['BUY']) + len(votes['SELL'])
-            best = max([buy_metrics, sell_metrics], key=lambda m: (m['support_count'], m['support_avg_confidence'], m['edge']))
+            total_voting = len(votes["BUY"]) + len(votes["SELL"])
+            best = max([buy, sell], key=lambda m: (m["support_count"], m["confidence"], m["edge"]))
             if total_voting == 0:
                 rejection_reason = f"No qualified agents (need >= {self.agent_min_confidence}%)"
-            elif best['support_count'] < 1:
-                rejection_reason = "No directional agent support"
-            elif best['edge'] <= 0:
+            elif best["support_count"] < self.min_agents_agree:
+                rejection_reason = f"Need at least {self.min_agents_agree} agreeing agents with weighted confidence >= {self.min_consensus_confidence:.0f}%"
+            elif best["edge"] <= 0:
                 rejection_reason = "Opposing agents offset the setup (weighted edge <= 0)"
-            elif best['support_count'] < self.min_agents_agree:
-                rejection_reason = (
-                    f"Need at least {self.min_agents_agree} agreeing agents with weighted confidence "
-                    f">= {self.min_consensus_confidence:.0f}%"
-                )
-            elif best['support_count'] >= self.min_agents_agree and best['confidence'] < self.min_consensus_confidence:
-                rejection_reason = (
-                    f"Net weighted confidence {best['confidence']:.0f}% below "
-                    f"{self.min_consensus_confidence:.0f}% after opposition penalty"
-                )
+            elif best["confidence"] < self.min_consensus_confidence:
+                rejection_reason = f"Net weighted confidence {best['confidence']:.0f}% below {self.min_consensus_confidence:.0f}% after opposition penalty"
             else:
                 rejection_reason = "No valid weighted consensus edge"
 
-        buy_count = len(votes['BUY'])
-        sell_count = len(votes['SELL'])
-        total_voting = buy_count + sell_count
-        buy_agreement_pct = (buy_count / total_voting * 100) if total_voting > 0 else 0
-        sell_agreement_pct = (sell_count / total_voting * 100) if total_voting > 0 else 0
-
-        all_votes = votes['BUY'] + votes['SELL'] + votes['WAIT']
-        strongest_agent = max(all_votes, key=lambda x: x.get('score', 0), default=None)
-        directional_votes = votes['BUY'] + votes['SELL']
-        strongest_directional = max(directional_votes, key=lambda x: x.get('score', 0), default=None)
-        strongest_directional_context = None
-        if strongest_directional:
-            strongest_signal = 'BUY' if strongest_directional in votes['BUY'] else 'SELL'
-            strongest_directional_context = {
-                'agent': strongest_directional.get('agent'),
-                'signal': strongest_signal,
-                'confidence': round(float(strongest_directional.get('confidence', 0)), 1),
-                'adjusted_confidence': round(float(strongest_directional.get('adjusted_confidence', strongest_directional.get('confidence', 0))), 1),
-                'weight': strongest_directional.get('weight'),
-                'score': round(float(strongest_directional.get('score', 0)), 3),
-                'mode': 'classic_consensus',
+        buy_count = len(votes["BUY"])
+        sell_count = len(votes["SELL"])
+        total = buy_count + sell_count
+        buy_pct = (buy_count / total * 100) if total else 0
+        sell_pct = (sell_count / total * 100) if total else 0
+        directional = votes["BUY"] + votes["SELL"]
+        strongest = max(directional, key=lambda x: x.get("score", 0), default=None)
+        strongest_ctx = None
+        if strongest:
+            strongest_signal = "BUY" if strongest in votes["BUY"] else "SELL"
+            strongest_ctx = {
+                "agent": strongest.get("agent"),
+                "signal": strongest_signal,
+                "confidence": round(float(strongest.get("confidence", 0)), 1),
+                "adjusted_confidence": round(float(strongest.get("adjusted_confidence", strongest.get("confidence", 0))), 1),
+                "weight": strongest.get("weight"),
+                "score": round(float(strongest.get("score", 0)), 3),
+                "mode": "classic_consensus",
             }
 
-        selected_metrics = buy_metrics if decision == 'BUY' else sell_metrics if decision == 'SELL' else None
+        selected_metrics = buy if decision == "BUY" else sell if decision == "SELL" else None
         return {
-            'decision': decision,
-            'confidence': round(float(confidence), 1),
-            'buy_score': buy_metrics['support_score'],
-            'sell_score': sell_metrics['support_score'],
-            'buy_net_score': buy_metrics['edge'],
-            'sell_net_score': sell_metrics['edge'],
-            'buy_count': buy_count,
-            'sell_count': sell_count,
-            'buy_agreement_pct': round(buy_agreement_pct, 1),
-            'sell_agreement_pct': round(sell_agreement_pct, 1),
-            'total_voting_agents': total_voting,
-            'strongest_agent': strongest_agent['agent'] if strongest_agent else None,
-            'strongest_directional': strongest_directional_context,
-            'rejection_reason': rejection_reason,
-            'consensus': {
-                'mode': '5_agent_weighted_consensus',
-                'selected': selected_metrics,
-                'BUY': buy_metrics,
-                'SELL': sell_metrics,
-                'rules': {
-                    'agent_min_confidence': self.agent_min_confidence,
-                    'min_agents_agree': self.min_agents_agree,
-                    'min_consensus_confidence': self.min_consensus_confidence,
-                    'strong_single_agent_confidence': self.strong_single_agent_confidence,
-                    'strong_single_agent_enabled': self.strong_single_agent_enabled,
+            "decision": decision,
+            "confidence": round(float(confidence), 1),
+            "buy_score": buy["support_score"],
+            "sell_score": sell["support_score"],
+            "buy_net_score": buy["edge"],
+            "sell_net_score": sell["edge"],
+            "buy_count": buy_count,
+            "sell_count": sell_count,
+            "buy_agreement_pct": round(buy_pct, 1),
+            "sell_agreement_pct": round(sell_pct, 1),
+            "total_voting_agents": total,
+            "strongest_agent": strongest.get("agent") if strongest else None,
+            "strongest_directional": strongest_ctx,
+            "rejection_reason": rejection_reason,
+            "consensus": {
+                "mode": "5_agent_weighted_consensus",
+                "selected": selected_metrics,
+                "BUY": buy,
+                "SELL": sell,
+                "rules": {
+                    "agent_min_confidence": self.agent_min_confidence,
+                    "min_agents_agree": self.min_agents_agree,
+                    "min_consensus_confidence": self.min_consensus_confidence,
                 },
             },
         }
 
-    def _direction_metrics(self, side: str, votes: Dict) -> Dict[str, Any]:
-        """Metrics for one side, with opposing agents subtracted from edge."""
-        side = side.upper()
-        opposite = 'SELL' if side == 'BUY' else 'BUY'
+    def _direction_metrics(self, side: str, votes: Dict[str, list]) -> Dict[str, Any]:
+        opposite = "SELL" if side == "BUY" else "BUY"
         supporters = votes.get(side, []) or []
         opponents = votes.get(opposite, []) or []
-        support_score = sum(float(v.get('score', 0) or 0) for v in supporters)
-        opposition_score = sum(float(v.get('score', 0) or 0) for v in opponents)
+        support_score = sum(float(v.get("score", 0) or 0) for v in supporters)
+        opposition_score = sum(float(v.get("score", 0) or 0) for v in opponents)
         edge = support_score - opposition_score
-        support_weight = sum(float(v.get('weight', 0) or 0) for v in supporters)
+        support_weight = sum(float(v.get("weight", 0) or 0) for v in supporters)
         support_count = len(supporters)
         if support_weight > 0:
-            support_avg = sum(float(v.get('adjusted_confidence', v.get('confidence', 0)) or 0) * float(v.get('weight', 0) or 0) for v in supporters) / support_weight
+            support_avg = sum(float(v.get("adjusted_confidence", v.get("confidence", 0)) or 0) * float(v.get("weight", 0) or 0) for v in supporters) / support_weight
         else:
             support_avg = 0.0
-        strongest = max((float(v.get('adjusted_confidence', v.get('confidence', 0)) or 0) for v in supporters), default=0.0)
-        # Opposition penalty is capped so one small opposing vote reduces quality
-        # without completely hiding a real two-agent consensus.
         opposition_ratio = opposition_score / max(support_score, 0.0001)
         opposition_penalty = min(30.0, opposition_ratio * 30.0)
         confidence = max(0.0, min(95.0, support_avg - opposition_penalty))
-        valid_single = False
-        valid_multi = bool(support_count >= self.min_agents_agree and confidence >= self.min_consensus_confidence)
-        valid = bool(edge > 0 and valid_multi)
+        valid = bool(edge > 0 and support_count >= self.min_agents_agree and confidence >= self.min_consensus_confidence)
         return {
-            'side': side,
-            'support_count': support_count,
-            'opposition_count': len(opponents),
-            'support_score': round(support_score, 4),
-            'opposition_score': round(opposition_score, 4),
-            'edge': round(edge, 4),
-            'support_weight': round(support_weight, 4),
-            'support_avg_confidence': round(support_avg, 1),
-            'strongest_confidence': round(strongest, 1),
-            'opposition_penalty': round(opposition_penalty, 1),
-            'confidence': round(confidence, 1),
-            'valid_single': valid_single,
-            'valid_multi': valid_multi,
-            'valid': valid,
-            'supporters': [v.get('agent') for v in supporters],
-            'opponents': [v.get('agent') for v in opponents],
+            "side": side,
+            "support_count": support_count,
+            "opposition_count": len(opponents),
+            "support_score": round(support_score, 4),
+            "opposition_score": round(opposition_score, 4),
+            "edge": round(edge, 4),
+            "support_weight": round(support_weight, 4),
+            "support_avg_confidence": round(support_avg, 1),
+            "opposition_penalty": round(opposition_penalty, 1),
+            "confidence": round(confidence, 1),
+            "valid": valid,
+            "supporters": [v.get("agent") for v in supporters],
+            "opponents": [v.get("agent") for v in opponents],
         }
 
-    def _format_agent_context_for_ai(self, agents_results: Dict[str, Any]) -> str:
-        """Format compact, high-signal agent outputs for Groq under token limits."""
-        def short(value: Any, limit: int = 550) -> str:
-            text = str(value)
-            return text if len(text) <= limit else text[:limit] + "..."
-
-        sections: List[str] = []
-        tech = agents_results.get('technical', {}) or {}
-        t = tech.get('technical', {}) or {}
-        sections.append(
-            "TECHNICAL: "
-            f"signal={tech.get('signal')} conf={tech.get('confidence')} trend={t.get('trend')} score={t.get('classic_score')} "
-            f"RSI={t.get('rsi')} div={t.get('rsi_divergence')} MACD={t.get('macd')} hist={t.get('macd_histogram')} "
-            f"EMA={short(t.get('ema_ribbon'), 180)} ATR={t.get('atr')} regime={short(t.get('market_regime'), 180)} "
-            f"levels={short(t.get('key_levels'), 160)} reasons={short(t.get('reasons'), 220)}"
-        )
-
-        classical = agents_results.get('classical', {}) or {}
-        sections.append(
-            "CLASSICAL: "
-            f"dir={classical.get('direction')} conf={classical.get('confidence')} "
-            f"S={short(classical.get('support_levels'), 120)} R={short(classical.get('resistance_levels'), 120)} "
-            f"patterns={short(classical.get('patterns_detected'), 450)}"
-        )
-
-        smc = agents_results.get('smc', {}) or {}
-        sections.append(
-            "SMC: "
-            f"dir={smc.get('direction')} conf={smc.get('confidence')} structure={short(smc.get('market_structure'), 300)} "
-            f"OB={short(smc.get('order_blocks'), 450)} liquidity={short(smc.get('liquidity'), 350)} "
-            f"FVG={short(smc.get('fvg'), 300)} zone={smc.get('zone')} signals={short(smc.get('signals'), 250)}"
-        )
-
-        pa = agents_results.get('price_action', {}) or {}
-        sections.append(
-            "PRICE_ACTION: "
-            f"dir={pa.get('direction')} conf={pa.get('confidence')} role={pa.get('role')} "
-            f"patterns={short(pa.get('candle_patterns'), 400)} breakout={short(pa.get('breakout_analysis'), 220)} "
-            f"rejection={short(pa.get('rejection'), 220)} signals={short(pa.get('signals'), 250)}"
-        )
-
-        mtf = agents_results.get('multitimeframe', {}) or {}
-        sections.append(
-            "MTF: "
-            f"dir={mtf.get('direction')} conf={mtf.get('confidence')} align={mtf.get('alignment')} score={mtf.get('alignment_score')} "
-            f"setup={mtf.get('setup_type')} counter={mtf.get('counter_trend')} bias={short(mtf.get('weighted_bias'), 220)} "
-            f"conflicts={short(mtf.get('conflicts'), 180)}"
-        )
-
-        daily = agents_results.get('daily_bias', {}) or {}
-        risk = agents_results.get('risk', {}) or {}
-        news = agents_results.get('news', {}) or {}
-        news_ai = agents_results.get('news_ai', {}) or {}
-        dyn = agents_results.get('dynamic_risk', {}) or {}
-        sections.append(f"DAILY_BIAS: {short(daily, 350)}")
-        sections.append(
-            "RISK: "
-            f"approved={risk.get('approved')} rejection={risk.get('rejection_reason')} dir={risk.get('direction')} "
-            f"entry={short(risk.get('entry'), 160)} SL={short(risk.get('stop_loss'), 160)} TP={short(risk.get('take_profit'), 260)} "
-            f"grade={short(risk.get('trade_grade'), 220)}"
-        )
-        sections.append(f"NEWS: status={news.get('market_status')} can_trade={news.get('can_trade')} risk_score={news.get('risk_score')} restrictions={short(news.get('active_restrictions'), 220)}")
-        if news_ai:
-            sections.append(f"AI_NEWS: {short(news_ai, 350)}")
-        if dyn:
-            sections.append(f"DYNAMIC_RISK: {short(dyn, 300)}")
-        return "\n".join(sections)[:6500]
-
-    def _generic_ai_reasoning(self, ai: Dict[str, Any]) -> bool:
-        """Detect weak/generic Groq explanations."""
-        text = " ".join(str(ai.get(k, '')) for k in ['reasoning', 'entry_reason', 'opposite_risk', 'risk_notes', 'action_plan'])
-        generic_phrases = [
-            # English generic phrases (Groq now replies in English)
-            'agents recommend', 'no specific reason', 'no risks', 'no clear strength', 'no clear weakness',
-            'enter now', 'the opposite direction',
-            # Arabic fallbacks (in case of legacy/mixed output)
-            'الوكلاء يوصون', 'لا يوجد سبب', 'لا يوجد مخاطر', 'مخاطر بيع الذهب',
-            'الدخول الآن', 'الاتجاه المعاكس', 'لا يوجد قوة محددة', 'لا يوجد ضعف'
-        ]
-        return any(p in text for p in generic_phrases) or len(text.strip()) < 80
-
-    async def _ai_decision(
-        self,
-        votes: Dict,
-        price_data: Dict,
-        indicators: Dict,
-        session_info: Dict,
-        memory_rules: List[Dict] | None = None,
-        daily_bias: Dict | None = None,
-        news_ai: Dict | None = None,
-        dynamic_risk: Dict | None = None,
-        agents_results: Dict[str, Any] | None = None
-    ) -> Dict:
-        """
-        🤖 القرار بالذكاء الاصطناعي
-        """
-        
-        if not self.ai_service:
-            return {'available': False, 'error': 'AI service not initialized'}
-        
-        try:
-            # بناء prompt مع كل البيانات
-            session_quality = session_info.get('quality', session_info.get('session_quality', 'UNKNOWN'))
-            trading_allowed = session_info.get('trading_allowed', False)
-            
-            # إضافة معلومات التعلم للـ AI
-            learning_summary = ""
-            if self.learning_service and self.learning_service.learning_history:
-                last = self.learning_service.learning_history[-1]
-                learning_summary = f"""
-الأوزان الحالية (متعلمة):
-{self._format_weights_for_ai(last.adjusted_weights)}
-"""
-            
-            prompt = f"""
-You are the final Groq decision engine for Gold AI Signals.
-Respond in concise professional English only. Integrate all agent outputs and decide BUY, SELL, or WAIT.
-
-Agent statistics:
-- BUY: {len(votes['BUY'])} agents
-- SELL: {len(votes['SELL'])} agents
-- WAIT: {len(votes['WAIT'])} agents
-
-Vote details:
-{self._format_votes_for_ai(votes)}
-
-Detailed agent context. Use actual numbers/levels. Do not say generic phrases like "agents recommend":
-{self._format_agent_context_for_ai(agents_results or {})}
-
-{learning_summary}
-
-Session info:
-- Quality: {session_quality}
-- Trading allowed: {trading_allowed}
-
-Daily Bias / higher-timeframe direction:
-{daily_bias or {}}
-
-Groq news interpretation:
-{news_ai or {}}
-
-Dynamic Risk Management / dynamic risk constraints:
-{dynamic_risk or {}}
-
-Agent Playbooks v3.0 / per-agent rules by specialty:
-{format_agent_playbooks_for_prompt(max_items_per_agent=2)}
-
-Memory rules from past mistakes (follow them as much as possible; if you must violate one, set the decision to WAIT or lower confidence):
-{format_memory_rules_for_prompt(memory_rules or [], max_rules=4)}
-
-Strict reasoning rules:
-- English only. Be specific with numbers (price levels, RSI, ATR, OB, FVG, EMA, volume profile, etc.).
-- IMPORTANT RULE CHANGE: Only agents with ≥60% confidence are passed to you. 
-  Agents below 60% are already filtered out and ignored.
-- Groq (you) only needs ≥51% confidence to approve a direction (BUY or SELL).
-- When final_signal = WAIT, you MUST explain in "reasoning" and "opposing_evidence":
-  - Which QUALIFIED agents (≥60%) are against the trade and their exact numeric reasons.
-  - Key levels: nearest support / resistance / liquidity pool / FVG.
-  - Why the current setup is not high-probability right now.
-- Do NOT use bullish evidence as supportive for SELL (and vice versa).
-- supportive_evidence must support final_signal only.
-- risk_reward must match RiskManagement numbers.
-- If evidence conflicts, choose WAIT and explain the conflict with numbers.
-- invalidation must be a clear price level or candle-close condition.
-
-Return JSON only, no Markdown:
-{{
-    "final_signal": "BUY or SELL or WAIT",
-    "confidence": 0-100,
-    "consensus_strength": "Strong or Moderate or Weak",
-    "reasoning": "Brief decision rationale with 2-3 numeric/technical facts",
-    "risk_reward": "Risk/reward from RiskManagement",
-    "market_bias": "Bullish/Bearish/Neutral with reason",
-    "entry_reason": "Why entry is valid using price, SL/TP, R:R, timeframe, pattern, OB/FVG, EMA/RSI/MACD",
-    "opposite_risk": "Why the opposite side is weaker or what could invalidate this decision",
-    "risk_notes": "Specific risks: news, nearby support/resistance, weak timeframe, volatility, agent conflict",
-    "action_plan": "Enter/Wait/Cancel + exact condition",
-    "supportive_evidence": ["supporting evidence 1", "supporting evidence 2", "supporting evidence 3"],
-    "opposing_evidence": ["opposing evidence/risk 1", "opposing evidence/risk 2"],
-    "invalidation": "Clear price level or candle-close condition that invalidates the trade",
-    "alternative_scenario": "Clear price condition that makes the opposite scenario better",
-    "quality_notes": ["specific strength", "specific weakness or warning"]
-}}
-"""
-
-            # استخدم prompt القرار المخصص الذي يحتوي أصوات الوكلاء، بدلاً من prompt عام.
-            if hasattr(self.ai_service, '_call_ai'):
-                response = await self.ai_service._call_ai(prompt, 'decision')
-            else:
-                response = await self.ai_service.analyze_chart(
-                    symbol=price_data.get('symbol', 'XAUUSD'),
-                    price_data=price_data,
-                    technical_indicators=indicators,
-                    timeframe=price_data.get('timeframe', '1h'),
-                    agent_type='decision'
-                )
-            
-            if response.success:
-                parsed = self.ai_service.parse_json_response(response.content)
-                
-                if parsed:
-                    result = self._build_ai_decision_result(parsed, response)
-                    groq_obs = self.config.get('groq_observation_mode', {}) or {}
-                    if result.get('ai_warnings') and groq_obs.get('retry_on_contradiction', True):
-                        correction_prompt = prompt + f"""
-
-Mandatory correction: your previous analysis has contradictions in the supportive evidence:
-{result.get('ai_warnings')}
-
-Respond JSON only. If the decision is SELL, do not put bullish evidence in supportive_evidence.
-If the decision is BUY, do not put bearish evidence in supportive_evidence.
-Move conflicting evidence into opposing_evidence, or set final_signal = WAIT.
-"""
-                        retry_response = await self.ai_service._call_ai(correction_prompt, 'decision')
-                        if retry_response.success:
-                            retry_parsed = self.ai_service.parse_json_response(retry_response.content)
-                            if retry_parsed:
-                                retry_result = self._build_ai_decision_result(retry_parsed, retry_response)
-                                retry_result['retry_used'] = True
-                                retry_result['previous_ai_warnings'] = result.get('ai_warnings', [])
-                                return retry_result
-                    return result
-            
-            return {'available': False, 'error': response.error or 'AI response parsing failed'}
-            
-        except Exception as e:
-            logger.error(f"❌ خطأ في قرار AI: {e}")
-            return {'available': False, 'error': str(e)}
-    
-    def _build_ai_decision_result(self, parsed: Dict[str, Any], response: Any) -> Dict[str, Any]:
-        """Build normalized AI decision dict and attach validation warnings."""
-        result = {
-            'available': True,
-            'signal': parsed.get('final_signal', parsed.get('signal', 'WAIT')),
-            'confidence': parsed.get('confidence', 50),
-            'consensus_strength': parsed.get('consensus_strength', 'Unknown'),
-            'reasoning': parsed.get('reasoning', ''),
-            'risk_reward': parsed.get('risk_reward', ''),
-            'market_bias': parsed.get('market_bias', ''),
-            'entry_reason': parsed.get('entry_reason', ''),
-            'opposite_risk': parsed.get('opposite_risk', ''),
-            'risk_notes': parsed.get('risk_notes', ''),
-            'action_plan': parsed.get('action_plan', ''),
-            'evidence': parsed.get('supportive_evidence', parsed.get('evidence', [])),
-            'supportive_evidence': parsed.get('supportive_evidence', parsed.get('evidence', [])),
-            'opposing_evidence': parsed.get('opposing_evidence', []),
-            'invalidation': parsed.get('invalidation', ''),
-            'alternative_scenario': parsed.get('alternative_scenario', ''),
-            'quality_notes': parsed.get('quality_notes', []),
-            'provider': response.provider,
-            'model': getattr(response, 'model', ''),
-            'tokens_used': response.tokens_used,
-            'cost': response.cost,
-        }
-        result['ai_warnings'] = self._ai_contradiction_warnings({'signal': result['signal'], **parsed})
-        return result
-
-    def _format_votes_for_ai(self, votes: Dict) -> str:
-        """تنسيق الأصوات لـ AI"""
-        
-        lines = []
-        
-        for signal in ['BUY', 'SELL', 'WAIT']:
-            agents = votes.get(signal, [])
-            if agents:
-                lines.append(f"\n{signal}:")
-                for agent in agents:
-                    lines.append(
-                        f"  - {agent['agent']}: "
-                        f"confidence {agent['confidence']}% "
-                        f"(weight {agent['weight']*100:.0f}%)"
-                    )
-        
-        return "\n".join(lines) if lines else "No votes"
-    
-    def _format_weights_for_ai(self, weights: Dict) -> str:
-        """تنسيق الأوزان لـ AI"""
-        lines = []
-        for name, weight in weights.items():
-            lines.append(f"  - {name}: {weight*100:.0f}%")
-        return "\n".join(lines)
-    
-    def _final_decision(
-        self,
-        classic: Dict,
-        ai: Dict,
-        session_info: Dict
-    ) -> tuple:
-        """Final decision in classic consensus mode (no external AI/Groq)."""
-        allow_signals = session_info.get('allow_signals', True)
-        current_session = session_info.get('current_session', 'Unknown')
-        if not allow_signals:
-            return 'WAIT', 0, f"Reports session ({current_session}) - no signals sent"
-        if not session_info.get('trading_allowed'):
-            return 'WAIT', 0, "Outside trading hours"
-
-        session_quality = session_info.get('quality', session_info.get('session_quality', 'LOW'))
-        quality_multipliers = {
-            'BEST': 1.0,
-            'HIGH': 1.0,
-            'MEDIUM': 1.10,
-            'LOW': 1.20,
-            'NONE': 1.50,
-        }
-        min_conf = self.min_confidence * quality_multipliers.get(str(session_quality).upper(), 1.20)
-
-        final_signal = str(classic.get('decision', 'WAIT')).upper()
-        final_confidence = float(classic.get('confidence', 0) or 0)
-        consensus = (classic.get('consensus', {}) or {}).get('selected') or {}
-
-        if final_signal not in {'BUY', 'SELL'}:
-            reason = classic.get('rejection_reason') or 'No valid 5-agent weighted consensus'
-            return 'WAIT', round(final_confidence, 1), f"Classic consensus WAIT: {reason}"
-
-        if final_confidence < min_conf:
-            return (
-                'WAIT',
-                round(final_confidence, 1),
-                f"Classic consensus {final_signal} blocked: confidence {final_confidence:.0f}% below {min_conf:.0f}%",
-            )
-
+    def _final_decision(self, classic: Dict[str, Any], ai_or_session: Dict[str, Any], session_info: Dict[str, Any] | None = None) -> tuple[str, float, str]:
+        # Backward-compatible signature: older tests/callers passed (classic, ai, session).
+        # External AI is ignored in classic consensus mode.
+        if session_info is None:
+            session_info = ai_or_session
+        if not session_info.get("allow_signals", True):
+            return "WAIT", 0, f"Reports session ({session_info.get('current_session', 'Unknown')}) - no signals sent"
+        if not session_info.get("trading_allowed"):
+            return "WAIT", 0, "Outside trading hours"
+        final_signal = str(classic.get("decision", "WAIT")).upper()
+        final_conf = float(classic.get("confidence", 0) or 0)
+        if final_signal not in {"BUY", "SELL"}:
+            return "WAIT", round(final_conf, 1), f"Classic consensus WAIT: {classic.get('rejection_reason') or 'No valid weighted consensus'}"
+        if final_conf < self.min_confidence:
+            return "WAIT", round(final_conf, 1), f"Classic consensus {final_signal} blocked: confidence {final_conf:.0f}% below {self.min_confidence:.0f}%"
+        selected = (classic.get("consensus", {}) or {}).get("selected") or {}
         reason = (
-            f"Classic 5-agent weighted consensus = {final_signal}; "
-            f"confidence {final_confidence:.0f}% (min {min_conf:.0f}%), "
-            f"support={consensus.get('support_count', 0)} agent(s), "
-            f"opposition={consensus.get('opposition_count', 0)} agent(s), "
-            f"edge={consensus.get('edge', 0)}"
+            f"Classic 5-agent weighted consensus = {final_signal}; confidence {final_conf:.0f}% "
+            f"(min {self.min_confidence:.0f}%), support={selected.get('support_count', 0)} agent(s), "
+            f"opposition={selected.get('opposition_count', 0)} agent(s), edge={selected.get('edge', 0)}"
         )
-        return final_signal, round(final_confidence, 1), reason
+        return final_signal, round(final_conf, 1), reason
 
-    def _get_learning_info(self) -> Dict:
-        """معلومات التعلم للقرار"""
-        
-        info = {
-            'enabled': self.learning_service is not None,
-            'current_weights': self.current_weights.copy()
-        }
-        
-        if self.learning_service and self.learning_service.learning_history:
-            last_report = self.learning_service.learning_history[-1]
-            info['last_update'] = last_report.report_date
-            info['trades_analyzed'] = last_report.total_trades_analyzed
-            info['overall_win_rate'] = last_report.overall_win_rate
-        
+    def _get_learning_info(self) -> Dict[str, Any]:
+        info = {"enabled": self.learning_service is not None, "current_weights": self.current_weights.copy()}
+        if self.learning_service and getattr(self.learning_service, "learning_history", None):
+            last = self.learning_service.learning_history[-1]
+            info.update({"last_update": last.report_date, "trades_analyzed": last.total_trades_analyzed, "overall_win_rate": last.overall_win_rate})
         return info
-    
-    def _assess_risk(self, signal: str, indicators: Dict) -> Dict:
-        """
-        ⚠️ تقييم المخاطر
-        """
-        
-        risk_factors = []
-        risk_score = 0
-        
-        # RSI
-        rsi = indicators.get('rsi', 50)
+
+    def _assess_risk(self, signal: str, indicators: Dict[str, Any]) -> Dict[str, Any]:
+        factors = []
+        score = 0
+        rsi = float(indicators.get("rsi", 50) or 50)
         if rsi > 75 or rsi < 25:
-            risk_factors.append("RSI in extreme zone")
-            risk_score += 1
-        
-        # Spread
-        spread = indicators.get('spread', 0)
+            factors.append("RSI in extreme zone")
+            score += 1
+        spread = float(indicators.get("spread", 0) or 0)
         if spread > 5:
-            risk_factors.append(f"High spread: {spread}")
-            risk_score += 1
-        
-        # Low ATR
-        atr = indicators.get('atr', 0)
-        if atr < 1.0:
-            risk_factors.append("Low ATR - weak volatility")
-            risk_score += 1
-        
-        # Risk assessment
-        if risk_score == 0:
-            assessment = "Acceptable ✅"
-        elif risk_score == 1:
-            assessment = "Moderate ⚠️"
-        else:
-            assessment = "High ❌"
-        
-        return {
-            'score': risk_score,
-            'assessment': assessment,
-            'factors': risk_factors
-        }
-    
-
-    def _apply_safety_filters(self, result: Dict[str, Any], agents_results: Dict[str, Any]) -> Dict[str, Any]:
-        """Apply hard blockers after consensus: session, news, and risk approval."""
-        warnings = list(result.get('warnings', []) or [])
-        signal = str(result.get('signal', 'WAIT')).upper()
-
-        session = agents_results.get('session', {}) or {}
-        if session and not session.get('trading_allowed', True):
-            warnings.append(f"Session blocked: {session.get('reason', 'outside trading hours')}")
-            signal = 'WAIT'
-        if session and not session.get('allow_signals', True):
-            warnings.append(f"Signals disabled in current session: {session.get('current_session')}")
-            signal = 'WAIT'
-
-        news = agents_results.get('news', {}) or {}
-        if news and (news.get('can_trade') is False or str(news.get('market_status', '')).upper() == 'DANGER'):
-            warnings.append(f"News blocked: {news.get('summary', news.get('market_status', 'DANGER'))}")
-            signal = 'WAIT'
-
-        news_ai = agents_results.get('news_ai', {}) or news.get('ai_interpretation', {}) or {}
-        if news_ai and news_ai.get('available'):
-            risk_level = str(news_ai.get('risk_level', '')).upper()
-            allowed_direction = str(news_ai.get('allowed_direction', 'BOTH')).upper()
-            block_trading = bool(news_ai.get('block_trading', False))
-            if block_trading or allowed_direction == 'NONE' or risk_level == 'EXTREME':
-                warnings.append(f"AI News blocked trading: {news_ai.get('reasoning', risk_level)}")
-                signal = 'WAIT'
-            elif signal in {'BUY', 'SELL'} and allowed_direction in {'BUY', 'SELL'} and signal != allowed_direction:
-                warnings.append(f"⚠️ News Advisory — AI recommends only {allowed_direction}: {news_ai.get('reasoning', '')[:115]}")
-                # Advisory mode — signal proceeds
-
-        daily_bias = agents_results.get('daily_bias', {}) or {}
-        if signal in {'BUY', 'SELL'} and daily_bias.get('enabled', True):
-            bias = str(daily_bias.get('bias', 'NEUTRAL')).upper()
-            bias_conf = float(daily_bias.get('confidence') or 0)
-            db_settings = self.config.get('daily_bias_filter', {}) or {}
-            # Counter-trend override rule in classic consensus mode:
-            # require at least 2 qualified agents in the signal direction AND
-            # signal confidence >=75% (configurable). Opposing agents are already
-            # subtracted from the consensus confidence/edge.
-            required_agents = int(db_settings.get('contrarian_min_agents_for_lower_confidence', 2) or 2)
-            contrarian_min = float(db_settings.get('contrarian_min_confidence', 75) or 75)
-            same_direction_agents = self._same_direction_vote_count(result, signal)
-            is_contrarian = (bias == 'BULLISH' and signal == 'SELL') or (bias == 'BEARISH' and signal == 'BUY')
-            if is_contrarian and (same_direction_agents < required_agents or float(result.get('confidence') or 0) < contrarian_min):
-                warnings.append(
-                    f"Daily Bias (4H) blocks counter-trend: bias={bias} ({bias_conf}%), signal={signal}. "
-                    f"Counter-trend requires ≥{required_agents} qualified agents and confidence ≥{contrarian_min}% "
-                    f"({same_direction_agents} qualified agent(s) support {signal})."
-                )
-                signal = 'WAIT'
-
-        risk = agents_results.get('risk', {}) or {}
-        if signal in {'BUY', 'SELL'} and risk and not risk.get('approved', False):
-            warnings.append(f"Risk rejected: {risk.get('rejection_reason', 'not approved')}")
-            signal = 'WAIT'
-
-        if signal != result.get('signal'):
-            reason = '; '.join(warnings[-3:]) or 'Safety filter blocked signal'
-            result['reasoning'] = f"{result.get('reasoning', '')} | {reason}".strip(' |')
-            result['confidence'] = 0 if signal == 'WAIT' else result.get('confidence', 0)
-
-        result['signal'] = signal
-        result['decision'] = signal
-        result['warnings'] = warnings
-        return result
+            factors.append(f"High spread: {spread}")
+            score += 1
+        atr = float(indicators.get("atr", 0) or 0)
+        if atr and atr < 1.0:
+            factors.append("Low ATR - weak volatility")
+            score += 1
+        assessment = "Acceptable ✅" if score == 0 else "Moderate ⚠️" if score == 1 else "High ❌"
+        return {"score": score, "assessment": assessment, "factors": factors}
 
     def _same_direction_vote_count(self, result: Dict[str, Any], signal: str) -> int:
-        """Return how many qualified voting agents support the final signal.
+        votes = result.get("votes", {}) or {}
+        side_votes = votes.get(str(signal).upper(), []) if isinstance(votes, dict) else []
+        if isinstance(side_votes, list):
+            return len(side_votes)
+        classic = result.get("classic", {}) or {}
+        return int(classic.get("buy_count" if signal == "BUY" else "sell_count", 0) or 0)
 
-        ``votes`` already contains only agents that passed agent_min_confidence
-        filtering (default >=60%). Fall back to the classic counts for older
-        tests/legacy payloads.
-        """
-        signal = str(signal).upper()
-        votes = result.get('votes', {}) or {}
-        if isinstance(votes, dict):
-            side_votes = votes.get(signal, []) or []
-            if isinstance(side_votes, list):
-                return len(side_votes)
-        classic = result.get('classic', {}) or {}
-        if signal == 'BUY':
-            return int(classic.get('buy_count', 0) or 0)
-        if signal == 'SELL':
-            return int(classic.get('sell_count', 0) or 0)
-        return 0
+    def _apply_safety_filters(self, result: Dict[str, Any], agents_results: Dict[str, Any]) -> Dict[str, Any]:
+        warnings = list(result.get("warnings", []) or [])
+        signal = str(result.get("signal", "WAIT")).upper()
+
+        session = agents_results.get("session", {}) or {}
+        if session and not session.get("trading_allowed", True):
+            warnings.append(f"Session blocked: {session.get('reason', 'outside trading hours')}")
+            signal = "WAIT"
+        if session and not session.get("allow_signals", True):
+            warnings.append(f"Signals disabled in current session: {session.get('current_session')}")
+            signal = "WAIT"
+
+        news = agents_results.get("news", {}) or {}
+        if news and (news.get("can_trade") is False or str(news.get("market_status", "")).upper() == "DANGER"):
+            warnings.append(f"News blocked: {news.get('summary', news.get('market_status', 'DANGER'))}")
+            signal = "WAIT"
+
+        daily_bias = agents_results.get("daily_bias", {}) or {}
+        if signal in {"BUY", "SELL"} and daily_bias.get("enabled", True):
+            bias = str(daily_bias.get("bias", "NEUTRAL")).upper()
+            bias_conf = float(daily_bias.get("confidence") or 0)
+            db = self.config.get("daily_bias_filter", {}) or {}
+            required_agents = int(db.get("contrarian_min_agents_for_lower_confidence", 2) or 2)
+            required_conf = float(db.get("contrarian_min_confidence", 75) or 75)
+            is_contrarian = (bias == "BULLISH" and signal == "SELL") or (bias == "BEARISH" and signal == "BUY")
+            same_count = self._same_direction_vote_count(result, signal)
+            if is_contrarian and (same_count < required_agents or float(result.get("confidence") or 0) < required_conf):
+                warnings.append(
+                    f"Daily Bias (4H) blocks counter-trend: bias={bias} ({bias_conf}%), signal={signal}. "
+                    f"Counter-trend requires ≥{required_agents} qualified agents and confidence ≥{required_conf}% "
+                    f"({same_count} qualified agent(s) support {signal})."
+                )
+                signal = "WAIT"
+
+        risk = agents_results.get("risk", {}) or {}
+        if signal in {"BUY", "SELL"} and risk and not risk.get("approved", False):
+            warnings.append(f"Risk rejected: {risk.get('rejection_reason', 'not approved')}")
+            signal = "WAIT"
+
+        if signal != result.get("signal"):
+            reason = "; ".join(warnings[-3:]) or "Safety filter blocked signal"
+            result["reasoning"] = f"{result.get('reasoning', '')} | {reason}".strip(" |")
+            result["confidence"] = 0 if signal == "WAIT" else result.get("confidence", 0)
+        result["signal"] = signal
+        result["decision"] = signal
+        result["warnings"] = warnings
+        return result
 
     def _calculate_quality_score(self, analysis: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        """Calculate a human-friendly signal quality score (0-100 + grade)."""
-        confidence = float(analysis.get('confidence') or 0)
-        risk = context.get('risk', {}) or {}
-        news = context.get('news', {}) or {}
-        session = context.get('session', {}) or {}
-        classic = analysis.get('classic', {}) or {}
-        signal = str(analysis.get('signal', 'WAIT')).upper()
-
-        tp = risk.get('take_profit', {}) or {}
-        tp2 = tp.get('tp2', {}) or {}
-        rr = float(tp2.get('rr_ratio') or 0)
-
-        agreement = 0.0
-        if signal == 'BUY':
-            agreement = float(classic.get('buy_agreement_pct') or 0)
-        elif signal == 'SELL':
-            agreement = float(classic.get('sell_agreement_pct') or 0)
-        else:
-            agreement = max(float(classic.get('buy_agreement_pct') or 0), float(classic.get('sell_agreement_pct') or 0))
-
-        components: Dict[str, float] = {}
-        components['confidence'] = min(confidence, 100) * 0.30
-        components['agreement'] = min(agreement, 100) * 0.20
-        components['risk_reward'] = min(max((rr / 3.0) * 20.0, 0), 20.0)
-        components['risk_approved'] = 10.0 if risk.get('approved') else 0.0
-
-        news_status = str(news.get('market_status', 'SAFE')).upper()
-        if news_status == 'SAFE' and news.get('can_trade', True):
-            components['news'] = 10.0
-        elif news_status in {'CAUTION', 'HIGH_VOLATILITY'} and news.get('can_trade', True):
-            components['news'] = 5.0
-        else:
-            components['news'] = 0.0
-
-        session_quality = str(session.get('session_quality', session.get('quality', 'LOW'))).upper()
-        session_points = {'BEST': 10.0, 'HIGH': 9.0, 'MEDIUM': 6.0, 'LOW': 3.0}.get(session_quality, 0.0)
-        components['session'] = session_points if session.get('trading_allowed', True) else 0.0
-
-        penalty = min(len(analysis.get('warnings', []) or []) * 4.0, 12.0)
-        raw_score = max(0.0, min(100.0, sum(components.values()) - penalty))
-
-        if raw_score >= 90:
-            grade = 'A+'
-            label = 'Elite'
-        elif raw_score >= 80:
-            grade = 'A'
-            label = 'Strong'
-        elif raw_score >= 70:
-            grade = 'B'
-            label = 'Good'
-        elif raw_score >= 60:
-            grade = 'C'
-            label = 'Acceptable'
-        else:
-            grade = 'D'
-            label = 'Weak'
-
-        return {
-            'score': round(raw_score, 1),
-            'grade': grade,
-            'label': label,
-            'components': {k: round(v, 1) for k, v in components.items()},
-            'penalty': round(penalty, 1),
-            'rr_ratio': round(rr, 2),
-            'agreement_pct': round(agreement, 1),
+        confidence = float(analysis.get("confidence") or 0)
+        risk = context.get("risk", {}) or {}
+        news = context.get("news", {}) or {}
+        session = context.get("session", {}) or {}
+        classic = analysis.get("classic", {}) or {}
+        signal = str(analysis.get("signal", "WAIT")).upper()
+        tp2 = ((risk.get("take_profit", {}) or {}).get("tp2", {}) or {})
+        rr = float(tp2.get("rr_ratio") or 0)
+        agreement = float(classic.get("buy_agreement_pct" if signal == "BUY" else "sell_agreement_pct", 0) or 0)
+        components = {
+            "confidence": min(confidence, 100) * 0.30,
+            "agreement": min(agreement, 100) * 0.20,
+            "risk_reward": min(max((rr / 3.0) * 20.0, 0), 20.0),
+            "risk_approved": 10.0 if risk.get("approved") else 0.0,
         }
-
-    def _ai_contradiction_warnings(self, ai: Dict[str, Any]) -> List[str]:
-        """Detect obvious contradictions in Groq explanation."""
-        warnings: List[str] = []
-        signal = str(ai.get('signal', ai.get('final_signal', ''))).upper()
-        supportive = ai.get('supportive_evidence', ai.get('evidence', []))
-        text = " ".join(str(x) for x in supportive) + " " + str(ai.get('entry_reason', ''))
-        lower = text.lower()
-        bullish_terms = ['macd bullish', 'bullish and improving', 'ema bullish', 'صاعد', 'شرائي', 'hidden_bullish']
-        bearish_terms = ['macd bearish', 'ema bearish', 'هابط', 'بيعي', 'hidden_bearish']
-        if signal == 'SELL' and any(term in lower for term in bullish_terms):
-            warnings.append('Warning: Groq explanation contains bullish evidence inside SELL supportive evidence; move it to risks or set the decision to WAIT.')
-        if signal == 'BUY' and any(term in lower for term in bearish_terms):
-            warnings.append('Warning: Groq explanation contains bearish evidence inside BUY supportive evidence; move it to risks or set the decision to WAIT.')
-        # Support/resistance misuse: support below is not a SELL reason unless it is being broken; resistance above is not a BUY reason unless it is being broken.
-        if signal == 'SELL' and ('دعم' in lower or 'support' in lower) and not any(x in lower for x in ['كسر', 'تحت', 'break', 'below', 'target', 'هدف']):
-            warnings.append('Warning: Groq used the presence of support as supportive evidence for SELL without mentioning a break; this should be a risk/target, not an entry reason.')
-        if signal == 'BUY' and ('مقاومة' in lower or 'resistance' in lower) and not any(x in lower for x in ['اختراق', 'فوق', 'break', 'above', 'target', 'هدف']):
-            warnings.append('Warning: Groq used the presence of resistance as supportive evidence for BUY without mentioning a breakout; this should be a risk/target, not an entry reason.')
-        inv_alt = str(ai.get('invalidation', '')) + ' ' + str(ai.get('alternative_scenario', ''))
-        if signal in {'BUY', 'SELL'} and not any(ch.isdigit() for ch in inv_alt):
-            warnings.append('Warning: Groq did not provide a clear price level for invalidation or the alternative scenario.')
-        return warnings
+        news_status = str(news.get("market_status", "SAFE")).upper()
+        components["news"] = 10.0 if news_status == "SAFE" and news.get("can_trade", True) else 5.0 if news.get("can_trade", True) else 0.0
+        sq = str(session.get("session_quality", session.get("quality", "LOW"))).upper()
+        components["session"] = {"BEST": 10.0, "HIGH": 9.0, "MEDIUM": 6.0, "LOW": 3.0}.get(sq, 0.0) if session.get("trading_allowed", True) else 0.0
+        penalty = min(len(analysis.get("warnings", []) or []) * 4.0, 12.0)
+        raw = max(0.0, min(100.0, sum(components.values()) - penalty))
+        grade, label = ("A+", "Elite") if raw >= 90 else ("A", "Strong") if raw >= 80 else ("B", "Good") if raw >= 70 else ("C", "Acceptable") if raw >= 60 else ("D", "Weak")
+        return {"score": round(raw, 1), "grade": grade, "label": label, "components": {k: round(v, 1) for k, v in components.items()}, "penalty": round(penalty, 1), "rr_ratio": round(rr, 2), "agreement_pct": round(agreement, 1)}
 
     def _order_type(self, signal: str, entry: float, current_price: float | None) -> str:
-        """Classify paper order type from entry vs current price.
-
-        Respects entry_style config:
-          - "market" / "fixed_risk":  always *_MARKET.
-          - "smart":   uses pending_threshold_points.
-          - "hybrid":  uses market_threshold_points.
-        """
         oe = self.config.get("order_execution", {}) or {}
         entry_style = str(oe.get("entry_style", "market")).lower()
-
         if entry_style in ("market", "fixed_risk"):
             return f"{signal}_MARKET"
-
         try:
             entry = float(entry)
             current = float(current_price or entry)
         except (TypeError, ValueError):
             return f"{signal}_MARKET"
-
-        if entry_style == "hybrid":
-            threshold = float(oe.get("market_threshold_points", 30) or 30) / 10.0
-        else:
-            threshold = float(oe.get("pending_threshold_points", 1.0) or 1.0)
-
+        threshold = float(oe.get("market_threshold_points" if entry_style == "hybrid" else "pending_threshold_points", 30) or 30) / (10.0 if entry_style == "hybrid" else 1.0)
         if abs(entry - current) <= max(threshold, 0.01):
             return f"{signal}_MARKET"
-        if signal == 'BUY':
-            return 'BUY_LIMIT' if entry < current else 'BUY_STOP'
-        if signal == 'SELL':
-            return 'SELL_LIMIT' if entry > current else 'SELL_STOP'
-        return 'UNKNOWN'
+        if signal == "BUY":
+            return "BUY_LIMIT" if entry < current else "BUY_STOP"
+        if signal == "SELL":
+            return "SELL_LIMIT" if entry > current else "SELL_STOP"
+        return "UNKNOWN"
 
     def _to_trade_decision(self, analysis: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert analysis output to the canonical payload expected by DB/Telegram."""
-        final_signal = str(analysis.get('signal', 'WAIT')).upper()
-        risk = context.get('risk', {}) or {}
-        current_price = context.get('current_price')
+        final_signal = str(analysis.get("signal", "WAIT")).upper()
+        risk = context.get("risk", {}) or {}
+        current_price = context.get("current_price")
         signal_payload: Dict[str, Any] = {}
-        if final_signal in {'BUY', 'SELL'}:
-            entry_info = risk.get('entry', {}) or {}
-            entry_zone = entry_info.get('zone', {}) or {}
-            sl = risk.get('stop_loss', {}) or {}
-            tp = risk.get('take_profit', {}) or {}
-            tp1 = tp.get('tp1', {}) or {}
-            tp2 = tp.get('tp2', {}) or {}
-            entry_price = entry_info.get('price') or current_price
-            stop_loss = sl.get('price', 0)
-            tp1_price = tp1.get('price', 0)
-            tp2_price = tp2.get('price', 0)
-            rr_ratio = tp2.get('rr_ratio', tp1.get('rr_ratio', 0))
-
-            # Prefer the smart order classification computed by the risk agent
-            # (level/SMC aware). Fall back to the local price-vs-entry heuristic.
-            order_type = entry_info.get('order_type') or self._order_type(final_signal, float(entry_price or 0), current_price)
-            entry_kind = entry_info.get('kind') or ('MARKET' if order_type.endswith('MARKET') else order_type.split('_')[-1])
-
+        if final_signal in {"BUY", "SELL"}:
+            entry_info = risk.get("entry", {}) or {}
+            entry_zone = entry_info.get("zone", {}) or {}
+            sl = risk.get("stop_loss", {}) or {}
+            tp = risk.get("take_profit", {}) or {}
+            tp1 = tp.get("tp1", {}) or {}
+            tp2 = tp.get("tp2", {}) or {}
+            entry_price = entry_info.get("price") or current_price
+            order_type = entry_info.get("order_type") or self._order_type(final_signal, float(entry_price or 0), current_price)
+            entry_kind = entry_info.get("kind") or ("MARKET" if order_type.endswith("MARKET") else order_type.split("_")[-1])
             signal_payload = {
-                'type': final_signal,
-                'entry': {
-                    'price': entry_price,
-                    'low': entry_zone.get('low', entry_price),
-                    'high': entry_zone.get('high', entry_price),
-                    'kind': entry_kind,
-                    'order_type': order_type,
-                    'basis': entry_info.get('basis', ''),
-                    'current_price': entry_info.get('current_price', current_price),
-                    'distance_points': entry_info.get('distance_points', 0.0),
+                "type": final_signal,
+                "entry": {
+                    "price": entry_price,
+                    "low": entry_zone.get("low", entry_price),
+                    "high": entry_zone.get("high", entry_price),
+                    "kind": entry_kind,
+                    "order_type": order_type,
+                    "basis": entry_info.get("basis", ""),
+                    "current_price": entry_info.get("current_price", current_price),
+                    "distance_points": entry_info.get("distance_points", 0.0),
                 },
-                'stop_loss': stop_loss,
-                'tp1': tp1_price,
-                'tp2': tp2_price,
-                'tp1_rr': tp1.get('rr_ratio', 0),
-                'tp2_rr': tp2.get('rr_ratio', 0),
-                'rr_ratio': rr_ratio,
-                'order_type': order_type,
-                'entry_kind': entry_kind,
-                'position_size': risk.get('position_size', {}),
-                'risk_summary': risk.get('summary', ''),
+                "stop_loss": sl.get("price", 0),
+                "tp1": tp1.get("price", 0),
+                "tp2": tp2.get("price", 0),
+                "tp1_rr": tp1.get("rr_ratio", 0),
+                "tp2_rr": tp2.get("rr_ratio", 0),
+                "rr_ratio": tp2.get("rr_ratio", tp1.get("rr_ratio", 0)),
+                "order_type": order_type,
+                "entry_kind": entry_kind,
+                "position_size": risk.get("position_size", {}),
+                "risk_summary": risk.get("summary", ""),
             }
-
-        reasons = [analysis.get('reasoning', '')]
-        if signal_payload.get('risk_summary'):
-            reasons.append(signal_payload.get('risk_summary'))
-        for warning in (analysis.get('ai', {}) or {}).get('ai_warnings', []) or []:
-            reasons.append(warning)
-        for warning in analysis.get('warnings', []) or []:
-            reasons.append(warning)
-
-        quality = self._calculate_quality_score(analysis, context)
-
+        reasons = [analysis.get("reasoning", "")]
+        if signal_payload.get("risk_summary"):
+            reasons.append(signal_payload.get("risk_summary"))
+        reasons.extend(analysis.get("warnings", []) or [])
         return {
-            'decision': final_signal,
-            'signal': signal_payload,
-            'confidence': analysis.get('confidence', 0),
-            'quality': quality,
-            'current_price': current_price,
-            'reasons': [r for r in reasons if r],
-            'warnings': analysis.get('warnings', []),
-            'votes': analysis.get('votes', {}),
-            'weights': analysis.get('weights', {}),
-            'classic': analysis.get('classic', {}),
-            'agent_context': (analysis.get('classic', {}) or {}).get('strongest_directional'),
-            'one_agent_groq_mode': False,
-            'consensus_mode': True,
-            'ai': {'available': False, 'reason': 'classic consensus mode'}, 
-            'learning': analysis.get('learning', {}),
-            'risk': risk,
-            'risk_assessment': analysis.get('risk_assessment', {}),
-            'session_info': context.get('session', {}),
-            'news': context.get('news', {}),
-            'news_ai': context.get('news_ai', {}),
-            'daily_bias': context.get('daily_bias', {}),
-            'dynamic_risk': context.get('dynamic_risk', {}),
-            'summary': analysis.get('reasoning', ''),
-            'timestamp': analysis.get('timestamp', self.now_iso()),
+            "decision": final_signal,
+            "signal": signal_payload,
+            "confidence": analysis.get("confidence", 0),
+            "quality": self._calculate_quality_score(analysis, context),
+            "current_price": current_price,
+            "reasons": [r for r in reasons if r],
+            "warnings": analysis.get("warnings", []),
+            "votes": analysis.get("votes", {}),
+            "weights": analysis.get("weights", {}),
+            "classic": analysis.get("classic", {}),
+            "agent_context": (analysis.get("classic", {}) or {}).get("strongest_directional"),
+            "consensus_mode": True,
+            "learning": analysis.get("learning", {}),
+            "risk": risk,
+            "risk_assessment": analysis.get("risk_assessment", {}),
+            "session_info": context.get("session", {}),
+            "news": context.get("news", {}),
+            "daily_bias": context.get("daily_bias", {}),
+            "dynamic_risk": context.get("dynamic_risk", {}),
+            "summary": analysis.get("reasoning", ""),
+            "timestamp": analysis.get("timestamp", self.now_iso()),
         }
 
     def decide(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Production-compatible sync decision payload for DB/Telegram."""
-        analysis = self.analyze(data)
-        return self._to_trade_decision(analysis, data.get('all_agents_results', data))
+        return self._to_trade_decision(self.analyze(data), data.get("all_agents_results", data))
 
     async def decide_async(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Production-compatible async decision payload for DB/Telegram."""
         analysis = await self.analyze_async(data)
-        return self._to_trade_decision(analysis, data.get('all_agents_results', data))
+        return self._to_trade_decision(analysis, data.get("all_agents_results", data))
 
-    def get_decision_message(self, result: Dict) -> str:
-        """تنسيق رسالة القرار لتيليجرام"""
-        
-        signal = result.get('signal', 'WAIT')
-        confidence = result.get('confidence', 0)
-        reasoning = result.get('reasoning', '')
-        votes = result.get('votes', {})
-        classic = result.get('classic', {})
-        ai = result.get('ai', {})
-        learning = result.get('learning', {})
-        risk = result.get('risk_assessment', {})
-        weights = result.get('weights', {})
-        
-        signal_emoji = {
-            'BUY': '🟢',
-            'SELL': '🔴',
-            'WAIT': '🟡'
-        }.get(signal, '⚪')
-        
-        lines = [
-            "━━━━━━━━━━━━━━━━━━━━",
-            f"{signal_emoji} *Final Decision*",
-            "━━━━━━━━━━━━━━━━━━━━",
-            f"📊 Signal: *{signal}*",
-            f"🎯 Confidence: *{confidence}%*",
-            ""
-        ]
-        
-        # New statistics
-        buy_count = len(votes.get('BUY', []))
-        sell_count = len(votes.get('SELL', []))
-        total_voting = classic.get('total_voting_agents', buy_count + sell_count)
-        
-        # Compute agreement percentage
-        if signal == 'BUY':
-            agreement_pct = classic.get('buy_agreement_pct', 0)
-        elif signal == 'SELL':
-            agreement_pct = classic.get('sell_agreement_pct', 0)
-        else:
-            agreement_pct = max(classic.get('buy_agreement_pct', 0), classic.get('sell_agreement_pct', 0))
-        
+    def get_decision_message(self, result: Dict[str, Any]) -> str:
+        signal = result.get("signal", "WAIT")
+        confidence = result.get("confidence", 0)
+        votes = result.get("votes", {})
+        classic = result.get("classic", {})
+        lines = ["━━━━━━━━━━━━━━━━━━━━", "🧭 *Final Decision*", "━━━━━━━━━━━━━━━━━━━━", f"📊 Signal: *{signal}*", f"🎯 Confidence: *{confidence}%*", ""]
         lines.append("🔥 Agreement requirements:")
-        lines.append(f"├ Agents: {total_voting}/{self.min_agents_agree} ✅")
-        lines.append(f"├ Agreement: {agreement_pct:.0f}% ✅")
+        lines.append(f"├ Agents: {classic.get('total_voting_agents', 0)}/{self.min_agents_agree}")
+        lines.append(f"└ Min weighted confidence: {self.min_consensus_confidence:.0f}%")
         lines.append("")
-        
-        # Learned weights
-        if weights:
-            lines.append("⚙️ Learned weights:")
-            for name, w in sorted(weights.items(), key=lambda x: -x[1])[:5]:
-                lines.append(f"├ {name}: {w*100:.0f}%")
-            lines.append("")
-        
-        # Detailed votes
         lines.append("🗳️ Agent votes:")
-        lines.append(f"├ BUY: {buy_count} ({classic.get('buy_agreement_pct', 0):.0f}%)")
-        lines.append(f"├ SELL: {sell_count} ({classic.get('sell_agreement_pct', 0):.0f}%)")
+        lines.append(f"├ BUY: {len(votes.get('BUY', []))} ({classic.get('buy_agreement_pct', 0):.0f}%)")
+        lines.append(f"├ SELL: {len(votes.get('SELL', []))} ({classic.get('sell_agreement_pct', 0):.0f}%)")
         lines.append(f"└ WAIT: {len(votes.get('WAIT', []))}")
-        lines.append("")
-        
-        # AI
-        if ai.get('available'):
-            lines.extend([
-                f"🤖 AI: {ai.get('provider', 'AI')}",
-                f"├ Strength: {ai.get('consensus_strength', 'N/A')}",
-                f"└ R/R: {ai.get('risk_reward', 'N/A')}",
-                ""
-            ])
-        
-        # Learning
-        if learning.get('enabled'):
-            lines.append("🧠 Smart learning: ✅ enabled")
-            if learning.get('overall_win_rate'):
-                lines.append(f"├ Win Rate: {learning['overall_win_rate']:.1f}%")
-            lines.append("")
-        
-        # Risk
-        lines.extend([
-            f"⚠️ Risk: {risk.get('assessment', 'N/A')}",
-            f"📝 Reason: {reasoning[:80]}..."
-            if len(reasoning) > 80 else f"📝 Reason: {reasoning}"
-        ])
-        
-        # Rejection reason if any
-        rejection = classic.get('rejection_reason')
-        if rejection and signal == 'WAIT':
-            lines.append(f"❌ Wait reason: {rejection}")
-        
+        if classic.get("rejection_reason") and signal == "WAIT":
+            lines.append(f"❌ Wait reason: {classic['rejection_reason']}")
         lines.append("━━━━━━━━━━━━━━━━━━━━")
-        
         return "\n".join(lines)

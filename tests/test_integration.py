@@ -112,11 +112,11 @@ def base_config():
 def run_pipeline(config, data, news_status="SAFE"):
     """Run full analysis pipeline."""
     # Run agents
-    tech = TechnicalAgent(config, ai_service=None).analyze(data)
-    classical = ClassicalAgent(config, ai_service=None).analyze(data)
-    smc = SMCAgent(config, ai_service=None).analyze(data)
-    pa = PriceActionAgent(config, ai_service=None).analyze(data)
-    mtf = MultiTimeframeAgent(config, ai_service=None).analyze(data)
+    tech = TechnicalAgent(config, ).analyze(data)
+    classical = ClassicalAgent(config, ).analyze(data)
+    smc = SMCAgent(config, ).analyze(data)
+    pa = PriceActionAgent(config, ).analyze(data)
+    mtf = MultiTimeframeAgent(config, ).analyze(data)
     
     news = {"market_status": news_status, "can_trade": True, "summary": "safe"}
     if news_status == "DANGER":
@@ -136,7 +136,7 @@ def run_pipeline(config, data, news_status="SAFE"):
     
     results["risk"] = RiskManagementAgent(config).evaluate(results)
     
-    return DecisionAgent(config, ai_service=None).analyze(results)
+    return DecisionAgent(config, ).analyze(results)
 
 
 def test_full_pipeline_uptrend_generates_buy_signal():
@@ -196,7 +196,7 @@ def test_decision_with_news_danger_blocks_signal():
             "portfolio": {"open_trades_count": 0, "today_signals_count": 0, "consecutive_losses": 0},
         }
         results["risk"] = RiskManagementAgent(config).evaluate(results)
-        decision = DecisionAgent(config, ai_service=None).analyze(results)
+        decision = DecisionAgent(config, ).analyze(results)
         
         # Should be WAIT due to news danger
         assert decision["signal"] in {"WAIT", "AVOID"}

@@ -1,13 +1,7 @@
-"""Weekly AI Performance Report service.
+"""Weekly performance report service.
 
-Generates a structured weekly performance report using Groq.
-
-Pipeline:
-  1. Collect last 7 days of trades, agent stats, risk events, memory rules
-  2. Build a structured prompt with real numbers only
-  3. Call Groq to produce a markdown report
-  4. Split long messages for Telegram (4096 char limit)
-  5. Save report as JSON in storage/weekly_report.json
+Generates a deterministic structured weekly report from real trade statistics and
+sends it to Telegram. No external decision service is used.
 """
 from __future__ import annotations
 
@@ -32,7 +26,7 @@ CLOSED_STATUSES = {"CLOSED_TP1", "CLOSED_TP2", "CLOSED_SL", "EXPIRED", "BE_HIT",
 
 @dataclass
 class WeeklyStats:
-    """Aggregated weekly numbers fed into the Groq prompt."""
+    """Aggregated weekly numbers used by the weekly report."""
     lookback_days: int = 7
     week_start: str = ""
     week_end: str = ""
@@ -58,8 +52,6 @@ class WeeklyStats:
     by_session: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     halt_activations: int = 0
     caution_activations: int = 0
-    new_memory_rules: int = 0
-    applied_memory_rules: int = 0
     news_blocked_signals: int = 0
     duplicate_blocked_signals: int = 0
 
@@ -90,21 +82,17 @@ class WeeklyStats:
             "by_session": self.by_session,
             "halt_activations": self.halt_activations,
             "caution_activations": self.caution_activations,
-            "new_memory_rules": self.new_memory_rules,
-            "applied_memory_rules": self.applied_memory_rules,
             "news_blocked_signals": self.news_blocked_signals,
             "duplicate_blocked_signals": self.duplicate_blocked_signals,
         }
 
 
 class WeeklyReportService:
-    """Build and send the weekly AI performance report."""
+    """Build and send the weekly performance report."""
 
-    def __init__(self, config: Dict[str, Any], database: Any, ai_service: Any = None,
-                 telegram: Any = None) -> None:
+    def __init__(self, config: Dict[str, Any], database: Any, telegram: Any = None, **_kwargs) -> None:
         self.config = config
         self.database = database
-        self.ai_service = ai_service
         self.telegram = telegram
         wr_cfg = (config.get("weekly_report") or {})
         self.enabled = bool(wr_cfg.get("enabled", False))
@@ -252,8 +240,6 @@ class WeeklyReportService:
                                                    {"event": "HALT_ACTIVATED", "since": start_iso})
         stats.caution_activations = self._safe_count("session_log",
                                                       {"event": "CAUTION_ACTIVATED", "since": start_iso})
-        stats.new_memory_rules = self._safe_count("ai_memory_rules",
-                                                   {"since": start_iso})
         stats.news_blocked_signals = self._safe_count("signals",
                                                        {"blocked_by": "news", "since": start_iso})
         stats.duplicate_blocked_signals = self._safe_count("signals",
@@ -276,7 +262,6 @@ class WeeklyReportService:
             "3) 📅 Best and worst day (day + pnl + trade count)\n"
             "4) 🌍 Session performance (London / NY / Asian, best/worst)\n"
             "5) ⚠️ Risk (HALT/CAUTION count)\n"
-            "6) 🧠 New memory rules (count only)\n"
             "7) 🎯 3-5 specific, actionable recommendations for config.json next week\n\n"
             f"⚠️ Strict rules:\n"
             f"- Do not exceed {self.max_chars} characters\n"
@@ -288,12 +273,10 @@ class WeeklyReportService:
         )
 
     # ------------------------------------------------------------------ #
-    # 3) Generate (calls Groq)
+    # 3) Generate deterministic report
     # ------------------------------------------------------------------ #
     async def generate_report(self, *, now: Optional[datetime] = None) -> Dict[str, Any]:
         stats = self.collect_stats(now=now)
-        prompt = self.build_prompt(stats)
-
         # Gracefully handle weeks with too few trades
         if stats.total_trades < self.min_trades:
             message = (
@@ -314,49 +297,16 @@ class WeeklyReportService:
             self._save(result)
             return result
 
-        if self.ai_service is None:
-            message = self._fallback_message(stats)
-            result = {
-                "status": "ok_no_ai",
-                "stats": stats.to_prompt_dict(),
-                "report_text": message,
-                "recommendations": [],
-            }
-            self._save(result)
-            return result
-
-        try:
-            response = await self.ai_service._call_ai(prompt, agent_type="weekly_report")
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Groq call failed for weekly report: %s", exc)
-            response = None
-
-        if response is None or not getattr(response, "success", False):
-            message = self._fallback_message(stats)
-            result = {
-                "status": "ok_groq_failed",
-                "stats": stats.to_prompt_dict(),
-                "report_text": message,
-                "recommendations": [],
-                "error": getattr(response, "error", "unknown") if response else "no_response",
-            }
-            self._save(result)
-            return result
-
-        text = (response.content or "").strip()
-        if not text:
-            text = self._fallback_message(stats)
-
+        message = self._fallback_message(stats)
         result = {
             "status": "ok",
             "stats": stats.to_prompt_dict(),
-            "report_text": text,
-            "recommendations": self._extract_recommendations(text),
-            "tokens_used": getattr(response, "tokens_used", 0) or 0,
-            "cost": getattr(response, "cost", 0.0) or 0.0,
+            "report_text": message,
+            "recommendations": [],
         }
         self._save(result)
         return result
+
 
     # ------------------------------------------------------------------ #
     # 4) Send to Telegram (split if needed)
@@ -365,9 +315,7 @@ class WeeklyReportService:
         if not self.telegram or not self.send_telegram:
             logger.info("Telegram disabled or unavailable; skipping send.")
             return False
-        # Weekly report text is usually generated by Groq. Escape it before
-        # sending with Telegram HTML parse mode so any literal <, >, & in the
-        # AI text cannot break delivery or be interpreted as HTML tags.
+        # Escape text before sending with Telegram HTML parse mode.
         safe_report_text = html.escape(str(report_text), quote=False)
         chunks = self.split_message(safe_report_text)
         all_ok = True
@@ -402,7 +350,7 @@ class WeeklyReportService:
     # Internals
     # ------------------------------------------------------------------ #
     def _fallback_message(self, stats: WeeklyStats) -> str:
-        """Used when Groq is not available; a simple text-only summary."""
+        """Simple text-only weekly summary."""
         pf = stats.profit_factor
         pf_display = "∞" if pf >= 99 or (pf in (0, 99.9) and stats.losses == 0 and stats.wins > 0) else pf
         lines = [
@@ -419,7 +367,7 @@ class WeeklyReportService:
             f"🏆 Largest win: {stats.largest_win_points:+.2f}",
             f"💔 Largest loss: {stats.largest_loss_points:+.2f}",
             "",
-            "⚠️ (Groq unavailable — automated summary with no recommendations)",
+            "⚠️ Automated summary.",
         ]
         return "\n".join(lines)
 
