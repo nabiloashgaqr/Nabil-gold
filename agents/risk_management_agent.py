@@ -205,9 +205,13 @@ class RiskManagementAgent(BaseAgent):
                 sell_count += 1
             details[agent] = {"direction": direction, "confidence": confidence, "weight": weight, "score": round(agent_score, 2)}
 
-        if score > 0 and buy_count >= sell_count:
+        # FIX: prioritise weighted score direction, then use agent count as
+        # tiebreaker. The old logic could pick the WRONG direction when
+        # score > 0 but sell_count > buy_count (or vice-versa), producing
+        # an inverted risk-management evaluation.
+        if score > 0:
             direction = "BUY"
-        elif score < 0 and sell_count >= buy_count:
+        elif score < 0:
             direction = "SELL"
         elif buy_count > sell_count:
             direction = "BUY"
@@ -787,8 +791,35 @@ class RiskManagementAgent(BaseAgent):
             return {"recommended_lots": None, "risk_amount": None, "based_on_capital": None, "risk_percent": risk_percent}
         risk_amount = capital * (risk_percent / 100)
         price_distance = abs(entry - stop_loss)
-        # Approximation for XAUUSD: 1 standard lot ~= 100 oz, $1 move ~= $100.
-        lots = risk_amount / max(price_distance * 100, 0.01)
+        # FIX: use point_size-based calculation that works for ALL instruments,
+        # not just gold. The old formula (price_distance * 100) assumed XAUUSD
+        # (1 lot = 100 oz, $1 move = $100). For forex (1 lot = 100,000 units)
+        # and WTI (1 lot = 1,000 barrels) we need the correct pip value.
+        from utils.instruments import point_size, price_to_points
+        ps = point_size(self.symbol)
+        distance_points = price_to_points(price_distance, self.symbol)
+        # Pip value per standard lot:
+        #   XAU/USD:  1 lot = 100 oz → $10 per 0.10 move → $10 per point
+        #   Forex:    1 lot = 100,000 units → $10 per pip (10 points) → $1 per point
+        #   WTI:      1 lot = 1,000 barrels → $10 per 0.01 move → $10 per point
+        category = "metal"
+        try:
+            from utils.instruments import get_instrument
+            spec = get_instrument(self.config, self.symbol)
+            category = str(spec.get("category", "forex")).lower()
+        except Exception:
+            pass
+        if category == "forex":
+            # 1 standard lot = 100,000 units; 1 point = 0.00001 → $1/lot
+            value_per_point_per_lot = 1.0
+        elif category == "oil":
+            # 1 standard lot = 1,000 barrels; 1 point = 0.01 → $10/lot
+            value_per_point_per_lot = 10.0
+        else:
+            # Gold: 1 standard lot = 100 oz; 1 point = 0.10 → $10/lot
+            value_per_point_per_lot = 10.0
+        risk_per_lot = max(distance_points * value_per_point_per_lot, 0.01)
+        lots = risk_amount / risk_per_lot
         max_lots = self._f(self.settings.get("max_lot_size"), 10.0)
         lots = min(lots, max_lots)
         return {

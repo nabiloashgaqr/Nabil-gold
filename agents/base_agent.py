@@ -41,3 +41,20 @@ class BaseAgent(ABC):
             return float(value)
         except (TypeError, ValueError):
             return default
+
+    def _f(self, value: Any, default: float = 0.0) -> float:
+        """Shorthand safe-float used across all agents."""
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _last(self, values: list, default: float = 0.0) -> float:
+        """Return the most recent non-None value from a series."""
+        for value in reversed(values):
+            if value is not None:
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    continue
+        return default

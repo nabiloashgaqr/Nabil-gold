@@ -294,6 +294,10 @@ class TechnicalAgent(BaseAgent):
             if len(lows) >= 2:
                 a, b = lows[-2], lows[-1]
                 ia, ib = offset + int(a['index']), offset + int(b['index'])
+                # FIX: bounds-check rsi_series access to prevent IndexError
+                # when swing index extends beyond the indicator series.
+                if ia >= len(rsi_series) or ib >= len(rsi_series):
+                    return 'NONE'
                 pa, pb = float(a['price']), float(b['price'])
                 ra, rb = float(rsi_series[ia] or 50), float(rsi_series[ib] or 50)
                 if pb < pa and rb > ra:
@@ -303,6 +307,8 @@ class TechnicalAgent(BaseAgent):
             if len(highs) >= 2:
                 a, b = highs[-2], highs[-1]
                 ia, ib = offset + int(a['index']), offset + int(b['index'])
+                if ia >= len(rsi_series) or ib >= len(rsi_series):
+                    return 'NONE'
                 pa, pb = float(a['price']), float(b['price'])
                 ra, rb = float(rsi_series[ia] or 50), float(rsi_series[ib] or 50)
                 if pb > pa and rb < ra:
