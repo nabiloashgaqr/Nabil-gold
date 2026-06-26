@@ -684,21 +684,15 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         logger.info("جلب بيانات السوق...")
         data = market_data.get_gold_data()
         if not data:
-            logger.error("فشل في جلب البيانات")
-            # Don't fail silently on scheduled runs — surface it so a recurring
-            # data outage is visible instead of looking like "no signal".
-            telegram.send_error_alert(
-                "Analysis aborted: failed to fetch market data (Twelve Data). "
-                "No signal will be generated this cycle."
-            )
+            # Pre-check already sent the error alert. Just log and skip.
+            logger.error("فشل في جلب البيانات لـ %s — تخطي", config.get("symbol"))
             return
 
         # Safety: never send production signals from synthetic/demo prices on GitHub Actions.
         allow_synthetic = bool(config.get("data_source", {}).get("allow_synthetic_in_production", False))
         synthetic_sources = synthetic_timeframe_sources(data)
         if os.environ.get("GITHUB_ACTIONS") == "true" and synthetic_sources and not allow_synthetic:
-            # Error already sent by the pre-check in run_analysis_async().
-            # Just log and skip this symbol silently.
+            # Pre-check already sent the error alert. Just log and skip.
             logger.error("Skipping %s: synthetic_demo data detected.", config.get("symbol"))
             return
 
@@ -921,8 +915,12 @@ async def run_analysis_async() -> None:
         allow_synth = bool(base_config.get("data_source", {}).get("allow_synthetic_in_production", False))
         if os.environ.get("GITHUB_ACTIONS") == "true" and not allow_synth:
             telegram.send_error_alert(
-                "Analysis blocked: TWELVEDATA_API_KEY is missing or invalid. "
-                "Get a free key: https://twelvedata.com/register and add it to GitHub Secrets."
+                "🚨 بيانات تجريبية — المفتاح غير موجود أو غير صالح\n"
+                "━━━━━━━━━━━━━━━━━━━━━\n"
+                "TWELVEDATA_API_KEY مفقود أو خاطئ\n\n"
+                "1. سجّل: https://twelvedata.com/register\n"
+                "2. أضف المفتاح في GitHub Secrets\n"
+                "━━━━━━━━━━━━━━━━━━━━━"
             )
             logger.error("TWELVEDATA_API_KEY not working — aborting all symbols")
             return
