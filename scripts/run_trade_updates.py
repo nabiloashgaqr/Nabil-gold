@@ -111,14 +111,14 @@ def _build_status_message(open_trades, evaluations, current_price: float) -> str
 
 def main() -> None:
     """تحديث الصفقات المفتوحة."""
-    logger.info("بدء تحديث الصفقات: %s", datetime.now(timezone.utc).isoformat())
+    logger.info("Starting trade updates: %s", datetime.now(timezone.utc).isoformat())
     config = load_config()
 
     # ── فحص ساعات التداول ──
     session = TradingSessionAgent(config).check()
     logger.info(
-        "🔍 الجلسة: %s | الجودة: %s | مسموح: %s",
-        session.get("current_session") or "خارج الجلسة",
+        "🔍 Session: %s | Quality: %s | Allowed: %s",
+        session.get("current_session") or "خارج Session",
         session.get("session_quality", "N/A"),
         session.get("trading_allowed"),
     )
@@ -127,14 +127,14 @@ def main() -> None:
     force_update = os.environ.get("FORCE_TRADE_UPDATE", "false").lower() in {"1", "true", "yes"}
     if not session.get("trading_allowed") and not update_outside_hours and not force_update:
         logger.info(
-            "🚫 خارج ساعات تحديث الصفقات (%s) - لا تحديث حالياً. السبب: %s",
+            "🚫 Outside trade update hours (%s) - No update. Reason: %s",
             session.get("current_session") or "غير محدد",
             session.get("reason", ""),
         )
         return  # ══ لا تحديث خارج الجلسات إلا عند FORCE_TRADE_UPDATE ══
     if not session.get("trading_allowed") and (update_outside_hours or force_update):
         logger.info(
-            "ℹ️ خارج ساعات التحديث العادية، لكن التحديث مستمر بسبب update_outside_trading_hours أو FORCE_TRADE_UPDATE"
+            "ℹ️ Outside normal update hours, but continuing due to update_outside_trading_hours or FORCE_TRADE_UPDATE"
         )
 
     try:
@@ -147,9 +147,9 @@ def main() -> None:
         # when triggered externally, but the workflow pre-check should normally
         # skip the heavy steps before Python dependencies are installed.
         open_trades = database.get_open_trades()
-        logger.info("عدد الصفقات النشطة/المعلقة: %s", len(open_trades))
+        logger.info("Active/pending trades count: %s", len(open_trades))
         if not open_trades:
-            logger.info("لا توجد صفقات مفتوحة أو أوامر معلقة — تخطي تحديث الصفقات بدون Telegram وبدون جلب سعر.")
+            logger.info("لا توجد صفقات مفتوحة أو أوامر معلقة — skipping تحديث الصفقات بدون Telegram وبدون جلب سعر.")
             return
 
         # In the consolidated end-of-day digest, suppress this script's own
@@ -180,12 +180,12 @@ def main() -> None:
             price_payload = market_data.get_ohlcv(base_tf, outputsize=5)
             allow_synthetic = bool(symbol_config.get("data_source", {}).get("allow_synthetic_in_production", False))
             if os.environ.get("GITHUB_ACTIONS") == "true" and price_payload.get("source") == "synthetic_demo" and not allow_synthetic:
-                logger.error("تم إيقاف تحديث صفقات %s: السعر من synthetic_demo. راجع TWELVEDATA_API_KEY.", symbol)
+                logger.error("Trade updates stopped for %s: price is from synthetic_demo. Check TWELVEDATA_API_KEY.", symbol)
                 telegram.send_error_alert(f"Trade updates stopped for {symbol}: price is from synthetic_demo. Check TWELVEDATA_API_KEY.")
                 continue
             symbol_price = price_payload.get("current_price")
             if not symbol_price:
-                logger.error("فشل في جلب السعر للرمز %s", symbol)
+                logger.error("Failed to fetch price for symbol %s", symbol)
                 continue
             current_price = float(symbol_price)
             evaluations.extend(manager.update_trades(
@@ -200,7 +200,7 @@ def main() -> None:
             if evaluation.get("events"):
                 total_events += len(evaluation.get("events", []))
                 logger.info(
-                    "تحديث الصفقة %s: %s | %s -> %s | PnL=%s",
+                    "Trade update %s: %s | %s -> %s | PnL=%s",
                     evaluation.get("trade_id"),
                     ",".join(evaluation.get("events", [])),
                     evaluation.get("old_status"),
@@ -253,9 +253,9 @@ def main() -> None:
                 _build_status_message(open_trades, evaluations, float(current_price))
             )
 
-        logger.info("اكتمل تحديث الصفقات (events=%s, open=%s)", total_events, len(open_trades))
+        logger.info("Trade update completed (events=%s, open=%s)", total_events, len(open_trades))
     except Exception as exc:  # noqa: BLE001
-        logger.exception("خطأ في التحديث: %s", exc)
+        logger.exception("Update error: %s", exc)
 
 
 if __name__ == "__main__":

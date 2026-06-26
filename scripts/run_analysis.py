@@ -1,7 +1,7 @@
-"""سكريبت التحليل الرئيسي.
+"""Main analysis script.
 
-يعمل كل 5 دقائق عبر cron-job.org/GitHub Actions. يجلب بيانات الذهب، يشغل الوكلاء،
-يطبق إدارة المخاطر والقرار، ثم يحفظ ويرسل الإشارة إذا كانت مؤهلة.
+Runs every 5 minutes via cron-job.org/GitHub Actions. Fetches market data, runs agents,
+يطبق إدارة المخاطر وDecision، ثم يحفظ ويرسل الإشارة إذا كانت مؤهلة.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import html
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
-# إضافة المسار الرئيسي للمشروع
+# Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.classical_agent import ClassicalAgent
@@ -646,18 +646,18 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
     telegram = TelegramService(config)
 
     try:
-        # ── فحص ساعات التداول أولاً ──
+        # ── Check trading hours first ──
         session = TradingSessionAgent(config).check()
         logger.info(
-            "🔍 الجلسة: %s | الجودة: %s | مسموح: %s",
-            session.get("current_session") or "خارج الجلسة",
+            "🔍 Session: %s | Quality: %s | Allowed: %s",
+            session.get("current_session") or "خارج Session",
             session.get("session_quality", "N/A"),
             session.get("trading_allowed"),
         )
 
         if not session.get("trading_allowed"):
             logger.info(
-                "🚫 خارج ساعات التداول (%s) - لا تحليل حالياً. السبب: %s",
+                "🚫 Outside trading hours (%s) - No analysis. Reason: %s",
                 session.get("current_session") or "غير محدد",
                 session.get("reason", ""),
             )
@@ -677,15 +677,15 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 )
             return  # ══ لا تحليل خارج الجلسات ══
 
-        # ── تهيئة الخدمات ──
+        # ── Initialize services ──
         market_data = MarketDataService(config)
         database = DatabaseService(config)
 
-        logger.info("جلب بيانات السوق...")
+        logger.info("Fetching market data...")
         data = market_data.get_gold_data()
         if not data:
             # Pre-check already sent the error alert. Just log and skip.
-            logger.error("فشل في جلب البيانات لـ %s — تخطي", config.get("symbol"))
+            logger.error("Failed to fetch data for %s — skipping", config.get("symbol"))
             return
 
         # Safety: never send production signals from synthetic/demo prices on GitHub Actions.
@@ -701,7 +701,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         today_signals = database.get_today_signals_count()
         consecutive_losses = database.get_consecutive_losses()
 
-        # ── تشغيل وكلاء التحليل ──
+        # ── Running analysis agents ──
         all_results: Dict[str, Any] = {
             "technical": run_agent("technical", TechnicalAgent(config), data),
             "classical": run_agent("classical", ClassicalAgent(config), data),
@@ -723,20 +723,20 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         all_results["daily_bias"] = run_agent("daily_bias", DailyBiasAgent(config), data)
         all_results["risk"] = RiskManagementAgent(config).evaluate(all_results)
         all_results["dynamic_risk"] = DynamicRiskManager(config).evaluate(database)
-        # ── تشغيل وكيل القرار ──
-        logger.info("تشغيل وكيل القرار (5-agent consensus)...")
+        # ── Running decision agent ──
+        logger.info("Running decision agent (5-agent consensus)...")
 
         # --- 1) LearningService wired ---
         learning_service = None
         try:
             learning_service = get_learning_service(database, config)
             # تحميل الأوزان من DB (التي يحسبها run_learning.py يومياً).
-            # كانت هذه الخطوة مفقودة فلم تكن أوزان DB تؤثر على القرار.
+            # كانت هذه الخطوة مفقودة فلم تكن أوزان DB تؤثر على Decision.
             try:
                 loaded = await learning_service.load_current_weights()
-                logger.info("🧠 أوزان الوكلاء المحمّلة من DB: %s", loaded)
+                logger.info("🧠 Agent weights loaded from DB: %s", loaded)
             except Exception as w_exc:
-                logger.warning("⚠️ فشل تحميل الأوزان من DB: %s (fallback إلى config)", w_exc)
+                logger.warning("⚠️ Failed to load weights from DB: %s (fallback إلى config)", w_exc)
         except Exception:
             learning_service = None
         decision = await DecisionAgent(config, learning_service=learning_service).decide_async(all_results)
@@ -746,7 +746,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
 
         decision["dynamic_risk"] = all_results.get("dynamic_risk", {})
         logger.info(
-            "القرار: %s - الثقة: %s%% - %s | DynamicRisk=%s",
+            "Decision: %s - Confidence: %s%% - %s | DynamicRisk=%s",
             decision.get("decision"),
             decision.get("confidence"),
             decision.get("summary"),
@@ -781,19 +781,19 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             today_signals = database.get_today_signals_count()
             open_trades = database.get_open_trades()
             if today_signals >= max_daily:
-                logger.info("تم الوصول للحد الأقصى من الإشارات اليومية: %s", max_daily)
+                logger.info("Daily signal limit reached: %s", max_daily)
                 if should_send_status(config):
                     telegram.send_message(f"🟡 No signal: daily signal limit reached ({max_daily}).")
                 return
             if len(open_trades) >= max_open:
-                logger.info("تم الوصول للحد الأقصى للصفقات المفتوحة: %s", max_open)
+                logger.info("Max open trades reached: %s", max_open)
                 if should_send_status(config):
                     telegram.send_message(f"🟡 No signal: max open trades reached ({max_open}).")
                 return
 
             dynamic_block_reason = should_block_signal(decision, all_results.get("dynamic_risk", {}))
             if dynamic_block_reason:
-                logger.info("تم منع الإشارة بسبب Dynamic Risk: %s", dynamic_block_reason)
+                logger.info("Signal blocked by Dynamic Risk: %s", dynamic_block_reason)
                 if should_send_status(config):
                     telegram.send_message(
                         "🟡 <b>Signal blocked by Dynamic Risk</b>\n"
@@ -807,7 +807,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
 
             duplicate_reason = duplicate_signal_reason(decision, database, config)
             if duplicate_reason:
-                logger.info("تم منع إشارة مكررة: %s", duplicate_reason)
+                logger.info("Duplicate signal blocked: %s", duplicate_reason)
                 if should_send_status(config):
                     telegram.send_message(
                         "🟡 <b>Duplicate signal blocked</b>\n"
@@ -845,7 +845,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             try:
                 delivered = bool(telegram.send_signal(decision))
             except Exception as send_exc:  # noqa: BLE001
-                logger.exception("فشل إرسال إشارة Telegram")
+                logger.exception("Failed to send Telegram signal")
                 telegram.send_error_alert(f"Signal generated but Telegram delivery raised: {send_exc}")
                 delivered = False
 
@@ -854,7 +854,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 # runs via the duplicate filter. Alert loudly instead of failing
                 # silently (the old code's worst failure mode).
                 logger.error(
-                    "⚠️ تم توليد إشارة %s لكن فشل إرسالها إلى Telegram — لن تُحفظ الصفقة لتفادي حجب التكرار.",
+                    "⚠️ Signal generated %s but Telegram delivery failed — trade NOT saved to avoid duplicate filter blocking.",
                     decision.get("decision"),
                 )
                 telegram.send_error_alert(
@@ -893,10 +893,10 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         except Exception as scale_exc:
             logger.warning("⚠️ Scale-in check failed: %s", scale_exc)
 
-        logger.info("✅ اكتمل التحليل بنجاح")
+        logger.info("✅ Analysis completed successfully")
 
     except Exception as exc:  # noqa: BLE001
-        logger.exception("خطأ في التحليل")
+        logger.exception("Analysis error")
         telegram.send_error_alert(str(exc))
 
 
@@ -915,11 +915,11 @@ async def run_analysis_async() -> None:
         allow_synth = bool(base_config.get("data_source", {}).get("allow_synthetic_in_production", False))
         if os.environ.get("GITHUB_ACTIONS") == "true" and not allow_synth:
             telegram.send_error_alert(
-                "🚨 بيانات تجريبية — المفتاح غير موجود أو غير صالح\n"
+                "🚨 Synthetic data detected — API key missing or invalid\n"
                 "━━━━━━━━━━━━━━━━━━━━━\n"
-                "TWELVEDATA_API_KEY مفقود أو خاطئ\n\n"
-                "1. سجّل: https://twelvedata.com/register\n"
-                "2. أضف المفتاح في GitHub Secrets\n"
+                "TWELVEDATA_API_KEY is missing or wrong\n\n"
+                "1. Register: https://twelvedata.com/register\n"
+                "2. Add key to GitHub Secrets\n"
                 "━━━━━━━━━━━━━━━━━━━━━"
             )
             logger.error("TWELVEDATA_API_KEY not working — aborting all symbols")
