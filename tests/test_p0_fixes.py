@@ -73,13 +73,13 @@ def test_decision_agent_counts_neutral_as_wait_vote() -> None:
 
 def test_synthetic_timeframe_sources_detects_any_synthetic_frame() -> None:
     data = {
-        "source": "twelve_data",
+        "source": "finnhub",
         "timeframe": "15m",
         "timeframes": {
-            "5m": {"source": "twelve_data"},
-            "15m": {"source": "twelve_data"},
+            "5m": {"source": "finnhub"},
+            "15m": {"source": "finnhub"},
             "1H": {"source": "synthetic_demo"},
-            "4H": {"source": "twelve_data"},
+            "4H": {"source": "finnhub"},
         },
     }
 

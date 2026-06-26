@@ -77,7 +77,7 @@ def _patch_common(monkeypatch, telegram, database):
     fake_md = MagicMock()
     fake_md.get_gold_data.return_value = {
         "current_price": 4130.14,
-        "source": "twelve_data",
+        "source": "finnhub",
         "timeframes": {},
         "data": [],
     }
