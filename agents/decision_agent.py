@@ -55,10 +55,17 @@ class DecisionAgent(BaseAgent):
         self.current_weights = self._load_weights()
         self.voting_agents = {"technical", "classical", "smc", "price_action", "multitimeframe"}
         
-        # === NEW RULE (User request): Each agent must be >=60%, Groq only needs >=51% direction match ===
-        groq_obs = config.get('groq_observation_mode', {}) or {}
-        self.agent_min_confidence = int(groq_obs.get('agent_min_confidence', 60))
-        self.groq_min_confidence = int(groq_obs.get('min_groq_confidence', 51))
+        # Classic consensus mode: no external AI final gate.
+        # Agents below this confidence are ignored. Entry is allowed when either
+        # one strong agent reaches ``strong_single_agent_confidence`` or at least
+        # ``min_agents_agree`` agents agree with weighted confidence above
+        # ``min_consensus_confidence``. Opposing agents subtract from edge.
+        consensus_cfg = config.get('signal_requirements', {}) or {}
+        legacy_obs = config.get('groq_observation_mode', {}) or {}
+        self.agent_min_confidence = int(consensus_cfg.get('agent_min_confidence', legacy_obs.get('agent_min_confidence', 60)))
+        self.min_consensus_confidence = float(consensus_cfg.get('min_consensus_confidence', self.min_confidence) or self.min_confidence)
+        self.strong_single_agent_confidence = float(consensus_cfg.get('strong_single_agent_confidence', 70) or 70)
+        self.strong_single_agent_enabled = bool(consensus_cfg.get('strong_single_agent_enabled', True))
         
     def _load_weights(self) -> Dict[str, float]:
         """تحميل الأوزان (من learning service أولاً، ثم config).
@@ -266,43 +273,67 @@ class DecisionAgent(BaseAgent):
     
 
     def _classic_decision(self, votes: Dict) -> Dict:
+        """Weighted 5-agent consensus decision (no external AI/Groq).
+
+        Directional edge is calculated by adding same-direction weighted scores
+        and subtracting the opposite side's weighted scores:
+
+            BUY edge  = BUY_score  - SELL_score
+            SELL edge = SELL_score - BUY_score
+
+        A signal is valid when either:
+          * one strong qualified agent supports it (>= strong_single_agent_confidence), or
+          * at least min_agents_agree agents support it and their weighted average
+            confidence is >= min_consensus_confidence.
         """
-        📊 القرار الكلاسيكي (One-Agent + Groq Observation)
-        """
-        buy_score = sum(v['score'] for v in votes['BUY'])
-        sell_score = sum(v['score'] for v in votes['SELL'])
+        buy_metrics = self._direction_metrics('BUY', votes)
+        sell_metrics = self._direction_metrics('SELL', votes)
+
+        candidates = []
+        for side, metrics in (('BUY', buy_metrics), ('SELL', sell_metrics)):
+            if metrics['valid']:
+                candidates.append((side, metrics))
+
+        decision = 'WAIT'
+        confidence = 50.0
+        rejection_reason = None
+
+        if candidates:
+            # Highest positive edge wins. If tied, prefer higher adjusted confidence.
+            decision, selected = max(candidates, key=lambda item: (item[1]['edge'], item[1]['confidence']))
+            confidence = selected['confidence']
+        else:
+            total_voting = len(votes['BUY']) + len(votes['SELL'])
+            best = max([buy_metrics, sell_metrics], key=lambda m: (m['support_count'], m['support_avg_confidence'], m['edge']))
+            if total_voting == 0:
+                rejection_reason = f"No qualified agents (need >= {self.agent_min_confidence}%)"
+            elif best['support_count'] < 1:
+                rejection_reason = "No directional agent support"
+            elif best['edge'] <= 0:
+                rejection_reason = "Opposing agents offset the setup (weighted edge <= 0)"
+            elif best['support_count'] < self.min_agents_agree and best['strongest_confidence'] < self.strong_single_agent_confidence:
+                rejection_reason = (
+                    f"Need {self.min_agents_agree} agreeing agents >= {self.min_consensus_confidence:.0f}% "
+                    f"or one strong agent >= {self.strong_single_agent_confidence:.0f}%"
+                )
+            elif best['support_count'] >= self.min_agents_agree and best['support_avg_confidence'] < self.min_consensus_confidence:
+                rejection_reason = (
+                    f"Consensus confidence {best['support_avg_confidence']:.0f}% below "
+                    f"{self.min_consensus_confidence:.0f}%"
+                )
+            else:
+                rejection_reason = "No valid weighted consensus edge"
+
         buy_count = len(votes['BUY'])
         sell_count = len(votes['SELL'])
         total_voting = buy_count + sell_count
         buy_agreement_pct = (buy_count / total_voting * 100) if total_voting > 0 else 0
         sell_agreement_pct = (sell_count / total_voting * 100) if total_voting > 0 else 0
 
-        decision = 'WAIT'
-        confidence = 50
-        rejection_reason = None
-
-        buy_valid = buy_count >= self.min_agents_agree and buy_agreement_pct >= self.min_agreement_pct
-        sell_valid = sell_count >= self.min_agents_agree and sell_agreement_pct >= self.min_agreement_pct
-
-        if buy_valid and (not sell_valid or buy_score > sell_score):
-            decision = 'BUY'
-            confidence = min(buy_score * 100, 95)
-        elif sell_valid and (not buy_valid or sell_score >= buy_score):
-            decision = 'SELL'
-            confidence = min(sell_score * 100, 95)
-        else:
-            if total_voting < self.min_agents_agree:
-                rejection_reason = f"Not enough agents ({total_voting}/{self.min_agents_agree})"
-            elif max(buy_agreement_pct, sell_agreement_pct) < self.min_agreement_pct:
-                max_agreement = max(buy_count, sell_count)
-                rejection_reason = f"Low agreement ({max_agreement}/{total_voting} = {max(buy_agreement_pct, sell_agreement_pct):.0f}% below {self.min_agreement_pct}%)"
-            else:
-                rejection_reason = "Conflict between BUY and SELL with no clear edge"
-
         all_votes = votes['BUY'] + votes['SELL'] + votes['WAIT']
-        strongest_agent = max(all_votes, key=lambda x: x['score'], default=None)
+        strongest_agent = max(all_votes, key=lambda x: x.get('score', 0), default=None)
         directional_votes = votes['BUY'] + votes['SELL']
-        strongest_directional = max(directional_votes, key=lambda x: x['score'], default=None)
+        strongest_directional = max(directional_votes, key=lambda x: x.get('score', 0), default=None)
         strongest_directional_context = None
         if strongest_directional:
             strongest_signal = 'BUY' if strongest_directional in votes['BUY'] else 'SELL'
@@ -313,14 +344,17 @@ class DecisionAgent(BaseAgent):
                 'adjusted_confidence': round(float(strongest_directional.get('adjusted_confidence', strongest_directional.get('confidence', 0))), 1),
                 'weight': strongest_directional.get('weight'),
                 'score': round(float(strongest_directional.get('score', 0)), 3),
-                'mode': 'one_agent_context',
+                'mode': 'classic_consensus',
             }
 
+        selected_metrics = buy_metrics if decision == 'BUY' else sell_metrics if decision == 'SELL' else None
         return {
             'decision': decision,
-            'confidence': confidence,
-            'buy_score': buy_score,
-            'sell_score': sell_score,
+            'confidence': round(float(confidence), 1),
+            'buy_score': buy_metrics['support_score'],
+            'sell_score': sell_metrics['support_score'],
+            'buy_net_score': buy_metrics['edge'],
+            'sell_net_score': sell_metrics['edge'],
             'buy_count': buy_count,
             'sell_count': sell_count,
             'buy_agreement_pct': round(buy_agreement_pct, 1),
@@ -328,7 +362,63 @@ class DecisionAgent(BaseAgent):
             'total_voting_agents': total_voting,
             'strongest_agent': strongest_agent['agent'] if strongest_agent else None,
             'strongest_directional': strongest_directional_context,
-            'rejection_reason': rejection_reason
+            'rejection_reason': rejection_reason,
+            'consensus': {
+                'mode': '5_agent_weighted_consensus',
+                'selected': selected_metrics,
+                'BUY': buy_metrics,
+                'SELL': sell_metrics,
+                'rules': {
+                    'agent_min_confidence': self.agent_min_confidence,
+                    'min_agents_agree': self.min_agents_agree,
+                    'min_consensus_confidence': self.min_consensus_confidence,
+                    'strong_single_agent_confidence': self.strong_single_agent_confidence,
+                    'strong_single_agent_enabled': self.strong_single_agent_enabled,
+                },
+            },
+        }
+
+    def _direction_metrics(self, side: str, votes: Dict) -> Dict[str, Any]:
+        """Metrics for one side, with opposing agents subtracted from edge."""
+        side = side.upper()
+        opposite = 'SELL' if side == 'BUY' else 'BUY'
+        supporters = votes.get(side, []) or []
+        opponents = votes.get(opposite, []) or []
+        support_score = sum(float(v.get('score', 0) or 0) for v in supporters)
+        opposition_score = sum(float(v.get('score', 0) or 0) for v in opponents)
+        edge = support_score - opposition_score
+        support_weight = sum(float(v.get('weight', 0) or 0) for v in supporters)
+        support_count = len(supporters)
+        if support_weight > 0:
+            support_avg = sum(float(v.get('adjusted_confidence', v.get('confidence', 0)) or 0) * float(v.get('weight', 0) or 0) for v in supporters) / support_weight
+        else:
+            support_avg = 0.0
+        strongest = max((float(v.get('adjusted_confidence', v.get('confidence', 0)) or 0) for v in supporters), default=0.0)
+        # Opposition penalty is capped so one small opposing vote reduces quality
+        # without completely hiding a real two-agent consensus.
+        opposition_ratio = opposition_score / max(support_score, 0.0001)
+        opposition_penalty = min(30.0, opposition_ratio * 30.0)
+        confidence = max(0.0, min(95.0, support_avg - opposition_penalty))
+        valid_single = bool(self.strong_single_agent_enabled and support_count >= 1 and strongest >= self.strong_single_agent_confidence)
+        valid_multi = bool(support_count >= self.min_agents_agree and support_avg >= self.min_consensus_confidence)
+        valid = bool(edge > 0 and (valid_single or valid_multi))
+        return {
+            'side': side,
+            'support_count': support_count,
+            'opposition_count': len(opponents),
+            'support_score': round(support_score, 4),
+            'opposition_score': round(opposition_score, 4),
+            'edge': round(edge, 4),
+            'support_weight': round(support_weight, 4),
+            'support_avg_confidence': round(support_avg, 1),
+            'strongest_confidence': round(strongest, 1),
+            'opposition_penalty': round(opposition_penalty, 1),
+            'confidence': round(confidence, 1),
+            'valid_single': valid_single,
+            'valid_multi': valid_multi,
+            'valid': valid,
+            'supporters': [v.get('agent') for v in supporters],
+            'opponents': [v.get('agent') for v in opponents],
         }
 
     def _format_agent_context_for_ai(self, agents_results: Dict[str, Any]) -> str:
@@ -619,30 +709,15 @@ Move conflicting evidence into opposing_evidence, or set final_signal = WAIT.
         ai: Dict,
         session_info: Dict
     ) -> tuple:
-        """
-        🎯 القرار النهائي
-        
-        🚀 التحقق من allow_signals:
-        - إذا كانت session = Report Session → لا إرسال إشارات
-        """
-        
-        # 🚀 التحقق من allow_signals من session_info
+        """Final decision in classic consensus mode (no external AI/Groq)."""
         allow_signals = session_info.get('allow_signals', True)
         current_session = session_info.get('current_session', 'Unknown')
-        
-        # If the session does not allow signals (e.g. the reports session)
         if not allow_signals:
             return 'WAIT', 0, f"Reports session ({current_session}) - no signals sent"
-        
-        # Check trading session
         if not session_info.get('trading_allowed'):
             return 'WAIT', 0, "Outside trading hours"
-        
-        session_quality = session_info.get('quality', session_info.get('session_quality', 'LOW'))
 
-        # لا نخفض الحد الأدنى للثقة تحت قيمة config أبداً.
-        # في السابق كانت جلسة HIGH تضرب الحد ×0.7، فكانت تسمح بإشارات ضعيفة مثل 41%.
-        # الآن الحد الأدنى الحقيقي هو risk_settings.min_confidence، ويمكن رفعه للجلسات الضعيفة فقط.
+        session_quality = session_info.get('quality', session_info.get('session_quality', 'LOW'))
         quality_multipliers = {
             'BEST': 1.0,
             'HIGH': 1.0,
@@ -650,101 +725,32 @@ Move conflicting evidence into opposing_evidence, or set final_signal = WAIT.
             'LOW': 1.20,
             'NONE': 1.50,
         }
-
         min_conf = self.min_confidence * quality_multipliers.get(str(session_quality).upper(), 1.20)
 
-        # Read Groq Observation Mode config (was previously only inside _ai_decision,
-        # causing NameError when _final_decision ran after a successful AI call).
-        groq_obs = self.config.get('groq_observation_mode', {}) or {}
-        groq_observation_enabled = bool(groq_obs.get('enabled', False))
-        observation_min_conf = float(
-            groq_obs.get('min_groq_confidence', self.min_confidence) or self.min_confidence
+        final_signal = str(classic.get('decision', 'WAIT')).upper()
+        final_confidence = float(classic.get('confidence', 0) or 0)
+        consensus = (classic.get('consensus', {}) or {}).get('selected') or {}
+
+        if final_signal not in {'BUY', 'SELL'}:
+            reason = classic.get('rejection_reason') or 'No valid 5-agent weighted consensus'
+            return 'WAIT', round(final_confidence, 1), f"Classic consensus WAIT: {reason}"
+
+        if final_confidence < min_conf:
+            return (
+                'WAIT',
+                round(final_confidence, 1),
+                f"Classic consensus {final_signal} blocked: confidence {final_confidence:.0f}% below {min_conf:.0f}%",
+            )
+
+        reason = (
+            f"Classic 5-agent weighted consensus = {final_signal}; "
+            f"confidence {final_confidence:.0f}% (min {min_conf:.0f}%), "
+            f"support={consensus.get('support_count', 0)} agent(s), "
+            f"opposition={consensus.get('opposition_count', 0)} agent(s), "
+            f"edge={consensus.get('edge', 0)}"
         )
+        return final_signal, round(final_confidence, 1), reason
 
-        # One-Agent + Groq mode – Groq is final gate
-
-        ai_config = self.config.get('ai_service', {})
-        ai_required = bool(ai_config.get('enabled', False)) and not bool(ai_config.get('fallback_to_classic', True))
-        if ai_required and (not ai.get('available') or ai.get('error')):
-            error = ai.get('error') or 'AI unavailable'
-            return 'WAIT', 0, f"Groq required but AI failed: {error}"
-
-        # دمج الكلاسيكي مع AI / Groq Observation Mode
-        if ai.get('available'):
-            ai_signal = str(ai.get('signal', 'WAIT')).upper()
-            ai_conf = float(ai.get('confidence', 50) or 0)
-            required_conf = observation_min_conf if groq_observation_enabled else min_conf
-            ai_warnings = ai.get('ai_warnings', []) or []
-            supportive_count = len(ai.get('supportive_evidence', ai.get('evidence', [])) or [])
-            min_supportive = int(groq_obs.get('min_supportive_evidence_items', 0) or 0)
-            if groq_observation_enabled and groq_obs.get('block_on_ai_contradiction', True) and ai_warnings:
-                return 'WAIT', ai_conf, 'Groq Observation blocked: contradictory supportive evidence: ' + '; '.join(ai_warnings)
-            if groq_observation_enabled and min_supportive and supportive_count < min_supportive:
-                return 'WAIT', ai_conf, f'Groq Observation: signal blocked because Groq provided only {supportive_count} supportive evidence item(s), {min_supportive} required'
-            if (
-                groq_observation_enabled
-                and not bool(groq_obs.get('allow_single_agent_context', True))
-                and ai_signal in {'BUY', 'SELL'}
-            ):
-                classic_signal = str(classic.get('decision', 'WAIT')).upper()
-                if classic_signal != ai_signal:
-                    return (
-                        'WAIT',
-                        ai_conf,
-                        f'Production strict: Groq returned {ai_signal}, but agent agreement context is {classic_signal}. Required {self.min_agents_agree} agents and {self.min_agreement_pct}% agreement.',
-                    )
-
-            # === NEW RULE: Groq only needs >=51% (groq_min_confidence) in the matching direction ===
-            groq_threshold = self.groq_min_confidence if groq_observation_enabled else required_conf
-            
-            if ai_signal != 'WAIT' and ai_conf >= groq_threshold:
-                final_signal = ai_signal
-                if groq_observation_enabled:
-                    final_confidence = ai_conf
-                    reasoning = f"Groq Observation: Groq decision = {ai_signal} with confidence {ai_conf:.0f}% (threshold {groq_threshold}%). {ai.get('reasoning', '')}"
-                else:
-                    final_confidence = (ai_conf * 0.7) + (classic.get('confidence', 50) * 0.3)
-                    reasoning = ai.get('reasoning', classic.get('decision', 'N/A'))
-            else:
-                if ai_required or groq_observation_enabled:
-                    final_signal = 'WAIT'
-                    final_confidence = ai_conf
-                    
-                    # Build rich professional reason
-                    groq_reason = ai.get('reasoning') or ai.get('opposite_risk') or ai.get('risk_notes') or ''
-                    strongest = classic.get('strongest_directional') or {}
-                    opp_agent = strongest.get('agent', 'agents')
-                    opp_conf = strongest.get('confidence', 0)
-                    
-                    base = f"Groq did not approve ({ai_conf:.0f}% < {groq_threshold:.0f}%)"
-                    if groq_reason:
-                        base += f" — {groq_reason[:140]}"
-                    if opp_agent and opp_conf:
-                        base += f" | Strongest opposing: {opp_agent} ({opp_conf}%)"
-                    reasoning = base
-                else:
-                    final_signal = classic.get('decision', 'WAIT')
-                    final_confidence = classic.get('confidence', 50)
-                    reasoning = "Classical decision - AI unavailable or low confidence"
-        else:
-            if ai_required:
-                final_signal = 'WAIT'
-                final_confidence = 0
-                reasoning = "Groq is required but AI is disabled or unavailable"
-            else:
-                final_signal = classic.get('decision', 'WAIT')
-                final_confidence = classic.get('confidence', 50)
-                reasoning = "Classical decision - AI disabled"
-        
-        # التحقق من الحد الأدنى للثقة
-        # For Groq: use the lower groq_min_confidence (51%), agents already filtered at 60%
-        final_required_conf = self.groq_min_confidence if groq_observation_enabled else min_conf
-        if final_confidence < final_required_conf:
-            final_signal = 'WAIT'
-            reasoning += f" (low confidence: {final_confidence:.0f}% below {final_required_conf:.0f}%)"
-        
-        return final_signal, round(final_confidence, 1), reasoning
-    
     def _get_learning_info(self) -> Dict:
         """معلومات التعلم للقرار"""
         
@@ -837,22 +843,19 @@ Move conflicting evidence into opposing_evidence, or set final_signal = WAIT.
             bias = str(daily_bias.get('bias', 'NEUTRAL')).upper()
             bias_conf = float(daily_bias.get('confidence') or 0)
             db_settings = self.config.get('daily_bias_filter', {}) or {}
-            # Counter-trend override rules:
-            #   • one qualified agent in the signal direction  -> require 70% (default)
-            #   • two or more qualified agents same direction  -> require 65% (default)
-            # This keeps a strong Daily Bias from blocking good reversal setups
-            # when more than one agent confirms the same counter-trend direction.
-            single_agent_min = float(db_settings.get('contrarian_min_confidence', 70) or 70)
-            multi_agent_min = float(db_settings.get('contrarian_min_confidence_two_agents', single_agent_min) or single_agent_min)
-            multi_agent_count = int(db_settings.get('contrarian_min_agents_for_lower_confidence', 2) or 2)
+            # Counter-trend override rule in classic consensus mode:
+            # require at least 2 qualified agents in the signal direction AND
+            # signal confidence >=75% (configurable). Opposing agents are already
+            # subtracted from the consensus confidence/edge.
+            required_agents = int(db_settings.get('contrarian_min_agents_for_lower_confidence', 2) or 2)
+            contrarian_min = float(db_settings.get('contrarian_min_confidence', 75) or 75)
             same_direction_agents = self._same_direction_vote_count(result, signal)
-            contrarian_min = multi_agent_min if same_direction_agents >= multi_agent_count else single_agent_min
             is_contrarian = (bias == 'BULLISH' and signal == 'SELL') or (bias == 'BEARISH' and signal == 'BUY')
-            if is_contrarian and float(result.get('confidence') or 0) < contrarian_min:
+            if is_contrarian and (same_direction_agents < required_agents or float(result.get('confidence') or 0) < contrarian_min):
                 warnings.append(
                     f"Daily Bias (4H) blocks counter-trend: bias={bias} ({bias_conf}%), signal={signal}. "
-                    f"Signal confidence must be ≥{contrarian_min}% to override "
-                    f"({same_direction_agents} qualified agent(s) support {signal}; Groq threshold is separate at 51%)."
+                    f"Counter-trend requires ≥{required_agents} qualified agents and confidence ≥{contrarian_min}% "
+                    f"({same_direction_agents} qualified agent(s) support {signal})."
                 )
                 signal = 'WAIT'
 
@@ -1085,8 +1088,9 @@ Move conflicting evidence into opposing_evidence, or set final_signal = WAIT.
             'weights': analysis.get('weights', {}),
             'classic': analysis.get('classic', {}),
             'agent_context': (analysis.get('classic', {}) or {}).get('strongest_directional'),
-            'one_agent_groq_mode': True,
-            'ai': analysis.get('ai', {}),
+            'one_agent_groq_mode': False,
+            'consensus_mode': True,
+            'ai': {'available': False, 'reason': 'classic consensus mode'}, 
             'learning': analysis.get('learning', {}),
             'risk': risk,
             'risk_assessment': analysis.get('risk_assessment', {}),

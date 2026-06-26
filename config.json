@@ -36,7 +36,7 @@
     "multitimeframe": 0.2
   },
   "risk_settings": {
-    "min_confidence": 60,
+    "min_confidence": 65,
     "min_rr_ratio": 1.5,
     "default_risk_percent": 1.0,
     "atr_multiplier_sl": 1.5,
@@ -52,10 +52,10 @@
     "description_max_rr_ratio": "سقف R:R لتجنب أهداف TP2 غير واقعية في الإشارات التجريبية/الحية"
   },
   "signal_requirements": {
-    "min_agents_agree": 1,
+    "min_agents_agree": 2,
     "min_agreement_percentage": 1,
-    "allow_all_signals": true,
-    "description": "One-Agent + Groq mode: one directional agent context is enough, but Groq must independently approve BUY/SELL.",
+    "allow_all_signals": false,
+    "description": "Classic consensus mode: enter if one qualified agent has >=70% OR at least two qualified agents agree with weighted confidence >=65%. Opposing agents subtract from the directional edge.",
     "experimental_single_agent": {
       "enabled": false,
       "min_confidence": 1,
@@ -74,7 +74,11 @@
         "last_candle"
       ],
       "force_signal_confidence": 45
-    }
+    },
+    "min_consensus_confidence": 65,
+    "strong_single_agent_confidence": 70,
+    "strong_single_agent_enabled": true,
+    "agent_min_confidence": 60
   },
   "schedule": {
     "analysis_interval_minutes": 5,
@@ -185,63 +189,13 @@
     "note": "No live provider is configured here. Use NewsRiskAgent with NEWS_EVENTS_JSON or storage/news_events.json until a real provider is added."
   },
   "ai_service": {
-    "enabled": true,
-    "provider": "groq",
-    "model": "llama-3.3-70b-versatile",
-    "max_tokens": 900,
-    "temperature": 0.1,
-    "api_key": "ENV:GROQ_API_KEY",
-    "fallback_to_classic": false,
-    "description": "خدمة الذكاء الاصطناعي للتحليل الذكي"
+    "enabled": false,
+    "provider": "none",
+    "model": "classic-consensus",
+    "fallback_to_classic": true,
+    "description": "Disabled. Final decisions are made by 5-agent weighted consensus; no Groq/API dependency."
   },
-  "ai_providers": {
-    "openai": {
-      "models": [
-        "gpt-4o",
-        "gpt-4o-mini",
-        "gpt-4-turbo",
-        "gpt-3.5-turbo"
-      ],
-      "default_model": "gpt-4o-mini",
-      "cost_per_1k_tokens": 0.00015
-    },
-    "anthropic": {
-      "models": [
-        "claude-3-5-sonnet-20241022",
-        "claude-3-opus-20240229",
-        "claude-3-haiku-20240307"
-      ],
-      "default_model": "claude-3-5-sonnet-20241022",
-      "cost_per_1k_tokens": 0.0008
-    },
-    "grok": {
-      "models": [
-        "grok-2",
-        "grok-2-mini",
-        "grok-1"
-      ],
-      "default_model": "grok-2-mini",
-      "cost_per_1k_tokens": 0.0005
-    },
-    "gemini": {
-      "models": [
-        "gemini-2.0-flash-exp",
-        "gemini-1.5-pro",
-        "gemini-1.5-flash"
-      ],
-      "default_model": "gemini-2.0-flash-exp",
-      "cost_per_1k_tokens": 0.000125
-    },
-    "groq": {
-      "models": [
-        "llama-3.1-8b-instant",
-        "llama-3.3-70b-versatile",
-        "llama-3.1-70b-versatile"
-      ],
-      "default_model": "llama-3.1-8b-instant",
-      "cost_per_1k_tokens": 5e-05
-    }
-  },
+  "ai_providers": {},
   "learning": {
     "enabled": true,
     "update_frequency_days": 1,
@@ -305,18 +259,18 @@
     "description": "وضع تجريبي: يتم حفظ ومتابعة الصفقات افتراضياً بدون تنفيذ حقيقي"
   },
   "ai_trade_review": {
-    "enabled": true,
+    "enabled": false,
     "max_reviews_per_run": 20,
     "recent_trades_limit": 60,
     "review_only_losses": true,
-    "description": "يراجع Groq الصفقات الخاسرة المغلقة ويستخرج دروساً وقواعد تحسين"
+    "description": "Disabled after removing Groq dependency."
   },
   "ai_memory_rules": {
-    "enabled": true,
-    "max_active_rules_in_prompt": 8,
+    "enabled": false,
+    "max_active_rules_in_prompt": 0,
     "min_confidence_to_apply": 60,
     "advisory_mode": true,
-    "description": "قواعد ذاكرة مستخرجة من مراجعات Groq للخسائر وتضاف إلى Prompt القرار القادم"
+    "description": "Disabled because AI trade review/Groq is removed."
   },
   "daily_bias_filter": {
     "enabled": true,
@@ -326,17 +280,17 @@
     "rsi_period": 14,
     "slope_lookback": 12,
     "score_threshold": 1.25,
-    "contrarian_min_confidence": 70,
-    "block_strong_contrarian_below": 70,
-    "description": "فلتر اتجاه أعلى (Daily Bias): الصفقة المعاكسة للاتجاه 4H مسموحة إذا كانت ثقة الإشارة ≥70% مع وكيل مؤهل واحد، أو ≥65% إذا وافق وكيلان مؤهلان على نفس الاتجاه. حد Groq النهائي يبقى منفصلاً عند 51%.",
-    "contrarian_min_confidence_two_agents": 65,
+    "contrarian_min_confidence": 75,
+    "block_strong_contrarian_below": 75,
+    "description": "فلتر اتجاه أعلى (Daily Bias): الصفقات المعاكسة للاتجاه 4H تحتاج موافقة وكيلين مؤهلين على نفس الاتجاه وثقة إشارة ≥75%. الوكلاء المعارضون يخصمون من قوة الإشارة.",
+    "contrarian_min_confidence_two_agents": 75,
     "contrarian_min_agents_for_lower_confidence": 2
   },
   "ai_news_interpretation": {
-    "enabled": true,
+    "enabled": false,
     "block_on_extreme": true,
     "respect_allowed_direction": true,
-    "description": "Groq يفسر الأخبار ويحدد هل نمنع التداول أو نسمح باتجاه معين فقط"
+    "description": "Disabled. News filtering is rule-based via NewsRiskAgent only."
   },
   "dynamic_risk_management": {
     "enabled": false,
@@ -365,16 +319,16 @@
     "description": "تصنيف أخبار Tier 1/2 مع نوافذ منع وتحذير مخصصة للذهب"
   },
   "groq_observation_mode": {
-    "enabled": true,
-    "min_groq_confidence": 51,
-    "allow_single_agent_context": true,
+    "enabled": false,
+    "min_groq_confidence": 0,
+    "allow_single_agent_context": false,
     "disable_forced_observation": true,
-    "block_on_ai_contradiction": true,
-    "min_supportive_evidence_items": 2,
-    "retry_on_contradiction": true,
-    "max_retry": 1,
-    "description": "Agents must be >=60% to qualify. Groq only needs >=51% in the matching direction.",
-    "agent_min_confidence": 60
+    "block_on_ai_contradiction": false,
+    "min_supportive_evidence_items": 0,
+    "retry_on_contradiction": false,
+    "max_retry": 0,
+    "agent_min_confidence": 60,
+    "description": "Disabled. Replaced by classic 5-agent weighted consensus."
   },
   "order_execution": {
     "enabled": true,
@@ -387,7 +341,7 @@
       "description_max_risk_distance_points": "300 نقطة (30$). إذا أقرب مستوى ضمن 300 → دخول MARKET فوراً + SL خلف المستوى.",
       "sl_buffer_points": 20,
       "description_sl_buffer_points": "بفر بالأعلى (للبيع) أو الأسفل (للشراء) من المستوى لوضع الستوب. 20 نقطة = 2.00$. يضمن أن الستوب ليس بالضبط عند المستوى.",
-      "scale_in_enabled": true,
+      "scale_in_enabled": false,
       "scale_in_max": 1,
       "description_scale_in_max": "أقصى عدد من صفقات التعزيز المسموحة (بالإضافة للأصلية). 2 = يمكن الدخول 3 صفقات في نفس الاتجاه: الأصلية + تعزيز 1 + تعزيز 2.",
       "scale_in_trigger_points": 50,
@@ -396,7 +350,7 @@
       "description_scale_in_size_ratio": "نسبة حجم التعزيز مقارنة بالصفقة الأصلية. 0.5 = نصف الحجم. 1.0 = نفس الحجم.",
       "description": "fixed_risk zone logic kept for entry levels, but always MARKET execution.",
       "note": "Zone logic kept only for SL/TP calculation. Execution always MARKET.",
-      "description_scale_in": "حجم التعزيز = 100% (1.0). يتعزز عندما يبقى ≤50 نقطة من المستوى. أقصى تعزيز = 1 فقط."
+      "description_scale_in": "Disabled in classic consensus mode to avoid unconfirmed scale-ins after removing Groq."
     },
     "allowed_order_types": [
       "BUY_MARKET",
@@ -405,17 +359,11 @@
     "description": "Paper order classification only: market, limit, or stop based on entry vs current price.",
     "pending_support_removed": true
   },
-  "operation_mode": "observation",
+  "operation_mode": "classic_consensus",
   "operation_modes": {
-    "observation": {
-      "description": "One-Agent + Groq: one directional agent context is enough, but Groq must approve final BUY/SELL. Paper-only observation mode.",
+    "classic_consensus": {
+      "description": "No AI/Groq. Final signal from 5-agent weighted consensus + risk/news/session/duplicate filters.",
       "requires_three_agents": false,
-      "groq_observation": true,
-      "paper_only": true
-    },
-    "production_strict": {
-      "description": "Strict production-like mode: requires agent agreement + Groq + all risk filters.",
-      "requires_three_agents": true,
       "groq_observation": false,
       "paper_only": true
     }

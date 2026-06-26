@@ -99,7 +99,7 @@ class TestFinalDecisionAiAvailable:
         assert signal == "SELL"
         assert confidence >= 60
 
-    def test_groq_wait_returns_wait(self):
+    def test_ai_wait_is_ignored_in_classic_consensus_mode(self):
         agent = DecisionAgent(_base_config())
         ai = {
             "available": True,
@@ -109,17 +109,18 @@ class TestFinalDecisionAiAvailable:
             "supportive_evidence": [],
             "ai_warnings": [],
         }
-        signal, _, _ = agent._final_decision(_classic_buy(), ai, _session())
-        assert signal == "WAIT"
+        signal, _, reason = agent._final_decision(_classic_buy(), ai, _session())
+        assert signal == "BUY"
+        assert "Classic" in reason
 
-    def test_groq_required_but_unavailable_returns_wait(self):
+    def test_ai_unavailable_is_ignored_in_classic_consensus_mode(self):
         cfg = _base_config()
         cfg["ai_service"]["fallback_to_classic"] = False
         agent = DecisionAgent(cfg)
         ai = {"available": False, "error": "no API key"}
         signal, _, reason = agent._final_decision(_classic_buy(), ai, _session())
-        assert signal == "WAIT"
-        assert "Groq" in reason or "AI" in reason
+        assert signal == "BUY"
+        assert "Classic" in reason
 
 
 class TestAnalyzeAsyncRegression:

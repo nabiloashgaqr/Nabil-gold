@@ -21,9 +21,6 @@ sys.path.insert(0, str(ROOT))
 from utils.helpers import load_config  # noqa: E402
 
 
-AI_KEYS = ["OPENAI_API_KEY", "GROQ_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"]
-
-
 REQUIRED_BY_MODE = {
     "analyze": [
         "TELEGRAM_BOT_TOKEN",
@@ -31,7 +28,6 @@ REQUIRED_BY_MODE = {
         "SUPABASE_URL",
         "SUPABASE_KEY",
         "TWELVE_DATA_API_KEY",
-        "GROQ_API_KEY",  # Groq is the primary (and mandatory) AI provider
     ],
     "update-trades": [
         "TELEGRAM_BOT_TOKEN",
@@ -87,38 +83,6 @@ def main() -> int:
         allow_synth = bool(data_source.get("allow_synthetic_in_production", False))
         if allow_synth:
             warnings.append("data_source.allow_synthetic_in_production=true: production may use demo data")
-
-    if mode == "analyze":
-        # Groq is the primary (and mandatory) AI provider in this project
-        # Check for GROQ_API_KEY (already in REQUIRED_BY_MODE)
-        if not os.environ.get("GROQ_API_KEY"):
-            missing.append("GROQ_API_KEY")
-
-        # Also check legacy ai_config section if present (for backward compatibility)
-        ai_config = config.get("ai_service", {})
-        fallback = bool(ai_config.get("fallback_to_classic", True))
-        provider = str(ai_config.get("provider", "groq")).lower()
-
-        provider_key_map = {
-            "openai": "OPENAI_API_KEY",
-            "grok": "GROK_API_KEY",
-            "groq": "GROQ_API_KEY",
-            "anthropic": "ANTHROPIC_API_KEY",
-            "gemini": "GEMINI_API_KEY",
-        }
-        required_ai_key = provider_key_map.get(provider, "GROQ_API_KEY")
-
-        # Only add if not already added and different from GROQ
-        if required_ai_key != "GROQ_API_KEY" and not os.environ.get(required_ai_key):
-            if fallback:
-                warnings.append(f"{required_ai_key} not found; analysis may fallback to classic")
-            else:
-                missing.append(required_ai_key)
-
-        # Additional check: Groq observation mode should be enabled in this project
-        groq_obs = config.get("groq_observation_mode", {})
-        if groq_obs.get("enabled") is False:
-            warnings.append("groq_observation_mode.enabled is false (project expects Groq as final gate)")
 
     for warning in warnings:
         print(f"⚠️ {warning}")

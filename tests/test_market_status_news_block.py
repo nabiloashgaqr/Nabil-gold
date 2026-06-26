@@ -23,39 +23,44 @@ def _technical_context() -> dict:
     }
 
 
-def test_market_status_news_block_does_not_show_groq_zero() -> None:
+def test_market_status_news_block_does_not_show_zero_confidence_gate() -> None:
     decision = {
         "decision": "WAIT",
         "confidence": 0,
         "current_price": 4027.06,
-        "ai": {"available": False, "confidence": 0},
         "classic": {"strongest_directional": {"agent": "technical", "confidence": 92.0}},
         "warnings": ["News blocked: No trading - Tier 1 FOMC Member Williams Speaks released 22 min ago"],
         "agent_min_confidence": 60,
-        "groq_min_confidence": 51,
     }
 
     msg = _build_market_status_message(decision, _technical_context(), _DB())
 
     assert "Gate: NEWS BLOCK" in msg
-    assert "Groq: skipped/overridden" in msg
-    assert "Groq: 0%" not in msg
-    assert "Groq returned 0%" not in msg
+    assert "Consensus overridden" in msg
+    assert "Groq" not in msg
+    assert "returned 0%" not in msg
     assert "News hard block active" in msg
     assert "News blocked:" in msg
     assert "Strongest agent: technical" in msg
 
 
-def test_market_status_normal_wait_still_shows_groq_confidence() -> None:
+def test_market_status_normal_wait_shows_consensus_rules() -> None:
     decision = {
         "decision": "WAIT",
         "confidence": 45,
         "current_price": 4027.06,
-        "ai": {"available": True, "confidence": 45, "reasoning": "mixed evidence"},
-        "classic": {"strongest_directional": {"agent": "technical", "confidence": 68.0}},
+        "classic": {
+            "strongest_directional": {"agent": "technical", "confidence": 68.0},
+            "rejection_reason": "Need 2 agreeing agents or one strong agent",
+            "consensus": {
+                "rules": {
+                    "agent_min_confidence": 60,
+                    "min_consensus_confidence": 65,
+                    "strong_single_agent_confidence": 70,
+                }
+            },
+        },
         "warnings": [],
-        "agent_min_confidence": 60,
-        "groq_min_confidence": 51,
     }
     ctx = _technical_context()
     ctx["news"] = {"can_trade": True, "market_status": "SAFE"}
@@ -63,5 +68,6 @@ def test_market_status_normal_wait_still_shows_groq_confidence() -> None:
     msg = _build_market_status_message(decision, ctx, _DB())
 
     assert "Gate: NEWS BLOCK" not in msg
-    assert "📊 Groq: 45%" in msg
-    assert "Groq returned 45%" in msg
+    assert "Consensus: WAIT" in msg
+    assert "Entry ≥65%" in msg
+    assert "2 agents ≥65% or 1 strong agent ≥70%" in msg

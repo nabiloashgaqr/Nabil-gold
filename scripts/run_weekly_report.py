@@ -51,10 +51,11 @@ async def main_async() -> int:
     database = DatabaseService(config)
 
     ai_service = None
-    try:
-        ai_service = get_ai_service(config)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("AI service init failed: %s (continuing without Groq)", exc)
+    if bool((config.get("ai_service") or {}).get("enabled", False)):
+        try:
+            ai_service = get_ai_service(config)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("AI service init failed: %s (continuing with deterministic weekly report)", exc)
 
     service = WeeklyReportService(
         config=config,

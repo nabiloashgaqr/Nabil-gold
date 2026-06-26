@@ -6,8 +6,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-green)
 ![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-Automated-orange)
 ![Telegram](https://img.shields.io/badge/Telegram-Signals%20%2B%20Reports-blue)
-![Groq](https://img.shields.io/badge/AI-GroqCloud-purple)
-![Tests](https://img.shields.io/badge/Tests-321%20Passed-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-334%20Passed-brightgreen)
 ![Mode](https://img.shields.io/badge/Mode-Paper%20Trading-yellow)
 ![Status](https://img.shields.io/badge/Status-Learning%20Phase-orange)
 
@@ -33,14 +32,14 @@
 الفكرة الأساسية:
 
 ```text
-Market Data → Analysis Agents → Risk Filters → DecisionAgent + Groq → Telegram + Supabase
+Market Data → 5 Analysis Agents → Weighted Consensus → Risk Filters → Telegram + Supabase
 ```
 
 أهم ما يفعله النظام:
 
 - يجلب بيانات XAU/USD من Twelve Data.
 - يشغّل عدة وكلاء تحليل فني وسلوكي ومخاطر.
-- يستخدم Groq كقرار نهائي إجباري في وضع One-Agent + Groq.
+- يستخدم 5 وكلاء تحليل مع weighted consensus بدون أي اعتماد على Groq أو API ذكاء خارجي.
 - يرسل إشارات منظمة إلى Telegram.
 - يتابع الصفقات المفتوحة كل 5 دقائق.
 - يحرّك الستوب تلقائياً حسب قواعد محددة.
@@ -57,14 +56,14 @@ Market Data → Analysis Agents → Risk Filters → DecisionAgent + Groq → Te
 | التشغيل | GitHub Actions عبر cron-job.org للتحليل والتحديث |
 | وضع التداول | Paper Trading |
 | مصدر البيانات | Twelve Data |
-| القرار النهائي | Groq إلزامي |
+| القرار النهائي | 5-Agent Weighted Consensus |
 | قاعدة البيانات | Supabase |
 | رسائل Telegram | إشارات + تحديثات + تقارير + أخطاء |
 | تحديث الصفقات | كل 5 دقائق |
 | حالة السوق | رسالة كل ساعة |
 | التقرير اليومي | 23:00 بتوقيتك المحلي |
 | التقرير الأسبوعي | السبت 10:00 صباحاً بتوقيتك المحلي |
-| الاختبارات | 321 passed |
+| الاختبارات | 334 passed |
 | المرحلة | Learning Phase |
 
 ---
@@ -125,7 +124,7 @@ Management: SL → entry after +100 pts · Trail gap 100 pts / step 30 pts · ch
 - التقرير اليومي مدمج في رسالة واحدة.
 - التقرير الأسبوعي يعمل السبت 10:00 صباحاً بتوقيتك.
 - Profit Factor يعرض `∞` عندما لا توجد خسائر بدلاً من 0.
-- تم تعقيم نصوص Groq/AI حتى لا تكسر رموز مثل `< > &` رسائل Telegram HTML.
+- تم تعقيم النصوص الخارجية حتى لا تكسر رموز مثل `< > &` رسائل Telegram HTML.
 - رسائل الأخطاء الآن تعرض Workflow / Job / Event / Run ID لتحديد مصدر المشكلة بسرعة.
 
 ### 5. إصلاح Scale-in
@@ -140,13 +139,13 @@ Management: SL → entry after +100 pts · Trail gap 100 pts / step 30 pts · ch
 
 ## 🧠 كيف يعمل النظام
 
-### وضع القرار الحالي: One-Agent + Groq
+### وضع القرار الحالي: 5-Agent Weighted Consensus
 
-- يكفي وجود وكيل اتجاهي واحد مؤهل لتوفير السياق.
+- لا يوجد اعتماد على Groq أو أي قرار AI خارجي.
 - الوكلاء تحت ثقة 60% يتم تجاهلهم.
-- Groq هو بوابة القرار النهائية.
-- Groq يحتاج ثقة لا تقل عن 51% لقبول BUY/SELL في وضع المراقبة.
-- إذا Groq فشل أو قال WAIT، لا يتم إرسال إشارة.
+- دخول عادي: وكيل واحد قوي بثقة ≥70% أو وكيلان على نفس الاتجاه بمتوسط/ثقة موزونة ≥65%.
+- الوكلاء الموافقون يضيفون وزنهم إلى الاتجاه، والوكلاء المعارضون يخصمون وزنهم من قوة الإشارة.
+- عكس Daily Bias يحتاج وكيلين مؤهلين على نفس الاتجاه وثقة إشارة ≥75%.
 
 ### خط الإشارة
 
@@ -155,8 +154,8 @@ Management: SL → entry after +100 pts · Trail gap 100 pts / step 30 pts · ch
 2. جلب بيانات XAU/USD من Twelve Data
 3. تشغيل وكلاء التحليل
 4. تشغيل فلاتر الجلسة والأخبار والاتجاه اليومي والمخاطر
-5. DecisionAgent يجمع السياق ويرسل إلى Groq
-6. Groq يقرر BUY / SELL / WAIT
+5. DecisionAgent يحسب weighted consensus بين الوكلاء الخمسة
+6. إذا كانت شروط الإجماع والمخاطر متحققة يقرر BUY / SELL، وإلا WAIT
 7. إذا القرار BUY/SELL ومؤهل → إرسال Telegram
 8. بعد نجاح الإرسال → حفظ الصفقة في Supabase
 9. تحديث الصفقة لاحقاً كل 5 دقائق
@@ -189,7 +188,7 @@ Management: SL → entry after +100 pts · Trail gap 100 pts / step 30 pts · ch
 
 | الوكيل | الوظيفة |
 |---|---|
-| `DecisionAgent` | القرار النهائي بالتعاون مع Groq |
+| `DecisionAgent` | القرار النهائي عبر 5-Agent Weighted Consensus |
 | `OpenTradesManager` | متابعة الصفقات المفتوحة وتحريك الستوب والتريلنج |
 | `DailyReportAgent` | إحصائيات التقرير اليومي |
 | `BaseAgent` | وظائف مشتركة للوكلاء |
@@ -200,7 +199,7 @@ Management: SL → entry after +100 pts · Trail gap 100 pts / step 30 pts · ch
 
 | الفلتر | الحالة | الوصف |
 |---|---|---|
-| Groq Final Gate | ✅ فعال | لا إشارة بدون قرار Groq |
+| Weighted Consensus | ✅ فعال | لا إشارة بدون إجماع موزون من الوكلاء |
 | Trading Hours | ✅ فعال | يمنع إشارات خارج نافذة التداول |
 | News Risk | ✅ فعال | يمنع التداول حول الأخبار عالية الخطورة |
 | Daily Bias | ✅ فعال | يسمح بعكس الاتجاه إذا الثقة ≥70% مع وكيل مؤهل واحد، أو ≥65% مع وكيلين مؤهلين بنفس الاتجاه |
@@ -264,7 +263,7 @@ Management: SL → entry after +100 pts · Trail gap 100 pts / step 30 pts · ch
 - SL / TP1 / TP2
 - سطر إدارة الصفقة
 - أصوات الوكلاء
-- Groq final gate
+- 5-Agent weighted consensus
 - أسباب الدخول
 - ملاحظات المخاطر
 - رقم الصفقة
@@ -314,7 +313,7 @@ Rule: 100-point gap / 30-point step.
 
 ### 5. التقرير الأسبوعي
 
-تقرير Groq أسبوعي يوم السبت 10:00 صباحاً بتوقيتك.
+تقرير أسبوعي رقمي/تلقائي يوم السبت 10:00 صباحاً بتوقيتك بدون Groq.
 
 ### 6. رسائل الأخطاء
 
@@ -453,7 +452,7 @@ supabase_schema_unified.sql
 | `signals` | أرشفة الإشارات |
 | `agent_weights` | أوزان الوكلاء المتعلمة |
 | `learning_history` | تاريخ التعلم |
-| `ai_trade_reviews` | مراجعات Groq للخسائر |
+| `ai_trade_reviews` | معطّل حالياً بعد حذف Groq |
 | `ai_memory_rules` | قواعد الذاكرة المستخرجة |
 | `daily_reports` | تقارير يومية |
 | `weekly_reports` | تقارير أسبوعية |
@@ -476,7 +475,6 @@ Repository → Settings → Secrets and variables → Actions
 | `SUPABASE_URL` | ✅ | رابط Supabase |
 | `SUPABASE_KEY` | ✅ | Service Role Key أو Key مناسب |
 | `TWELVE_DATA_API_KEY` | ✅ | بيانات الذهب |
-| `GROQ_API_KEY` | ✅ | قرار Groq النهائي وتقارير AI |
 
 اختياري:
 
@@ -524,7 +522,7 @@ python -m pytest -q
 آخر نتيجة مؤكدة:
 
 ```text
-321 passed, 1 warning
+334 passed, 1 warning
 ```
 
 ### تشغيل تحليل واحد محلياً
@@ -607,13 +605,13 @@ Nabil-gold/
 "operation_mode": "observation"
 ```
 
-### Groq
+### القرار بدون AI خارجي
 
 ```json
 "ai_service": {
-  "enabled": true,
-  "provider": "groq",
-  "model": "llama-3.3-70b-versatile"
+  "enabled": false,
+  "provider": "none",
+  "model": "classic-consensus"
 }
 ```
 
@@ -684,7 +682,7 @@ Nabil-gold/
 
 1. حساب أداء الوكلاء.
 2. تحديث الأوزان في Supabase.
-3. مراجعة الخسائر بواسطة Groq.
+3. مراجعة الخسائر بالمنطق الرقمي/القواعد عند الحاجة (AI review معطّل حالياً).
 4. استخراج Memory Rules.
 5. إدخال القواعد النشطة في Prompt القرارات القادمة.
 
@@ -729,7 +727,7 @@ Error Message
 | ⭐⭐ | تفعيل Dynamic Risk تدريجياً |
 | ⭐⭐ | أوامر Telegram تفاعلية مثل `/status` و `/open` |
 | ⭐ | GitHub Pages للداشبورد |
-| ⭐ | دعم Backtesting مع Groq context |
+| ⭐ | تحسين Backtesting للـ 5-Agent Consensus |
 | ⭐ | ضبط تلقائي للصيفي/الشتوي داخل السكريبتات بدلاً من Cron ثابت |
 
 ---

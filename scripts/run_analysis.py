@@ -333,7 +333,7 @@ def _dedupe_warnings(warnings: list) -> list:
     upcoming event. Showing both is noise. This:
       * drops exact duplicates,
       * keeps only the FIRST news-block warning (rule-based, most concise) and
-        drops the later AI-news one when both are present,
+        drops any later AI-news one when both are present,
       * preserves the order of all other warnings.
     """
     seen: set = set()
@@ -366,11 +366,10 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
 
 
 def _is_news_hard_block(decision: Dict[str, Any], all_results: Dict[str, Any]) -> bool:
-    """True when WAIT is caused by a hard news filter, not by Groq weakness.
+    """True when WAIT is caused by a hard news filter.
 
-    In that case the market-status message should not show "Groq: 0%" because
-    the 0% is the post-filter confidence after the news override. The clearer
-    message is: NEWS BLOCK / Groq skipped or overridden.
+    In that case the market-status message should show NEWS BLOCK instead of a
+    misleading zero-confidence decision caused by the post-filter override.
     """
     warnings = [str(w).lower() for w in (decision.get("warnings") or [])]
     if any(w.startswith("news blocked") or w.startswith("ai news blocked") for w in warnings):
@@ -399,33 +398,30 @@ def _build_market_status_message(
     """Build the hourly/explicit Market Status Telegram message.
 
     Special-case hard news blocks so the message explains that news overrode the
-    trade decision instead of misleadingly displaying "Groq: 0%".
+    agent consensus decision.
     """
     warnings = _dedupe_warnings(decision.get("warnings") or [])
     warnings_text = "\n".join(f"• {html.escape(str(w))}" for w in warnings[:6]) or "• No special warnings"
     price_text = f"{_safe_float(decision.get('current_price', all_results.get('current_price', 0))):.2f}"
-    ai = decision.get("ai", {}) or {}
     classic = decision.get("classic", {}) or {}
+    consensus = classic.get("consensus", {}) or {}
+    rules = consensus.get("rules", {}) or {}
 
-    agent_thr = decision.get("agent_min_confidence", 60)
-    groq_thr = decision.get("groq_min_confidence", 51)
-    groq_c = _safe_float(ai.get('confidence', decision.get('confidence', 0)))
-    groq_reason = ai.get("reasoning") or ai.get("opposite_risk") or ai.get("risk_notes") or ""
+    agent_thr = rules.get("agent_min_confidence", decision.get("agent_min_confidence", 60))
+    min_consensus = _safe_float(rules.get("min_consensus_confidence", 65), 65)
+    strong_single = _safe_float(rules.get("strong_single_agent_confidence", 70), 70)
     news_hard_block = _is_news_hard_block(decision, all_results)
 
     reason_lines = []
     if news_hard_block:
-        gate_line = f"📊 Gate: NEWS BLOCK  •  Groq: skipped/overridden  •  Agents ≥{agent_thr}%"
+        gate_line = f"📊 Gate: NEWS BLOCK  •  Consensus overridden  •  Agents ≥{agent_thr}%"
         reason_lines.append("• News hard block active — trading is paused during the event cooling window")
-        reason_lines.append("• Groq decision is skipped/overridden until the news filter clears")
+        reason_lines.append("• Agent consensus is ignored until the news filter clears")
     else:
-        gate_line = f"📊 Groq: {groq_c:.0f}%  •  Agents ≥{agent_thr}%  •  Groq ≥{groq_thr}%"
-        if groq_c < _safe_float(groq_thr, 51.0):
-            reason_lines.append(f"• Groq returned {groq_c:.0f}% — below {_safe_float(groq_thr, 51.0):.0f}% threshold")
-        else:
-            reason_lines.append(f"• Groq accepted direction at {groq_c:.0f}%")
-        if groq_reason:
-            reason_lines.append(f"• {str(groq_reason)[:160]}")
+        gate_line = f"📊 Consensus: WAIT  •  Agents ≥{agent_thr}%  •  Entry ≥{min_consensus:.0f}%"
+        rejection = classic.get("rejection_reason") or "No valid weighted consensus signal"
+        reason_lines.append(f"• {rejection}")
+        reason_lines.append(f"• Rules: 2 agents ≥{min_consensus:.0f}% or 1 strong agent ≥{strong_single:.0f}%")
 
     opp_agent = (classic.get("strongest_directional") or {}).get("agent")
     opp_conf = (classic.get("strongest_directional") or {}).get("confidence", 0)
@@ -484,7 +480,7 @@ async def _check_scale_in(
       - Only in fixed_risk entry_style
       - Only if there's an open trade
       - Only if price has approached the key level (within trigger distance)
-      - Ask Groq for quick confirmation
+      - Rule-based confirmation (AI disabled)
       - Bypass duplicate filter (intentional position building)
       - Respect news filter (if news blocks trading, no scale-in)
       - New defaults: trigger=50pts, max=1, size=100% (per user config)
@@ -591,9 +587,9 @@ async def _check_scale_in(
             logger.debug("📊 No scale-in: %s trade not near any level (trigger=%dpts)", trade_type, trigger_points)
             continue
 
-        # Ask Groq for quick confirmation
-        groq_ok = True
-        groq_reason = ""
+        # Rule-based scale-in confirmation (AI disabled in classic consensus mode)
+        scale_ok = True
+        scale_reason = ""
         if ai_service:
             try:
                 scale_prompt = f"""Quick scale-in check. We have an open {trade_type} position entered at {entry:.2f}.
@@ -602,7 +598,7 @@ The level is {abs(level_price - current_price):.2f}$ away.
 Should we add another {trade_type} position (scale-in)?
 
 News context: {str(all_results.get('news', {}))[:200]}
-AI news interpretation: {str(news_ai)[:200]}
+News context: {str(news_ai)[:200]}
 
 Reply JSON only:
 {{"scale_in": true/false, "confidence": 0-100, "reason": "brief reason"}}"""
@@ -617,26 +613,26 @@ Reply JSON only:
                     import json as _json
                     try:
                         parsed = _json.loads(resp.content)
-                        groq_ok = bool(parsed.get("scale_in", False))
-                        groq_confidence = float(parsed.get("confidence", 0) or 0)
-                        groq_reason = str(parsed.get("reason", ""))
-                        if groq_ok and groq_confidence < 60:
-                            groq_ok = False
-                            groq_reason = f"low confidence ({groq_confidence:.0f}%)"
+                        scale_ok = bool(parsed.get("scale_in", False))
+                        scale_confidence = float(parsed.get("confidence", 0) or 0)
+                        scale_reason = str(parsed.get("reason", ""))
+                        if scale_ok and scale_confidence < 60:
+                            scale_ok = False
+                            scale_reason = f"low confidence ({scale_confidence:.0f}%)"
                     except Exception:
-                        groq_ok = False
-                        groq_reason = "parse failed"
+                        scale_ok = False
+                        scale_reason = "parse failed"
             except Exception as exc:
-                logger.warning("📊 Groq scale-in check failed: %s", exc)
-                groq_ok = False
-                groq_reason = str(exc)
+                logger.warning("📊 Scale-in confirmation failed: %s", exc)
+                scale_ok = False
+                scale_reason = str(exc)
 
-        if not groq_ok:
-            logger.info("📊 Scale-in rejected by Groq for %s: %s", trade_type, groq_reason)
+        if not scale_ok:
+            logger.info("📊 Scale-in rejected for %s: %s", trade_type, scale_reason)
             continue
 
         # Execute scale-in
-        logger.info("📊 Scale-in %s confirmed by Groq: %s", trade_type, groq_reason)
+        logger.info("📊 Scale-in %s confirmed: %s", trade_type, scale_reason)
 
         scale_decision = {
             "decision": trade_type,
@@ -652,7 +648,7 @@ Reply JSON only:
             "confidence": 80,
             "current_price": current_price,
             "trade_id": database.new_trade_id(),
-            "reasons": [f"Scale-in: {groq_reason}"],
+            "reasons": [f"Scale-in: {scale_reason}"],
         }
         scale_decision["signal"]["trade_id"] = scale_decision["trade_id"]
         # Send Telegram notification first. Save the scale-in trade only if the
@@ -665,7 +661,7 @@ Reply JSON only:
             "Original entry: {entry_price}\n"
             "Scale entry: {scale_price:.2f}\n"
             "Level: {level}\n"
-            "Groq confidence: approved ✅\n"
+            "Confirmation: rule-based ✅\n"
             "Reason: {reason}\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
             "<i>Scale-in #{scale_num}/{max_scales} • Size: {size_ratio:.0%} of original</i>"
@@ -675,7 +671,7 @@ Reply JSON only:
             entry_price=trade.get("entry_price"),
             scale_price=current_price,
             level=html.escape(level_name),
-            reason=html.escape(groq_reason),
+            reason=html.escape(scale_reason),
             scale_num=existing_scales + 1,
             max_scales=max_scales,
             size_ratio=size_ratio,
@@ -741,7 +737,7 @@ async def run_analysis_async() -> None:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("⚠️ فشل تهيئة AI: %s", exc)
                 if not bool(ai_config.get("fallback_to_classic", True)):
-                    telegram.send_error_alert(f"Groq is required but AI initialization failed: {exc}")
+                    telegram.send_error_alert(f"AI initialization failed while fallback is disabled: {exc}")
                     return
 
         logger.info("جلب بيانات السوق...")
@@ -839,12 +835,8 @@ async def run_analysis_async() -> None:
         operation_mode = str(config.get("operation_mode", "observation")).lower()
         decision["run_source"] = "scheduled" if github_event == "schedule" else "manual" if github_event == "workflow_dispatch" else github_event
         decision["operation_mode"] = operation_mode
-        groq_obs_cfg = config.get("groq_observation_mode", {}) or {}
-        if operation_mode == "observation" and groq_obs_cfg.get("enabled", False) and groq_obs_cfg.get("allow_single_agent_context", False):
-            decision["decision_mode"] = "One-Agent + Groq"
-        else:
-            decision["decision_mode"] = "Groq Observation" if operation_mode == "observation" and groq_obs_cfg.get("enabled", False) else "Production Strict"
-        decision["requires_three_agents"] = bool((config.get("operation_modes", {}).get(operation_mode, {}) or {}).get("requires_three_agents", operation_mode != "observation"))
+        decision["decision_mode"] = "5-Agent Weighted Consensus"
+        decision["requires_three_agents"] = False
         trading_mode = str(config.get("trading_mode", "paper")).lower()
         paper_config = config.get("paper_trading", {}) or {}
         decision["trading_mode"] = trading_mode
