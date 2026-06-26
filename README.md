@@ -1,388 +1,138 @@
-# Multi-Asset AI-Free Signals — Paper-Trading Bot
+# Nabil Gold — Multi-Asset Paper Trading Bot
 
-نظام آلي لتوليد إشارات ورقية للذهب، 6 أزواج فوركس رئيسية، ونفط WTI، وإدارتها عبر Telegram وSupabase. القرار النهائي مبني على **إجماع موزون من 5 وكلاء تحليل** مع فلاتر أخبار ومخاطر، بدون أي API قرار خارجي.
+Automated trading signal system for **Gold (XAU/USD)** and **WTI Oil** using a 5-agent weighted consensus. Runs on GitHub Actions with zero cost. No external AI APIs required.
 
-> ⚠️ المشروع تعليمي/تجريبي فقط. لا يُعد توصية مالية ولا ينفذ أوامر حقيقية.
-
----
-
-## الحالة الحالية
-
-| البند | القيمة |
-|---|---|
-| وضع التداول | Paper Trading |
-| القرار النهائي | 5-Agent Weighted Consensus |
-| مصدر البيانات | Finnhub |
-| التخزين | Supabase |
-| الإشعارات | Telegram |
-| تشغيل التحليل | cron-job.org → GitHub Actions |
-| الإشارات | كل 5 دقائق، الإثنين–الجمعة، 24 ساعة |
-| تحديث الصفقات | كل 5 دقائق، فقط عند وجود صفقة/أمر نشط |
-| حالة السوق | كل ساعة عبر cron-job.org |
-| التقرير اليومي | 23:00 بتوقيتك المحلي |
-| التقرير الأسبوعي | السبت 10:00 بتوقيتك المحلي |
-| آخر فحص | 299 اختبار ناجح |
+> Paper trading only — not financial advice.
 
 ---
 
-## الأدوات المدعومة وحساب النقاط
+## How It Works
 
-يدعم النظام الآن 8 أدوات:
-
-| الرمز | النوع | حجم النقطة | مثال 100 نقطة | خانات العرض |
-|---|---|---:|---:|---:|
-| XAU/USD | ذهب | 0.10 | 10.00 دولار | 2 |
-| EUR/USD | فوركس | 0.00001 | 10 pips | 5 |
-| GBP/USD | فوركس | 0.00001 | 10 pips | 5 |
-| USD/JPY | فوركس | 0.001 | 10 pips | 3 |
-| USD/CHF | فوركس | 0.00001 | 10 pips | 5 |
-| USD/CAD | فوركس | 0.00001 | 10 pips | 5 |
-| AUD/USD | فوركس | 0.00001 | 10 pips | 5 |
-| WTI/USD | نفط WTI | 0.01 | 1.00 دولار | 2 |
-
-كل حسابات PnL وSL وTP وTrailing تستخدم `point_size` الخاص بالرمز، لذلك تختلف النقاط بين الذهب والفوركس والنفط بشكل صحيح.
-
----
-
-## كيف يعمل النظام
-
-```text
-Finnhub
+```
+Twelve Data API
   → 5 Analysis Agents
   → Weighted Consensus
-  → News / Session / Risk / Duplicate Filters
+  → News / Session / Risk Filters
   → Telegram Signal
   → Supabase Trade Record
-  → Trade Updates / SL / TP / Trailing
+  → Trade Management (SL / TP / Trailing)
 ```
 
-### وكلاء التحليل الخمسة
+## Agents
 
-| الوكيل | الدور |
+| Agent | Role |
 |---|---|
-| Technical | مؤشرات فنية، RSI/EMA/MACD/ATR ومستويات |
-| Classical | دعم/مقاومة، شموع وأنماط كلاسيكية |
-| SMC | Order Blocks, Liquidity, FVG, Structure |
-| Price Action | سلوك السعر والشموع والرفض |
-| Multi-Timeframe | توافق 5m/15m/1H/4H |
+| Technical | RSI, EMA, MACD, ATR, Bollinger |
+| Classical | Support/Resistance, Patterns, Fibonacci |
+| SMC | Order Blocks, Liquidity, FVG |
+| Price Action | Candlestick Patterns, Rejection |
+| Multi-Timeframe | 5m/15m/1H/4H Alignment |
 
----
+## Decision Rules
 
-## منطق القرار النهائي
+- Minimum **2 agents** must agree on direction
+- Net weighted confidence must be **≥ 65%**
+- Counter-trend trades against Daily Bias need **≥ 75%**
+- Agents below 60% confidence are excluded
 
-### 1. فلترة الوكلاء
+## Instruments
 
-أي وكيل ثقته أقل من:
+| Symbol | Type | Point Size |
+|---|---|---|
+| XAU/USD | Gold | $0.10 |
+| WTI/USD | Oil | $0.01 |
 
-```text
-60%
-```
+## Trade Management
 
-لا يُحسب في القرار.
-
-### 2. الدخول العادي
-
-الدخول العادي يحتاج:
-
-```text
-2 وكلاء مؤهلين على الأقل بنفس الاتجاه
-والثقة الموزونة الصافية ≥65%
-```
-
-لا يوجد دخول من وكيل واحد، حتى لو كانت ثقته عالية.
-
-### 3. خصم المعارضة
-
-الوكلاء الموافقون يضيفون وزنهم، والوكلاء المعارضون يخصمون من قوة الإشارة.
-
-مثال:
-
-```text
-Technical BUY 66% وزن 0.20
-SMC BUY 66% وزن 0.25
-Price Action SELL 80% وزن 0.15
-```
-
-الحساب:
-
-```text
-BUY score = (66/100×0.20) + (66/100×0.25) = 0.297
-SELL opposition = (80/100×0.15) = 0.120
-BUY edge = 0.297 - 0.120 = 0.177
-```
-
-تُخصم المعارضة من الثقة النهائية. إذا نزلت الثقة الصافية تحت 65% فالقرار يصبح WAIT.
-
-### 4. عكس الاتجاه الأعلى Daily Bias
-
-إذا كانت الصفقة عكس اتجاه 4H/Daily Bias:
-
-```text
-2 وكلاء مؤهلين على الأقل
-والثقة الصافية بعد الخصم ≥75%
-```
-
----
-
-## إدارة المخاطر والصفقة
-
-### قبل الدخول
-
-`RiskManagementAgent` يحسب:
-
-- Entry
-- Stop Loss
-- TP1 / TP2 / TP3
-- R:R
-- Position size تقديري
-- Trade grade
-
-### أثناء الصفقة
-
-| الحدث | التصرف |
+| Event | Action |
 |---|---|
-| ربح +100 نقطة | نقل SL إلى الدخول |
-| بعد نقل SL | يبدأ trailing مباشرة |
-| كل +30 نقطة إضافية | تحريك SL بمقدار 30 نقطة |
-| Trailing gap | 100 نقطة خلف السعر |
-| TP1 | حماية/جزئي حسب الخطة |
-| TP2 | إغلاق رابح |
-| SL | إغلاق خسارة أو ربح مقفول إذا كان trailing SL |
-| Expiry | بعد 24 ساعة إلا إذا الصفقة رابحة ومحمية |
+| +100 points | Move SL to entry |
+| After breakeven | Trailing stop (100pt gap, 30pt step) |
+| TP1 | Partial close (50%) |
+| TP2 | Full close |
+| 24 hours | Expire (if not protected) |
 
-رسالة الإشارة تعرض سطر الإدارة:
+## Schedule
 
-```text
-Management: SL → entry after +100 pts · Trail gap 100 pts / step 30 pts · check 5m
+| Job | Frequency |
+|---|---|
+| Analysis | Every 5 min, 3AM–10PM |
+| Trade Update | Every 5 min (offset by 1 min) |
+| Daily Report | 11:00 PM |
+| Weekly Report | Saturday 10:00 AM |
+
+## Setup
+
+### 1. Get API Key (Free)
+
+Register at [twelvedata.com/register](https://twelvedata.com/register) — 800 calls/day
+
+### 2. Add GitHub Secrets
+
+`Settings → Secrets and variables → Actions`
+
+| Secret | Required |
+|---|---|
+| `TWELVEDATA_API_KEY` | ✅ |
+| `TELEGRAM_BOT_TOKEN` | ✅ |
+| `TELEGRAM_CHAT_ID` | ✅ |
+| `SUPABASE_URL` | ✅ |
+| `SUPABASE_KEY` | ✅ |
+
+### 3. Setup Supabase
+
+Run `supabase_schema_unified.sql` in Supabase SQL Editor.
+
+### 4. Setup Cron Jobs
+
+**Analysis** (cron-job.org):
+```
+*/5 3-22 * * 1-5
 ```
 
----
-
-## رسائل Telegram
-
-### الإشارات
-
-تصل فقط عند وجود صفقة مؤهلة. تحتوي على:
-
-- BUY/SELL
-- السعر والثقة والجودة
-- خطة الدخول وSL/TP
-- إدارة الصفقة
-- أصوات الوكلاء
-- سبب الدخول
-- المخاطر
-- رقم الصفقة
-
-### تحديث الصفقات
-
-تصل فقط عند حدوث تغيير فعلي:
-
-- Order filled
-- SL moved to entry
-- Trailing stop moved
-- TP1 / TP2
-- SL / Trailing SL
-- Break-even
-- Expired / Manual close
-
-لا تُرسل رسائل لمجرد NEAR_TP1 أو LONG_RUNNING أو EXIT_WARNING.
-
-### حالة السوق
-
-تُرسل من Cron Job خارجي مخصص كل ساعة فقط، وليس من تشغيلات التحليل كل 5 دقائق.
-
----
-
-## جدولة cron-job.org
-
-### 1. تحليل الإشارات — كل 5 دقائق أيام العمل
-
-```cron
-*/5 * * * 1-5
+**Trade Update** (cron-job.org):
 ```
-
-POST:
-
-```text
-https://api.github.com/repos/nabiloashgaqr/Nabil-gold/actions/workflows/analyze.yml/dispatches
+1/5 3-22 * * 1-5
 ```
-
-Body:
-
-```json
-{
-  "ref": "main",
-  "inputs": {
-    "send_status": "false"
-  }
-}
-```
-
-### 2. تحديث الصفقات — كل 5 دقائق أيام العمل
-
-```cron
-*/5 * * * 1-5
-```
-
-POST:
-
-```text
-https://api.github.com/repos/nabiloashgaqr/Nabil-gold/actions/workflows/update_trades.yml/dispatches
-```
-
-Body:
-
-```json
-{
-  "ref": "main"
-}
-```
-
-> يبدأ Workflow التحديث بفحص Supabase. إذا لا توجد صفقة OPEN/PARTIAL/TP1_HIT/PENDING يتوقف مبكراً قبل checkout/pip/جلب السعر.
-
-### 3. حالة السوق — كل ساعة أيام العمل
-
-```cron
-2 * * * 1-5
-```
-
-POST إلى نفس Workflow التحليل:
-
-```text
-https://api.github.com/repos/nabiloashgaqr/Nabil-gold/actions/workflows/analyze.yml/dispatches
-```
-
-Body:
-
-```json
-{
-  "ref": "main",
-  "inputs": {
-    "send_status": "true"
-  }
-}
-```
-
----
 
 ## GitHub Actions
 
-| Workflow | الملف | ملاحظات |
-|---|---|---|
-| Analysis | `.github/workflows/analyze.yml` | بدون schedule داخلي، يعمل من cron-job.org |
-| Update Trades | `.github/workflows/update_trades.yml` | بدون schedule داخلي، يعمل من cron-job.org |
-| Daily Report | `.github/workflows/daily_report.yml` | 23:00 محلياً |
-| Weekly Report | `.github/workflows/weekly_report.yml` | السبت 10:00 محلياً |
-| Dashboard | `.github/workflows/dashboard.yml` | Artifact + Telegram summary |
-| Tests | `.github/workflows/tests.yml` | فحص الكود |
-
----
-
-## Secrets المطلوبة
-
-أضفها من:
-
-```text
-Repository → Settings → Secrets and variables → Actions
-```
-
-| Secret | الاستخدام |
+| Workflow | Trigger |
 |---|---|
-| TELEGRAM_BOT_TOKEN | إرسال رسائل Telegram |
-| TELEGRAM_CHAT_ID | القناة/المجموعة |
-| SUPABASE_URL | قاعدة البيانات |
-| SUPABASE_KEY | مفتاح Supabase |
-| FINNHUB_API_KEY | بيانات XAU/USD |
+| `analyze.yml` | cron-job.org |
+| `update_trades.yml` | cron-job.org |
+| `daily_report.yml` | Schedule |
+| `weekly_report.yml` | Schedule |
+| `tests.yml` | Push/PR |
 
-لا حاجة لأي مفاتيح قرار خارجي.
-
----
-
-## Supabase
-
-الملف:
-
-```text
-supabase_schema_unified.sql
-```
-
-الجداول الأساسية:
-
-| جدول | وظيفة |
-|---|---|
-| trades | الصفقات وحالاتها |
-| signals | أرشيف الإشارات |
-| agent_weights | أوزان الوكلاء |
-| learning_history | تاريخ التعلم |
-| daily_reports | تقارير يومية |
-| weekly_reports | تقارير أسبوعية |
-| portfolio | ملخص المحفظة الورقية |
-
----
-
-## التشغيل المحلي
+## Local Run
 
 ```bash
-python -m pip install -r requirements.txt
+pip install -r requirements.txt
 python -m pytest -q
-```
-
-تحليل واحد:
-
-```bash
 python scripts/run_analysis.py
 ```
 
-تحديث الصفقات:
+## Project Structure
 
-```bash
-python scripts/run_trade_updates.py
 ```
-
-تقرير يومي:
-
-```bash
-python scripts/run_daily_report.py
-```
-
----
-
-## هيكل المشروع
-
-```text
 Nabil-gold/
-├── .github/workflows/
-├── agents/
-├── services/
-├── scripts/
-├── tests/
-├── config.json
-├── requirements.txt
-├── supabase_schema_unified.sql
-└── README.md
+├── agents/           # Analysis + decision agents
+├── services/         # Market data, DB, Telegram
+├── scripts/          # Entry points for workflows
+├── tests/            # 299 tests
+├── config.json       # All settings
+└── supabase_schema_unified.sql
 ```
 
----
+## Tech Stack
 
-## ملاحظات تشغيلية
-
-- المستودع Public، لذلك GitHub Actions standard runners مجانية للمستودعات العامة حسب سياسة GitHub.
-- لا توجد رسائل Telegram من التحليل كل 5 دقائق إلا عند وجود صفقة أو خطأ.
-- حالة السوق لها Cron Job منفصل كل ساعة.
-- تحديث الصفقات لا يعمل تشغيل ثقيل إلا عند وجود صفقة نشطة أو معلقة.
-
----
-
-## خارطة الطريق
-
-| أولوية | بند |
-|---|---|
-| عالية | مراقبة أداء قاعدة 2 وكلاء / 65% لمدة أسبوع |
-| عالية | تشديد/تخفيف Daily Bias حسب النتائج |
-| متوسطة | تحسين Dashboard |
-| متوسطة | إضافة أوامر Telegram مثل `/status` و`/open` |
-| منخفضة | تحسين backtesting للإجماع الموزون |
+- **Python 3.11+** — zero external AI APIs
+- **Twelve Data** — market data (free tier)
+- **Supabase** — PostgreSQL persistence
+- **Telegram Bot** — notifications
+- **GitHub Actions** — stateless runner
 
 ---
 
-**Gold AI Signals — Paper first, measure everything.**
+**Paper first. Measure everything.**
