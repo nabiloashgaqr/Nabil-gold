@@ -20,42 +20,6 @@ DEFAULT_INSTRUMENTS: Dict[str, Dict[str, Any]] = {
         "min_sl_distance_points": 300, "trailing_distance": 100, "trailing_step": 30,
         "early_breakeven_points": 100, "duplicate_zone_points": 50,
     },
-    "EUR/USD": {
-        "symbol": "EUR/USD", "name": "Euro / US Dollar", "category": "forex",
-        "point_size": 0.00001, "price_decimals": 5,
-        "min_sl_distance_points": 300, "trailing_distance": 100, "trailing_step": 30,
-        "early_breakeven_points": 100, "duplicate_zone_points": 100,
-    },
-    "GBP/USD": {
-        "symbol": "GBP/USD", "name": "British Pound / US Dollar", "category": "forex",
-        "point_size": 0.00001, "price_decimals": 5,
-        "min_sl_distance_points": 300, "trailing_distance": 100, "trailing_step": 30,
-        "early_breakeven_points": 100, "duplicate_zone_points": 100,
-    },
-    "USD/JPY": {
-        "symbol": "USD/JPY", "name": "US Dollar / Japanese Yen", "category": "forex",
-        "point_size": 0.001, "price_decimals": 3,
-        "min_sl_distance_points": 300, "trailing_distance": 100, "trailing_step": 30,
-        "early_breakeven_points": 100, "duplicate_zone_points": 100,
-    },
-    "USD/CHF": {
-        "symbol": "USD/CHF", "name": "US Dollar / Swiss Franc", "category": "forex",
-        "point_size": 0.00001, "price_decimals": 5,
-        "min_sl_distance_points": 300, "trailing_distance": 100, "trailing_step": 30,
-        "early_breakeven_points": 100, "duplicate_zone_points": 100,
-    },
-    "USD/CAD": {
-        "symbol": "USD/CAD", "name": "US Dollar / Canadian Dollar", "category": "forex",
-        "point_size": 0.00001, "price_decimals": 5,
-        "min_sl_distance_points": 300, "trailing_distance": 100, "trailing_step": 30,
-        "early_breakeven_points": 100, "duplicate_zone_points": 100,
-    },
-    "AUD/USD": {
-        "symbol": "AUD/USD", "name": "Australian Dollar / US Dollar", "category": "forex",
-        "point_size": 0.00001, "price_decimals": 5,
-        "min_sl_distance_points": 300, "trailing_distance": 100, "trailing_step": 30,
-        "early_breakeven_points": 100, "duplicate_zone_points": 100,
-    },
     "WTI/USD": {
         "symbol": "WTI/USD", "name": "WTI Crude Oil", "category": "oil",
         "point_size": 0.01, "price_decimals": 2,
@@ -67,16 +31,11 @@ DEFAULT_INSTRUMENTS: Dict[str, Dict[str, Any]] = {
 ALIASES = {
     "XAUUSD": "XAU/USD",
     "GOLD": "XAU/USD",
-    "EURUSD": "EUR/USD",
-    "GBPUSD": "GBP/USD",
-    "USDJPY": "USD/JPY",
-    "USDCHF": "USD/CHF",
-    "USDCAD": "USD/CAD",
-    "AUDUSD": "AUD/USD",
     "WTI": "WTI/USD",
     "USOIL": "WTI/USD",
     "OIL": "WTI/USD",
     "OIL/W": "WTI/USD",
+    "WTICO_USD": "WTI/USD",
 }
 
 
