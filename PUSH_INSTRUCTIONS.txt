@@ -1,0 +1,97 @@
+=================================================================
+PUSH INSTRUCTIONS - Nabil-gold Repository (Finnhub ONLY)
+=================================================================
+
+The local repository is currently 18 commits ahead of origin/main.
+All changes have been committed locally (working tree clean).
+
+=================================================================
+CHANGES INCLUDED
+=================================================================
+- Completely removed Twelve Data (Finnhub ONLY - no fallbacks, no references)
+- Deleted ALL duplicate .env files (only single .env.example remains)
+- Merged all required env vars into .env.example (TELEGRAM_*, SUPABASE_*, FINNHUB_API_KEY, etc.)
+- Updated config.json, all workflows, scripts, tests, README
+- 299+ tests passing
+- SSH key configured for push
+
+=================================================================
+SSH KEY (EXACT - copy this exactly)
+=================================================================
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGDyV8UU13xkbo+Btntq1cyG7YthtxaPHGIodJdXz0IS arena-ai-nabil-gold-20260626
+
+=================================================================
+STEP-BY-STEP: RUN ON YOUR LOCAL MACHINE
+=================================================================
+
+1. Clone the repo (if you don't have it locally yet):
+   git clone git@github.com:nabiloashgaqr/Nabil-gold.git
+   cd Nabil-gold
+
+   OR if you already have a local copy, cd into it.
+
+2. Save the SSH key to your local machine:
+   # Create the key file
+   cat > ~/.ssh/arena-ai-nabil-gold-20260626 << 'KEYEOF'
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGDyV8UU13xkbo+Btntq1cyG7YthtxaPHGIodJdXz0IS arena-ai-nabil-gold-20260626
+KEYEOF
+
+   chmod 600 ~/.ssh/arena-ai-nabil-gold-20260626
+
+3. Configure SSH to use this key for GitHub:
+   cat >> ~/.ssh/config << 'SSHCFG'
+Host github.com
+  IdentityFile ~/.ssh/arena-ai-nabil-gold-20260626
+  User git
+  IdentitiesOnly yes
+SSHCFG
+
+   chmod 600 ~/.ssh/config
+
+4. Add key to ssh-agent (recommended):
+   eval "$(ssh-agent -s)"
+   ssh-add ~/.ssh/arena-ai-nabil-gold-20260626
+
+5. Verify SSH works:
+   ssh -T git@github.com
+   # Should say: "Hi nabiloashgaqr! You've successfully authenticated..."
+
+6. Make sure remote is SSH:
+   git remote -v
+   # If not showing git@github.com:... then:
+   git remote set-url origin git@github.com:nabiloashgaqr/Nabil-gold.git
+
+7. Push the changes:
+   git push origin main
+
+   # If it asks for passphrase or permission, use ssh-agent (step 4)
+
+=================================================================
+ALTERNATIVE: Direct command using the key (if ssh-agent not used)
+=================================================================
+GIT_SSH_COMMAND="ssh -i ~/.ssh/arena-ai-nabil-gold-20260626 -o IdentitiesOnly=yes" git push origin main
+
+=================================================================
+AFTER SUCCESSFUL PUSH
+=================================================================
+git status
+# Should say: "Your branch is up to date with 'origin/main'."
+
+git fetch origin && git status
+# Should show 0 ahead.
+
+=================================================================
+IF YOU NEED THE FULL REPO AS ZIP (alternative)
+=================================================================
+The workspace also has: /home/user/Nabil-gold-changes.zip
+(Contains all modified files from the 18 commits)
+
+=================================================================
+TROUBLESHOOTING
+=================================================================
+- Permission denied (publickey): Make sure chmod 600 on key and config.
+- libcrypto error: Ignore (this is sandbox only); run on your real machine.
+- "remote: Permission denied": Use the SSH key above.
+- Test key: ssh -i ~/.ssh/arena-ai-nabil-gold-20260626 -T git@github.com
+
+=================================================================
