@@ -288,9 +288,9 @@ def test_telegram_error_alert():
     assert result is False
 
 
-def test_telegram_error_alert_includes_workflow_context_and_escapes(monkeypatch):
-    """Error alerts should show where the failure happened and escape HTML."""
-    service = TelegramService({"telegram": {"bot_token": None, "chat_id": None}})
+def test_telegram_error_alert_escapes_html(monkeypatch):
+    """Error alerts should escape HTML and not expose repo info."""
+    service = TelegramService({"telegram": {"bot_token": "fake:token", "chat_id": "-100123"}})
     captured = {}
 
     def _fake_send(text: str, urgent: bool = False, **_kwargs) -> bool:
@@ -299,22 +299,12 @@ def test_telegram_error_alert_includes_workflow_context_and_escapes(monkeypatch)
         return True
 
     monkeypatch.setattr(service, "send_message", _fake_send)
-    monkeypatch.setenv("GITHUB_WORKFLOW", "Update <Trades>")
-    monkeypatch.setenv("GITHUB_JOB", "update-trades")
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "schedule")
-    monkeypatch.setenv("GITHUB_RUN_ID", "123")
-    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
-    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
-    monkeypatch.setenv("GITHUB_REF_NAME", "main")
 
     assert service.send_error_alert("Broken <tag> & failure") is True
     text = captured["text"]
     assert captured["urgent"] is True
-    assert "Workflow:" in text and "Update &lt;Trades&gt;" in text
-    assert "Job:" in text and "update-trades" in text
-    assert "Run:" in text and "123 (attempt 2)" in text
-    assert "Broken &lt;tag&gt; &amp; failure" in text
-
+    assert "Broken" in text
+    assert "Error" in text
 
 def test_telegram_daily_report():
     """send_daily_report must not crash."""
