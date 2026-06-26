@@ -55,12 +55,12 @@
     "min_agents_agree": 2,
     "min_agreement_percentage": 1,
     "allow_all_signals": false,
-    "description": "Classic consensus mode: enter if one qualified agent has >=70% OR at least two qualified agents agree with weighted confidence >=65%. Opposing agents subtract from the directional edge.",
+    "description": "Classic consensus mode: enter only when at least two qualified agents agree and their weighted confidence is >=65%. Opposing agents subtract from the directional edge/confidence.",
     "experimental_single_agent": {
       "enabled": false,
       "min_confidence": 1,
       "bypass_groq_min_confidence": false,
-      "description": "Disabled. Production observation uses one-agent context + Groq final decision only.",
+      "description": "Disabled in classic consensus mode.",
       "bypass_risk_rejection": false,
       "fallback_levels_enabled": true,
       "fallback_atr": 2.0,
@@ -76,8 +76,8 @@
       "force_signal_confidence": 45
     },
     "min_consensus_confidence": 65,
-    "strong_single_agent_confidence": 70,
-    "strong_single_agent_enabled": true,
+    "strong_single_agent_confidence": 0,
+    "strong_single_agent_enabled": false,
     "agent_min_confidence": 60
   },
   "schedule": {

@@ -51,7 +51,7 @@ def test_market_status_normal_wait_shows_consensus_rules() -> None:
         "current_price": 4027.06,
         "classic": {
             "strongest_directional": {"agent": "technical", "confidence": 68.0},
-            "rejection_reason": "Need 2 agreeing agents or one strong agent",
+            "rejection_reason": "Need at least 2 agreeing agents with weighted confidence >= 65%",
             "consensus": {
                 "rules": {
                     "agent_min_confidence": 60,
@@ -70,4 +70,4 @@ def test_market_status_normal_wait_shows_consensus_rules() -> None:
     assert "Gate: NEWS BLOCK" not in msg
     assert "Consensus: WAIT" in msg
     assert "Entry ≥65%" in msg
-    assert "2 agents ≥65% or 1 strong agent ≥70%" in msg
+    assert "at least 2 agents with weighted confidence ≥65%" in msg

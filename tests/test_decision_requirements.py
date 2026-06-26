@@ -149,7 +149,10 @@ def test_conflict_buy_vs_sell():
             {'agent': 'multitimeframe', 'confidence': 85, 'weight': 0.2, 'score': 0.17, 'adjusted_confidence': 85},
         ], 'WAIT': []}
     result = agent._classic_decision(votes)
-    assert result['decision'] == 'BUY'
+    # Opposing SELL agents now subtract from BUY confidence/edge; this conflict
+    # is too weak for a valid classic consensus entry.
+    assert result['decision'] == 'WAIT'
+    assert result['consensus']['BUY']['opposition_penalty'] > 0
 
 
 def test_all_conditions_met():

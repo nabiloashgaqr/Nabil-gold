@@ -56,16 +56,16 @@ class DecisionAgent(BaseAgent):
         self.voting_agents = {"technical", "classical", "smc", "price_action", "multitimeframe"}
         
         # Classic consensus mode: no external AI final gate.
-        # Agents below this confidence are ignored. Entry is allowed when either
-        # one strong agent reaches ``strong_single_agent_confidence`` or at least
-        # ``min_agents_agree`` agents agree with weighted confidence above
-        # ``min_consensus_confidence``. Opposing agents subtract from edge.
+        # Agents below this confidence are ignored. Entry is allowed only when
+        # at least ``min_agents_agree`` agents agree and their weighted
+        # confidence is above ``min_consensus_confidence``. Opposing agents
+        # subtract from edge/confidence.
         consensus_cfg = config.get('signal_requirements', {}) or {}
         legacy_obs = config.get('groq_observation_mode', {}) or {}
         self.agent_min_confidence = int(consensus_cfg.get('agent_min_confidence', legacy_obs.get('agent_min_confidence', 60)))
         self.min_consensus_confidence = float(consensus_cfg.get('min_consensus_confidence', self.min_confidence) or self.min_confidence)
         self.strong_single_agent_confidence = float(consensus_cfg.get('strong_single_agent_confidence', 70) or 70)
-        self.strong_single_agent_enabled = bool(consensus_cfg.get('strong_single_agent_enabled', True))
+        self.strong_single_agent_enabled = bool(consensus_cfg.get('strong_single_agent_enabled', False))
         
     def _load_weights(self) -> Dict[str, float]:
         """تحميل الأوزان (من learning service أولاً، ثم config).
@@ -281,10 +281,8 @@ class DecisionAgent(BaseAgent):
             BUY edge  = BUY_score  - SELL_score
             SELL edge = SELL_score - BUY_score
 
-        A signal is valid when either:
-          * one strong qualified agent supports it (>= strong_single_agent_confidence), or
-          * at least min_agents_agree agents support it and their weighted average
-            confidence is >= min_consensus_confidence.
+        A signal is valid only when at least min_agents_agree agents support it
+        and their weighted average confidence is >= min_consensus_confidence.
         """
         buy_metrics = self._direction_metrics('BUY', votes)
         sell_metrics = self._direction_metrics('SELL', votes)
@@ -311,15 +309,15 @@ class DecisionAgent(BaseAgent):
                 rejection_reason = "No directional agent support"
             elif best['edge'] <= 0:
                 rejection_reason = "Opposing agents offset the setup (weighted edge <= 0)"
-            elif best['support_count'] < self.min_agents_agree and best['strongest_confidence'] < self.strong_single_agent_confidence:
+            elif best['support_count'] < self.min_agents_agree:
                 rejection_reason = (
-                    f"Need {self.min_agents_agree} agreeing agents >= {self.min_consensus_confidence:.0f}% "
-                    f"or one strong agent >= {self.strong_single_agent_confidence:.0f}%"
+                    f"Need at least {self.min_agents_agree} agreeing agents with weighted confidence "
+                    f">= {self.min_consensus_confidence:.0f}%"
                 )
-            elif best['support_count'] >= self.min_agents_agree and best['support_avg_confidence'] < self.min_consensus_confidence:
+            elif best['support_count'] >= self.min_agents_agree and best['confidence'] < self.min_consensus_confidence:
                 rejection_reason = (
-                    f"Consensus confidence {best['support_avg_confidence']:.0f}% below "
-                    f"{self.min_consensus_confidence:.0f}%"
+                    f"Net weighted confidence {best['confidence']:.0f}% below "
+                    f"{self.min_consensus_confidence:.0f}% after opposition penalty"
                 )
             else:
                 rejection_reason = "No valid weighted consensus edge"
@@ -399,9 +397,9 @@ class DecisionAgent(BaseAgent):
         opposition_ratio = opposition_score / max(support_score, 0.0001)
         opposition_penalty = min(30.0, opposition_ratio * 30.0)
         confidence = max(0.0, min(95.0, support_avg - opposition_penalty))
-        valid_single = bool(self.strong_single_agent_enabled and support_count >= 1 and strongest >= self.strong_single_agent_confidence)
-        valid_multi = bool(support_count >= self.min_agents_agree and support_avg >= self.min_consensus_confidence)
-        valid = bool(edge > 0 and (valid_single or valid_multi))
+        valid_single = False
+        valid_multi = bool(support_count >= self.min_agents_agree and confidence >= self.min_consensus_confidence)
+        valid = bool(edge > 0 and valid_multi)
         return {
             'side': side,
             'support_count': support_count,

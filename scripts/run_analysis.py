@@ -409,7 +409,6 @@ def _build_market_status_message(
 
     agent_thr = rules.get("agent_min_confidence", decision.get("agent_min_confidence", 60))
     min_consensus = _safe_float(rules.get("min_consensus_confidence", 65), 65)
-    strong_single = _safe_float(rules.get("strong_single_agent_confidence", 70), 70)
     news_hard_block = _is_news_hard_block(decision, all_results)
 
     reason_lines = []
@@ -421,7 +420,7 @@ def _build_market_status_message(
         gate_line = f"📊 Consensus: WAIT  •  Agents ≥{agent_thr}%  •  Entry ≥{min_consensus:.0f}%"
         rejection = classic.get("rejection_reason") or "No valid weighted consensus signal"
         reason_lines.append(f"• {rejection}")
-        reason_lines.append(f"• Rules: 2 agents ≥{min_consensus:.0f}% or 1 strong agent ≥{strong_single:.0f}%")
+        reason_lines.append(f"• Rules: at least 2 agents with weighted confidence ≥{min_consensus:.0f}%")
 
     opp_agent = (classic.get("strongest_directional") or {}).get("agent")
     opp_conf = (classic.get("strongest_directional") or {}).get("confidence", 0)
