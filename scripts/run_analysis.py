@@ -907,7 +907,7 @@ async def run_analysis_async() -> None:
     telegram = TelegramService(base_config)
 
     # Pre-check: verify data API key works before running any symbol.
-    from services.market_data import MarketDataService
+    # Use MarketDataService from the module level so tests can monkeypatch it.
     test_service = MarketDataService(base_config)
     test_payload = test_service.get_ohlcv("5m", outputsize=3)
     if test_payload and test_payload.get("source") == "synthetic_demo":
