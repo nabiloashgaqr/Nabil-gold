@@ -1,6 +1,7 @@
 """Market data service for all configured instruments.
 
-Fetches OHLCV data from Twelve Data. A synthetic fallback exists for local tests;
+Fetches OHLCV data from Finnhub (primary). Twelve Data kept as optional fallback.
+A synthetic fallback exists for local tests;
 production workflows block synthetic prices unless explicitly allowed.
 """
 
@@ -20,8 +21,13 @@ from utils.helpers import load_config
 
 
 class MarketDataService:
-    """Fetch and normalize XAU/USD OHLCV data."""
+    """Fetch and normalize OHLCV data — Finnhub primary."""
 
+    # Finnhub
+    FINNHUB_URL = "https://finnhub.io/api/v1/forex/candle"
+    FINNHUB_QUOTE_URL = "https://finnhub.io/api/v1/quote"
+
+    # Twelve Data (optional fallback)
     TWELVE_URL = "https://api.twelvedata.com/time_series"
     TWELVE_QUOTE_URL = "https://api.twelvedata.com/quote"
 
@@ -43,27 +49,82 @@ class MarketDataService:
         "1D": 1440,
     }
 
+    # Finnhub resolution map
+    FINNHUB_RESOLUTION = {
+        "1m": "1",
+        "5m": "5",
+        "15m": "15",
+        "30m": "30",
+        "1H": "60",
+        "4H": "240",
+        "1D": "D",
+    }
+
+    # Twelve → Finnhub OANDA symbol map
+    SYMBOL_MAP_FINNHUB = {
+        "XAU/USD": "OANDA:XAU_USD",
+        "EUR/USD": "OANDA:EUR_USD",
+        "GBP/USD": "OANDA:GBP_USD",
+        "USD/JPY": "OANDA:USD_JPY",
+        "USD/CHF": "OANDA:USD_CHF",
+        "USD/CAD": "OANDA:USD_CAD",
+        "AUD/USD": "OANDA:AUD_USD",
+        "WTI/USD": "OANDA:WTICO_USD",
+        "USOIL": "OANDA:WTICO_USD",
+        "WTICO_USD": "OANDA:WTICO_USD",
+    }
+
+    WTI_FALLBACKS = [
+        "OANDA:WTICO_USD",
+        "OANDA:WTI_USD",
+        "OANDA:BCO_USD",
+        "OANDA:XBR_USD",
+        "OANDA:XTI_USD",
+    ]
+
     def __init__(self, config: Dict[str, Any] | None = None) -> None:
         self.config = config or load_config()
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.api_key = os.environ.get("TWELVE_DATA_API_KEY") or self.config.get("data_source", {}).get("api_keys", {}).get("twelve_data")
+        self.finnhub_key = (
+            os.environ.get("FINNHUB_API_KEY")
+            or self._get_cfg_key("finnhub")
+            or self._get_cfg_key("FINNHUB_API_KEY")
+        )
+        self.api_key = (
+            os.environ.get("TWELVE_DATA_API_KEY")
+            or self._get_cfg_key("twelve_data")
+        )
         if isinstance(self.api_key, str) and self.api_key.startswith("ENV:"):
             self.api_key = os.environ.get(self.api_key.replace("ENV:", "", 1))
         self.symbol = self.config.get("symbol", "XAU/USD")
+        self.finnhub_symbol = self._map_symbol(self.symbol)
         self._last_request_at = 0.0
         self._cache: Dict[str, Dict[str, Any]] = {}
         self.session = requests.Session()
 
-    def get_gold_data(self, outputsize: int = 220) -> Dict[str, Any] | None:
-        """Return normalized data for all configured timeframes.
+    def _get_cfg_key(self, name: str) -> str | None:
+        ds = self.config.get("data_source", {}) or {}
+        api_keys = ds.get("api_keys", {}) or {}
+        val = api_keys.get(name)
+        if isinstance(val, str) and val.startswith("ENV:"):
+            return os.environ.get(val.replace("ENV:", "", 1))
+        return val if isinstance(val, str) else None
 
-        To keep multi-asset operation within API limits, production config can
-        fetch one base 5m series per symbol and locally resample 15m/1H/4H.
-        """
+    def _map_symbol(self, symbol: str) -> str:
+        s = symbol.upper().strip()
+        if s in self.SYMBOL_MAP_FINNHUB:
+            return self.SYMBOL_MAP_FINNHUB[s]
+        if "/" in s:
+            base, quote = s.split("/", 1)
+            return f"OANDA:{base}_{quote}"
+        if s.startswith("OANDA:"):
+            return s
+        return f"OANDA:{s.replace('/', '_')}"
+
+    def get_gold_data(self, outputsize: int = 220) -> Dict[str, Any] | None:
         timeframes = self.config.get("timeframes", ["5m", "15m", "1H", "4H"])
         primary_tf = self.config.get("primary_timeframe", "15m")
         data_cfg = self.config.get("data_source", {}) or {}
-
         if data_cfg.get("resample_timeframes_from_base", False):
             base_tf = str(data_cfg.get("base_timeframe", "5m"))
             base_outputsize = int(data_cfg.get("base_outputsize", max(outputsize, 2500)) or max(outputsize, 2500))
@@ -75,11 +136,9 @@ class MarketDataService:
             tf_payloads: Dict[str, Dict[str, Any]] = {}
             for timeframe in timeframes:
                 tf_payloads[timeframe] = self.get_ohlcv(timeframe=timeframe, outputsize=outputsize)
-
         primary_payload = tf_payloads.get(primary_tf) or next(iter(tf_payloads.values()), None)
         if not primary_payload:
             return None
-
         return {
             "symbol": self.symbol,
             "timeframe": primary_tf,
@@ -92,25 +151,22 @@ class MarketDataService:
         }
 
     def get_ohlcv(self, timeframe: str = "15m", outputsize: int = 220) -> Dict[str, Any]:
-        """Fetch OHLCV for a timeframe with retry, cache and synthetic fallback."""
         cache_key = f"{self.symbol}:{timeframe}:{outputsize}"
         cached = self._cache.get(cache_key)
         if cached and time.time() - float(cached.get("cached_at", 0)) < 60:
             return cached["payload"]
-
         payload: Dict[str, Any] | None = None
-        if self.api_key and self.api_key != "YOUR_API_KEY":
+        if self.finnhub_key and self.finnhub_key != "YOUR_API_KEY":
+            payload = self._fetch_finnhub_data(timeframe, outputsize)
+        if payload is None and self.api_key and self.api_key != "YOUR_API_KEY":
             payload = self._fetch_twelve_data(timeframe, outputsize)
-
         if payload is None:
-            self.logger.warning("Using synthetic demo data for %s. Configure TWELVE_DATA_API_KEY for live prices.", timeframe)
+            self.logger.warning("Using synthetic demo data for %s %s. Configure FINNHUB_API_KEY for live prices.", self.symbol, timeframe)
             payload = self._generate_synthetic_data(timeframe, outputsize)
-
         self._cache[cache_key] = {"cached_at": time.time(), "payload": payload}
         return payload
 
     def _build_resampled_payloads(self, base_payload: Dict[str, Any], timeframes: List[str]) -> Dict[str, Dict[str, Any]]:
-        """Build requested timeframe payloads from a single lower-timeframe series."""
         base_tf = str(base_payload.get("timeframe", "5m"))
         base_minutes = int(self.TF_MINUTES.get(base_tf, 5) or 5)
         base_data = list(base_payload.get("data", []) or [])
@@ -136,7 +192,6 @@ class MarketDataService:
         return payloads
 
     def _resample_candles(self, candles: List[Dict[str, Any]], timeframe_minutes: int) -> List[Dict[str, Any]]:
-        """Resample candles by UTC time buckets."""
         buckets: Dict[int, List[Dict[str, Any]]] = {}
         bucket_seconds = timeframe_minutes * 60
         for candle in candles:
@@ -162,35 +217,96 @@ class MarketDataService:
         return out
 
     def get_current_price(self) -> float | None:
-        """Return current price, using Twelve quote first then OHLC fallback."""
+        if self.finnhub_key and self.finnhub_key != "YOUR_API_KEY":
+            try:
+                self._rate_limit()
+                q = self._fetch_finnhub_data("1m" if "1m" in self.FINNHUB_RESOLUTION else "5m", outputsize=2)
+                if q and q.get("current_price"):
+                    return float(q["current_price"])
+            except Exception as exc:
+                self.logger.debug("Finnhub quote fallback failed: %s", exc)
         if self.api_key and self.api_key != "YOUR_API_KEY":
             try:
                 self._rate_limit()
-                response = self.session.get(
-                    self.TWELVE_QUOTE_URL,
-                    params={"symbol": self.symbol, "apikey": self.api_key},
-                    timeout=20,
-                )
+                response = self.session.get(self.TWELVE_QUOTE_URL, params={"symbol": self.symbol, "apikey": self.api_key}, timeout=20)
                 response.raise_for_status()
                 data = response.json()
                 if "close" in data:
                     return float(data["close"])
                 if "price" in data:
                     return float(data["price"])
-            except Exception as exc:  # noqa: BLE001 - external API must not crash workflow
+            except Exception as exc:
                 self.logger.warning("Quote fetch failed, falling back to OHLC: %s", exc)
         payload = self.get_ohlcv(self.config.get("primary_timeframe", "15m"), outputsize=60)
         return float(payload["current_price"]) if payload else None
 
+    def _fetch_finnhub_data(self, timeframe: str, outputsize: int) -> Dict[str, Any] | None:
+        resolution = self.FINNHUB_RESOLUTION.get(timeframe)
+        if not resolution:
+            self.logger.warning("Finnhub: unsupported timeframe %s", timeframe)
+            return None
+        tf_minutes = self.TF_MINUTES.get(timeframe, 15)
+        if resolution == "D":
+            tf_minutes = 1440
+        end_ts = int(time.time())
+        start_ts = end_ts - int(outputsize * tf_minutes * 60 * 1.8)
+        symbols_to_try = [self.finnhub_symbol]
+        if self.symbol.upper().startswith("WTI"):
+            symbols_to_try = self.WTI_FALLBACKS
+        for sym in symbols_to_try:
+            for attempt in range(2):
+                try:
+                    self._rate_limit()
+                    params = {"symbol": sym, "resolution": resolution, "from": start_ts, "to": end_ts, "token": self.finnhub_key}
+                    resp = self.session.get(self.FINNHUB_URL, params=params, timeout=25)
+                    resp.raise_for_status()
+                    raw = resp.json()
+                    if raw.get("s") != "ok" or not raw.get("c"):
+                        if attempt == 0:
+                            params["from"] = start_ts - outputsize * tf_minutes * 60 * 3
+                            continue
+                        self.logger.debug("Finnhub no_data %s %s: %s", sym, timeframe, raw.get("s"))
+                        break
+                    candles = self._normalize_finnhub_values(raw)
+                    if not candles:
+                        break
+                    if len(candles) > outputsize:
+                        candles = candles[-outputsize:]
+                    current_price = float(candles[-1]["close"])
+                    return {"symbol": self.symbol, "timeframe": timeframe, "data": candles, "current_price": current_price, "spread_points": None, "last_updated": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"), "source": "finnhub", "finnhub_symbol": sym}
+                except Exception as exc:
+                    self.logger.warning("Finnhub attempt %s failed %s %s: %s", attempt + 1, sym, timeframe, exc)
+                    time.sleep(0.5 * (attempt + 1))
+        return None
+
+    def _normalize_finnhub_values(self, raw: Dict[str, Any]) -> List[Dict[str, Any]]:
+        try:
+            closes = raw.get("c", [])
+            opens = raw.get("o", [])
+            highs = raw.get("h", [])
+            lows = raw.get("l", [])
+            volumes = raw.get("v", [])
+            times = raw.get("t", [])
+            n = min(len(closes), len(opens), len(highs), len(lows), len(times))
+            candles: List[Dict[str, Any]] = []
+            from utils.instruments import price_decimals
+            decimals = price_decimals(self.symbol)
+            for i in range(n):
+                try:
+                    ts = int(times[i])
+                    dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+                    candles.append({"time": dt.replace(microsecond=0).isoformat().replace("+00:00", "Z"), "open": round(float(opens[i]), decimals), "high": round(float(highs[i]), decimals), "low": round(float(lows[i]), decimals), "close": round(float(closes[i]), decimals), "volume": float(volumes[i]) if i < len(volumes) else 0.0})
+                except Exception:
+                    continue
+            candles.sort(key=lambda x: x["time"])
+            return candles
+        except Exception as exc:
+            self.logger.debug("Finnhub normalize failed: %s", exc)
+            return []
+
     def _fetch_twelve_data(self, timeframe: str, outputsize: int) -> Dict[str, Any] | None:
         interval = self.INTERVAL_MAP.get(timeframe, timeframe)
-        params = {
-            "symbol": self.symbol,
-            "interval": interval,
-            "apikey": self.api_key,
-            "outputsize": outputsize,
-            "timezone": "UTC",
-        }
+        params = {"symbol": self.symbol, "interval": interval, "apikey": self.api_key, "outputsize": outputsize, "timezone": "UTC"}
         for attempt in range(3):
             try:
                 self._rate_limit()
@@ -204,17 +320,8 @@ class MarketDataService:
                 if not candles:
                     return None
                 current_price = float(candles[-1]["close"])
-                return {
-                    "symbol": self.symbol,
-                    "timeframe": timeframe,
-                    "data": candles,
-                    "current_price": current_price,
-                    # Twelve time_series does not reliably provide bid/ask; unknown spread will not block risk filter.
-                    "spread_points": None,
-                    "last_updated": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-                    "source": "twelve_data",
-                }
-            except Exception as exc:  # noqa: BLE001
+                return {"symbol": self.symbol, "timeframe": timeframe, "data": candles, "current_price": current_price, "spread_points": None, "last_updated": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"), "source": "twelve_data"}
+            except Exception as exc:
                 wait = 2**attempt
                 self.logger.warning("Twelve Data attempt %s failed for %s: %s", attempt + 1, timeframe, exc)
                 time.sleep(wait)
@@ -226,17 +333,8 @@ class MarketDataService:
             try:
                 dt_text = row.get("datetime") or row.get("time")
                 dt = self._parse_dt(str(dt_text))
-                candles.append(
-                    {
-                        "time": dt.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-                        "open": float(row["open"]),
-                        "high": float(row["high"]),
-                        "low": float(row["low"]),
-                        "close": float(row["close"]),
-                        "volume": float(row.get("volume") or 0),
-                    }
-                )
-            except Exception as exc:  # noqa: BLE001
+                candles.append({"time": dt.replace(microsecond=0).isoformat().replace("+00:00", "Z"), "open": float(row["open"]), "high": float(row["high"]), "low": float(row["low"]), "close": float(row["close"]), "volume": float(row.get("volume") or 0)})
+            except Exception as exc:
                 self.logger.debug("Skipping invalid candle %s: %s", row, exc)
         candles.sort(key=lambda item: item["time"])
         return candles
@@ -252,22 +350,12 @@ class MarketDataService:
         return dt.astimezone(timezone.utc)
 
     def _generate_synthetic_data(self, timeframe: str, outputsize: int) -> Dict[str, Any]:
-        """Generate deterministic-ish demo data for local tests, not trading."""
         minutes = self.TF_MINUTES.get(timeframe, 15)
         now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
         start = now - timedelta(minutes=minutes * outputsize)
         seed = int(now.strftime("%Y%m%d%H")) + minutes
         rng = random.Random(seed)
-        base_prices = {
-            "XAU/USD": 2350.0,
-            "EUR/USD": 1.0850,
-            "GBP/USD": 1.2700,
-            "USD/JPY": 155.00,
-            "USD/CHF": 0.9000,
-            "USD/CAD": 1.3600,
-            "AUD/USD": 0.6650,
-            "WTI/USD": 75.00,
-        }
+        base_prices = {"XAU/USD": 2350.0, "EUR/USD": 1.0850, "GBP/USD": 1.2700, "USD/JPY": 155.00, "USD/CHF": 0.9000, "USD/CAD": 1.3600, "AUD/USD": 0.6650, "WTI/USD": 75.00}
         base = base_prices.get(str(self.symbol).upper(), 1.0000) * (1 + math.sin(seed / 1000) * 0.002)
         from utils.instruments import price_decimals
         decimals = price_decimals(self.symbol)
@@ -284,30 +372,11 @@ class MarketDataService:
             close = max(0.0001, open_price + drift + noise)
             high = max(open_price, close) + rng.uniform(0.2, 2.2) * scale
             low = min(open_price, close) - rng.uniform(0.2, 2.2) * scale
-            candles.append(
-                {
-                    "time": dt.isoformat().replace("+00:00", "Z"),
-                    "open": round(open_price, decimals),
-                    "high": round(high, decimals),
-                    "low": round(low, decimals),
-                    "close": round(close, decimals),
-                    "volume": int(1000 + rng.random() * 1200),
-                }
-            )
-        return {
-            "symbol": self.symbol,
-            "timeframe": timeframe,
-            "data": candles,
-            "current_price": float(candles[-1]["close"]),
-            # Demo spread estimate: 2 points = 0.20 USD in our helper convention.
-            "spread_points": 2.0,
-            "last_updated": now.isoformat().replace("+00:00", "Z"),
-            "source": "synthetic_demo",
-        }
+            candles.append({"time": dt.isoformat().replace("+00:00", "Z"), "open": round(open_price, decimals), "high": round(high, decimals), "low": round(low, decimals), "close": round(close, decimals), "volume": int(1000 + rng.random() * 1200)})
+        return {"symbol": self.symbol, "timeframe": timeframe, "data": candles, "current_price": float(candles[-1]["close"]), "spread_points": 2.0, "last_updated": now.isoformat().replace("+00:00", "Z"), "source": "synthetic_demo"}
 
     def _rate_limit(self) -> None:
-        """Basic in-run rate limit to avoid API bursts."""
         elapsed = time.time() - self._last_request_at
-        if elapsed < 0.8:
-            time.sleep(0.8 - elapsed)
+        if elapsed < 1.05:
+            time.sleep(1.05 - elapsed)
         self._last_request_at = time.time()
