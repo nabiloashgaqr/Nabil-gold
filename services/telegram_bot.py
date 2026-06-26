@@ -766,34 +766,15 @@ class TelegramService:
         return self.send_message(report_text, urgent=False)
 
     def send_error_alert(self, error_message: str) -> bool:
-        """Send a compact error alert with GitHub Actions context.
+        """Send a compact error alert. No repo/workflow info exposed."""
+        if not self.bot_token or not self.chat_id:
+            self.logger.info("Telegram not configured. Error preview:\n%s", error_message)
+            return False
 
-        Values are escaped because Telegram messages use HTML parse mode.
-        The extra context makes it immediately clear which workflow/job failed
-        without exposing any secret values.
-        """
-        workflow = os.environ.get("GITHUB_WORKFLOW") or "local/manual"
-        job = os.environ.get("GITHUB_JOB") or "local"
-        event = os.environ.get("GITHUB_EVENT_NAME") or "local"
-        run_id = os.environ.get("GITHUB_RUN_ID") or "local"
-        attempt = os.environ.get("GITHUB_RUN_ATTEMPT") or "1"
-        ref = os.environ.get("GITHUB_REF_NAME") or os.environ.get("GITHUB_REF", "local")
-        repo = os.environ.get("GITHUB_REPOSITORY") or "local"
-
-        context_lines = [
-            f"<b>Workflow:</b> {html.escape(str(workflow))}",
-            f"<b>Job:</b> {html.escape(str(job))}",
-            f"<b>Event:</b> {html.escape(str(event))}",
-            f"<b>Run:</b> {html.escape(str(run_id))} (attempt {html.escape(str(attempt))})",
-            f"<b>Repo/Ref:</b> {html.escape(str(repo))} / {html.escape(str(ref))}",
-        ]
         text = (
             "🚨 <b>Gold AI Signals Error</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
-            + "\n".join(context_lines)
-            + "\n\n<code>"
-            + html.escape(str(error_message)[:3000])
-            + "</code>"
+            f"<code>{html.escape(str(error_message)[:2000])}</code>"
         )
         return self.send_message(text, urgent=True)
 
