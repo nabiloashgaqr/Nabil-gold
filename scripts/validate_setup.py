@@ -27,14 +27,14 @@ REQUIRED_BY_MODE = {
         "TELEGRAM_CHAT_ID",
         "SUPABASE_URL",
         "SUPABASE_KEY",
-        "TWELVE_DATA_API_KEY",
+        "FINNHUB_API_KEY",  # Finnhub only (Twelve Data completely removed)
     ],
     "update-trades": [
         "TELEGRAM_BOT_TOKEN",
         "TELEGRAM_CHAT_ID",
         "SUPABASE_URL",
         "SUPABASE_KEY",
-        "TWELVE_DATA_API_KEY",
+        "FINNHUB_API_KEY",
     ],
     "daily-report": [
         "TELEGRAM_BOT_TOKEN",
