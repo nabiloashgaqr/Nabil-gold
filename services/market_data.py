@@ -1,7 +1,8 @@
 """Market data service for all configured instruments.
 
-Fetches OHLCV data from Finnhub (primary). Twelve Data kept as optional fallback.
-A synthetic fallback exists for local tests;
+Fetches OHLCV data from **Finnhub only** (primary and exclusive).
+No Twelve Data fallback.
+A synthetic fallback exists **only** for local tests / development;
 production workflows block synthetic prices unless explicitly allowed.
 """
 
@@ -21,24 +22,11 @@ from utils.helpers import load_config
 
 
 class MarketDataService:
-    """Fetch and normalize OHLCV data — Finnhub primary."""
+    """Fetch and normalize OHLCV data — Finnhub ONLY."""
 
     # Finnhub
     FINNHUB_URL = "https://finnhub.io/api/v1/forex/candle"
     FINNHUB_QUOTE_URL = "https://finnhub.io/api/v1/quote"
-
-    # Twelve Data (optional fallback)
-    TWELVE_URL = "https://api.twelvedata.com/time_series"
-    TWELVE_QUOTE_URL = "https://api.twelvedata.com/quote"
-
-    INTERVAL_MAP = {
-        "5m": "5min",
-        "15m": "15min",
-        "30m": "30min",
-        "1H": "1h",
-        "4H": "4h",
-        "1D": "1day",
-    }
 
     TF_MINUTES = {
         "5m": 5,
@@ -60,7 +48,6 @@ class MarketDataService:
         "1D": "D",
     }
 
-    # Twelve → Finnhub OANDA symbol map
     SYMBOL_MAP_FINNHUB = {
         "XAU/USD": "OANDA:XAU_USD",
         "EUR/USD": "OANDA:EUR_USD",
@@ -90,12 +77,7 @@ class MarketDataService:
             or self._get_cfg_key("finnhub")
             or self._get_cfg_key("FINNHUB_API_KEY")
         )
-        self.api_key = (
-            os.environ.get("TWELVE_DATA_API_KEY")
-            or self._get_cfg_key("twelve_data")
-        )
-        if isinstance(self.api_key, str) and self.api_key.startswith("ENV:"):
-            self.api_key = os.environ.get(self.api_key.replace("ENV:", "", 1))
+        # Twelve Data completely removed. Only Finnhub is used.
         self.symbol = self.config.get("symbol", "XAU/USD")
         self.finnhub_symbol = self._map_symbol(self.symbol)
         self._last_request_at = 0.0
@@ -158,8 +140,6 @@ class MarketDataService:
         payload: Dict[str, Any] | None = None
         if self.finnhub_key and self.finnhub_key != "YOUR_API_KEY":
             payload = self._fetch_finnhub_data(timeframe, outputsize)
-        if payload is None and self.api_key and self.api_key != "YOUR_API_KEY":
-            payload = self._fetch_twelve_data(timeframe, outputsize)
         if payload is None:
             self.logger.warning("Using synthetic demo data for %s %s. Configure FINNHUB_API_KEY for live prices.", self.symbol, timeframe)
             payload = self._generate_synthetic_data(timeframe, outputsize)
@@ -225,18 +205,6 @@ class MarketDataService:
                     return float(q["current_price"])
             except Exception as exc:
                 self.logger.debug("Finnhub quote fallback failed: %s", exc)
-        if self.api_key and self.api_key != "YOUR_API_KEY":
-            try:
-                self._rate_limit()
-                response = self.session.get(self.TWELVE_QUOTE_URL, params={"symbol": self.symbol, "apikey": self.api_key}, timeout=20)
-                response.raise_for_status()
-                data = response.json()
-                if "close" in data:
-                    return float(data["close"])
-                if "price" in data:
-                    return float(data["price"])
-            except Exception as exc:
-                self.logger.warning("Quote fetch failed, falling back to OHLC: %s", exc)
         payload = self.get_ohlcv(self.config.get("primary_timeframe", "15m"), outputsize=60)
         return float(payload["current_price"]) if payload else None
 
@@ -304,40 +272,7 @@ class MarketDataService:
             self.logger.debug("Finnhub normalize failed: %s", exc)
             return []
 
-    def _fetch_twelve_data(self, timeframe: str, outputsize: int) -> Dict[str, Any] | None:
-        interval = self.INTERVAL_MAP.get(timeframe, timeframe)
-        params = {"symbol": self.symbol, "interval": interval, "apikey": self.api_key, "outputsize": outputsize, "timezone": "UTC"}
-        for attempt in range(3):
-            try:
-                self._rate_limit()
-                response = self.session.get(self.TWELVE_URL, params=params, timeout=25)
-                response.raise_for_status()
-                raw = response.json()
-                if raw.get("status") == "error" or "values" not in raw:
-                    self.logger.warning("Twelve Data returned error for %s: %s", timeframe, raw.get("message", raw))
-                    return None
-                candles = self._normalize_twelve_values(raw.get("values", []))
-                if not candles:
-                    return None
-                current_price = float(candles[-1]["close"])
-                return {"symbol": self.symbol, "timeframe": timeframe, "data": candles, "current_price": current_price, "spread_points": None, "last_updated": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"), "source": "twelve_data"}
-            except Exception as exc:
-                wait = 2**attempt
-                self.logger.warning("Twelve Data attempt %s failed for %s: %s", attempt + 1, timeframe, exc)
-                time.sleep(wait)
-        return None
-
-    def _normalize_twelve_values(self, values: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        candles: List[Dict[str, Any]] = []
-        for row in values:
-            try:
-                dt_text = row.get("datetime") or row.get("time")
-                dt = self._parse_dt(str(dt_text))
-                candles.append({"time": dt.replace(microsecond=0).isoformat().replace("+00:00", "Z"), "open": float(row["open"]), "high": float(row["high"]), "low": float(row["low"]), "close": float(row["close"]), "volume": float(row.get("volume") or 0)})
-            except Exception as exc:
-                self.logger.debug("Skipping invalid candle %s: %s", row, exc)
-        candles.sort(key=lambda item: item["time"])
-        return candles
+    # Twelve Data completely removed (Finnhub only)
 
     def _parse_dt(self, value: str) -> datetime:
         value = value.replace("Z", "+00:00")
