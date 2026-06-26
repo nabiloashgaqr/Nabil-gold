@@ -10,10 +10,10 @@
   "trend_timeframe": "4H",
   "entry_timeframe": "15m",
   "data_source": {
-    "primary": "finnhub",
+    "primary": "twelvedata",
     "fallback": null,
     "api_keys": {
-      "finnhub": "ENV:FINNHUB_API_KEY"
+      "twelvedata": "ENV:TWELVEDATA_API_KEY"
     },
     "allow_synthetic_in_production": false,
     "resample_timeframes_from_base": true,
@@ -330,30 +330,6 @@
       "enabled": true
     },
     {
-      "symbol": "EUR/USD",
-      "enabled": true
-    },
-    {
-      "symbol": "GBP/USD",
-      "enabled": true
-    },
-    {
-      "symbol": "USD/JPY",
-      "enabled": true
-    },
-    {
-      "symbol": "USD/CHF",
-      "enabled": true
-    },
-    {
-      "symbol": "USD/CAD",
-      "enabled": true
-    },
-    {
-      "symbol": "AUD/USD",
-      "enabled": true
-    },
-    {
       "symbol": "WTI/USD",
       "enabled": true
     }
@@ -370,78 +346,6 @@
       "trailing_step": 30,
       "early_breakeven_points": 100,
       "duplicate_zone_points": 50
-    },
-    {
-      "symbol": "EUR/USD",
-      "name": "Euro / US Dollar",
-      "category": "forex",
-      "point_size": 1e-05,
-      "price_decimals": 5,
-      "min_sl_distance_points": 300,
-      "trailing_distance": 100,
-      "trailing_step": 30,
-      "early_breakeven_points": 100,
-      "duplicate_zone_points": 100
-    },
-    {
-      "symbol": "GBP/USD",
-      "name": "British Pound / US Dollar",
-      "category": "forex",
-      "point_size": 1e-05,
-      "price_decimals": 5,
-      "min_sl_distance_points": 300,
-      "trailing_distance": 100,
-      "trailing_step": 30,
-      "early_breakeven_points": 100,
-      "duplicate_zone_points": 100
-    },
-    {
-      "symbol": "USD/JPY",
-      "name": "US Dollar / Japanese Yen",
-      "category": "forex",
-      "point_size": 0.001,
-      "price_decimals": 3,
-      "min_sl_distance_points": 300,
-      "trailing_distance": 100,
-      "trailing_step": 30,
-      "early_breakeven_points": 100,
-      "duplicate_zone_points": 100
-    },
-    {
-      "symbol": "USD/CHF",
-      "name": "US Dollar / Swiss Franc",
-      "category": "forex",
-      "point_size": 1e-05,
-      "price_decimals": 5,
-      "min_sl_distance_points": 300,
-      "trailing_distance": 100,
-      "trailing_step": 30,
-      "early_breakeven_points": 100,
-      "duplicate_zone_points": 100
-    },
-    {
-      "symbol": "USD/CAD",
-      "name": "US Dollar / Canadian Dollar",
-      "category": "forex",
-      "point_size": 1e-05,
-      "price_decimals": 5,
-      "min_sl_distance_points": 300,
-      "trailing_distance": 100,
-      "trailing_step": 30,
-      "early_breakeven_points": 100,
-      "duplicate_zone_points": 100
-    },
-    {
-      "symbol": "AUD/USD",
-      "name": "Australian Dollar / US Dollar",
-      "category": "forex",
-      "point_size": 1e-05,
-      "price_decimals": 5,
-      "min_sl_distance_points": 300,
-      "trailing_distance": 100,
-      "trailing_step": 30,
-      "early_breakeven_points": 100,
-      "duplicate_zone_points": 100
     },
     {
       "symbol": "WTI/USD",
