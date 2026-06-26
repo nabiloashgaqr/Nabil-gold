@@ -10,10 +10,11 @@
   "trend_timeframe": "4H",
   "entry_timeframe": "15m",
   "data_source": {
-    "primary": "twelve_data",
-    "fallback": "synthetic_demo",
+    "primary": "finnhub",
+    "fallback": "twelve_data",
     "api_keys": {
-      "twelve_data": "ENV:TWELVE_DATA_API_KEY"
+      "twelve_data": "ENV:TWELVE_DATA_API_KEY",
+      "finnhub": "ENV:FINNHUB_API_KEY"
     },
     "allow_synthetic_in_production": false,
     "resample_timeframes_from_base": true,
