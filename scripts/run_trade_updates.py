@@ -142,7 +142,7 @@ def main() -> None:
         database = DatabaseService(config)
 
         # Critical quota/cost optimization: do not fetch market data, initialize
-        # trade management, or consume Finnhub calls when there is no active
+        # trade management, or consume Twelve Data calls when there is no active
         # trade/pending order to manage. This still starts a tiny GitHub workflow
         # when triggered externally, but the workflow pre-check should normally
         # skip the heavy steps before Python dependencies are installed.
@@ -178,8 +178,8 @@ def main() -> None:
             price_payload = market_data.get_ohlcv(symbol_config.get("primary_timeframe", "15m"), outputsize=60)
             allow_synthetic = bool(symbol_config.get("data_source", {}).get("allow_synthetic_in_production", False))
             if os.environ.get("GITHUB_ACTIONS") == "true" and price_payload.get("source") == "synthetic_demo" and not allow_synthetic:
-                logger.error("تم إيقاف تحديث صفقات %s: السعر من synthetic_demo. راجع FINNHUB_API_KEY.", symbol)
-                telegram.send_error_alert(f"Trade updates stopped for {symbol}: price is from synthetic_demo. Check FINNHUB_API_KEY.")
+                logger.error("تم إيقاف تحديث صفقات %s: السعر من synthetic_demo. راجع TWELVEDATA_API_KEY.", symbol)
+                telegram.send_error_alert(f"Trade updates stopped for {symbol}: price is from synthetic_demo. Check TWELVEDATA_API_KEY.")
                 continue
             symbol_price = price_payload.get("current_price")
             if not symbol_price:

@@ -1,6 +1,6 @@
 """Run a lightweight XAU/USD backtest and send/report results.
 
-Default mode uses available Finnhub if configured, otherwise synthetic demo
+Default mode uses Twelve Data for live prices, otherwise synthetic demo
 candles.
 """
 

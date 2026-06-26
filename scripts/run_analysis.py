@@ -688,7 +688,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             # Don't fail silently on scheduled runs — surface it so a recurring
             # data outage is visible instead of looking like "no signal".
             telegram.send_error_alert(
-                "Analysis aborted: failed to fetch market data (Finnhub). "
+                "Analysis aborted: failed to fetch market data (Twelve Data). "
                 "No signal will be generated this cycle."
             )
             return
@@ -697,7 +697,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         allow_synthetic = bool(config.get("data_source", {}).get("allow_synthetic_in_production", False))
         synthetic_sources = synthetic_timeframe_sources(data)
         if os.environ.get("GITHUB_ACTIONS") == "true" and synthetic_sources and not allow_synthetic:
-            message = f"Analysis blocked: synthetic_demo data detected in production timeframes: {', '.join(sorted(set(synthetic_sources)))}. Configure FINNHUB_API_KEY."
+            message = f"Analysis blocked: synthetic_demo data detected in production timeframes: {', '.join(sorted(set(synthetic_sources)))}. Configure TWELVEDATA_API_KEY."
             logger.error(message)
             telegram.send_error_alert(message)
             return

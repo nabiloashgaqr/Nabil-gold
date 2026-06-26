@@ -1,7 +1,7 @@
 """Validate GitHub Actions runtime configuration before running bot jobs.
 
 This script intentionally prints only missing secret names and never prints values.
-It also tests that Finnhub API key is actually valid by making a real API call.
+It also tests that Twelve Data API key is actually valid by making a real API call.
 
 Usage:
     python scripts/validate_setup.py analyze
@@ -30,14 +30,14 @@ REQUIRED_BY_MODE = {
         "TELEGRAM_CHAT_ID",
         "SUPABASE_URL",
         "SUPABASE_KEY",
-        "FINNHUB_API_KEY",  # Finnhub only (Twelve Data completely removed)
+        "TWELVEDATA_API_KEY",
     ],
     "update-trades": [
         "TELEGRAM_BOT_TOKEN",
         "TELEGRAM_CHAT_ID",
         "SUPABASE_URL",
         "SUPABASE_KEY",
-        "FINNHUB_API_KEY",
+        "TWELVEDATA_API_KEY",
     ],
     "daily-report": [
         "TELEGRAM_BOT_TOKEN",
@@ -69,52 +69,56 @@ def _missing(names: Iterable[str]) -> list[str]:
     return unique_missing
 
 
-def _test_finnhub_key() -> tuple[bool, str]:
-    """Test that the FINNHUB_API_KEY can actually fetch data.
+def _has_data_key() -> bool:
+    """Return True if the market data API key is configured."""
+    key = os.environ.get("TWELVEDATA_API_KEY", "").strip()
+    return bool(key and not key.startswith("YOUR_"))
+
+
+def _test_twelvedata_key() -> tuple[bool, str]:
+    """Test that the TWELVEDATA_API_KEY can actually fetch data.
 
     Returns (ok, message).
     """
     import requests  # noqa: E402  — only needed when key exists
 
-    key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    key = os.environ.get("TWELVEDATA_API_KEY", "").strip()
     if not key:
-        return False, "FINNHUB_API_KEY is empty"
+        return False, "TWELVEDATA_API_KEY is empty"
     if key.startswith("YOUR_"):
-        return False, "FINNHUB_API_KEY is a placeholder (YOUR_...)"
+        return False, "TWELVEDATA_API_KEY is a placeholder (YOUR_...)"
 
-    # Use a recent 15-minute window for OANDA:XAU_USD
-    end_ts = int(time.time())
-    start_ts = end_ts - 3600  # last hour
-
-    url = "https://finnhub.io/api/v1/forex/candle"
+    url = "https://api.twelvedata.com/time_series"
     params = {
-        "symbol": "OANDA:XAU_USD",
-        "resolution": "15",
-        "from": start_ts,
-        "to": end_ts,
-        "token": key,
+        "symbol": "XAU/USD",
+        "interval": "15min",
+        "outputsize": 5,
+        "apikey": key,
     }
 
     try:
         resp = requests.get(url, params=params, timeout=15)
         resp.raise_for_status()
         data = resp.json()
-        status = data.get("s", "")
-        if status == "ok" and data.get("c"):
-            return True, f"Finnhub OK — received {len(data['c'])} candles for XAU/USD"
-        if status == "no_data":
-            # Market might be closed, but the key is valid.
-            return True, "Finnhub key valid (no_data = market closed or weekend)"
-        return False, f"Finnhub returned unexpected status: '{status}' — response: {str(data)[:200]}"
+
+        if data.get("status") == "error":
+            msg = data.get("message", "unknown error")
+            if "Invalid API key" in msg or "apikey" in msg.lower():
+                return False, "Twelve Data rejected the API key. Key is invalid."
+            return False, f"Twelve Data error: {msg}"
+
+        values = data.get("values", [])
+        if values:
+            return True, f"Twelve Data OK — received {len(values)} candles for XAU/USD"
+        return False, "Twelve Data returned no data for XAU/USD"
+
     except requests.exceptions.HTTPError as exc:
         status_code = getattr(exc.response, "status_code", "?")
         if status_code == 401:
-            return False, "Finnhub rejected the API key (HTTP 401 Unauthorized). Key is invalid or expired."
-        if status_code == 429:
-            return True, "Finnhub rate-limited (HTTP 429) — key is valid but try again later"
-        return False, f"Finnhub HTTP error {status_code}: {exc}"
+            return False, "Twelve Data rejected the API key (HTTP 401)."
+        return False, f"Twelve Data HTTP error {status_code}: {exc}"
     except Exception as exc:
-        return False, f"Finnhub connection failed: {exc}"
+        return False, f"Twelve Data connection failed: {exc}"
 
 
 def main() -> int:
@@ -145,17 +149,23 @@ def main() -> int:
         print("\nAdd them in: GitHub repo → Settings → Secrets and variables → Actions")
         return 1
 
-    # ── Live connectivity test for Finnhub ──────────────────────────
-    if "FINNHUB_API_KEY" in required:
-        print("🔑 Testing Finnhub API key...")
-        ok, msg = _test_finnhub_key()
+    # ── Live connectivity test for market data API ──────────────────
+    if "TWELVEDATA_API_KEY" in required:
+        if not _has_data_key():
+            print("❌ TWELVEDATA_API_KEY not found!")
+            print("   Get a free key: https://twelvedata.com/register (800 calls/day)")
+            print("   Add in: GitHub repo → Settings → Secrets → TWELVEDATA_API_KEY")
+            return 1
+
+        print("🔑 Testing Twelve Data API key...")
+        ok, msg = _test_twelvedata_key()
         if ok:
             print(f"   ✅ {msg}")
         else:
             print(f"   ❌ {msg}")
             print()
-            print("Fix: Go to https://finnhub.io/register → get a free key")
-            print("     Then add it in: GitHub repo → Settings → Secrets → FINNHUB_API_KEY")
+            print("Fix: Go to https://twelvedata.com/register → get a free key")
+            print("     Then add it in: GitHub repo → Settings → Secrets → TWELVEDATA_API_KEY")
             return 1
 
     print(f"✅ Setup validation passed for mode: {mode}")
