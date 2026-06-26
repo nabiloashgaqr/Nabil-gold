@@ -79,13 +79,13 @@ def test_market_data_spread_in_synthetic():
 
 
 def test_market_data_timeframe_mapping():
-    """Finnhub resolution + TF_MINUTES mapping must be correct (Twelve Data removed)."""
+    """Twelve Data interval + TF_MINUTES mapping must be correct."""
     assert MarketDataService.TF_MINUTES["5m"] == 5
     assert MarketDataService.TF_MINUTES["15m"] == 15
     assert MarketDataService.TF_MINUTES["1H"] == 60
     assert MarketDataService.TF_MINUTES["4H"] == 240
-    assert MarketDataService.FINNHUB_RESOLUTION["5m"] == "5"
-    assert MarketDataService.FINNHUB_RESOLUTION["1H"] == "60"
+    assert MarketDataService.TWELVEDATA_INTERVAL["5m"] == "5min"
+    assert MarketDataService.TWELVEDATA_INTERVAL["1H"] == "1h"
 
 
 # ───────────────────────────── DatabaseService ────────────────────────────────
