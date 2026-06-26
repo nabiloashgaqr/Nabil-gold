@@ -289,6 +289,9 @@ class MarketDataService:
 
     def _rate_limit(self) -> None:
         elapsed = time.time() - self._last_request_at
-        if elapsed < 1.05:
-            time.sleep(1.05 - elapsed)
+        # Twelve Data free tier: 8 calls/min. Wait at least 8 seconds between
+        # calls to stay safely under the limit (60s / 8 = 7.5s per call).
+        min_delay = 8.0
+        if elapsed < min_delay:
+            time.sleep(min_delay - elapsed)
         self._last_request_at = time.time()
