@@ -697,9 +697,9 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         allow_synthetic = bool(config.get("data_source", {}).get("allow_synthetic_in_production", False))
         synthetic_sources = synthetic_timeframe_sources(data)
         if os.environ.get("GITHUB_ACTIONS") == "true" and synthetic_sources and not allow_synthetic:
-            message = f"Analysis blocked: synthetic_demo data detected in production timeframes: {', '.join(sorted(set(synthetic_sources)))}. Configure TWELVEDATA_API_KEY."
-            logger.error(message)
-            telegram.send_error_alert(message)
+            # Error already sent by the pre-check in run_analysis_async().
+            # Just log and skip this symbol silently.
+            logger.error("Skipping %s: synthetic_demo data detected.", config.get("symbol"))
             return
 
         # سياق الحساب/المحفظة
@@ -910,6 +910,23 @@ async def run_analysis_async() -> None:
     """Run analysis for all enabled instruments."""
     base_config = load_config()
     instruments = enabled_instruments(base_config)
+    telegram = TelegramService(base_config)
+
+    # Pre-check: verify data API key works before running any symbol.
+    # This prevents duplicate error messages when multiple symbols fail.
+    from services.market_data import MarketDataService
+    test_service = MarketDataService(base_config)
+    test_payload = test_service.get_ohlcv("5m", outputsize=3)
+    if test_payload and test_payload.get("source") == "synthetic_demo":
+        allow_synth = bool(base_config.get("data_source", {}).get("allow_synthetic_in_production", False))
+        if os.environ.get("GITHUB_ACTIONS") == "true" and not allow_synth:
+            telegram.send_error_alert(
+                "Analysis blocked: TWELVEDATA_API_KEY is missing or invalid. "
+                "Get a free key: https://twelvedata.com/register and add it to GitHub Secrets."
+            )
+            logger.error("TWELVEDATA_API_KEY not working — aborting all symbols")
+            return
+
     for instrument in instruments:
         cfg = config_for_instrument(base_config, instrument)
         logger.info("▶️ Running analysis for %s", cfg.get("symbol"))
