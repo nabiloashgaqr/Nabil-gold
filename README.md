@@ -12,7 +12,7 @@
 |---|---|
 | وضع التداول | Paper Trading |
 | القرار النهائي | 5-Agent Weighted Consensus |
-| مصدر البيانات | Twelve Data |
+| مصدر البيانات | Finnhub |
 | التخزين | Supabase |
 | الإشعارات | Telegram |
 | تشغيل التحليل | cron-job.org → GitHub Actions |
@@ -47,7 +47,7 @@
 ## كيف يعمل النظام
 
 ```text
-Twelve Data
+Finnhub
   → 5 Analysis Agents
   → Weighted Consensus
   → News / Session / Risk / Duplicate Filters
@@ -292,7 +292,7 @@ Repository → Settings → Secrets and variables → Actions
 | TELEGRAM_CHAT_ID | القناة/المجموعة |
 | SUPABASE_URL | قاعدة البيانات |
 | SUPABASE_KEY | مفتاح Supabase |
-| TWELVE_DATA_API_KEY | بيانات XAU/USD |
+| FINNHUB_API_KEY | بيانات XAU/USD |
 
 لا حاجة لأي مفاتيح قرار خارجي.
 
