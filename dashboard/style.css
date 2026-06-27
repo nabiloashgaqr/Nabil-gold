@@ -326,4 +326,7 @@ body.dark .agent-bar { background: rgba(255,255,255,0.1); }
 @media (max-width: 480px) {
     .stats-grid { grid-template-columns: 1fr; }
     .section { padding: 16px; }
-}
+}.btn-contact { background: linear-gradient(135deg, var(--accent-gold), #f59f00); color: #fff; text-decoration: none; }
+.btn-contact:hover { filter: brightness(1.05); }
+[dir="ltr"] th, [dir="ltr"] td { text-align: left; }
+[dir="ltr"] .pricing-features { text-align: left; }

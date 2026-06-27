@@ -15,14 +15,19 @@
             <span class="badge-enhanced">Live</span>
         </div>
         <div class="nav-links">
-            <a href="#dashboard" class="nav-link active" onclick="showSection('dashboard')">الرئيسية</a>
-            <a href="#live-trades" class="nav-link" onclick="showSection('live-trades')">الصفقات الحية / TP1</a>
-            <a href="#reports" class="nav-link" onclick="showSection('reports')">التقارير</a>
-            <a href="#agents" class="nav-link" onclick="showSection('agents')">الوكلاء</a>
+            <a href="#dashboard" class="nav-link active" onclick="showSection('dashboard')" data-ar="الرئيسية" data-en="Dashboard">الرئيسية</a>
+            <a href="#live-trades" class="nav-link" onclick="showSection('live-trades')" data-ar="الصفقات الحية / TP1" data-en="Live Trades / TP1">الصفقات الحية / TP1</a>
+            <a href="#reports" class="nav-link" onclick="showSection('reports')" data-ar="التقارير" data-en="Reports">التقارير</a>
+            <a href="#agents" class="nav-link" onclick="showSection('agents')" data-ar="الوكلاء" data-en="Agents">الوكلاء</a>
         </div>
         <div class="nav-right">
-            <button onclick="refreshData()" class="btn btn-refresh" id="refreshBtn">🔄 تحديث</button>
-            <label class="auto-refresh"><input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()"> تلقائي</label>
+            <a class="btn btn-contact" href="https://t.me/Smart_Pro2026" target="_blank" rel="noopener" data-ar="📩 تواصل معنا" data-en="📩 Contact Us">📩 تواصل معنا</a>
+            <div class="lang-toggle">
+                <button class="lang-btn active" id="langAr" onclick="setLang('ar')">عربي</button>
+                <button class="lang-btn" id="langEn" onclick="setLang('en')">EN</button>
+            </div>
+            <button onclick="refreshData()" class="btn btn-refresh" id="refreshBtn" data-ar="🔄 تحديث" data-en="🔄 Refresh">🔄 تحديث</button>
+            <label class="auto-refresh"><input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()"> <span data-ar="تلقائي" data-en="Auto">تلقائي</span></label>
             <button onclick="toggleTheme()" id="themeBtn" class="theme-btn">🌙</button>
         </div>
     </nav>
@@ -30,48 +35,48 @@
     <main>
         <section id="dashboard" class="section active">
             <div class="section-header">
-                <h2>لوحة الصفقات المغلقة فقط</h2>
-                <p class="muted">آخر تحديث: <span id="lastUpdate">--</span> · المصدر: <span id="dataSource">--</span></p>
+                <h2><span data-ar="لوحة الصفقات المغلقة فقط" data-en="Closed Trades Dashboard">لوحة الصفقات المغلقة فقط</span></h2>
+                <p class="muted"><span data-ar="آخر تحديث:" data-en="Last update:">آخر تحديث:</span> <span id="lastUpdate">--</span> · <span data-ar="المصدر:" data-en="Source:">المصدر:</span> <span id="dataSource">--</span></p>
                 <div id="errorBox" class="error-box" style="display:none"></div>
             </div>
 
             <div class="stats-grid">
-                <div class="stat-card"><div class="stat-icon">✅</div><div class="stat-value" id="totalTrades">--</div><div class="stat-label">صفقات مغلقة</div></div>
-                <div class="stat-card success"><div class="stat-icon">🎯</div><div class="stat-value" id="winRate">--%</div><div class="stat-label">نسبة الربح</div><div class="progress-bar"><div id="winRateBar" class="progress-fill"></div></div></div>
-                <div class="stat-card success"><div class="stat-icon">💰</div><div class="stat-value" id="netPoints">--</div><div class="stat-label">صافي النقاط</div></div>
+                <div class="stat-card"><div class="stat-icon">✅</div><div class="stat-value" id="totalTrades">--</div><div class="stat-label"><span data-ar="صفقات مغلقة" data-en="Closed Trades">صفقات مغلقة</span></div></div>
+                <div class="stat-card success"><div class="stat-icon">🎯</div><div class="stat-value" id="winRate">--%</div><div class="stat-label"><span data-ar="نسبة الربح" data-en="Win Rate">نسبة الربح</span></div><div class="progress-bar"><div id="winRateBar" class="progress-fill"></div></div></div>
+                <div class="stat-card success"><div class="stat-icon">💰</div><div class="stat-value" id="netPoints">--</div><div class="stat-label"><span data-ar="صافي النقاط" data-en="Net Points">صافي النقاط</span></div></div>
                 <div class="stat-card"><div class="stat-icon">⚖️</div><div class="stat-value" id="profitFactor">--</div><div class="stat-label">Profit Factor</div></div>
-                <div class="stat-card"><div class="stat-icon">🚀</div><div class="stat-value" id="liveCount">--</div><div class="stat-label">صفقات حية</div></div>
-                <div class="stat-card"><div class="stat-icon">🥇</div><div class="stat-value" id="tp1Count">--</div><div class="stat-label">TP1 حي</div></div>
-                <div class="stat-card"><div class="stat-icon">📈</div><div class="stat-value" id="bestTrade">--</div><div class="stat-label">أفضل صفقة</div></div>
-                <div class="stat-card danger"><div class="stat-icon">📉</div><div class="stat-value" id="worstTrade">--</div><div class="stat-label">أسوأ صفقة</div></div>
-                <div class="stat-card"><div class="stat-icon">🧮</div><div class="stat-value" id="avgTrade">--</div><div class="stat-label">متوسط الصفقة</div></div>
+                <div class="stat-card"><div class="stat-icon">🚀</div><div class="stat-value" id="liveCount">--</div><div class="stat-label"><span data-ar="صفقات حية" data-en="Live Trades">صفقات حية</span></div></div>
+                <div class="stat-card"><div class="stat-icon">🥇</div><div class="stat-value" id="tp1Count">--</div><div class="stat-label"><span data-ar="TP1 حي" data-en="Live TP1">TP1 حي</span></div></div>
+                <div class="stat-card"><div class="stat-icon">📈</div><div class="stat-value" id="bestTrade">--</div><div class="stat-label"><span data-ar="أفضل صفقة" data-en="Best Trade">أفضل صفقة</span></div></div>
+                <div class="stat-card danger"><div class="stat-icon">📉</div><div class="stat-value" id="worstTrade">--</div><div class="stat-label"><span data-ar="أسوأ صفقة" data-en="Worst Trade">أسوأ صفقة</span></div></div>
+                <div class="stat-card"><div class="stat-icon">🧮</div><div class="stat-value" id="avgTrade">--</div><div class="stat-label"><span data-ar="متوسط الصفقة" data-en="Average Trade">متوسط الصفقة</span></div></div>
                 <div class="stat-card"><div class="stat-icon">🔮</div><div class="stat-value" id="expectancy">--</div><div class="stat-label">Expectancy</div></div>
             </div>
 
             <div class="filters-bar">
                 <div class="filter-group">
-                    <label>الرمز</label>
+                    <label><span data-ar="الرمز" data-en="Symbol">الرمز</span></label>
                     <select id="filterSymbol" onchange="applyFilters()"><option value="">كل الرموز</option><option value="XAU/USD">XAU/USD</option><option value="WTI/USD">WTI/USD</option></select>
                 </div>
                 <div class="filter-group">
-                    <label>النتيجة</label>
+                    <label><span data-ar="النتيجة" data-en="Result">النتيجة</span></label>
                     <select id="filterResult" onchange="applyFilters()"><option value="">الكل</option><option value="win">رابحة</option><option value="loss">خاسرة</option><option value="be">تعادل</option></select>
                 </div>
                 <div class="filter-group">
-                    <label>من تاريخ</label>
+                    <label><span data-ar="من تاريخ" data-en="From Date">من تاريخ</span></label>
                     <input type="date" id="filterDateFrom" onchange="applyFilters()">
                 </div>
                 <div class="filter-group">
-                    <label>إلى تاريخ</label>
+                    <label><span data-ar="إلى تاريخ" data-en="To Date">إلى تاريخ</span></label>
                     <input type="date" id="filterDateTo" onchange="applyFilters()">
                 </div>
                 <div class="filter-group search-group">
-                    <label>بحث</label>
+                    <label><span data-ar="بحث" data-en="Search">بحث</span></label>
                     <input id="searchInput" placeholder="رمز / حالة / نوع" oninput="applyFilters()">
                 </div>
                 <div class="filter-actions">
-                    <button onclick="clearFilters()" class="btn btn-secondary">مسح</button>
-                    <button onclick="exportToCSV()" class="btn btn-primary">تصدير CSV</button>
+                    <button onclick="clearFilters()" class="btn btn-secondary"><span data-ar="مسح" data-en="Clear">مسح</span></button>
+                    <button onclick="exportToCSV()" class="btn btn-primary"><span data-ar="تصدير CSV" data-en="Export CSV">تصدير CSV</span></button>
                 </div>
             </div>
 
@@ -94,7 +99,7 @@
         </section>
 
         <section id="live-trades" class="section">
-            <div class="section-header"><h2>الصفقات الحية وإدارة TP1</h2><p class="muted">تعرض OPEN / PARTIAL / TP1_HIT / PENDING فقط</p></div>
+            <div class="section-header"><h2><span data-ar="الصفقات الحية وإدارة TP1" data-en="Live Trades and TP1 Management">الصفقات الحية وإدارة TP1</span></h2><p class="muted">تعرض OPEN / PARTIAL / TP1_HIT / PENDING فقط</p></div>
             <div class="stats-mini">
                 <div class="mini-stat"><span class="mini-label">Live Trades</span><span class="mini-value" id="openTradesCount">--</span></div>
                 <div class="mini-stat"><span class="mini-label">TP1 Hit</span><span class="mini-value" id="liveTp1Count">--</span></div>
@@ -108,7 +113,7 @@
         </section>
 
         <section id="reports" class="section">
-            <div class="section-header"><h2>التقارير اليومية والأسبوعية</h2><p class="muted">من جداول daily_reports و weekly_reports في Supabase</p></div>
+            <div class="section-header"><h2><span data-ar="التقارير اليومية والأسبوعية" data-en="Daily and Weekly Reports">التقارير اليومية والأسبوعية</span></h2><p class="muted">من جداول daily_reports و weekly_reports في Supabase</p></div>
             <div class="reports-grid">
                 <div class="report-card"><h3>📅 التقرير اليومي الأخير</h3><pre id="dailyReport" class="report-content">جاري التحميل...</pre></div>
                 <div class="report-card"><h3>🗓️ التقرير الأسبوعي الأخير</h3><pre id="weeklyReport" class="report-content">جاري التحميل...</pre></div>
@@ -120,7 +125,7 @@
         </section>
 
         <section id="agents" class="section">
-            <div class="section-header"><h2>أداء الوكلاء</h2><p class="muted">يعرض agent_weights إن وجدت</p></div>
+            <div class="section-header"><h2><span data-ar="أداء الوكلاء" data-en="Agent Performance">أداء الوكلاء</span></h2><p class="muted">يعرض agent_weights إن وجدت</p></div>
             <div class="agents-grid" id="agentsGrid"></div>
             <div class="agent-summary">Consensus Strength: <strong id="consensusStrength">--</strong></div>
         </section>

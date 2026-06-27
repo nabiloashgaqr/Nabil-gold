@@ -13,6 +13,46 @@ let dashboardPayload = null;
 let charts = { daily: null, cumulative: null, session: null, instrument: null };
 let autoRefreshInterval = null;
 
+const I18N = {
+    ar: {
+        api404: 'ملف API غير منشور على Vercel: /api/dashboard يرجع 404. إذا كان Root Directory في Vercel هو dashboard، يجب رفع الملف داخل dashboard/api/dashboard.js ثم عمل Redeploy.',
+        loadError: 'تعذر تحميل البيانات',
+        noClosed: 'لا توجد صفقات مغلقة حسب الفلتر الحالي',
+        noLive: 'لا توجد صفقات حية أو TP1 حالياً',
+        noDaily: 'لا يوجد تقرير يومي بعد.',
+        noWeekly: 'لا يوجد تقرير أسبوعي بعد.',
+        noReports: 'لا توجد تقارير محفوظة',
+        loading: 'جاري التحميل...',
+        details: 'تفاصيل',
+    },
+    en: {
+        api404: 'Dashboard API is not deployed: /api/dashboard returns 404. If Vercel Root Directory is dashboard, upload dashboard/api/dashboard.js and redeploy.',
+        loadError: 'Failed to load data',
+        noClosed: 'No closed trades match the current filter',
+        noLive: 'No live or TP1 trades right now',
+        noDaily: 'No daily report yet.',
+        noWeekly: 'No weekly report yet.',
+        noReports: 'No saved reports',
+        loading: 'Loading...',
+        details: 'Details',
+    }
+};
+function tr(key) { return (I18N[currentLang] && I18N[currentLang][key]) || I18N.ar[key] || key; }
+function setLang(lang) {
+    currentLang = lang === 'en' ? 'en' : 'ar';
+    document.documentElement.lang = currentLang;
+    document.documentElement.dir = currentLang === 'ar' ? 'rtl' : 'ltr';
+    localStorage.setItem('lang', currentLang);
+    document.querySelectorAll('[data-ar][data-en]').forEach(el => { el.textContent = el.getAttribute(`data-${currentLang}`); });
+    document.querySelectorAll('.lang-btn').forEach(btn => btn.classList.remove('active'));
+    const active = currentLang === 'ar' ? $('langAr') : $('langEn');
+    if (active) active.classList.add('active');
+    renderTradesTable(filteredTrades);
+    updateOpenTrades(liveTrades);
+    if (dashboardPayload) renderReports(dashboardPayload);
+}
+
+
 function $(id) { return document.getElementById(id); }
 function setText(id, value) { const el = $(id); if (el) el.textContent = value; }
 function setHTML(id, value) { const el = $(id); if (el) el.innerHTML = value; }
@@ -92,7 +132,7 @@ async function loadDashboardData() {
         renderReports({ dailyReports: [], weeklyReports: [] });
         setText('dataSource', 'خطأ');
         setText('lastUpdate', new Date().toLocaleString('ar'));
-        setError(`تعذر تحميل البيانات: ${error.message}. تأكد من إعداد SUPABASE_URL و SUPABASE_SERVICE_KEY في Vercel.`);
+        setError(`${tr('loadError')}: ${error.message.includes('404') ? tr('api404') : error.message}`);
     }
 }
 
@@ -227,7 +267,7 @@ function renderTradesTable(trades) {
     const tbody = $('tradesBody');
     if (!tbody) return;
     if (!trades.length) {
-        tbody.innerHTML = '<tr><td colspan="10" class="empty">لا توجد صفقات مغلقة حسب الفلتر الحالي</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="10" class="empty">${tr('noClosed')}</td></tr>`;
         return;
     }
     tbody.innerHTML = trades.slice(0, 120).map(trade => {
@@ -243,7 +283,7 @@ function renderTradesTable(trades) {
             <td class="${pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}"><strong>${signed(pnl)}</strong></td>
             <td><span class="badge ${statusClass}">${esc(trade.status)}</span></td>
             <td>${esc(trade.confidence ?? '--')}%</td>
-            <td><button class="btn btn-sm" onclick="event.stopPropagation(); showTradeModalById(${JSON.stringify(trade.id)})">تفاصيل</button></td>
+            <td><button class="btn btn-sm" onclick="event.stopPropagation(); showTradeModalById(${JSON.stringify(trade.id)})">${tr('details')}</button></td>
         </tr>`;
     }).join('');
 }
@@ -308,7 +348,7 @@ function updateOpenTrades(trades) {
     if (pnlEl) pnlEl.style.color = unrealized >= 0 ? '#2b8a3e' : '#c92a2a';
     if (!tbody) return;
     if (!trades.length) {
-        tbody.innerHTML = '<tr><td colspan="11" class="empty">لا توجد صفقات حية أو TP1 حالياً</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="11" class="empty">${tr('noLive')}</td></tr>`;
         return;
     }
     tbody.innerHTML = trades.map(trade => {
@@ -336,12 +376,12 @@ function renderReports(payload) {
     const weekly = payload.weeklyReports || [];
     const latestDaily = daily[0];
     const latestWeekly = weekly[0];
-    setText('dailyReport', latestDaily ? (latestDaily.report_text || 'تقرير يومي بدون نص') : 'لا يوجد تقرير يومي بعد.');
-    setText('weeklyReport', latestWeekly ? (latestWeekly.report_text || JSON.stringify(latestWeekly.stats_json || {}, null, 2)) : 'لا يوجد تقرير أسبوعي بعد.');
+    setText('dailyReport', latestDaily ? (latestDaily.report_text || 'Daily report has no text') : tr('noDaily'));
+    setText('weeklyReport', latestWeekly ? (latestWeekly.report_text || JSON.stringify(latestWeekly.stats_json || {}, null, 2)) : tr('noWeekly'));
     const rows = [];
     daily.forEach(r => rows.push(`<tr><td>Daily</td><td>${esc(r.report_date || '-')}</td><td>${esc(timeText(r.created_at))}</td><td>-</td></tr>`));
     weekly.forEach(r => rows.push(`<tr><td>Weekly</td><td>${esc(r.week_start || '-') } → ${esc(r.week_end || '-')}</td><td>${esc(timeText(r.created_at))}</td><td>${esc(r.status || '-')}</td></tr>`));
-    setHTML('reportsBody', rows.length ? rows.join('') : '<tr><td colspan="4" class="empty">لا توجد تقارير محفوظة</td></tr>');
+    setHTML('reportsBody', rows.length ? rows.join('') : `<tr><td colspan="4" class="empty">${tr('noReports')}</td></tr>`);
 }
 
 function updateAgentPerformance() {
@@ -427,6 +467,8 @@ function refreshData() {
 window.addEventListener('click', (event) => { if (event.target === $('tradeModal')) closeModal(); });
 
 document.addEventListener('DOMContentLoaded', () => {
+    const savedLang = localStorage.getItem('lang') || 'ar';
+    setLang(savedLang);
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme === 'dark') { document.body.classList.add('dark'); setText('themeBtn', '☀️'); }
     loadDashboardData();
