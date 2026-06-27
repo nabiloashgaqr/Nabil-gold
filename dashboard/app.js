@@ -93,6 +93,8 @@ function statusClassOf(t) {
 }
 function tradeTime(t) { return t.created_at || t.entry_time || t.opened_at || t.updated_at || ''; }
 function closeTime(t) { return t.closed_at || t.close_time || ''; }
+function openTime(t) { return t.entry_time || t.created_at || t.opened_at || t.updated_at || ''; }
+function reportDate(t) { return dateText(openTime(t)); }
 function isLiveStatus(status) { return false; }
 function isClosedStatus(status) { return OUTCOME_STATUSES.has(String(status || '').toUpperCase()); }
 
@@ -144,6 +146,7 @@ async function loadDashboardData() {
         updateStats(filteredTrades, liveTrades);
         updateCharts(filteredTrades);
         renderTradesTable(filteredTrades);
+        renderDailyBreakdown(filteredTrades);
         updateOpenTrades(liveTrades);
         renderReports(payload);
         updateAgentPerformance();
@@ -158,6 +161,7 @@ async function loadDashboardData() {
         updateStats([], []);
         updateCharts([]);
         renderTradesTable([]);
+        renderDailyBreakdown([]);
         updateOpenTrades([]);
         renderReports({ dailyReports: [], weeklyReports: [] });
         setText('dataSource', 'خطأ');
@@ -254,7 +258,7 @@ function chartOptions(extra = {}) {
 function updateDailyPnlChart(trades) {
     const daily = {};
     trades.forEach(t => {
-        const d = dateText(closeTime(t) || tradeTime(t));
+        const d = reportDate(t);
         if (d !== '-') daily[d] = (daily[d] || 0) + pnlOf(t);
     });
     const labels = Object.keys(daily).sort().slice(-14);
@@ -293,10 +297,10 @@ function updateDailyPnlChart(trades) {
 }
 
 function updateCumulativePnlChart(trades) {
-    const sorted = [...trades].sort((a, b) => String(closeTime(a) || tradeTime(a)).localeCompare(String(closeTime(b) || tradeTime(b))));
+    const sorted = [...trades].sort((a, b) => String(openTime(a)).localeCompare(String(openTime(b))));
     let cumulative = 0;
     const data = sorted.map(t => { cumulative += pnlOf(t); return cumulative; });
-    const labels = sorted.map(t => dateText(closeTime(t) || tradeTime(t)).substring(5));
+    const labels = sorted.map(t => reportDate(t).substring(5));
     const ctx = $('cumulativePnlChart');
     setChartEmpty('cumulativePnlEmpty', !data.length);
     if (!ctx || typeof Chart === 'undefined') return;
@@ -380,7 +384,7 @@ function applyFilters() {
 
     filteredTrades = closedTrades.filter(trade => {
         const pnl = pnlOf(trade);
-        const tDate = dateText(closeTime(trade) || tradeTime(trade));
+        const tDate = reportDate(trade);
         if (symbol && trade.symbol !== symbol) return false;
         if (result === 'win' && pnl <= 0) return false;
         if (result === 'loss' && pnl >= 0) return false;
@@ -396,6 +400,7 @@ function applyFilters() {
     updateStats(filteredTrades, liveTrades);
     updateCharts(filteredTrades);
     renderTradesTable(filteredTrades);
+    renderDailyBreakdown(filteredTrades);
 }
 
 function clearFilters() {
@@ -404,6 +409,53 @@ function clearFilters() {
     updateStats(filteredTrades, liveTrades);
     updateCharts(filteredTrades);
     renderTradesTable(filteredTrades);
+    renderDailyBreakdown(filteredTrades);
+}
+
+
+function groupTradesByOpenDate(trades) {
+    const groups = {};
+    trades.forEach(t => {
+        const d = reportDate(t);
+        if (!groups[d]) groups[d] = [];
+        groups[d].push(t);
+    });
+    return groups;
+}
+
+function renderDailyBreakdown(trades) {
+    const el = $('dailyBreakdown');
+    if (!el) return;
+    const groups = groupTradesByOpenDate(trades);
+    const days = Object.keys(groups).sort().reverse();
+    if (!days.length) {
+        el.innerHTML = `<div class="empty">${currentLang === 'ar' ? 'لا توجد صفقات مغلقة' : 'No closed trades'}</div>`;
+        return;
+    }
+    el.innerHTML = days.map(day => {
+        const list = groups[day];
+        const wins = list.filter(t => pnlOf(t) > 0).length;
+        const losses = list.filter(t => pnlOf(t) < 0).length;
+        const be = list.filter(t => pnlOf(t) === 0).length;
+        const net = list.reduce((sum, t) => sum + pnlOf(t), 0);
+        const wr = list.length ? (wins / list.length) * 100 : 0;
+        const details = list.map(t => `<div class="daily-trade-row">
+            <span class="badge ${statusClassOf(t)}">${esc(displayStatus(t))}</span>
+            <strong>${esc(t.type)} ${esc(t.symbol)}</strong>
+            <span>Entry ${num(t.entry_price).toFixed(2)}</span>
+            <span class="${pnlOf(t) >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(pnlOf(t), 1)} pts</span>
+        </div>`).join('');
+        return `<div class="daily-day-card">
+            <div class="daily-day-head">
+                <div><strong>${esc(day)}</strong><span>${list.length} trades · WR ${wr.toFixed(1)}%</span></div>
+                <div class="daily-net ${net >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(net, 1)} pts</div>
+            </div>
+            <div class="daily-mini-stats">
+                <span>✅ ${wins}</span><span>❌ ${losses}</span><span>➖ ${be}</span>
+            </div>
+            <div class="daily-trades">${details}</div>
+        </div>`;
+    }).join('');
 }
 
 function exportToCSV() {
