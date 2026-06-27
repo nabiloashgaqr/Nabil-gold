@@ -352,13 +352,19 @@ class WeeklyReportService:
     def _fallback_message(self, stats: WeeklyStats) -> str:
         """Professional weekly report with full details."""
         pf = stats.profit_factor
-        pf_display = "∞" if pf >= 99 or (pf in (0, 99.9) and stats.losses == 0 and stats.wins > 0) else pf
+        gross_profit = stats.avg_win_points * stats.wins if stats.wins else 0
+        gross_loss = abs(stats.avg_loss_points * stats.losses) if stats.losses else 0
 
-        # Profit Factor calculation explanation
-        if stats.losses > 0:
-            pf_note = f"Gross Profit: +{stats.avg_win_points * stats.wins:.0f} / Gross Loss: {abs(stats.avg_loss_points * stats.losses):.0f}"
+        # Profit Factor display
+        if stats.losses > 0 and gross_loss > 0:
+            pf_display = f"{pf:.2f}"
+            pf_note = f"Gross +{gross_profit:.0f} / Loss -{gross_loss:.0f}"
+        elif gross_profit > 0:
+            pf_display = "∞"
+            pf_note = "No losses"
         else:
-            pf_note = "No losses this week"
+            pf_display = "0.00"
+            pf_note = "No trades"
 
         # Expectancy
         wr = stats.win_rate / 100
@@ -376,33 +382,33 @@ class WeeklyReportService:
 
         # System verdict
         if expectancy > 0 and stats.win_rate >= 55:
-            verdict = "✅ System is profitable"
+            verdict = "System is profitable"
         elif stats.net_pnl_points > 0:
-            verdict = "⚠️ Profitable but needs monitoring"
+            verdict = "Profitable but needs monitoring"
         else:
-            verdict = "❌ System needs review"
+            verdict = "System needs review"
 
         # Per-agent breakdown
         agent_lines = []
         for agent, data in sorted(stats.by_agent.items(), key=lambda x: x[1].get("pnl", 0), reverse=True):
-            emoji = "🟢" if data.get("pnl", 0) > 0 else "🔴" if data.get("pnl", 0) < 0 else "⚪"
+            icon = "[+]" if data.get("pnl", 0) > 0 else "[-]" if data.get("pnl", 0) < 0 else "[=]"
             agent_lines.append(
-                f"  {emoji} {agent}: {data.get('count', 0)} trades | "
+                f"  {icon} {agent}: {data.get('count', 0)} trades | "
                 f"WR {data.get('win_rate_pct', 0)}% | "
                 f"Net {data.get('pnl', 0):+.0f} pts"
             )
-        agent_section = "\n".join(agent_lines) if agent_lines else "  • No agent data"
+        agent_section = "\n".join(agent_lines) if agent_lines else "  No agent data available"
 
         # Per-session breakdown
         session_lines = []
         for session, data in sorted(stats.by_session.items(), key=lambda x: x[1].get("pnl", 0), reverse=True):
-            emoji = "🟢" if data.get("pnl", 0) > 0 else "🔴" if data.get("pnl", 0) < 0 else "⚪"
+            icon = "[+]" if data.get("pnl", 0) > 0 else "[-]" if data.get("pnl", 0) < 0 else "[=]"
             session_lines.append(
-                f"  {emoji} {session}: {data.get('count', 0)} trades | "
+                f"  {icon} {session}: {data.get('count', 0)} trades | "
                 f"WR {data.get('win_rate_pct', 0)}% | "
                 f"Net {data.get('pnl', 0):+.0f} pts"
             )
-        session_section = "\n".join(session_lines) if session_lines else "  • No session data"
+        session_section = "\n".join(session_lines) if session_lines else "  No session data available"
 
         # Best/Worst day
         best_day_line = f"Best: {stats.best_day} ({stats.best_day_pnl:+.0f} pts)" if stats.best_day != "—" else "Best: —"
@@ -410,37 +416,37 @@ class WeeklyReportService:
 
         lines = [
             "═══════════════════════════════════",
-            "📊 SmartSignal — Weekly Report",
+            "SmartSignal — Weekly Report",
             f"Week: {stats.week_start} → {stats.week_end}",
             "═══════════════════════════════════",
             "",
-            "📈 <b>Summary</b>",
-            f"• Total trades: {stats.total_trades}",
-            f"• Wins: {stats.wins}  |  Losses: {stats.losses}  |  BE: {stats.break_even}  |  Open: {stats.open_trades}",
-            f"• Win Rate: {stats.win_rate:.1f}%",
+            "SUMMARY",
+            f"  Total trades: {stats.total_trades}",
+            f"  Wins: {stats.wins}  |  Losses: {stats.losses}  |  BE: {stats.break_even}  |  Open: {stats.open_trades}",
+            f"  Win Rate: {stats.win_rate:.1f}%",
             "",
-            "💰 <b>Performance</b>",
-            f"• Net: {stats.net_pnl_points:+.1f} pts (${stats.net_pnl_points / 10:+.1f})",
-            f"• Profit Factor: {pf_display}  ({pf_note})",
-            f"• Avg Win: +{stats.avg_win_points:.1f}  |  Avg Loss: {stats.avg_loss_points:.1f}",
-            f"• Best Trade: {stats.largest_win_points:+.1f}  |  Worst: {stats.largest_loss_points:+.1f}",
-            f"• Expectancy: {expectancy:+.1f} pts/trade",
+            "PERFORMANCE",
+            f"  Net: {stats.net_pnl_points:+.1f} pts (${stats.net_pnl_points / 10:+.1f})",
+            f"  Profit Factor: {pf_display}  ({pf_note})",
+            f"  Avg Win: +{stats.avg_win_points:.1f}  |  Avg Loss: {stats.avg_loss_points:.1f}",
+            f"  Best Trade: {stats.largest_win_points:+.1f}  |  Worst: {stats.largest_loss_points:.1f}",
+            f"  Expectancy: {expectancy:+.1f} pts/trade",
             "",
-            "🤖 <b>Agent Performance</b>",
+            "AGENT PERFORMANCE",
             agent_section,
             "",
-            "📅 <b>Daily Breakdown</b>",
-            f"• {best_day_line}",
-            f"• {worst_day_line}",
+            "DAILY BREAKDOWN",
+            f"  {best_day_line}",
+            f"  {worst_day_line}",
             "",
-            "🌍 <b>Session Performance</b>",
+            "SESSION PERFORMANCE",
             session_section,
             "",
-            "🛡️ <b>Risk Grade</b>",
-            f"• Grade: {grade}",
-            f"• {verdict}",
+            "RISK GRADE",
+            f"  Grade: {grade}",
+            f"  {verdict}",
             "",
-            "⚠️ Paper trading only — not financial advice.",
+            "Paper trading only — not financial advice.",
         ]
         return "\n".join(lines)
 
