@@ -64,9 +64,32 @@ function esc(value) {
 function dateText(value) { return value ? String(value).substring(0, 10) : '-'; }
 function timeText(value) { return value ? String(value).replace('T', ' ').substring(0, 19) : '-'; }
 function pnlOf(t) {
-    let pnl = num(t.pnl ?? t.final_pnl ?? t.current_pnl_points ?? t.current_pnl ?? 0);
-    if (String(t.status || '').toUpperCase() === 'SL_HIT' && pnl > 0) pnl = -Math.abs(pnl);
-    return pnl;
+    // SL_HIT can be a real loss, breakeven, or positive trailing stop.
+    // Never force SL_HIT negative; use the realized PnL sign stored/calculated by trade management.
+    return num(t.pnl ?? t.final_pnl ?? t.current_pnl_points ?? t.current_pnl ?? 0);
+}
+function stopOutcomeOf(t) {
+    if (String(t.status || '').toUpperCase() !== 'SL_HIT') return null;
+    const pnl = pnlOf(t);
+    if (t.stop_outcome) return t.stop_outcome;
+    if (pnl > 0) return 'SL_PLUS';
+    if (pnl < 0) return 'SL_LOSS';
+    return 'SL_BE';
+}
+function displayStatus(t) {
+    const outcome = stopOutcomeOf(t);
+    if (outcome === 'SL_PLUS') return 'SL+';
+    if (outcome === 'SL_BE') return 'SL BE';
+    if (outcome === 'SL_LOSS') return 'SL LOSS';
+    return String(t.status || 'UNKNOWN').toUpperCase();
+}
+function statusClassOf(t) {
+    const pnl = pnlOf(t);
+    const outcome = stopOutcomeOf(t);
+    if (outcome === 'SL_PLUS') return 'win';
+    if (outcome === 'SL_BE') return 'neutral';
+    if (outcome === 'SL_LOSS') return 'loss';
+    return pnl > 0 || t.status === 'TP2_HIT' || t.status === 'TP1_HIT' ? 'win' : pnl < 0 ? 'loss' : 'neutral';
 }
 function tradeTime(t) { return t.created_at || t.entry_time || t.opened_at || t.updated_at || ''; }
 function closeTime(t) { return t.closed_at || t.close_time || ''; }
@@ -332,7 +355,7 @@ function renderTradesTable(trades) {
     }
     tbody.innerHTML = trades.slice(0, 120).map(trade => {
         const pnl = pnlOf(trade);
-        const statusClass = pnl > 0 || trade.status === 'TP2_HIT' ? 'win' : pnl < 0 || trade.status === 'SL_HIT' ? 'loss' : 'neutral';
+        const statusClass = statusClassOf(trade);
         return `<tr onclick='showTradeModalById(${JSON.stringify(trade.id)})'>
             <td>${esc(dateText(tradeTime(trade)))}</td>
             <td>${esc(dateText(closeTime(trade)))}</td>
@@ -341,7 +364,7 @@ function renderTradesTable(trades) {
             <td>${num(trade.entry_price).toFixed(2)}</td>
             <td>${trade.close_price != null ? num(trade.close_price).toFixed(2) : '-'}</td>
             <td class="${pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}"><strong>${signed(pnl)}</strong></td>
-            <td><span class="badge ${statusClass}">${esc(trade.status)}</span></td>
+            <td><span class="badge ${statusClass}">${esc(displayStatus(trade))}</span></td>
             <td>${esc(trade.confidence ?? '--')}%</td>
             <td><button class="btn btn-sm" onclick="event.stopPropagation(); showTradeModalById(${JSON.stringify(trade.id)})">${tr('details')}</button></td>
         </tr>`;
@@ -468,10 +491,10 @@ function showTradeModal(trade) {
     if (!modal || !title || !body) return;
     const pnl = pnlOf(trade);
     const live = isLiveStatus(trade.status);
-    title.textContent = `${trade.type} ${trade.symbol} — ${trade.status}`;
+    title.textContent = `${trade.type} ${trade.symbol} — ${displayStatus(trade)}`;
     body.innerHTML = `<div class="trade-detail-grid">
         <div><strong>ID:</strong> <code>${esc(trade.id)}</code></div>
-        <div><strong>الحالة:</strong> <span class="badge ${live ? 'open' : pnl >= 0 ? 'win' : 'loss'}">${esc(trade.status)}</span></div>
+        <div><strong>الحالة:</strong> <span class="badge ${statusClassOf(trade)}">${esc(displayStatus(trade))}</span></div>
         <div><strong>تاريخ الدخول:</strong> ${esc(timeText(tradeTime(trade)))}</div>
         <div><strong>تاريخ الإغلاق:</strong> ${esc(timeText(closeTime(trade)))}</div>
         <div><strong>الرمز:</strong> ${esc(trade.symbol)}</div>
