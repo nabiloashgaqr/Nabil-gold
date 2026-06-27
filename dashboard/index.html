@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" dir="ltr">
+<html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -14,26 +14,30 @@
         <img class="brand-logo" src="assets/smart-signal-logo.png" alt="SmartSignal Gold & Oil logo" />
         <div>
           <div class="brand-name">SmartSignal</div>
-          <div class="brand-subtitle">Gold & Oil Signals</div>
+          <div class="brand-subtitle" data-ar="Gold & Oil Signals" data-en="Gold & Oil Signals">Gold & Oil Signals</div>
         </div>
         <span class="status-pill"><span class="pulse"></span> Live</span>
       </div>
 
       <nav class="nav-links" aria-label="Dashboard navigation">
-        <a href="#dashboard" class="nav-link active" onclick="showSection('dashboard')">Dashboard</a>
-        <a href="#reports" class="nav-link" onclick="showSection('reports')">Reports</a>
-        <a href="#agents" class="nav-link" onclick="showSection('agents')">Agents</a>
+        <a href="#dashboard" class="nav-link active" onclick="showSection('dashboard')" data-ar="الرئيسية" data-en="Dashboard">الرئيسية</a>
+        <a href="#reports" class="nav-link" onclick="showSection('reports')" data-ar="التقارير" data-en="Reports">التقارير</a>
+        <a href="#agents" class="nav-link" onclick="showSection('agents')" data-ar="الوكلاء" data-en="Agents">الوكلاء</a>
       </nav>
 
       <div class="topbar-meta">
-        <span class="top-meta-pill"><b>Last update</b> <strong id="lastUpdate">--</strong></span>
-        <span class="top-meta-pill"><b>Source</b> <strong id="dataSource">--</strong></span>
-        <label class="top-meta-pill auto-refresh"><input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()"><span>Auto</span></label>
+        <span class="top-meta-pill"><b data-ar="آخر تحديث" data-en="Last update">آخر تحديث</b> <strong id="lastUpdate">--</strong></span>
+        <span class="top-meta-pill"><b data-ar="المصدر" data-en="Source">المصدر</b> <strong id="dataSource">--</strong></span>
+        <label class="top-meta-pill auto-refresh"><input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()"><span data-ar="تلقائي" data-en="Auto">تلقائي</span></label>
       </div>
 
       <div class="top-actions">
-        <a class="btn btn-contact" href="https://t.me/Smart_Pro2026" target="_blank" rel="noopener">Subscribe / Contact Us</a>
-        <button onclick="refreshData()" class="btn btn-ghost" id="refreshBtn">Refresh</button>
+        <a class="btn btn-contact" href="https://t.me/Smart_Pro2026" target="_blank" rel="noopener" data-ar="للاشتراك تواصل معنا" data-en="Subscribe / Contact Us">للاشتراك تواصل معنا</a>
+        <div class="segmented">
+          <button class="lang-btn active" id="langAr" onclick="setLang('ar')">AR</button>
+          <button class="lang-btn" id="langEn" onclick="setLang('en')">EN</button>
+        </div>
+        <button onclick="refreshData()" class="btn btn-ghost" id="refreshBtn" data-ar="تحديث" data-en="Refresh">تحديث</button>
         <button onclick="toggleTheme()" id="themeBtn" class="icon-btn" aria-label="Toggle theme">🌙</button>
       </div>
     </header>
@@ -45,53 +49,56 @@
         <div id="errorBox" class="error-box" style="display:none"></div>
 
         <div class="kpi-grid">
-          <div class="kpi-card"><span class="kpi-icon green">✓</span><div><p>Outcome Trades</p><strong id="totalTrades">--</strong></div></div>
-          <div class="kpi-card"><span class="kpi-icon blue">◎</span><div><p>Win Rate</p><strong id="winRate">--%</strong><div class="progress-bar"><div id="winRateBar" class="progress-fill"></div></div></div></div>
-          <div class="kpi-card"><span class="kpi-icon gold">$</span><div><p>Net Points</p><strong id="netPoints">--</strong></div></div>
+          <div class="kpi-card"><span class="kpi-icon green">✓</span><div><p data-ar="صفقات نتائج" data-en="Outcome Trades">صفقات نتائج</p><strong id="totalTrades">--</strong></div></div>
+          <div class="kpi-card"><span class="kpi-icon blue">◎</span><div><p data-ar="نسبة الربح" data-en="Win Rate">نسبة الربح</p><strong id="winRate">--%</strong><div class="progress-bar"><div id="winRateBar" class="progress-fill"></div></div></div></div>
+          <div class="kpi-card"><span class="kpi-icon gold">$</span><div><p data-ar="صافي النقاط" data-en="Net Points">صافي النقاط</p><strong id="netPoints">--</strong></div></div>
           <div class="kpi-card"><span class="kpi-icon purple">×</span><div><p>Profit Factor</p><strong id="profitFactor">--</strong></div></div>
-          <div class="kpi-card compact"><p>Closed</p><strong id="liveCount">--</strong></div>
-          <div class="kpi-card compact"><p>TP1 Trades</p><strong id="tp1Count">--</strong></div>
-          <div class="kpi-card compact"><p>Best Trade</p><strong id="bestTrade">--</strong></div>
-          <div class="kpi-card compact"><p>Worst Trade</p><strong id="worstTrade">--</strong></div>
-          <div class="kpi-card compact"><p>Average Trade</p><strong id="avgTrade">--</strong></div>
+          <div class="kpi-card compact"><p data-ar="مغلقة" data-en="Closed">مغلقة</p><strong id="liveCount">--</strong></div>
+          <div class="kpi-card compact"><p data-ar="صفقات TP1" data-en="TP1 Trades">صفقات TP1</p><strong id="tp1Count">--</strong></div>
+          <div class="kpi-card compact"><p data-ar="أفضل صفقة" data-en="Best Trade">أفضل صفقة</p><strong id="bestTrade">--</strong></div>
+          <div class="kpi-card compact"><p data-ar="أسوأ صفقة" data-en="Worst Trade">أسوأ صفقة</p><strong id="worstTrade">--</strong></div>
+          <div class="kpi-card compact"><p data-ar="متوسط الصفقة" data-en="Average Trade">متوسط الصفقة</p><strong id="avgTrade">--</strong></div>
           <div class="kpi-card compact"><p>Expectancy</p><strong id="expectancy">--</strong></div>
         </div>
 
         <div class="toolbar-card">
-          <div class="filter-group"><label>Symbol</label><select id="filterSymbol" onchange="applyFilters()"><option value="">All Symbols</option><option value="XAU/USD">XAU/USD</option><option value="WTI/USD">WTI/USD</option></select></div>
-          <div class="filter-group"><label>Result</label><select id="filterResult" onchange="applyFilters()"><option value="">All</option><option value="win">Win</option><option value="loss">Loss</option><option value="be">Break Even</option></select></div>
-          <div class="filter-group"><label>From Date</label><input type="date" id="filterDateFrom" onchange="applyFilters()"></div>
-          <div class="filter-group"><label>To Date</label><input type="date" id="filterDateTo" onchange="applyFilters()"></div>
-          <div class="filter-group search-group"><label>Search</label><input id="searchInput" placeholder="Symbol / Status / ID" oninput="applyFilters()"></div>
-          <div class="toolbar-actions"><button onclick="clearFilters()" class="btn btn-ghost">Clear</button><button onclick="exportToCSV()" class="btn btn-primary">Export CSV</button></div>
+          <div class="filter-group"><label data-ar="الرمز" data-en="Symbol">الرمز</label><select id="filterSymbol" onchange="applyFilters()"><option value="">All Symbols</option><option value="XAU/USD">XAU/USD</option><option value="WTI/USD">WTI/USD</option></select></div>
+          <div class="filter-group"><label data-ar="النتيجة" data-en="Result">النتيجة</label><select id="filterResult" onchange="applyFilters()"><option value="">All</option><option value="win">Win</option><option value="loss">Loss</option><option value="be">Break Even</option></select></div>
+          <div class="filter-group"><label data-ar="من تاريخ" data-en="From Date">من تاريخ</label><input type="date" id="filterDateFrom" onchange="applyFilters()"></div>
+          <div class="filter-group"><label data-ar="إلى تاريخ" data-en="To Date">إلى تاريخ</label><input type="date" id="filterDateTo" onchange="applyFilters()"></div>
+          <div class="filter-group search-group"><label data-ar="بحث" data-en="Search">بحث</label><input id="searchInput" placeholder="Symbol / Status / ID" oninput="applyFilters()"></div>
+          <div class="toolbar-actions"><button onclick="clearFilters()" class="btn btn-ghost" data-ar="مسح" data-en="Clear">مسح</button><button onclick="exportToCSV()" class="btn btn-primary" data-ar="تصدير CSV" data-en="Export CSV">تصدير CSV</button></div>
         </div>
 
         <div class="charts-grid">
           <div class="chart-card primary-chart">
-            <div class="chart-header"><div><h3>Daily PnL</h3><span>Closed only</span></div><strong id="dailyChartTotal">--</strong></div>
+            <div class="chart-header"><div><h3>Daily PnL</h3><span data-ar="مغلق فقط" data-en="Closed only">مغلق فقط</span></div><strong id="dailyChartTotal">--</strong></div>
             <div class="chart-area"><canvas id="dailyPnlChart"></canvas><div class="chart-empty" id="dailyPnlEmpty">No closed trades</div></div>
           </div>
           <div class="chart-card">
-            <div class="chart-header"><div><h3>Cumulative PnL</h3><span>Cumulative</span></div></div>
+            <div class="chart-header"><div><h3>Cumulative PnL</h3><span data-ar="تراكمي" data-en="Cumulative">تراكمي</span></div></div>
             <div class="chart-area"><canvas id="cumulativePnlChart"></canvas><div class="chart-empty" id="cumulativePnlEmpty">No closed trades</div></div>
           </div>
           <div class="chart-card">
-            <div class="chart-header"><div><h3>By Session</h3><span>Asia / Europe / America by trade open time</span></div></div>
+            <div class="chart-header"><div><h3>By Session</h3><span data-ar="حسب الجلسة" data-en="By session">حسب الجلسة</span></div></div>
             <div class="chart-area"><canvas id="sessionChart"></canvas><div class="chart-empty" id="sessionEmpty">No data</div></div>
           </div>
           <div class="chart-card">
-            <div class="chart-header"><div><h3>By Symbol</h3><span>By symbol</span></div></div>
+            <div class="chart-header"><div><h3>By Symbol</h3><span data-ar="حسب الرمز" data-en="By symbol">حسب الرمز</span></div></div>
             <div class="chart-area"><canvas id="instrumentChart"></canvas><div class="chart-empty" id="instrumentEmpty">No data</div></div>
           </div>
         </div>
 
 
-
+        <div class="table-card daily-breakdown-card">
+          <div class="table-header"><div><h3 data-ar="تقرير يومي لكل يوم" data-en="Daily Report for Every Day">تقرير يومي لكل يوم</h3></div><small data-ar="حسب تاريخ فتح الصفقة" data-en="Grouped by trade open date">حسب تاريخ فتح الصفقة</small></div>
+          <div id="dailyBreakdown" class="daily-breakdown"></div>
+        </div>
 
         <div class="table-card">
-          <div class="table-header"><div><h3>All Closed Trades</h3><span id="tradesCount">(0)</span></div><small>OPEN / PARTIAL / PENDING are hidden</small></div>
+          <div class="table-header"><div><h3 data-ar="كل الصفقات المغلقة" data-en="All Closed Trades">كل الصفقات المغلقة</h3><span id="tradesCount">(0)</span></div><small data-ar="لا يتم عرض OPEN / PARTIAL / PENDING" data-en="OPEN / PARTIAL / PENDING are hidden">لا يتم عرض OPEN / PARTIAL / PENDING</small></div>
           <div class="table-container">
-            <table id="tradesTable"><thead><tr><th>Opened</th><th>Closed</th><th>Symbol</th><th>Type</th><th>Entry</th><th>Close</th><th>PnL</th><th>Status</th><th>Confidence</th><th></th></tr></thead><tbody id="tradesBody"><tr><td colspan="10" class="loading">Loading...</td></tr></tbody></table>
+            <table id="tradesTable"><thead><tr><th data-ar="الدخول" data-en="Opened">الدخول</th><th data-ar="الإغلاق" data-en="Closed">الإغلاق</th><th data-ar="الرمز" data-en="Symbol">الرمز</th><th data-ar="النوع" data-en="Type">النوع</th><th>Entry</th><th>Close</th><th>PnL</th><th data-ar="الحالة" data-en="Status">الحالة</th><th data-ar="الثقة" data-en="Confidence">الثقة</th><th></th></tr></thead><tbody id="tradesBody"><tr><td colspan="10" class="loading">Loading...</td></tr></tbody></table>
           </div>
         </div>
       </section>
@@ -99,22 +106,22 @@
 
 
       <section id="reports" class="section">
-        <div class="page-title"><h1>Daily & Weekly Reports</h1><p>Loaded from Supabase</p></div>
+        <div class="page-title"><h1 data-ar="التقارير اليومية والأسبوعية" data-en="Daily & Weekly Reports">التقارير اليومية والأسبوعية</h1><p data-ar="من جداول Supabase" data-en="Loaded from Supabase reports tables">من جداول Supabase</p></div>
         <div class="reports-grid"><div class="report-card"><h3>Latest Daily Report</h3><pre id="dailyReport" class="report-content">Loading...</pre></div><div class="report-card"><h3>Latest Weekly Report</h3><pre id="weeklyReport" class="report-content">Loading...</pre></div></div>
         <div class="report-archive-grid">
           <div class="table-card report-archive-card">
-            <div class="table-header"><div><h3>Daily Reports Archive</h3></div><small>Grouped by month</small></div>
+            <div class="table-header"><div><h3 data-ar="أرشيف التقارير اليومية" data-en="Daily Reports Archive">أرشيف التقارير اليومية</h3></div><small data-ar="منظم حسب الشهر" data-en="Grouped by month">منظم حسب الشهر</small></div>
             <div id="dailyReportsArchive" class="reports-archive"></div>
           </div>
           <div class="table-card report-archive-card">
-            <div class="table-header"><div><h3>Weekly Reports Archive</h3></div><small>Grouped by month</small></div>
+            <div class="table-header"><div><h3 data-ar="أرشيف التقارير الأسبوعية" data-en="Weekly Reports Archive">أرشيف التقارير الأسبوعية</h3></div><small data-ar="منظم حسب الشهر" data-en="Grouped by month">منظم حسب الشهر</small></div>
             <div id="weeklyReportsArchive" class="reports-archive"></div>
           </div>
         </div>
       </section>
 
       <section id="agents" class="section">
-        <div class="page-title"><h1>Agent Performance</h1><p>Weights and performance of analysis agents</p></div>
+        <div class="page-title"><h1 data-ar="أداء الوكلاء" data-en="Agent Performance">أداء الوكلاء</h1><p data-ar="أوزان وأداء وكلاء التحليل" data-en="Weights and performance of analysis agents">أوزان وأداء وكلاء التحليل</p></div>
         <div class="agents-grid" id="agentsGrid"></div>
         <div class="agent-summary">Consensus Strength: <strong id="consensusStrength">--</strong></div>
       </section>
