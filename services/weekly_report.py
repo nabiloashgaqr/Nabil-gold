@@ -50,6 +50,7 @@ class WeeklyStats:
     by_day: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     by_agent: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     by_session: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    by_instrument: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     halt_activations: int = 0
     caution_activations: int = 0
     news_blocked_signals: int = 0
@@ -80,6 +81,7 @@ class WeeklyStats:
             "by_day": self.by_day,
             "by_agent": self.by_agent,
             "by_session": self.by_session,
+            "by_instrument": self.by_instrument,
             "halt_activations": self.halt_activations,
             "caution_activations": self.caution_activations,
             "news_blocked_signals": self.news_blocked_signals,
@@ -235,6 +237,27 @@ class WeeklyReportService:
             for s, v in session_buckets.items()
         }
 
+        # ---- Per instrument ------------------------------------------------ #
+        instrument_buckets: Dict[str, Dict[str, Any]] = {}
+        for trade in closed:
+            symbol = str(trade.get("symbol") or "XAU/USD")
+            pnl = self._trade_pnl(trade)
+            status = str(trade.get("status", "")).upper()
+            is_win = status not in {"SL_HIT"} and pnl >= 0
+            bucket = instrument_buckets.setdefault(
+                symbol, {"count": 0, "wins": 0, "losses": 0, "pnl": 0.0})
+            bucket["count"] += 1
+            bucket["pnl"] += pnl
+            if is_win:
+                bucket["wins"] += 1
+            else:
+                bucket["losses"] += 1
+        stats.by_instrument = {
+            s: {**v, "pnl": round(v["pnl"], 2),
+                "win_rate_pct": round(v["wins"] / v["count"] * 100.0, 1) if v["count"] else 0.0}
+            for s, v in instrument_buckets.items()
+        }
+
         # ---- Risk / memory / news counters (best-effort) ---------------- #
         stats.halt_activations = self._safe_count("session_log",
                                                    {"event": "HALT_ACTIVATED", "since": start_iso})
@@ -384,9 +407,9 @@ class WeeklyReportService:
         if expectancy > 0 and stats.win_rate >= 55:
             verdict = "✅ System is profitable"
         elif stats.net_pnl_points > 0:
-            verdict = "Profitable but needs monitoring"
+            verdict = "⚠️ Profitable but needs monitoring"
         else:
-            verdict = "⚠️ System needs review"
+            verdict = "❌ System needs review"
 
         # Per-agent breakdown
         agent_lines = []
@@ -397,54 +420,105 @@ class WeeklyReportService:
                 f"WR {data.get('win_rate_pct', 0)}% | "
                 f"Net {data.get('pnl', 0):+.0f} pts"
             )
-        agent_section = "\n".join(agent_lines) if agent_lines else "  No agent data available"
+        agent_section = "\n".join(agent_lines) if agent_lines else "  No agent data"
 
-        # Per-session breakdown
+        # Per-session breakdown (improved names)
+        session_map = {
+            "Asian": "🌏 Asian (00:00-07:00 UTC)",
+            "London": "🇬🇧 London (07:00-12:00 UTC)",
+            "London-NY Overlap": "🇺🇸🇬🇧 London-NY Overlap (12:00-16:00 UTC)",
+            "New York": "🇺🇸 New York (16:00-21:00 UTC)",
+            "Late NY / Rollover": "🌙 Late NY (21:00-00:00 UTC)",
+            "unknown": "❓ Unknown Session",
+        }
         session_lines = []
         for session, data in sorted(stats.by_session.items(), key=lambda x: x[1].get("pnl", 0), reverse=True):
             icon = "[+]" if data.get("pnl", 0) > 0 else "[-]" if data.get("pnl", 0) < 0 else "[=]"
+            session_name = session_map.get(session, session)
             session_lines.append(
-                f"  {icon} {session}: {data.get('count', 0)} trades | "
+                f"  {icon} {session_name}: {data.get('count', 0)} trades | "
                 f"WR {data.get('win_rate_pct', 0)}% | "
                 f"Net {data.get('pnl', 0):+.0f} pts"
             )
-        session_section = "\n".join(session_lines) if session_lines else "  No session data available"
+        session_section = "\n".join(session_lines) if session_lines else "  No session data"
+
+        # Per-instrument breakdown
+        instrument_lines = []
+        for symbol, data in sorted(stats.by_instrument.items(), key=lambda x: x[1].get("pnl", 0), reverse=True):
+            icon = "[+]" if data.get("pnl", 0) > 0 else "[-]" if data.get("pnl", 0) < 0 else "[=]"
+            instrument_lines.append(
+                f"  {icon} {symbol}: {data.get('count', 0)} trades | "
+                f"WR {data.get('win_rate_pct', 0)}% | "
+                f"Net {data.get('pnl', 0):+.0f} pts"
+            )
+        if not instrument_lines:
+            instrument_lines = ["  No instrument data"]
+        # Best instrument
+        best_instrument = max(stats.by_instrument.items(), key=lambda x: x[1].get("pnl", 0)) if stats.by_instrument else None
+
+        # Daily breakdown with more detail
+        daily_lines = []
+        for day, data in sorted(stats.by_day.items()):
+            icon = "[+]" if data.get("pnl", 0) > 0 else "[-]" if data.get("pnl", 0) < 0 else "[=]"
+            daily_lines.append(
+                f"  {icon} {day}: {data.get('count', 0)} trades | "
+                f"W {data.get('wins', 0)} / L {data.get('losses', 0)} | "
+                f"Net {data.get('pnl', 0):+.0f} pts"
+            )
+        if not daily_lines:
+            daily_lines = ["  No daily data"]
+        daily_section = "\n".join(daily_lines)
 
         # Best/Worst day
         best_day_line = f"Best: {stats.best_day} ({stats.best_day_pnl:+.0f} pts)" if stats.best_day != "—" else "Best: —"
         worst_day_line = f"Worst: {stats.worst_day} ({stats.worst_day_pnl:+.0f} pts)" if stats.worst_day != "—" else "Worst: —"
 
+        # Best instrument line
+        best_instrument_line = ""
+        if best_instrument:
+            best_instrument_line = f"\n🏆 Best Instrument: {best_instrument[0]} (Net {best_instrument[1].get('pnl', 0):+.0f} pts)"
+
+        separator = "───────────────────────────────────"
+
         lines = [
-            "═══════════════════════════════════",
             "📊 SmartSignal — Weekly Report",
             f"Week: {stats.week_start} → {stats.week_end}",
-            "═══════════════════════════════════",
+            separator,
             "",
             "📈 SUMMARY",
-            f"  📊 Total trades: {stats.total_trades}",
+            f"  Total trades: {stats.total_trades}",
             f"  ✅ Wins: {stats.wins}  |  ❌ Losses: {stats.losses}  |  ⚪ BE: {stats.break_even}  |  🔄 Open: {stats.open_trades}",
-            f"  🎯 Win Rate: {stats.win_rate:.1f}%",
+            f"  🎯 Win Rate: {stats.win_rate:.1f}%{best_instrument_line}",
+            separator,
             "",
             "💰 PERFORMANCE",
             f"  💵 Net: {stats.net_pnl_points:+.1f} pts (${stats.net_pnl_points / 10:+.1f})",
             f"  ⚖️ Profit Factor: {pf_display}  ({pf_note})",
             f"  📊 Avg Win: +{stats.avg_win_points:.1f}  |  Avg Loss: {stats.avg_loss_points:.1f}",
-            f"  🏆 Best Trade: {stats.largest_win_points:+.1f}  |  💔 Worst: {stats.largest_loss_points:.1f}",
+            f"  🏆 Best: {stats.largest_win_points:+.1f}  |  💔 Worst: {stats.largest_loss_points:.1f}",
             f"  📈 Expectancy: {expectancy:+.1f} pts/trade",
+            separator,
             "",
-            "🤖 AGENT PERFORMANCE",
+            "📊 BY INSTRUMENT",
+            "\n".join(instrument_lines),
+            separator,
+            "",
+            "🤖 BY AGENT",
             agent_section,
+            separator,
             "",
             "📅 DAILY BREAKDOWN",
-            f"  {best_day_line}",
-            f"  {worst_day_line}",
+            daily_section,
+            separator,
             "",
-            "🌍 SESSION PERFORMANCE",
+            "🌍 BY SESSION",
             session_section,
+            separator,
             "",
             "🛡️ RISK GRADE",
             f"  Grade: {grade}",
             f"  {verdict}",
+            separator,
             "",
             "⚠️ Paper trading only — not financial advice.",
         ]
