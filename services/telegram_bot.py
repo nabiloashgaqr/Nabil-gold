@@ -15,7 +15,7 @@ from typing import Any, Dict, List
 
 import requests
 
-from utils.helpers import calculate_pips, format_price, load_config
+from utils.helpers import calculate_pips, canonical_session_label, format_price, load_config
 from utils.instruments import price_to_points
 
 
@@ -138,13 +138,17 @@ class TelegramService:
         # ── Header: time · session · run source ────────────────────────────
         header_bits: List[str] = [self._now_text()]
         session_info = decision.get("session_info", {}) or {}
-        if session_info.get("current_session"):
-            sq = str(session_info.get("session_quality", "UNKNOWN"))
-            quality_emoji = {"BEST": "⭐⭐⭐", "HIGH": "⭐⭐", "MEDIUM": "⭐", "LOW": "⚠️"}.get(sq, "")
-            session_name = str(session_info.get("current_session", ""))
-            # Add session emoji
-            session_emoji = "🌏" if "Asian" in session_name else "🇬🇧" if "London" in session_name and "NY" not in session_name else "🇺🇸🇬🇧" if "Overlap" in session_name else "🇺🇸" if "New York" in session_name else "🌙"
-            header_bits.append(f"{session_emoji} {session_name} {quality_emoji}".strip())
+        sq = str(session_info.get("session_quality", "UNKNOWN"))
+        quality_emoji = {"BEST": "⭐⭐⭐", "HIGH": "⭐⭐", "MEDIUM": "⭐", "LOW": "⚠️"}.get(sq, "")
+        session_name = canonical_session_label(datetime.now(timezone.utc))
+        session_emoji = (
+            "🌏" if session_name == "Asia Morning" else
+            "🇬🇧" if session_name == "London / Europe Midday" else
+            "🇬🇧🇺🇸" if session_name == "London + New York Afternoon" else
+            "🇺🇸" if session_name == "New York Evening" else
+            "🌙"
+        )
+        header_bits.append(f"{session_emoji} {session_name} {quality_emoji}".strip())
 
         # Robust run_source handling (always produce clean English, never "unknown run")
         run_source = str(decision.get("run_source", "") or decision.get("operation_mode", "") or "").lower().strip()
