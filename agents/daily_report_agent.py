@@ -92,12 +92,12 @@ class DailyReportAgent(BaseAgent):
 
         # Session breakdown
         session_map = {
-            "Asian Session (00:00-07:00 UTC)": "🌏 Asian Session (00:00-07:00 UTC)",
-            "London Session (07:00-12:00 UTC)": "🇬🇧 London Session (07:00-12:00 UTC)",
-            "London-NY Overlap (12:00-16:00 UTC)": "🇺🇸🇬🇧 London-NY Overlap (12:00-16:00 UTC)",
-            "New York Session (16:00-21:00 UTC)": "🇺🇸 New York Session (16:00-21:00 UTC)",
-            "Late NY Session (21:00-00:00 UTC)": "🌙 Late NY Session (21:00-00:00 UTC)",
-            "unknown": "❓ Unknown Session",
+            "Asian Session (00:00-07:00 UTC)": "🌏 Asian (03:00-10:00 AM)",
+            "London Session (07:00-12:00 UTC)": "🇬🇧 London (10:00-03:00 PM)",
+            "London-NY Overlap (12:00-16:00 UTC)": "🇺🇸🇬🇧 London-NY (03:00-07:00 PM)",
+            "New York Session (16:00-21:00 UTC)": "🇺🇸 New York (07:00 PM-12:00 AM)",
+            "Late NY Session (21:00-00:00 UTC)": "🌙 Late NY (12:00-03:00 AM)",
+            "unknown": "❓ Unknown",
         }
         session_lines = []
         for session, data in sorted(stats.get("by_session", {}).items(), key=lambda x: x[1].get("net", 0), reverse=True):
@@ -120,7 +120,7 @@ class DailyReportAgent(BaseAgent):
         # Recommendations
         recommendations = "\n".join(f"• {html.escape(str(x))}" for x in stats.get("recommendations", [])[:4]) or "• Not enough data yet"
 
-        separator = "───────────────────────────────────"
+        separator = "────────────────────"
 
         return f"""📊 SmartSignal — {title_en}
 📅 Period: {html.escape(date.today().isoformat())}
