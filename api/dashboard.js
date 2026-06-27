@@ -183,10 +183,94 @@ function buildDailyReport(r) {
   ].filter(Boolean).join('\n');
 }
 
+
+function extractAgentVotes(trade) {
+  const ss = trade.signal_snapshot || {};
+  const votes = ss.votes || {};
+  const out = [];
+  for (const direction of ['BUY', 'SELL']) {
+    const arr = Array.isArray(votes[direction]) ? votes[direction] : [];
+    for (const v of arr) {
+      if (!v || !v.agent) continue;
+      out.push({
+        agent: String(v.agent).toLowerCase(),
+        signal: direction,
+        confidence: Number(v.adjusted_confidence ?? v.confidence ?? 0) || 0,
+        weight: Number(v.weight ?? 0) || 0,
+        score: Number(v.score ?? 0) || 0,
+      });
+    }
+  }
+  // Fallback for old / one-agent records if votes were not stored.
+  const ctx = ss.agent_context || ss.classic?.strongest_directional;
+  if (!out.length && ctx && ctx.agent && ctx.signal && ['BUY', 'SELL'].includes(String(ctx.signal).toUpperCase())) {
+    out.push({
+      agent: String(ctx.agent).toLowerCase(),
+      signal: String(ctx.signal).toUpperCase(),
+      confidence: Number(ctx.adjusted_confidence ?? ctx.confidence ?? 0) || 0,
+      weight: Number(ctx.weight ?? 0) || 0,
+      score: Number(ctx.score ?? 0) || 0,
+    });
+  }
+  return out;
+}
+function computeAgentPerformance(closedTrades, agentWeights = []) {
+  const defaultAgents = ['technical', 'classical', 'smc', 'price_action', 'multitimeframe'];
+  const stats = {};
+  function ensure(agent) {
+    if (!stats[agent]) {
+      const w = (agentWeights || []).find(a => String(a.agent_name).toLowerCase() === agent);
+      stats[agent] = {
+        agent_name: agent,
+        weight: Number(w?.weight ?? 0) || 0,
+        predictions: 0,
+        wins: 0,
+        losses: 0,
+        net_pnl: 0,
+        avg_confidence: 0,
+        confidence_sum: 0,
+        last_signal: null,
+        source: 'computed_from_closed_trades',
+      };
+    }
+    return stats[agent];
+  }
+  defaultAgents.forEach(ensure);
+  closedTrades.forEach(trade => {
+    const pnl = Number(trade.pnl ?? trade.final_pnl ?? trade.current_pnl ?? 0) || 0;
+    const tradeSide = String(trade.type || trade.side || trade.trade_type || '').toUpperCase();
+    const votes = extractAgentVotes(trade);
+    votes.forEach(v => {
+      const st = ensure(v.agent);
+      st.predictions += 1;
+      st.confidence_sum += v.confidence;
+      st.last_signal = v.signal;
+      if (!st.weight && v.weight) st.weight = v.weight;
+      // If an agent voted with the executed trade side, profit means correct.
+      // If it voted against the executed side, a loss would mean the opposing view was correct.
+      const correct = v.signal === tradeSide ? pnl > 0 : pnl < 0;
+      if (correct) st.wins += 1;
+      else st.losses += 1;
+      st.net_pnl += v.signal === tradeSide ? pnl : -pnl;
+    });
+  });
+  return Object.values(stats).map(st => {
+    const winRate = st.predictions ? (st.wins / st.predictions) * 100 : null;
+    return {
+      ...st,
+      win_rate: winRate,
+      total_predictions: st.predictions,
+      avg_confidence: st.predictions ? st.confidence_sum / st.predictions : 0,
+      net_pnl: Number(st.net_pnl.toFixed(1)),
+      trend: st.predictions < 2 ? 'INSUFFICIENT_DATA' : winRate >= 60 ? 'IMPROVING' : winRate >= 45 ? 'STABLE' : 'DECLINING',
+    };
+  }).sort((a, b) => (b.predictions - a.predictions) || String(a.agent_name).localeCompare(String(b.agent_name)));
+}
+
 function summarize(closedTrades, liveTrades) {
   const total = closedTrades.length;
-  const wins = closedTrades.filter(t => Number(t.pnl) > 0 || ['TP2_HIT', 'TP1_HIT'].includes(t.status)).length;
-  const losses = closedTrades.filter(t => Number(t.pnl) < 0 || t.status === 'SL_HIT').length;
+  const wins = closedTrades.filter(t => Number(t.pnl) > 0).length;
+  const losses = closedTrades.filter(t => Number(t.pnl) < 0).length;
   const net = closedTrades.reduce((s, t) => s + (Number(t.pnl) || 0), 0);
   const gp = closedTrades.filter(t => Number(t.pnl) > 0).reduce((s, t) => s + Number(t.pnl), 0);
   const gl = Math.abs(closedTrades.filter(t => Number(t.pnl) < 0).reduce((s, t) => s + Number(t.pnl), 0));
@@ -242,6 +326,7 @@ module.exports = async function handler(req, res) {
 
     const closedTrades = (closedRaw || []).map(normalizeTrade);
     const liveTrades = (liveRaw || []).map(normalizeTrade);
+    const agentPerformance = computeAgentPerformance(closedTrades, agentWeights || []);
 
     return json(res, 200, {
       ok: true,
@@ -252,6 +337,7 @@ module.exports = async function handler(req, res) {
       liveTrades,
       dailyReports: (dailyReports && dailyReports.length ? dailyReports.map(r => ({ ...r, report_text: r.report_text || buildDailyReport(r) })) : [buildGeneratedDailyReport(closedTrades)]),
       weeklyReports: (weeklyReports && weeklyReports.length ? weeklyReports : [buildGeneratedWeeklyReport(closedTrades)]),
+      agentPerformance,
       agentWeights: agentWeights || [],
     });
   } catch (error) {
