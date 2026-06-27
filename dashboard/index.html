@@ -26,12 +26,9 @@
       </nav>
 
       <div class="topbar-meta">
-        <span class="top-meta-pill"><b>Last update</b><strong id="lastUpdate">--</strong></span>
-        <span class="top-meta-pill"><b>Source</b><strong id="dataSource">--</strong></span>
-        <label class="top-meta-pill auto-refresh">
-          <input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()" />
-          <span>Auto</span>
-        </label>
+        <span class="top-meta-pill"><b>Last update</b> <strong id="lastUpdate">--</strong></span>
+        <span class="top-meta-pill"><b>Source</b> <strong id="dataSource">--</strong></span>
+        <label class="top-meta-pill auto-refresh"><input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()"><span>Auto</span></label>
       </div>
 
       <div class="top-actions">
@@ -43,6 +40,8 @@
 
     <main class="main-content">
       <section id="dashboard" class="section active">
+
+
         <div id="errorBox" class="error-box" style="display:none"></div>
 
         <div class="kpi-grid">
@@ -61,9 +60,9 @@
         <div class="toolbar-card">
           <div class="filter-group"><label>Symbol</label><select id="filterSymbol" onchange="applyFilters()"><option value="">All Symbols</option><option value="XAU/USD">XAU/USD</option><option value="WTI/USD">WTI/USD</option></select></div>
           <div class="filter-group"><label>Result</label><select id="filterResult" onchange="applyFilters()"><option value="">All</option><option value="win">Win</option><option value="loss">Loss</option><option value="be">Break Even</option></select></div>
-          <div class="filter-group"><label>From Date</label><input type="date" id="filterDateFrom" onchange="applyFilters()" /></div>
-          <div class="filter-group"><label>To Date</label><input type="date" id="filterDateTo" onchange="applyFilters()" /></div>
-          <div class="filter-group search-group"><label>Search</label><input id="searchInput" placeholder="Symbol / Status / ID" oninput="applyFilters()" /></div>
+          <div class="filter-group"><label>From Date</label><input type="date" id="filterDateFrom" onchange="applyFilters()"></div>
+          <div class="filter-group"><label>To Date</label><input type="date" id="filterDateTo" onchange="applyFilters()"></div>
+          <div class="filter-group search-group"><label>Search</label><input id="searchInput" placeholder="Symbol / Status / ID" oninput="applyFilters()"></div>
           <div class="toolbar-actions"><button onclick="clearFilters()" class="btn btn-ghost">Clear</button><button onclick="exportToCSV()" class="btn btn-primary">Export CSV</button></div>
         </div>
 
@@ -72,42 +71,36 @@
             <div class="chart-header"><div><h3>Daily PnL</h3><span>Closed only</span></div><strong id="dailyChartTotal">--</strong></div>
             <div class="chart-area"><canvas id="dailyPnlChart"></canvas><div class="chart-empty" id="dailyPnlEmpty">No closed trades</div></div>
           </div>
-
           <div class="chart-card">
             <div class="chart-header"><div><h3>Cumulative PnL</h3><span>Cumulative</span></div></div>
             <div class="chart-area"><canvas id="cumulativePnlChart"></canvas><div class="chart-empty" id="cumulativePnlEmpty">No closed trades</div></div>
           </div>
-
           <div class="chart-card">
             <div class="chart-header"><div><h3>By Session</h3><span>Asia / Europe / America by trade open time</span></div></div>
             <div class="chart-area"><canvas id="sessionChart"></canvas><div class="chart-empty" id="sessionEmpty">No data</div></div>
           </div>
-
           <div class="chart-card">
             <div class="chart-header"><div><h3>By Symbol</h3><span>By symbol</span></div></div>
             <div class="chart-area"><canvas id="instrumentChart"></canvas><div class="chart-empty" id="instrumentEmpty">No data</div></div>
           </div>
         </div>
 
+
+
+
         <div class="table-card">
           <div class="table-header"><div><h3>All Closed Trades</h3><span id="tradesCount">(0)</span></div><small>OPEN / PARTIAL / PENDING are hidden</small></div>
           <div class="table-container">
-            <table id="tradesTable">
-              <thead>
-                <tr><th>Opened</th><th>Closed</th><th>Symbol</th><th>Type</th><th>Entry</th><th>Close</th><th>PnL</th><th>Status</th><th>Confidence</th><th></th></tr>
-              </thead>
-              <tbody id="tradesBody"><tr><td colspan="10" class="loading">Loading...</td></tr></tbody>
-            </table>
+            <table id="tradesTable"><thead><tr><th>Opened</th><th>Closed</th><th>Symbol</th><th>Type</th><th>Entry</th><th>Close</th><th>PnL</th><th>Status</th><th>Confidence</th><th></th></tr></thead><tbody id="tradesBody"><tr><td colspan="10" class="loading">Loading...</td></tr></tbody></table>
           </div>
         </div>
       </section>
 
+
+
       <section id="reports" class="section">
         <div class="page-title"><h1>Daily & Weekly Reports</h1><p>Loaded from Supabase</p></div>
-        <div class="reports-grid">
-          <div class="report-card"><h3>Latest Daily Report</h3><pre id="dailyReport" class="report-content">Loading...</pre></div>
-          <div class="report-card"><h3>Latest Weekly Report</h3><pre id="weeklyReport" class="report-content">Loading...</pre></div>
-        </div>
+        <div class="reports-grid"><div class="report-card"><h3>Latest Daily Report</h3><pre id="dailyReport" class="report-content">Loading...</pre></div><div class="report-card"><h3>Latest Weekly Report</h3><pre id="weeklyReport" class="report-content">Loading...</pre></div></div>
         <div class="report-archive-grid">
           <div class="table-card report-archive-card">
             <div class="table-header"><div><h3>Daily Reports Archive</h3></div><small>Grouped by month</small></div>
@@ -128,14 +121,7 @@
     </main>
   </div>
 
-  <div id="tradeModal" class="modal" style="display:none">
-    <div class="modal-content">
-      <span onclick="closeModal()" class="close">&times;</span>
-      <h2 id="modalTitle"></h2>
-      <div id="modalBody"></div>
-    </div>
-  </div>
-
+  <div id="tradeModal" class="modal" style="display:none"><div class="modal-content"><span onclick="closeModal()" class="close">&times;</span><h2 id="modalTitle"></h2><div id="modalBody"></div></div></div>
   <script src="app.js"></script>
 </body>
 </html>
