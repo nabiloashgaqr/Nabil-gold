@@ -38,6 +38,14 @@ const I18N = {
     }
 };
 function tr(key) { return (I18N[currentLang] && I18N[currentLang][key]) || I18N.ar[key] || key; }
+function localeCode() { return currentLang === 'ar' ? 'ar-SA' : 'en-US'; }
+function formatDateTime(value) {
+    const d = value ? new Date(value) : new Date();
+    return d.toLocaleString(localeCode(), { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+function reportText(r) { return currentLang === 'ar' ? (r.report_text_ar || r.report_text || '') : (r.report_text_en || r.report_text || ''); }
+function wordTrades(n) { return currentLang === 'ar' ? `${n} صفقات` : `${n} trades`; }
+function wordReports(n) { return currentLang === 'ar' ? `${n} تقارير` : `${n} reports`; }
 function setLang(lang) {
     currentLang = lang === 'en' ? 'en' : 'ar';
     document.documentElement.lang = currentLang;
@@ -49,7 +57,11 @@ function setLang(lang) {
     if (active) active.classList.add('active');
     renderTradesTable(filteredTrades);
     updateOpenTrades(liveTrades);
-    if (dashboardPayload) renderReports(dashboardPayload);
+    if (dashboardPayload) {
+        setText('lastUpdate', formatDateTime(dashboardPayload.generatedAt || Date.now()));
+        renderReports(dashboardPayload);
+        renderDailyBreakdown(filteredTrades);
+    }
 }
 
 
@@ -151,7 +163,7 @@ async function loadDashboardData() {
         renderReports(payload);
         updateAgentPerformance();
 
-        setText('lastUpdate', new Date(payload.generatedAt || Date.now()).toLocaleString('ar'));
+        setText('lastUpdate', formatDateTime(payload.generatedAt || Date.now()));
         setText('dataSource', payload.source || 'api');
     } catch (error) {
         console.error('Dashboard load failed:', error);
@@ -165,7 +177,7 @@ async function loadDashboardData() {
         updateOpenTrades([]);
         renderReports({ dailyReports: [], weeklyReports: [] });
         setText('dataSource', 'خطأ');
-        setText('lastUpdate', new Date().toLocaleString('ar'));
+        setText('lastUpdate', formatDateTime(Date.now()));
         setError(`${tr('loadError')}: ${error.message.includes('404') ? tr('api404') : error.message}`);
     }
 }
@@ -442,12 +454,12 @@ function renderDailyBreakdown(trades) {
         const details = list.map(t => `<div class="daily-trade-row">
             <span class="badge ${statusClassOf(t)}">${esc(displayStatus(t))}</span>
             <strong>${esc(t.type)} ${esc(t.symbol)}</strong>
-            <span>Entry ${num(t.entry_price).toFixed(2)}</span>
+            <span>${currentLang === 'ar' ? 'دخول' : 'Entry'} ${num(t.entry_price).toFixed(2)}</span>
             <span class="${pnlOf(t) >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(pnlOf(t), 1)} pts</span>
         </div>`).join('');
         return `<div class="daily-day-card">
             <div class="daily-day-head">
-                <div><strong>${esc(day)}</strong><span>${list.length} trades · WR ${wr.toFixed(1)}%</span></div>
+                <div><strong>${esc(day)}</strong><span>${wordTrades(list.length)} · ${currentLang === 'ar' ? 'نسبة الربح' : 'WR'} ${wr.toFixed(1)}%</span></div>
                 <div class="daily-net ${net >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(net, 1)} pts</div>
             </div>
             <div class="daily-mini-stats">
@@ -522,13 +534,13 @@ function renderReportArchive(containerId, reports, type) {
                 <button class="report-file-head" onclick="toggleReportFile('${rid}')">
                     <span class="file-icon">${type === 'weekly' ? '🗓️' : '📄'}</span>
                     <span class="file-title">${esc(period)}</span>
-                    <span class="file-meta">${trades} trades · WR ${wr.toFixed(1)}% · <b class="${net >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(net, 1)}</b></span>
+                    <span class="file-meta">${wordTrades(trades)} · ${currentLang === 'ar' ? 'نسبة الربح' : 'WR'} ${wr.toFixed(1)}% · <b class="${net >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(net, 1)}</b></span>
                 </button>
-                <pre id="${rid}" class="report-file-body">${esc(r.report_text || 'No report text')}</pre>
+                <pre id="${rid}" class="report-file-body">${esc(reportText(r) || (currentLang === 'ar' ? 'لا يوجد نص للتقرير' : 'No report text'))}</pre>
             </div>`;
         }).join('');
         return `<div class="report-month-folder">
-            <div class="folder-head"><div><span class="folder-icon">📁</span><strong>${esc(monthLabel(month))}</strong></div><span>${list.length} ${currentLang === 'ar' ? 'تقارير' : 'reports'} · <b class="${totalNet >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(totalNet, 1)}</b></span></div>
+            <div class="folder-head"><div><span class="folder-icon">📁</span><strong>${esc(monthLabel(month))}</strong></div><span>${wordReports(list.length)} · <b class="${totalNet >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(totalNet, 1)}</b></span></div>
             <div class="folder-body">${items}</div>
         </div>`;
     }).join('');
@@ -543,8 +555,8 @@ function renderReports(payload) {
     const weekly = payload.weeklyReports || [];
     const latestDaily = daily[0];
     const latestWeekly = weekly[0];
-    setText('dailyReport', latestDaily ? (latestDaily.report_text || 'Daily report has no text') : tr('noDaily'));
-    setText('weeklyReport', latestWeekly ? (latestWeekly.report_text || JSON.stringify(latestWeekly.stats_json || {}, null, 2)) : tr('noWeekly'));
+    setText('dailyReport', latestDaily ? (reportText(latestDaily) || (currentLang === 'ar' ? 'التقرير اليومي بدون نص' : 'Daily report has no text')) : tr('noDaily'));
+    setText('weeklyReport', latestWeekly ? (reportText(latestWeekly) || JSON.stringify(latestWeekly.stats_json || {}, null, 2)) : tr('noWeekly'));
     renderReportArchive('dailyReportsArchive', daily, 'daily');
     renderReportArchive('weeklyReportsArchive', weekly, 'weekly');
     setHTML('reportsBody', '');
