@@ -336,13 +336,20 @@ function updateCumulativePnlChart(trades) {
 }
 
 function updateSessionChart(trades) {
+    const order = currentLang === 'ar'
+        ? ['آسيا صباحاً', 'لندن / أوروبا ظهراً', 'لندن + أمريكا عصراً', 'أمريكا مساءً', 'أمريكا متأخرة ليلاً']
+        : ['Asia Morning', 'London / Europe Midday', 'London + New York Afternoon', 'New York Evening', 'Late New York Night'];
     const grouped = {};
+    const counts = {};
+    order.forEach(k => { grouped[k] = 0; counts[k] = 0; });
     trades.forEach(t => {
         const session = sessionBucket(t);
         grouped[session] = (grouped[session] || 0) + pnlOf(t);
+        counts[session] = (counts[session] || 0) + 1;
     });
-    const labels = Object.keys(grouped);
+    const labels = order.filter(k => counts[k] > 0 || grouped[k] !== 0);
     const data = labels.map(k => grouped[k]);
+    const displayLabels = labels.map(k => `${k} (${counts[k]})`);
     const ctx = $('sessionChart');
     setChartEmpty('sessionEmpty', !data.length);
     if (!ctx || typeof Chart === 'undefined') return;
@@ -350,8 +357,31 @@ function updateSessionChart(trades) {
     if (!data.length) return;
     charts.session = new Chart(ctx.getContext('2d'), {
         type: 'bar',
-        data: { labels, datasets: [{ data, backgroundColor: data.map(v => v >= 0 ? '#2b8a3e' : '#c92a2a'), borderRadius: 5 }] },
-        options: chartOptions({ indexAxis: 'y' }),
+        data: {
+            labels: displayLabels,
+            datasets: [{
+                data,
+                backgroundColor: data.map(v => v >= 0 ? 'rgba(22,163,74,.72)' : 'rgba(220,38,38,.72)'),
+                borderColor: data.map(v => v >= 0 ? '#16a34a' : '#dc2626'),
+                borderWidth: 1,
+                borderRadius: 8,
+                maxBarThickness: 34,
+            }]
+        },
+        options: chartOptions({
+            indexAxis: 'y',
+            plugins: {
+                ...chartOptions().plugins,
+                tooltip: {
+                    ...chartOptions().plugins.tooltip,
+                    callbacks: { label: ctx => ` ${signed(ctx.parsed.x, 1)} pts · ${counts[labels[ctx.dataIndex]]} ${currentLang === 'ar' ? 'صفقات' : 'trades'}` }
+                }
+            },
+            scales: {
+                x: chartOptions().scales.y,
+                y: { grid: { display: false }, ticks: { color: document.body.classList.contains('dark') ? '#94a3b8' : '#64748b' } }
+            }
+        }),
     });
 }
 
