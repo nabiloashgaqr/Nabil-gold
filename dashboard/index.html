@@ -114,8 +114,17 @@
 
       <section id="reports" class="section">
         <div class="page-title"><h1 data-ar="التقارير اليومية والأسبوعية" data-en="Daily & Weekly Reports">التقارير اليومية والأسبوعية</h1><p data-ar="من جداول Supabase" data-en="Loaded from Supabase reports tables">من جداول Supabase</p></div>
-        <div class="reports-grid"><div class="report-card"><h3>Daily Report</h3><pre id="dailyReport" class="report-content">Loading...</pre></div><div class="report-card"><h3>Weekly Report</h3><pre id="weeklyReport" class="report-content">Loading...</pre></div></div>
-        <div class="table-card"><div class="table-header"><h3 data-ar="سجل التقارير" data-en="Reports History">سجل التقارير</h3></div><div class="table-container"><table><thead><tr><th>Type</th><th>Period</th><th>Created</th><th>Status</th></tr></thead><tbody id="reportsBody"></tbody></table></div></div>
+        <div class="reports-grid"><div class="report-card"><h3>Latest Daily Report</h3><pre id="dailyReport" class="report-content">Loading...</pre></div><div class="report-card"><h3>Latest Weekly Report</h3><pre id="weeklyReport" class="report-content">Loading...</pre></div></div>
+        <div class="report-archive-grid">
+          <div class="table-card report-archive-card">
+            <div class="table-header"><div><h3 data-ar="أرشيف التقارير اليومية" data-en="Daily Reports Archive">أرشيف التقارير اليومية</h3></div><small data-ar="منظم حسب الشهر" data-en="Grouped by month">منظم حسب الشهر</small></div>
+            <div id="dailyReportsArchive" class="reports-archive"></div>
+          </div>
+          <div class="table-card report-archive-card">
+            <div class="table-header"><div><h3 data-ar="أرشيف التقارير الأسبوعية" data-en="Weekly Reports Archive">أرشيف التقارير الأسبوعية</h3></div><small data-ar="منظم حسب الشهر" data-en="Grouped by month">منظم حسب الشهر</small></div>
+            <div id="weeklyReportsArchive" class="reports-archive"></div>
+          </div>
+        </div>
       </section>
 
       <section id="agents" class="section">

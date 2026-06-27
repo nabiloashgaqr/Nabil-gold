@@ -477,6 +477,67 @@ function updateOpenTrades(_trades) {
 }
 
 
+function monthLabel(month) {
+    if (!month || month.length < 7) return currentLang === 'ar' ? 'بدون شهر' : 'No Month';
+    const [y, m] = month.split('-');
+    const namesAr = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+    const namesEn = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const idx = Math.max(0, Math.min(11, Number(m) - 1));
+    return currentLang === 'ar' ? `${namesAr[idx]} ${y}` : `${namesEn[idx]} ${y}`;
+}
+function reportPeriod(report, type) {
+    if (type === 'weekly') return `${report.week_start || '-'} → ${report.week_end || '-'}`;
+    return report.report_date || (report.created_at || '').slice(0, 10) || '-';
+}
+function groupReportsByMonth(reports, type) {
+    const groups = {};
+    reports.forEach(r => {
+        const period = reportPeriod(r, type);
+        const month = r.month || String(period).slice(0, 7) || 'unknown';
+        if (!groups[month]) groups[month] = [];
+        groups[month].push(r);
+    });
+    Object.values(groups).forEach(list => list.sort((a, b) => reportPeriod(b, type).localeCompare(reportPeriod(a, type))));
+    return groups;
+}
+function renderReportArchive(containerId, reports, type) {
+    const el = $(containerId);
+    if (!el) return;
+    if (!reports.length) {
+        el.innerHTML = `<div class="empty">${currentLang === 'ar' ? 'لا توجد تقارير' : 'No reports'}</div>`;
+        return;
+    }
+    const groups = groupReportsByMonth(reports, type);
+    const months = Object.keys(groups).sort().reverse();
+    el.innerHTML = months.map(month => {
+        const list = groups[month];
+        const totalNet = list.reduce((sum, r) => sum + num(r.daily_pnl ?? r.net_pnl_points ?? r.stats_json?.net_pnl_points ?? r.stats_json?.net_points ?? 0), 0);
+        const items = list.map((r, idx) => {
+            const period = reportPeriod(r, type);
+            const net = num(r.daily_pnl ?? r.net_pnl_points ?? r.stats_json?.net_pnl_points ?? r.stats_json?.net_points ?? 0);
+            const trades = num(r.closed_trades ?? r.stats_json?.closed_trades ?? r.stats_json?.total_trades ?? r.stats_json?.total ?? 0);
+            const wr = num(r.win_rate ?? r.stats_json?.win_rate_pct ?? r.stats_json?.win_rate ?? 0);
+            const rid = `${containerId}-${month}-${idx}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+            return `<div class="report-file">
+                <button class="report-file-head" onclick="toggleReportFile('${rid}')">
+                    <span class="file-icon">${type === 'weekly' ? '🗓️' : '📄'}</span>
+                    <span class="file-title">${esc(period)}</span>
+                    <span class="file-meta">${trades} trades · WR ${wr.toFixed(1)}% · <b class="${net >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(net, 1)}</b></span>
+                </button>
+                <pre id="${rid}" class="report-file-body">${esc(r.report_text || 'No report text')}</pre>
+            </div>`;
+        }).join('');
+        return `<div class="report-month-folder">
+            <div class="folder-head"><div><span class="folder-icon">📁</span><strong>${esc(monthLabel(month))}</strong></div><span>${list.length} ${currentLang === 'ar' ? 'تقارير' : 'reports'} · <b class="${totalNet >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(totalNet, 1)}</b></span></div>
+            <div class="folder-body">${items}</div>
+        </div>`;
+    }).join('');
+}
+function toggleReportFile(id) {
+    const el = $(id);
+    if (!el) return;
+    el.classList.toggle('open');
+}
 function renderReports(payload) {
     const daily = payload.dailyReports || [];
     const weekly = payload.weeklyReports || [];
@@ -484,10 +545,9 @@ function renderReports(payload) {
     const latestWeekly = weekly[0];
     setText('dailyReport', latestDaily ? (latestDaily.report_text || 'Daily report has no text') : tr('noDaily'));
     setText('weeklyReport', latestWeekly ? (latestWeekly.report_text || JSON.stringify(latestWeekly.stats_json || {}, null, 2)) : tr('noWeekly'));
-    const rows = [];
-    daily.forEach(r => rows.push(`<tr><td>Daily</td><td>${esc(r.report_date || '-')}</td><td>${esc(timeText(r.created_at))}</td><td>-</td></tr>`));
-    weekly.forEach(r => rows.push(`<tr><td>Weekly</td><td>${esc(r.week_start || '-') } → ${esc(r.week_end || '-')}</td><td>${esc(timeText(r.created_at))}</td><td>${esc(r.status || '-')}</td></tr>`));
-    setHTML('reportsBody', rows.length ? rows.join('') : `<tr><td colspan="4" class="empty">${tr('noReports')}</td></tr>`);
+    renderReportArchive('dailyReportsArchive', daily, 'daily');
+    renderReportArchive('weeklyReportsArchive', weekly, 'weekly');
+    setHTML('reportsBody', '');
 }
 
 function updateAgentPerformance() {
