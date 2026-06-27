@@ -168,7 +168,7 @@ class WeeklyReportService:
         total_resolved = stats.wins + stats.losses + stats.break_even
         stats.win_rate = (stats.wins / total_resolved * 100.0) if total_resolved else 0.0
 
-        # Profit Factor: 99.9 / ∞ for no-loss case (consistent with dashboard / daily)
+        # ⚖️ Profit Factor: 99.9 / ∞ for no-loss case (consistent with dashboard / daily)
         gross_profit = sum(wins) if wins else 0.0
         gross_loss = abs(sum(losses)) if losses else 0.0
         if gross_loss > 0:
@@ -382,11 +382,11 @@ class WeeklyReportService:
 
         # System verdict
         if expectancy > 0 and stats.win_rate >= 55:
-            verdict = "System is profitable"
+            verdict = "✅ System is profitable"
         elif stats.net_pnl_points > 0:
             verdict = "Profitable but needs monitoring"
         else:
-            verdict = "System needs review"
+            verdict = "⚠️ System needs review"
 
         # Per-agent breakdown
         agent_lines = []
@@ -416,37 +416,37 @@ class WeeklyReportService:
 
         lines = [
             "═══════════════════════════════════",
-            "SmartSignal — Weekly Report",
+            "📊 SmartSignal — Weekly Report",
             f"Week: {stats.week_start} → {stats.week_end}",
             "═══════════════════════════════════",
             "",
-            "SUMMARY",
-            f"  Total trades: {stats.total_trades}",
-            f"  Wins: {stats.wins}  |  Losses: {stats.losses}  |  BE: {stats.break_even}  |  Open: {stats.open_trades}",
-            f"  Win Rate: {stats.win_rate:.1f}%",
+            "📈 SUMMARY",
+            f"  📊 Total trades: {stats.total_trades}",
+            f"  ✅ Wins: {stats.wins}  |  ❌ Losses: {stats.losses}  |  ⚪ BE: {stats.break_even}  |  🔄 Open: {stats.open_trades}",
+            f"  🎯 Win Rate: {stats.win_rate:.1f}%",
             "",
-            "PERFORMANCE",
-            f"  Net: {stats.net_pnl_points:+.1f} pts (${stats.net_pnl_points / 10:+.1f})",
-            f"  Profit Factor: {pf_display}  ({pf_note})",
-            f"  Avg Win: +{stats.avg_win_points:.1f}  |  Avg Loss: {stats.avg_loss_points:.1f}",
-            f"  Best Trade: {stats.largest_win_points:+.1f}  |  Worst: {stats.largest_loss_points:.1f}",
-            f"  Expectancy: {expectancy:+.1f} pts/trade",
+            "💰 PERFORMANCE",
+            f"  💵 Net: {stats.net_pnl_points:+.1f} pts (${stats.net_pnl_points / 10:+.1f})",
+            f"  ⚖️ Profit Factor: {pf_display}  ({pf_note})",
+            f"  📊 Avg Win: +{stats.avg_win_points:.1f}  |  Avg Loss: {stats.avg_loss_points:.1f}",
+            f"  🏆 Best Trade: {stats.largest_win_points:+.1f}  |  💔 Worst: {stats.largest_loss_points:.1f}",
+            f"  📈 Expectancy: {expectancy:+.1f} pts/trade",
             "",
-            "AGENT PERFORMANCE",
+            "🤖 AGENT PERFORMANCE",
             agent_section,
             "",
-            "DAILY BREAKDOWN",
+            "📅 DAILY BREAKDOWN",
             f"  {best_day_line}",
             f"  {worst_day_line}",
             "",
-            "SESSION PERFORMANCE",
+            "🌍 SESSION PERFORMANCE",
             session_section,
             "",
-            "RISK GRADE",
+            "🛡️ RISK GRADE",
             f"  Grade: {grade}",
             f"  {verdict}",
             "",
-            "Paper trading only — not financial advice.",
+            "⚠️ Paper trading only — not financial advice.",
         ]
         return "\n".join(lines)
 
@@ -528,16 +528,49 @@ class WeeklyReportService:
 
     @staticmethod
     def _trade_agents(trade: Dict[str, Any]) -> List[str]:
+        """Extract agent names from trade data or signal_snapshot."""
+        # Direct fields
         agents = trade.get("agents") or trade.get("signals_agents") or []
         if isinstance(agents, str):
             return [a.strip() for a in agents.split(",") if a.strip()]
-        if isinstance(agents, list):
+        if isinstance(agents, list) and agents:
             return [str(a) for a in agents if a]
-        return ["unknown"]
+
+        # Extract from signal_snapshot (where decision data is stored)
+        snapshot = trade.get("signal_snapshot") or {}
+        agent_context = snapshot.get("agent_context") or {}
+        if agent_context.get("agent"):
+            return [str(agent_context["agent"])]
+
+        # Try to find from votes
+        votes = snapshot.get("votes") or {}
+        agent_names = []
+        for side in ("BUY", "SELL"):
+            for vote in votes.get(side, []) or []:
+                name = str(vote.get("agent", "")).strip()
+                if name and name not in agent_names:
+                    agent_names.append(name)
+        if agent_names:
+            return agent_names
+
+        return ["consensus"]
 
     @staticmethod
     def _trade_session(trade: Dict[str, Any]) -> str:
-        return str(trade.get("session") or trade.get("current_session") or "unknown")
+        """Extract session from trade data or signal_snapshot."""
+        # Direct fields
+        session = trade.get("session") or trade.get("current_session")
+        if session:
+            return str(session)
+
+        # Extract from signal_snapshot
+        snapshot = trade.get("signal_snapshot") or {}
+        session_info = snapshot.get("session_info") or {}
+        session = session_info.get("current_session")
+        if session:
+            return str(session)
+
+        return "unknown"
 
     def _safe_count(self, table: str, filters: Dict[str, Any]) -> int:
         """Best-effort count; never raises."""
