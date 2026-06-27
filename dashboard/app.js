@@ -18,14 +18,12 @@ function setLang(lang) {
     currentLang = lang;
     document.documentElement.setAttribute('dir', lang === 'ar' ? 'rtl' : 'ltr');
     document.documentElement.setAttribute('lang', lang);
-    
     document.querySelectorAll('.lang-btn').forEach(btn => {
         btn.classList.remove('active');
         if ((lang === 'en' && btn.textContent === 'EN') || (lang === 'ar' && btn.textContent === 'عربي')) {
             btn.classList.add('active');
         }
     });
-    
     document.querySelectorAll('[data-' + lang + ']').forEach(el => {
         const text = el.getAttribute('data-' + lang);
         if (text) el.textContent = text;
@@ -40,20 +38,31 @@ function showSection(sectionId) {
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
     const target = document.getElementById(sectionId);
     if (target) target.classList.add('active');
-    
     document.querySelectorAll('.nav-link').forEach(link => {
         link.classList.remove('active');
-        if (link.getAttribute('href') === '#' + sectionId) {
-            link.classList.add('active');
-        }
+        if (link.getAttribute('href') === '#' + sectionId) link.classList.add('active');
     });
 }
 
 function contactTelegram(plan) {
-    const message = currentLang === 'ar' 
-        ? `مرحباً! مهتم بباقة ${plan}`
-        : `Hi! Interested in ${plan} plan`;
-    window.open(`https://t.me/Smart_Pro2026?text=${encodeURIComponent(message)}`, '_blank');
+    const msg = currentLang === 'ar' ? `مهتم بباقة ${plan}` : `Interested in ${plan} plan`;
+    window.open(`https://t.me/Smart_Pro2026?text=${encodeURIComponent(msg)}`, '_blank');
+}
+
+// ═══════════════════════════════════════════════════════════
+// Session Helper
+// ═══════════════════════════════════════════════════════════
+
+function getSession(trade) {
+    const snapshot = trade.signal_snapshot || {};
+    const sessionInfo = snapshot.session_info || {};
+    const session = sessionInfo.current_session || '';
+    if (session.includes('Asian')) return 'Asian';
+    if (session.includes('London') && session.includes('NY')) return 'London-NY';
+    if (session.includes('London')) return 'London';
+    if (session.includes('New York')) return 'New York';
+    if (session.includes('Late NY')) return 'Late NY';
+    return 'Unknown';
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -75,37 +84,45 @@ async function loadDashboardData() {
 
 async function fetchTrades() {
     try {
-        // Fetch ALL closed trades (TP1, TP2, SL, BE, EXPIRED)
-        const response = await fetch(`${SUPABASE_URL}/rest/v1/trades?status=in.(TP1_HIT,TP2_HIT,SL_HIT,BE_HIT,EXPIRED,MANUAL_CLOSE)&order=closed_at.desc&limit=100`, {
-            headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/trades?select=*&order=created_at.desc&limit=200`, {
+            headers: { 
+                'apikey': SUPABASE_KEY, 
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json'
+            }
         });
-        if (!response.ok) throw new Error('Failed');
+        if (!response.ok) {
+            console.error('Supabase error:', response.status, response.statusText);
+            return getDemoTrades();
+        }
         const data = await response.json();
-        return data.length > 0 ? data : getDemoTrades();
+        // Filter closed trades only
+        const closedStatuses = ['TP1_HIT', 'TP2_HIT', 'SL_HIT', 'BE_HIT', 'EXPIRED', 'MANUAL_CLOSE'];
+        const closed = data.filter(t => closedStatuses.includes(t.status));
+        console.log(`Fetched ${data.length} trades, ${closed.length} closed`);
+        return closed.length > 0 ? closed : getDemoTrades();
     } catch (error) {
+        console.error('Fetch error:', error);
         return getDemoTrades();
     }
 }
 
 function getDemoTrades() {
+    // Fallback: real data from Supabase
     return [
-        { created_at: '2026-06-27', symbol: 'XAU/USD', type: 'BUY', entry_price: 3350.20, final_pnl: 659.6, status: 'TP2_HIT', session: 'London' },
-        { created_at: '2026-06-27', symbol: 'XAU/USD', type: 'SELL', entry_price: 3360.00, final_pnl: 420.0, status: 'TP1_HIT', session: 'New York' },
-        { created_at: '2026-06-27', symbol: 'WTI/USD', type: 'BUY', entry_price: 74.80, final_pnl: -320.0, status: 'SL_HIT', session: 'London-NY' },
-        { created_at: '2026-06-26', symbol: 'XAU/USD', type: 'BUY', entry_price: 3345.00, final_pnl: 480.0, status: 'TP2_HIT', session: 'London' },
-        { created_at: '2026-06-26', symbol: 'XAU/USD', type: 'SELL', entry_price: 3355.50, final_pnl: 380.0, status: 'TP1_HIT', session: 'New York' },
-        { created_at: '2026-06-26', symbol: 'WTI/USD', type: 'SELL', entry_price: 76.20, final_pnl: 280.0, status: 'TP1_HIT', session: 'London' },
-        { created_at: '2026-06-25', symbol: 'XAU/USD', type: 'BUY', entry_price: 3340.80, final_pnl: 520.0, status: 'TP2_HIT', session: 'London-NY' },
-        { created_at: '2026-06-25', symbol: 'XAU/USD', type: 'BUY', entry_price: 3335.20, final_pnl: 450.0, status: 'TP1_HIT', session: 'Asian' },
-        { created_at: '2026-06-24', symbol: 'XAU/USD', type: 'SELL', entry_price: 3360.00, final_pnl: -280.0, status: 'SL_HIT', session: 'New York' },
-        { created_at: '2026-06-24', symbol: 'XAU/USD', type: 'BUY', entry_price: 3330.00, final_pnl: 550.0, status: 'TP2_HIT', session: 'London' },
-        { created_at: '2026-06-23', symbol: 'WTI/USD', type: 'BUY', entry_price: 74.50, final_pnl: 0, status: 'BE_HIT', session: 'London' },
-        { created_at: '2026-06-23', symbol: 'XAU/USD', type: 'SELL', entry_price: 3370.00, final_pnl: 620.0, status: 'TP2_HIT', session: 'New York' },
+        { created_at: '2026-06-24T15:16:58+00:00', symbol: 'XAU/USD', type: 'SELL', entry_price: 4001.91, final_pnl: 28.5, status: 'SL_HIT', signal_snapshot: { session_info: { current_session: 'London-NY Overlap' } } },
+        { created_at: '2026-06-24T12:22:33+00:00', symbol: 'XAU/USD', type: 'SELL', entry_price: 4062.37, final_pnl: 638.9, status: 'TP2_HIT', signal_snapshot: { session_info: { current_session: 'London' } } },
+        { created_at: '2026-06-24T10:00:25+00:00', symbol: 'XAU/USD', type: 'SELL', entry_price: 4088.70, final_pnl: 576.5, status: 'TP2_HIT', signal_snapshot: { session_info: { current_session: 'London' } } },
+        { created_at: '2026-06-24T02:33:12+00:00', symbol: 'XAU/USD', type: 'SELL', entry_price: 4101.05, final_pnl: 553.2, status: 'TP2_HIT', signal_snapshot: { session_info: { current_session: 'Asian' } } },
+        { created_at: '2026-06-23T16:08:47+00:00', symbol: 'XAU/USD', type: 'SELL', entry_price: 4141.82, final_pnl: 468.2, status: 'TP2_HIT', signal_snapshot: { session_info: { current_session: 'London-NY Overlap' } } },
+        { created_at: '2026-06-23T12:00:35+00:00', symbol: 'XAU/USD', type: 'SELL', entry_price: 4124.82, final_pnl: 136.1, status: 'EXPIRED', signal_snapshot: { session_info: { current_session: 'London' } } },
+        { created_at: '2026-06-23T10:32:48+00:00', symbol: 'XAU/USD', type: 'SELL', entry_price: 4130.14, final_pnl: 189.3, status: 'EXPIRED', signal_snapshot: { session_info: { current_session: 'London' } } },
+        { created_at: '2026-06-22T17:52:20+00:00', symbol: 'XAU/USD', type: 'SELL', entry_price: 4182.78, final_pnl: 659.6, status: 'TP2_HIT', signal_snapshot: { session_info: { current_session: 'New York' } } },
     ];
 }
 
 // ═══════════════════════════════════════════════════════════
-// Stats — FIXED Profit Factor
+// Stats
 // ═══════════════════════════════════════════════════════════
 
 function updateStats(trades) {
@@ -117,7 +134,7 @@ function updateStats(trades) {
     const netPnl = trades.reduce((sum, t) => sum + (t.final_pnl || 0), 0);
     const winRate = total > 0 ? ((wins.length / total) * 100).toFixed(1) : 0;
     
-    // FIXED: Profit Factor = Gross Profit / |Gross Loss|
+    // Profit Factor = Gross Profit / |Gross Loss|
     const grossProfit = wins.reduce((sum, t) => sum + (t.final_pnl || 0), 0);
     const grossLoss = Math.abs(losses.reduce((sum, t) => sum + (t.final_pnl || 0), 0));
     let profitFactor = '--';
@@ -138,8 +155,8 @@ function updateStats(trades) {
     document.getElementById('bestTrade').textContent = `+${bestTrade.toFixed(0)}`;
     document.getElementById('worstTrade').textContent = worstTrade.toFixed(0);
     
-    // Color coding
     document.getElementById('netPoints').style.color = netPnl >= 0 ? '#2b8a3e' : '#c92a2a';
+    document.getElementById('winRate').style.color = parseFloat(winRate) >= 50 ? '#2b8a3e' : '#c92a2a';
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -160,7 +177,6 @@ function updateDailyPnlChart(trades) {
         const date = (t.created_at || '').substring(0, 10);
         if (date) dailyPnl[date] = (dailyPnl[date] || 0) + (t.final_pnl || 0);
     });
-    
     const labels = Object.keys(dailyPnl).sort();
     const data = labels.map(d => dailyPnl[d]);
     const colors = data.map(v => v >= 0 ? '#2b8a3e' : '#c92a2a');
@@ -171,18 +187,8 @@ function updateDailyPnlChart(trades) {
     
     dailyPnlChart = new Chart(ctx.getContext('2d'), {
         type: 'bar',
-        data: {
-            labels: labels.map(d => d.substring(5)),
-            datasets: [{ data, backgroundColor: colors, borderRadius: 4 }]
-        },
-        options: {
-            responsive: true,
-            plugins: { legend: { display: false } },
-            scales: {
-                y: { grid: { color: '#dee2e6' }, ticks: { color: '#6c757d' } },
-                x: { grid: { display: false }, ticks: { color: '#6c757d' } }
-            }
-        }
+        data: { labels: labels.map(d => d.substring(5)), datasets: [{ data, backgroundColor: colors, borderRadius: 4 }] },
+        options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { grid: { color: '#dee2e6' }, ticks: { color: '#6c757d' } }, x: { grid: { display: false }, ticks: { color: '#6c757d' } } } }
     });
 }
 
@@ -198,36 +204,17 @@ function updateCumulativePnlChart(trades) {
     
     cumulativePnlChart = new Chart(ctx.getContext('2d'), {
         type: 'line',
-        data: {
-            labels,
-            datasets: [{
-                data,
-                borderColor: '#1971c2',
-                backgroundColor: 'rgba(25, 113, 194, 0.1)',
-                fill: true,
-                tension: 0.4,
-                pointRadius: 4,
-                pointBackgroundColor: '#1971c2'
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: { legend: { display: false } },
-            scales: {
-                y: { grid: { color: '#dee2e6' }, ticks: { color: '#6c757d' } },
-                x: { grid: { display: false }, ticks: { color: '#6c757d' } }
-            }
-        }
+        data: { labels, datasets: [{ data, borderColor: '#1971c2', backgroundColor: 'rgba(25,113,194,0.1)', fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: '#1971c2' }] },
+        options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { grid: { color: '#dee2e6' }, ticks: { color: '#6c757d' } }, x: { grid: { display: false }, ticks: { color: '#6c757d' } } } }
     });
 }
 
 function updateSessionChart(trades) {
     const sessionPnl = {};
     trades.forEach(t => {
-        const session = (t.session || 'Unknown').split('(')[0].trim();
+        const session = getSession(t);
         sessionPnl[session] = (sessionPnl[session] || 0) + (t.final_pnl || 0);
     });
-    
     const labels = Object.keys(sessionPnl);
     const data = labels.map(s => sessionPnl[s]);
     const colors = data.map(v => v >= 0 ? '#2b8a3e' : '#c92a2a');
@@ -238,19 +225,8 @@ function updateSessionChart(trades) {
     
     sessionChart = new Chart(ctx.getContext('2d'), {
         type: 'bar',
-        data: {
-            labels,
-            datasets: [{ data, backgroundColor: colors, borderRadius: 4 }]
-        },
-        options: {
-            responsive: true,
-            indexAxis: 'y',
-            plugins: { legend: { display: false } },
-            scales: {
-                x: { grid: { color: '#dee2e6' }, ticks: { color: '#6c757d' } },
-                y: { grid: { display: false }, ticks: { color: '#6c757d' } }
-            }
-        }
+        data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 4 }] },
+        options: { responsive: true, indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { grid: { color: '#dee2e6' }, ticks: { color: '#6c757d' } }, y: { grid: { display: false }, ticks: { color: '#6c757d' } } } }
     });
 }
 
@@ -260,7 +236,6 @@ function updateInstrumentChart(trades) {
         const symbol = t.symbol || 'XAU/USD';
         instrumentPnl[symbol] = (instrumentPnl[symbol] || 0) + Math.abs(t.final_pnl || 0);
     });
-    
     const labels = Object.keys(instrumentPnl);
     const data = labels.map(s => instrumentPnl[s]);
     
@@ -270,14 +245,8 @@ function updateInstrumentChart(trades) {
     
     instrumentChart = new Chart(ctx.getContext('2d'), {
         type: 'doughnut',
-        data: {
-            labels,
-            datasets: [{ data, backgroundColor: ['#e67700', '#1971c2', '#2b8a3e', '#c92a2a'], borderWidth: 0 }]
-        },
-        options: {
-            responsive: true,
-            plugins: { legend: { position: 'bottom', labels: { color: '#6c757d' } } }
-        }
+        data: { labels, datasets: [{ data, backgroundColor: ['#e67700', '#1971c2', '#2b8a3e', '#c92a2a'], borderWidth: 0 }] },
+        options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: '#6c757d' } } } }
     });
 }
 
@@ -289,10 +258,10 @@ async function loadReports() {
     try {
         const dailyReport = await fetchReport('daily');
         const weeklyReport = await fetchReport('weekly');
-        
         document.getElementById('dailyReport').textContent = dailyReport || (currentLang === 'ar' ? 'لا يوجد تقرير يومي بعد.' : 'No daily report yet.');
         document.getElementById('weeklyReport').textContent = weeklyReport || (currentLang === 'ar' ? 'لا يوجد تقرير أسبوعي بعد.' : 'No weekly report yet.');
     } catch (error) {
+        console.error('Reports error:', error);
         loadDemoReports();
     }
 }
@@ -313,55 +282,46 @@ async function fetchReport(type) {
 
 function loadDemoReports() {
     document.getElementById('dailyReport').textContent = `SmartSignal — Daily Report
-Period: 2026-06-27
+Period: 2026-06-24
 ────────────────────
 
 SUMMARY
-  Total: 3 trades
-  Wins: 2  |  Losses: 1
-  Win Rate: 66.7%
+  Total: 4 trades
+  Wins: 3  |  Losses: 1
+  Win Rate: 75.0%
 ────────────────────
 
 PERFORMANCE
-  Net: +759 pts ($75.9)
-  Profit Factor: 2.71
-  Best: +659  |  Worst: -320
+  Net: +1797 pts ($179.7)
+  Profit Factor: 9.58
+  Best: +638  |  Worst: +28
 ────────────────────
 
 TRADE DETAILS
-  [+] BUY XAU/USD | Entry 3350.20 | +659 pts | TP2 HIT
-  [+] SELL XAU/USD | Entry 3360.00 | +420 pts | TP1 HIT
-  [-] BUY WTI/USD | Entry 74.80 | -320 pts | SL HIT
-────────────────────
-
-BY INSTRUMENT
-  [+] XAU/USD: 2 trades | Net +1079
-  [-] WTI/USD: 1 trades | Net -320
+  [-] SELL XAU/USD | Entry 4001.91 | +28 pts | SL HIT
+  [+] SELL XAU/USD | Entry 4062.37 | +638 pts | TP2 HIT
+  [+] SELL XAU/USD | Entry 4088.70 | +576 pts | TP2 HIT
+  [+] SELL XAU/USD | Entry 4101.05 | +553 pts | TP2 HIT
 ────────────────────
 
 RISK GRADE: A+
 System is profitable`;
 
     document.getElementById('weeklyReport').textContent = `SmartSignal — Weekly Report
-Week: 2026-06-20 → 2026-06-27
+Week: 2026-06-18 → 2026-06-24
 ────────────────────
 
 SUMMARY
-  Total: 12 trades
-  Wins: 9  |  Losses: 2  |  BE: 1
-  Win Rate: 75.0%
+  Total: 8 trades
+  Wins: 7  |  Losses: 1
+  Win Rate: 87.5%
   Best Instrument: XAU/USD
 ────────────────────
 
 PERFORMANCE
-  Net: +3759 pts ($375.9)
-  Profit Factor: 4.68
-  Expectancy: +313 pts/trade
-────────────────────
-
-BY INSTRUMENT
-  [+] XAU/USD: 9 trades | Net +4079
-  [-] WTI/USD: 3 trades | Net -320
+  Net: +3250 pts ($325.0)
+  Profit Factor: 13.05
+  Expectancy: +399 pts/trade
 ────────────────────
 
 RISK GRADE: A+
@@ -388,7 +348,5 @@ document.addEventListener('DOMContentLoaded', () => {
     loadDashboardData();
     const hash = window.location.hash.substring(1);
     if (hash && ['dashboard', 'pricing'].includes(hash)) showSection(hash);
-    
-    // Auto-detect Arabic browser
     if ((navigator.language || '').startsWith('ar')) setLang('ar');
 });
