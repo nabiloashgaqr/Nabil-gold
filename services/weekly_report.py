@@ -318,6 +318,7 @@ class WeeklyReportService:
                 "recommendations": [],
             }
             self._save(result)
+            self.save_to_database(result)
             return result
 
         message = self._fallback_message(stats)
@@ -328,7 +329,64 @@ class WeeklyReportService:
             "recommendations": [],
         }
         self._save(result)
+        self.save_to_database(result)
         return result
+
+
+
+    def save_to_database(self, result: Dict[str, Any]) -> None:
+        """Persist weekly report into Supabase weekly_reports for dashboard use.
+
+        The local JSON artifact is still written by _save(). This method archives
+        the report in Supabase. It upserts by (week_start, week_end) using a
+        select-then-update flow to avoid requiring a unique constraint.
+        """
+        stats = result.get("stats") or {}
+        week_text = str(stats.get("week") or "")
+        if "→" in week_text:
+            week_start, week_end = [x.strip() for x in week_text.split("→", 1)]
+        else:
+            week_start = str(stats.get("week_start") or "")
+            week_end = str(stats.get("week_end") or "")
+        if not week_start or week_start == "—":
+            week_start = datetime.now(self.tz).date().isoformat()
+        if not week_end or week_end == "—":
+            week_end = datetime.now(self.tz).date().isoformat()
+
+        payload = {
+            "week_start": week_start,
+            "week_end": week_end,
+            "stats_json": stats,
+            "report_text": str(result.get("report_text") or ""),
+            "recommendations": result.get("recommendations") or [],
+            "tokens_used": int(result.get("tokens_used", 0) or 0),
+            "cost": float(result.get("cost", 0) or 0),
+            "status": str(result.get("status") or "ok"),
+        }
+
+        client = getattr(self.database, "client", None)
+        if not (getattr(self.database, "use_supabase", False) and client is not None):
+            logger.info("Supabase unavailable; weekly report saved only as local JSON artifact.")
+            return
+
+        try:
+            existing = (
+                client.table("weekly_reports")
+                .select("id")
+                .eq("week_start", week_start)
+                .eq("week_end", week_end)
+                .limit(1)
+                .execute()
+            )
+            rows = list(existing.data or [])
+            if rows:
+                client.table("weekly_reports").update(payload).eq("id", rows[0]["id"]).execute()
+                logger.info("Saved weekly report to Supabase: updated %s → %s", week_start, week_end)
+            else:
+                client.table("weekly_reports").insert(payload).execute()
+                logger.info("Saved weekly report to Supabase: inserted %s → %s", week_start, week_end)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Failed to save weekly report to Supabase: %s", exc)
 
 
     # ------------------------------------------------------------------ #
