@@ -2,7 +2,7 @@
 // Reads Supabase using server-side environment variables only.
 // Required env in Vercel: SUPABASE_URL and SUPABASE_SERVICE_KEY (or SUPABASE_KEY).
 
-const OUTCOME_STATUSES = ['TP1_HIT', 'TP2_HIT', 'SL_HIT'];
+const OUTCOME_STATUSES = ['TP1_HIT', 'TP2_HIT', 'SL_HIT', 'BE_HIT', 'EXPIRED', 'MANUAL_CLOSE', 'CLOSED'];
 const LIVE_STATUSES = [];
 
 function json(res, status, body) {
@@ -52,15 +52,26 @@ async function supabaseGet(path, params = {}) {
   return response.json();
 }
 
+function normalizePnlByStatus(status, rawPnl) {
+  let pnl = Number(rawPnl) || 0;
+  // In this dashboard, SL_HIT is treated as a losing stop event.
+  // Some old rows stored a positive final_pnl after stop/trailing logic;
+  // for performance metrics and Profit Factor we normalize SL_HIT to negative.
+  if (String(status || '').toUpperCase() === 'SL_HIT' && pnl > 0) pnl = -Math.abs(pnl);
+  return pnl;
+}
+
 function normalizeTrade(t) {
   const status = String(t.status || 'UNKNOWN').toUpperCase();
-  const pnl = Number(t.final_pnl ?? t.current_pnl_points ?? t.current_pnl ?? t.pnl ?? 0) || 0;
+  const rawPnl = t.final_pnl ?? t.current_pnl_points ?? t.current_pnl ?? t.pnl ?? 0;
+  const pnl = normalizePnlByStatus(status, rawPnl);
   return {
     ...t,
     id: t.id || '',
     symbol: t.symbol || 'XAU/USD',
     type: String(t.type || t.side || t.trade_type || '').toUpperCase(),
     status,
+    raw_pnl: Number(rawPnl) || 0,
     pnl,
     created_at: t.created_at || t.entry_time || t.opened_at || t.updated_at || '',
     closed_at: t.closed_at || t.close_time || '',
