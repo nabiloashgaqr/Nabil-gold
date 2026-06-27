@@ -148,8 +148,10 @@ class WeeklyReportService:
             pnl = self._trade_pnl(trade)
             pnl_total += pnl
             status = str(trade.get("status", "")).upper()
-            is_loss = status == "SL_HIT" or pnl < 0
-            is_be = status in {"BE_HIT", "EXPIRED"} and abs(pnl) < 0.5
+            # SL_HIT can be a loss, breakeven, or SL+ after stop was moved.
+            # Use actual PnL sign for performance classification.
+            is_loss = pnl < 0
+            is_be = abs(pnl) < 0.5 or (status in {"BE_HIT", "EXPIRED"} and abs(pnl) < 0.5)
             if is_loss:
                 losses.append(pnl)
                 largest_loss = min(largest_loss, pnl)
@@ -187,9 +189,9 @@ class WeeklyReportService:
             bucket["pnl"] += pnl
             bucket["count"] += 1
             status = str(trade.get("status", "")).upper()
-            if status == "SL_HIT" or pnl < 0:
+            if pnl < 0:
                 bucket["losses"] += 1
-            elif status not in {"BE_HIT", "EXPIRED"} or pnl >= 0:
+            elif pnl > 0:
                 bucket["wins"] += 1
         stats.by_day = {d: {**v, "pnl": round(v["pnl"], 2)} for d, v in day_buckets.items()}
         if day_buckets:
@@ -204,7 +206,7 @@ class WeeklyReportService:
             agents = self._trade_agents(trade)
             pnl = self._trade_pnl(trade)
             status = str(trade.get("status", "")).upper()
-            is_win = status not in {"SL_HIT"} and pnl >= 0
+            is_win = pnl > 0
             for agent in agents:
                 bucket = agent_buckets.setdefault(
                     agent, {"count": 0, "wins": 0, "losses": 0, "pnl": 0.0})
@@ -229,7 +231,7 @@ class WeeklyReportService:
             bucket["count"] += 1
             bucket["pnl"] += pnl
             status = str(trade.get("status", "")).upper()
-            if status not in {"SL_HIT"} and pnl >= 0:
+            if pnl > 0:
                 bucket["wins"] += 1
         stats.by_session = {
             s: {**v, "pnl": round(v["pnl"], 2),
@@ -243,7 +245,7 @@ class WeeklyReportService:
             symbol = str(trade.get("symbol") or "XAU/USD")
             pnl = self._trade_pnl(trade)
             status = str(trade.get("status", "")).upper()
-            is_win = status not in {"SL_HIT"} and pnl >= 0
+            is_win = pnl > 0
             bucket = instrument_buckets.setdefault(
                 symbol, {"count": 0, "wins": 0, "losses": 0, "pnl": 0.0})
             bucket["count"] += 1
