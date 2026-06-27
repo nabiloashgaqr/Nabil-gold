@@ -90,6 +90,24 @@ class DailyReportAgent(BaseAgent):
         buy = direction.get("BUY", {})
         sell = direction.get("SELL", {})
 
+        # Session breakdown
+        session_map = {
+            "Asian Session (00:00-07:00 UTC)": "🌏 Asian Session (00:00-07:00 UTC)",
+            "London Session (07:00-12:00 UTC)": "🇬🇧 London Session (07:00-12:00 UTC)",
+            "London-NY Overlap (12:00-16:00 UTC)": "🇺🇸🇬🇧 London-NY Overlap (12:00-16:00 UTC)",
+            "New York Session (16:00-21:00 UTC)": "🇺🇸 New York Session (16:00-21:00 UTC)",
+            "Late NY Session (21:00-00:00 UTC)": "🌙 Late NY Session (21:00-00:00 UTC)",
+            "unknown": "❓ Unknown Session",
+        }
+        session_lines = []
+        for session, data in sorted(stats.get("by_session", {}).items(), key=lambda x: x[1].get("net", 0), reverse=True):
+            icon = "[+]" if data.get("net", 0) > 0 else "[-]" if data.get("net", 0) < 0 else "[=]"
+            session_name = session_map.get(session, session)
+            session_lines.append(
+                f"  {icon} {session_name}: {data.get('count', 0)} trades | Net {data.get('net', 0):+.1f} pts"
+            )
+        session_section = "\n".join(session_lines) if session_lines else "  No session data"
+
         # Trade details
         trade_details = self._format_trade_details(trades)
 
@@ -102,44 +120,56 @@ class DailyReportAgent(BaseAgent):
         # Recommendations
         recommendations = "\n".join(f"• {html.escape(str(x))}" for x in stats.get("recommendations", [])[:4]) or "• Not enough data yet"
 
-        return f"""SmartSignal — {title_en}
-━━━━━━━━━━━━━━━━━━━━━
+        separator = "───────────────────────────────────"
 
-Period: {html.escape(date.today().isoformat())}
+        return f"""📊 SmartSignal — {title_en}
+📅 Period: {html.escape(date.today().isoformat())}
+{separator}
 
-SUMMARY
+📈 SUMMARY
   Total: {stats['total']} trades
-  Wins: {stats['wins']}  |  Losses: {stats['losses']}  |  BE: {stats['breakeven']}  |  Open: {stats['open']}
-  Win Rate: {stats['win_rate']}%
+  ✅ Wins: {stats['wins']}  |  ❌ Losses: {stats['losses']}  |  ⚪ BE: {stats['breakeven']}  |  🔄 Open: {stats['open']}
+  🎯 Win Rate: {stats['win_rate']}%
+{separator}
 
-PERFORMANCE
-  Net: {stats['net_points']:+.1f} pts (${stats['net_points'] / 10:+.1f})
-  Gross Profit: +{stats['gross_profit']:.1f} pts
-  Gross Loss: -{stats['gross_loss']:.1f} pts
-  Profit Factor: {pf_display}
-  Avg Win: +{stats['avg_win']:.1f}  |  Avg Loss: -{stats['avg_loss']:.1f}
-  Best Trade: {stats['best_trade']:+.1f}  |  Worst: {stats['worst_trade']:+.1f}
+💰 PERFORMANCE
+  💵 Net: {stats['net_points']:+.1f} pts (${stats['net_points'] / 10:+.1f})
+  📊 Gross Profit: +{stats['gross_profit']:.1f} pts  |  Gross Loss: -{stats['gross_loss']:.1f} pts
+  ⚖️ Profit Factor: {pf_display}
+  📈 Avg Win: +{stats['avg_win']:.1f}  |  Avg Loss: -{stats['avg_loss']:.1f}
+  🏆 Best: {stats['best_trade']:+.1f}  |  💔 Worst: {stats['worst_trade']:+.1f}
+{separator}
 
-WIN/LOSS STREAKS
-  Best Streak: {streaks['best_win']} wins
-  Worst Streak: {streaks['worst_loss']} losses
-  Current: {streaks['current']}
+🎯 WIN/LOSS STREAKS
+  🔥 Best Streak: {streaks['best_win']} wins
+  ⚠️ Worst Streak: {streaks['worst_loss']} losses
+  📍 Current: {streaks['current']}
+{separator}
 
-BY INSTRUMENT
+📊 BY INSTRUMENT
 {instrument_lines}
+{separator}
 
-BY DIRECTION
-  BUY: {buy.get('count', 0)} trades → {buy.get('net', 0):+.1f} pts
-  SELL: {sell.get('count', 0)} trades → {sell.get('net', 0):+.1f} pts
+🧭 BY DIRECTION
+  🔼 BUY: {buy.get('count', 0)} trades → {buy.get('net', 0):+.1f} pts
+  🔽 SELL: {sell.get('count', 0)} trades → {sell.get('net', 0):+.1f} pts
+{separator}
 
+🌍 BY SESSION
+{session_section}
+{separator}
+
+📋 TRADE DETAILS
 {trade_details}
+{separator}
 
 {risk}
+{separator}
 
-RECOMMENDATIONS
+💡 RECOMMENDATIONS
 {recommendations}
 
-Paper trading only — not financial advice.""".strip()
+⚠️ Paper trading only — not financial advice.""".strip()
 
     def _format_instruments(self, by_instrument: Dict[str, Dict[str, Any]]) -> str:
         if not by_instrument:
