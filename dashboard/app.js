@@ -3,8 +3,8 @@
 // ═══════════════════════════════════════════════════════════
 
 // Supabase Configuration
-const SUPABASE_URL = 'https://your-project.supabase.co';
-const SUPABASE_KEY = 'your-anon-key';
+const SUPABASE_URL = 'https://trsmuzekxmpqtvxdkxwe.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyc211emVreG1wcXR2eGRreHdlIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTc2NDc5NiwiZXhwIjoyMDk3MzQwNzk2fQ.SshxIsbWpD-2sXHOSXbaLRxLGDGNcQC9G3SyDvisvso';
 
 // Chart instances
 let dailyPnlChart = null;
