@@ -1,9 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" dir="ltr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SmartSignal — Trading Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -12,16 +14,21 @@
     <nav class="navbar">
         <div class="nav-brand">
             <span class="logo">📊</span>
-            <span class="brand-name">SmartSignal</span>
+            <span class="brand-name" data-en="SmartSignal" data-ar="سمارت سيغنال">SmartSignal</span>
         </div>
         <div class="nav-links">
-            <a href="#dashboard" class="nav-link active" onclick="showSection('dashboard')">Dashboard</a>
-            <a href="#pricing" class="nav-link" onclick="showSection('pricing')">Pricing</a>
-            <a href="https://t.me/GoldOilSignals" class="nav-link btn-join" target="_blank">Join Free</a>
+            <a href="#dashboard" class="nav-link active" onclick="showSection('dashboard')" data-en="Dashboard" data-ar="لوحة التحكم">Dashboard</a>
+            <a href="#pricing" class="nav-link" onclick="showSection('pricing')" data-en="Pricing" data-ar="الأسعار">Pricing</a>
+            <a href="https://t.me/GoldOilSignals" class="nav-link btn-join" target="_blank" data-en="Join Free" data-ar="انضم مجاناً">Join Free</a>
         </div>
         <div class="nav-status">
+            <div class="lang-toggle">
+                <button class="lang-btn active" onclick="setLang('en')">EN</button>
+                <button class="lang-btn" onclick="setLang('ar')">عربي</button>
+            </div>
             <span class="status-dot"></span>
-            <span class="status-text">Last Update: <span id="lastUpdate">Loading...</span></span>
+            <span class="status-text" data-en="Last Update:" data-ar="آخر تحديث:">Last Update:</span>
+            <span id="lastUpdate">Loading...</span>
         </div>
     </nav>
 
@@ -32,54 +39,54 @@
             <div class="stat-card">
                 <div class="stat-icon">📈</div>
                 <div class="stat-value" id="totalTrades">--</div>
-                <div class="stat-label">Total Trades</div>
+                <div class="stat-label" data-en="Total Trades" data-ar="إجمالي الصفقات">Total Trades</div>
             </div>
             <div class="stat-card success">
                 <div class="stat-icon">🎯</div>
                 <div class="stat-value" id="winRate">--%</div>
-                <div class="stat-label">Win Rate</div>
+                <div class="stat-label" data-en="Win Rate" data-ar="نسبة الفوز">Win Rate</div>
             </div>
             <div class="stat-card success">
                 <div class="stat-icon">💰</div>
                 <div class="stat-value" id="netPoints">--</div>
-                <div class="stat-label">Net Points</div>
+                <div class="stat-label" data-en="Net Points" data-ar="صافي النقاط">Net Points</div>
             </div>
             <div class="stat-card">
                 <div class="stat-icon">⚖️</div>
                 <div class="stat-value" id="profitFactor">--</div>
-                <div class="stat-label">Profit Factor</div>
+                <div class="stat-label" data-en="Profit Factor" data-ar="عامل الربح">Profit Factor</div>
             </div>
             <div class="stat-card success">
                 <div class="stat-icon">🏆</div>
                 <div class="stat-value" id="bestTrade">--</div>
-                <div class="stat-label">Best Trade</div>
+                <div class="stat-label" data-en="Best Trade" data-ar="أفضل صفقة">Best Trade</div>
             </div>
             <div class="stat-card danger">
                 <div class="stat-icon">💔</div>
                 <div class="stat-value" id="worstTrade">--</div>
-                <div class="stat-label">Worst Trade</div>
+                <div class="stat-label" data-en="Worst Trade" data-ar="أسوأ صفقة">Worst Trade</div>
             </div>
         </div>
 
         <!-- Charts Row -->
         <div class="charts-grid">
             <div class="chart-card">
-                <h3>📈 Daily PnL</h3>
+                <h3 data-en="📈 Daily PnL" data-ar="📈 الأرباح اليومية">📈 Daily PnL</h3>
                 <canvas id="dailyPnlChart"></canvas>
             </div>
             <div class="chart-card">
-                <h3>📊 Cumulative PnL</h3>
+                <h3 data-en="📊 Cumulative PnL" data-ar="📊 الأرباح المتراكمة">📊 Cumulative PnL</h3>
                 <canvas id="cumulativePnlChart"></canvas>
             </div>
         </div>
 
         <div class="charts-grid">
             <div class="chart-card">
-                <h3>🌍 By Session</h3>
+                <h3 data-en="🌍 By Session" data-ar="🌍 حسب الجلسة">🌍 By Session</h3>
                 <canvas id="sessionChart"></canvas>
             </div>
             <div class="chart-card">
-                <h3>📊 By Instrument</h3>
+                <h3 data-en="📊 By Instrument" data-ar="📊 حسب الأداة">📊 By Instrument</h3>
                 <canvas id="instrumentChart"></canvas>
             </div>
         </div>
@@ -87,39 +94,39 @@
         <!-- Reports Grid -->
         <div class="reports-grid">
             <div class="report-card">
-                <h3>📋 Daily Report</h3>
+                <h3 data-en="📋 Daily Report" data-ar="📋 التقرير اليومي">📋 Daily Report</h3>
                 <div class="report-content" id="dailyReport">
-                    <div class="loading">Loading daily report...</div>
+                    <div class="loading" data-en="Loading daily report..." data-ar="جاري تحميل التقرير اليومي...">Loading daily report...</div>
                 </div>
             </div>
             <div class="report-card">
-                <h3>📊 Weekly Report</h3>
+                <h3 data-en="📊 Weekly Report" data-ar="📊 التقرير الأسبوعي">📊 Weekly Report</h3>
                 <div class="report-content" id="weeklyReport">
-                    <div class="loading">Loading weekly report...</div>
+                    <div class="loading" data-en="Loading weekly report..." data-ar="جاري تحميل التقرير الأسبوعي...">Loading weekly report...</div>
                 </div>
             </div>
         </div>
 
         <!-- Recent Trades -->
         <div class="trades-card">
-            <h3>📋 Recent Trades</h3>
+            <h3 data-en="📋 Recent Trades" data-ar="📋 آخر الصفقات">📋 Recent Trades</h3>
             <div class="trades-table-wrapper">
                 <table class="trades-table">
                     <thead>
                         <tr>
-                            <th>Date</th>
-                            <th>Symbol</th>
-                            <th>Side</th>
-                            <th>Entry</th>
+                            <th data-en="Date" data-ar="التاريخ">Date</th>
+                            <th data-en="Symbol" data-ar="الزوج">Symbol</th>
+                            <th data-en="Side" data-ar="الاتجاه">Side</th>
+                            <th data-en="Entry" data-ar="الدخول">Entry</th>
                             <th>SL</th>
                             <th>TP1</th>
                             <th>TP2</th>
-                            <th>PnL</th>
-                            <th>Status</th>
+                            <th data-en="PnL" data-ar="الربح">PnL</th>
+                            <th data-en="Status" data-ar="الحالة">Status</th>
                         </tr>
                     </thead>
                     <tbody id="tradesBody">
-                        <tr><td colspan="9" class="loading">Loading trades...</td></tr>
+                        <tr><td colspan="9" class="loading" data-en="Loading trades..." data-ar="جاري تحميل الصفقات...">Loading trades...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -129,123 +136,118 @@
     <!-- Pricing Section -->
     <section id="pricing" class="section">
         <div class="pricing-header">
-            <h1>🏆 SmartSignal — Premium Signals</h1>
-            <p>Automated trading signals for Gold & Oil powered by 5-agent consensus system</p>
-            <div class="pricing-badge">🎯 87.5% Win Rate This Week</div>
+            <h1 data-en="🏆 SmartSignal — Premium Signals" data-ar="🏆 سمارت سيغنال — إشارات متميزة">🏆 SmartSignal — Premium Signals</h1>
+            <p data-en="Automated trading signals for Gold & Oil powered by 5-agent consensus system" data-ar="إشارات تداول آلية للذهب والنفط تعمل بنظام إجماع 5 وكلاء">Automated trading signals for Gold & Oil powered by 5-agent consensus system</p>
+            <div class="pricing-badge" data-en="🎯 87.5% Win Rate This Week" data-ar="🎯 نسبة فوز 87.5% هذا الأسبوع">🎯 87.5% Win Rate This Week</div>
         </div>
 
         <div class="pricing-grid">
             <!-- Free Plan -->
             <div class="pricing-card">
-                <div class="pricing-plan">Free</div>
+                <div class="pricing-plan" data-en="Free" data-ar="مجاني">Free</div>
                 <div class="pricing-price">$0</div>
-                <div class="pricing-period">forever</div>
+                <div class="pricing-period" data-en="forever" data-ar="للأبد">forever</div>
                 <ul class="pricing-features">
-                    <li>✅ 1 signal per day</li>
-                    <li>✅ General market analysis</li>
-                    <li>✅ Weekly summary</li>
-                    <li>❌ Full entry/exit levels</li>
-                    <li>❌ Real-time updates</li>
-                    <li>❌ Trade management</li>
-                    <li>❌ Support</li>
+                    <li data-en="✅ 1 signal per day" data-ar="✅ إشارة واحدة يومياً">✅ 1 signal per day</li>
+                    <li data-en="✅ General market analysis" data-ar="✅ تحليل عام للسوق">✅ General market analysis</li>
+                    <li data-en="✅ Weekly summary" data-ar="✅ ملخص أسبوعي">✅ Weekly summary</li>
+                    <li data-en="❌ Full entry/exit levels" data-ar="❌ مستويات دخول/خروج كاملة">❌ Full entry/exit levels</li>
+                    <li data-en="❌ Real-time updates" data-ar="❌ تحديثات فورية">❌ Real-time updates</li>
+                    <li data-en="❌ Trade management" data-ar="❌ إدارة الصفقات">❌ Trade management</li>
                 </ul>
-                <a href="https://t.me/GoldOilSignals" class="pricing-btn" target="_blank">Join Free Channel</a>
+                <a href="https://t.me/GoldOilSignals" class="pricing-btn" target="_blank" data-en="Join Free Channel" data-ar="انضم للقناة المجانية">Join Free Channel</a>
             </div>
 
             <!-- Starter Plan -->
             <div class="pricing-card popular">
-                <div class="popular-badge">Most Popular</div>
-                <div class="pricing-plan">Starter</div>
+                <div class="popular-badge" data-en="Most Popular" data-ar="الأكثر شعبية">Most Popular</div>
+                <div class="pricing-plan" data-en="Starter" data-ar="المبتدئ">Starter</div>
                 <div class="pricing-price">$39</div>
-                <div class="pricing-period">/month</div>
+                <div class="pricing-period" data-en="/month" data-ar="/شهرياً">/month</div>
                 <ul class="pricing-features">
-                    <li>✅ 3-5 signals per day</li>
-                    <li>✅ Full entry/SL/TP levels</li>
-                    <li>✅ Real-time updates</li>
-                    <li>✅ Trade management (SL/TP/Trailing)</li>
-                    <li>✅ Daily report</li>
-                    <li>✅ Gold & Oil coverage</li>
-                    <li>❌ Priority support</li>
+                    <li data-en="✅ 3-5 signals per day" data-ar="✅ 3-5 إشارات يومياً">✅ 3-5 signals per day</li>
+                    <li data-en="✅ Full entry/SL/TP levels" data-ar="✅ مستويات دخول/وقف/هدف كاملة">✅ Full entry/SL/TP levels</li>
+                    <li data-en="✅ Real-time updates" data-ar="✅ تحديثات فورية">✅ Real-time updates</li>
+                    <li data-en="✅ Trade management" data-ar="✅ إدارة الصفقات">✅ Trade management</li>
+                    <li data-en="✅ Daily report" data-ar="✅ تقرير يومي">✅ Daily report</li>
+                    <li data-en="✅ Gold & Oil coverage" data-ar="✅ تغطية الذهب والنفط">✅ Gold & Oil coverage</li>
                 </ul>
-                <a href="#" class="pricing-btn primary" onclick="contactTelegram('Starter')">Subscribe Now</a>
+                <a href="#" class="pricing-btn primary" onclick="contactTelegram('Starter')" data-en="Subscribe Now" data-ar="اشترك الآن">Subscribe Now</a>
             </div>
 
             <!-- Pro Plan -->
             <div class="pricing-card">
-                <div class="pricing-plan">Pro</div>
+                <div class="pricing-plan" data-en="Pro" data-ar="المحترف">Pro</div>
                 <div class="pricing-price">$69</div>
-                <div class="pricing-period">/month</div>
+                <div class="pricing-period" data-en="/month" data-ar="/شهرياً">/month</div>
                 <ul class="pricing-features">
-                    <li>✅ Everything in Starter</li>
-                    <li>✅ 5-10 signals per day</li>
-                    <li>✅ Weekly detailed report</li>
-                    <li>✅ Performance dashboard</li>
-                    <li>✅ Priority support</li>
-                    <li>✅ MyFXBook verified results</li>
-                    <li>✅ Risk management alerts</li>
+                    <li data-en="✅ Everything in Starter" data-ar="✅ كل مزايا المبتدئ">✅ Everything in Starter</li>
+                    <li data-en="✅ 5-10 signals per day" data-ar="✅ 5-10 إشارات يومياً">✅ 5-10 signals per day</li>
+                    <li data-en="✅ Weekly detailed report" data-ar="✅ تقرير أسبوعي مفصل">✅ Weekly detailed report</li>
+                    <li data-en="✅ Performance dashboard" data-ar="✅ لوحة أداء">✅ Performance dashboard</li>
+                    <li data-en="✅ Priority support" data-ar="✅ دعم أولوية">✅ Priority support</li>
+                    <li data-en="✅ Risk management alerts" data-ar="✅ تنبيهات إدارة المخاطر">✅ Risk management alerts</li>
                 </ul>
-                <a href="#" class="pricing-btn" onclick="contactTelegram('Pro')">Subscribe Now</a>
+                <a href="#" class="pricing-btn" onclick="contactTelegram('Pro')" data-en="Subscribe Now" data-ar="اشترك الآن">Subscribe Now</a>
             </div>
 
             <!-- Lifetime Plan -->
             <div class="pricing-card">
-                <div class="pricing-plan">Lifetime</div>
+                <div class="pricing-plan" data-en="Lifetime" data-ar="مدى الحياة">Lifetime</div>
                 <div class="pricing-price">$399</div>
-                <div class="pricing-period">one-time</div>
+                <div class="pricing-period" data-en="one-time" data-ar="دفعة واحدة">one-time</div>
                 <ul class="pricing-features">
-                    <li>✅ Everything in Pro</li>
-                    <li>✅ Lifetime access</li>
-                    <li>✅ All future updates</li>
-                    <li>✅ Personal consultation</li>
-                    <li>✅ Custom strategy review</li>
-                    <li>✅ API access (coming soon)</li>
-                    <li>✅ 30-day money-back guarantee</li>
+                    <li data-en="✅ Everything in Pro" data-ar="✅ كل مزايا المحترف">✅ Everything in Pro</li>
+                    <li data-en="✅ Lifetime access" data-ar="✅ وصول مدى الحياة">✅ Lifetime access</li>
+                    <li data-en="✅ All future updates" data-ar="✅ جميع التحديثات المستقبلية">✅ All future updates</li>
+                    <li data-en="✅ Personal consultation" data-ar="✅ استشارة شخصية">✅ Personal consultation</li>
+                    <li data-en="✅ 30-day money-back guarantee" data-ar="✅ ضمان استرداد 30 يوم">✅ 30-day money-back guarantee</li>
                 </ul>
-                <a href="#" class="pricing-btn" onclick="contactTelegram('Lifetime')">Get Lifetime Access</a>
+                <a href="#" class="pricing-btn" onclick="contactTelegram('Lifetime')" data-en="Get Lifetime Access" data-ar="احصل على وصول مدى الحياة">Get Lifetime Access</a>
             </div>
         </div>
 
         <!-- Testimonials -->
         <div class="testimonials">
-            <h2>What Our Members Say</h2>
+            <h2 data-en="What Our Members Say" data-ar="ماذا يقول أعضاؤنا">What Our Members Say</h2>
             <div class="testimonials-grid">
                 <div class="testimonial-card">
                     <div class="testimonial-stars">⭐⭐⭐⭐⭐</div>
-                    <p>"Best gold signals I've used. The trailing stop feature alone saved me thousands."</p>
-                    <div class="testimonial-author">— Ahmed K., Dubai</div>
+                    <p data-en=""Best gold signals I've used. The trailing stop feature alone saved me thousands."" data-ar=""أفضل إشارات ذهب استخدمتها. ميزة التوقف المتحرك وحدها وفرت لي آلاف الدولارات."">"Best gold signals I've used. The trailing stop feature alone saved me thousands."</p>
+                    <div class="testimonial-author" data-en="— Ahmed K., Dubai" data-ar="— أحمد ك، دبي">— Ahmed K., Dubai</div>
                 </div>
                 <div class="testimonial-card">
                     <div class="testimonial-stars">⭐⭐⭐⭐⭐</div>
-                    <p>"87% win rate this week. The system really works!"</p>
-                    <div class="testimonial-author">— Mohammed S., Riyadh</div>
+                    <p data-en=""87% win rate this week. The system really works!"" data-ar=""نسبة فوز 87% هذا الأسبوع. النظام يعمل فعلاً!"">"87% win rate this week. The system really works!"</p>
+                    <div class="testimonial-author" data-en="— Mohammed S., Riyadh" data-ar="— محمد س، الرياض">— Mohammed S., Riyadh</div>
                 </div>
                 <div class="testimonial-card">
                     <div class="testimonial-stars">⭐⭐⭐⭐⭐</div>
-                    <p>"Finally a transparent signal service. All trades are recorded and verified."</p>
-                    <div class="testimonial-author">— Tariq A., Amman</div>
+                    <p data-en=""Finally a transparent signal service. All trades are recorded and verified."" data-ar=""أخيراً خدمة إشارات شفافة. جميع الصفقات مسجلة وموثقة."">"Finally a transparent signal service. All trades are recorded and verified."</p>
+                    <div class="testimonial-author" data-en="— Tariq A., Amman" data-ar="— طارق ع، عمان">— Tariq A., Amman</div>
                 </div>
             </div>
         </div>
 
         <!-- FAQ -->
         <div class="faq">
-            <h2>Frequently Asked Questions</h2>
+            <h2 data-en="Frequently Asked Questions" data-ar="الأسئلة الشائعة">Frequently Asked Questions</h2>
             <div class="faq-grid">
                 <div class="faq-item">
-                    <h4>How are signals generated?</h4>
-                    <p>Our system uses 5 specialized AI agents (Technical, Classical, SMC, Price Action, Multi-Timeframe) that analyze the market and reach consensus before generating any signal.</p>
+                    <h4 data-en="How are signals generated?" data-ar="كيف يتم توليد الإشارات؟">How are signals generated?</h4>
+                    <p data-en="Our system uses 5 specialized AI agents (Technical, Classical, SMC, Price Action, Multi-Timeframe) that analyze the market and reach consensus before generating any signal." data-ar="يستخدم نظامنا 5 وكلاء AI متخصصين (فني، كلاسيكي، SMC، حركة السعر، متعدد الأطر الزمنية) الذين يحللون السوق ويتوصلون لتوافق قبل توليد أي إشارة.">Our system uses 5 specialized AI agents (Technical, Classical, SMC, Price Action, Multi-Timeframe) that analyze the market and reach consensus before generating any signal.</p>
                 </div>
                 <div class="faq-item">
-                    <h4>What instruments do you cover?</h4>
-                    <p>Gold (XAU/USD) and WTI Crude Oil (WTI/USD). We focus on quality over quantity.</p>
+                    <h4 data-en="What instruments do you cover?" data-ar="ما الأدوات التي تغطونها؟">What instruments do you cover?</h4>
+                    <p data-en="Gold (XAU/USD) and WTI Crude Oil (WTI/USD). We focus on quality over quantity." data-ar="الذهب (XAU/USD) ونفط خام WTI (WTI/USD). نركز على الجودة而非 الكمية.">Gold (XAU/USD) and WTI Crude Oil (WTI/USD). We focus on quality over quantity.</p>
                 </div>
                 <div class="faq-item">
-                    <h4>Is there a free trial?</h4>
-                    <p>Yes! Join our free Telegram channel to see 1 signal per day and evaluate our performance.</p>
+                    <h4 data-en="Is there a free trial?" data-ar="هل توجد تجربة مجانية؟">Is there a free trial?</h4>
+                    <p data-en="Yes! Join our free Telegram channel to see 1 signal per day and evaluate our performance." data-ar="نعم! انضم لقناتنا المجانية على تليجرام لرؤية إشارة واحدة يومياً وتقييم أدائنا.">Yes! Join our free Telegram channel to see 1 signal per day and evaluate our performance.</p>
                 </div>
                 <div class="faq-item">
-                    <h4>What's the win rate?</h4>
-                    <p>Our current weekly win rate is 87.5%. All results are tracked and verifiable.</p>
+                    <h4 data-en="What's the win rate?" data-ar="ما نسبة الفوز؟">What's the win rate?</h4>
+                    <p data-en="Our current weekly win rate is 87.5%. All results are tracked and verifiable." data-ar="نسبة الفوز الأسبوعية الحالية هي 87.5%. جميع النتائج متبعة وقابلة للتحقق.">Our current weekly win rate is 87.5%. All results are tracked and verifiable.</p>
                 </div>
             </div>
         </div>
@@ -254,12 +256,12 @@
     <!-- Footer -->
     <footer class="footer">
         <div class="footer-content">
-            <div class="footer-brand">📊 SmartSignal — Automated Trading Signals</div>
-            <div class="footer-disclaimer">⚠️ Paper trading only. Not financial advice. Past performance does not guarantee future results.</div>
+            <div class="footer-brand">📊 SmartSignal</div>
+            <div class="footer-disclaimer" data-en="⚠️ Paper trading only. Not financial advice. Past performance does not guarantee future results." data-ar="⚠️ تداول ورقي فقط. ليست نصيحة مالية. الأداء السابق لا يضمن النتائج المستقبلية.">⚠️ Paper trading only. Not financial advice. Past performance does not guarantee future results.</div>
             <div class="footer-links">
                 <a href="https://t.me/GoldOilSignals" target="_blank">Telegram</a>
-                <a href="#dashboard">Dashboard</a>
-                <a href="#pricing">Pricing</a>
+                <a href="#dashboard" data-en="Dashboard" data-ar="لوحة التحكم">Dashboard</a>
+                <a href="#pricing" data-en="Pricing" data-ar="الأسعار">Pricing</a>
             </div>
         </div>
     </footer>

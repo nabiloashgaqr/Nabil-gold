@@ -6,11 +6,58 @@
 const SUPABASE_URL = 'https://trsmuzekxmpqtvxdkxwe.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRyc211emVreG1wcXR2eGRreHdlIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTc2NDc5NiwiZXhwIjoyMDk3MzQwNzk2fQ.SshxIsbWpD-2sXHOSXbaLRxLGDGNcQC9G3SyDvisvso';
 
+// Current language
+let currentLang = 'en';
+
 // Chart instances
 let dailyPnlChart = null;
 let cumulativePnlChart = null;
 let sessionChart = null;
 let instrumentChart = null;
+
+// ═══════════════════════════════════════════════════════════
+// Language Support
+// ═══════════════════════════════════════════════════════════
+
+function setLang(lang) {
+    currentLang = lang;
+    
+    // Update HTML direction
+    document.documentElement.setAttribute('dir', lang === 'ar' ? 'rtl' : 'ltr');
+    document.documentElement.setAttribute('lang', lang);
+    
+    // Update language buttons
+    document.querySelectorAll('.lang-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if ((lang === 'en' && btn.textContent === 'EN') || 
+            (lang === 'ar' && btn.textContent === 'عربي')) {
+            btn.classList.add('active');
+        }
+    });
+    
+    // Update all translatable elements
+    document.querySelectorAll('[data-' + lang + ']').forEach(el => {
+        const text = el.getAttribute('data-' + lang);
+        if (text) {
+            el.textContent = text;
+        }
+    });
+    
+    // Update placeholder text
+    updateLoadingTexts();
+}
+
+function updateLoadingTexts() {
+    const loadingElements = document.querySelectorAll('.loading');
+    loadingElements.forEach(el => {
+        if (currentLang === 'ar') {
+            if (el.textContent.includes('daily')) el.textContent = 'جاري تحميل التقرير اليومي...';
+            else if (el.textContent.includes('weekly')) el.textContent = 'جاري تحميل التقرير الأسبوعي...';
+            else if (el.textContent.includes('trades')) el.textContent = 'جاري تحميل الصفقات...';
+            else if (el.textContent.includes('Loading')) el.textContent = 'جاري التحميل...';
+        }
+    });
+}
 
 // ═══════════════════════════════════════════════════════════
 // Navigation
@@ -38,7 +85,9 @@ function showSection(sectionId) {
 // ═══════════════════════════════════════════════════════════
 
 function contactTelegram(plan) {
-    const message = `Hi! I'm interested in the ${plan} plan for SmartSignal VIP.`;
+    const message = currentLang === 'ar' 
+        ? `مرحباً! أنا مهتم بباقة ${plan} لخدمة سمارت سيغنال VIP.`
+        : `Hi! I'm interested in the ${plan} plan for SmartSignal VIP.`;
     const telegramUrl = `https://t.me/GoldOilSignals?text=${encodeURIComponent(message)}`;
     window.open(telegramUrl, '_blank');
 }
@@ -75,19 +124,25 @@ async function loadDashboardData() {
 }
 
 async function fetchTrades() {
-    // Try to fetch from Supabase
-    if (SUPABASE_URL !== 'https://your-project.supabase.co') {
+    try {
+        // Fetch from Supabase
         const response = await fetch(`${SUPABASE_URL}/rest/v1/trades?order=created_at.desc&limit=100`, {
             headers: {
                 'apikey': SUPABASE_KEY,
                 'Authorization': `Bearer ${SUPABASE_KEY}`
             }
         });
+        
+        if (!response.ok) {
+            throw new Error('Failed to fetch trades');
+        }
+        
         return await response.json();
+    } catch (error) {
+        console.error('Error fetching trades:', error);
+        // Return demo data
+        return getDemoTrades();
     }
-    
-    // Return demo data
-    return getDemoTrades();
 }
 
 function getDemoTrades() {
@@ -108,18 +163,23 @@ function getDemoTrades() {
 // ═══════════════════════════════════════════════════════════
 
 function updateStats(trades) {
+    if (!trades || trades.length === 0) {
+        return;
+    }
+    
     const total = trades.length;
-    const wins = trades.filter(t => t.final_pnl > 0).length;
-    const losses = trades.filter(t => t.final_pnl < 0).length;
+    const wins = trades.filter(t => (t.final_pnl || 0) > 0).length;
+    const losses = trades.filter(t => (t.final_pnl || 0) < 0).length;
     const netPnl = trades.reduce((sum, t) => sum + (t.final_pnl || 0), 0);
     const winRate = total > 0 ? ((wins / total) * 100).toFixed(1) : 0;
     
-    const grossProfit = trades.filter(t => t.final_pnl > 0).reduce((sum, t) => sum + t.final_pnl, 0);
-    const grossLoss = Math.abs(trades.filter(t => t.final_pnl < 0).reduce((sum, t) => sum + t.final_pnl, 0));
+    const grossProfit = trades.filter(t => (t.final_pnl || 0) > 0).reduce((sum, t) => sum + (t.final_pnl || 0), 0);
+    const grossLoss = Math.abs(trades.filter(t => (t.final_pnl || 0) < 0).reduce((sum, t) => sum + (t.final_pnl || 0), 0));
     const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss).toFixed(2) : '∞';
     
-    const bestTrade = Math.max(...trades.map(t => t.final_pnl || 0));
-    const worstTrade = Math.min(...trades.map(t => t.final_pnl || 0));
+    const pnlValues = trades.map(t => t.final_pnl || 0);
+    const bestTrade = Math.max(...pnlValues);
+    const worstTrade = Math.min(...pnlValues);
     
     document.getElementById('totalTrades').textContent = total;
     document.getElementById('winRate').textContent = `${winRate}%`;
@@ -127,9 +187,6 @@ function updateStats(trades) {
     document.getElementById('profitFactor').textContent = profitFactor;
     document.getElementById('bestTrade').textContent = `+${bestTrade.toFixed(1)}`;
     document.getElementById('worstTrade').textContent = worstTrade.toFixed(1);
-    
-    // Update colors
-    document.getElementById('netPoints').className = `stat-value ${netPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -137,6 +194,10 @@ function updateStats(trades) {
 // ═══════════════════════════════════════════════════════════
 
 function updateCharts(trades) {
+    if (!trades || trades.length === 0) {
+        return;
+    }
+    
     updateDailyPnlChart(trades);
     updateCumulativePnlChart(trades);
     updateSessionChart(trades);
@@ -146,23 +207,27 @@ function updateCharts(trades) {
 function updateDailyPnlChart(trades) {
     const dailyPnl = {};
     trades.forEach(t => {
-        const date = t.created_at.substring(0, 10);
-        dailyPnl[date] = (dailyPnl[date] || 0) + (t.final_pnl || 0);
+        const date = (t.created_at || '').substring(0, 10);
+        if (date) {
+            dailyPnl[date] = (dailyPnl[date] || 0) + (t.final_pnl || 0);
+        }
     });
     
     const labels = Object.keys(dailyPnl).sort();
     const data = labels.map(d => dailyPnl[d]);
-    const colors = data.map(v => v >= 0 ? '#3fb950' : '#f85149');
+    const colors = data.map(v => v >= 0 ? '#2b8a3e' : '#c92a2a');
     
     if (dailyPnlChart) dailyPnlChart.destroy();
     
-    const ctx = document.getElementById('dailyPnlChart').getContext('2d');
-    dailyPnlChart = new Chart(ctx, {
+    const ctx = document.getElementById('dailyPnlChart');
+    if (!ctx) return;
+    
+    dailyPnlChart = new Chart(ctx.getContext('2d'), {
         type: 'bar',
         data: {
             labels: labels.map(d => d.substring(5)),
             datasets: [{
-                label: 'Daily PnL (pts)',
+                label: currentLang === 'ar' ? 'الأرباح اليومية (نقاط)' : 'Daily PnL (pts)',
                 data: data,
                 backgroundColor: colors,
                 borderColor: colors,
@@ -177,12 +242,12 @@ function updateDailyPnlChart(trades) {
             },
             scales: {
                 y: {
-                    grid: { color: '#30363d' },
-                    ticks: { color: '#8b949e' }
+                    grid: { color: '#dee2e6' },
+                    ticks: { color: '#6c757d' }
                 },
                 x: {
                     grid: { display: false },
-                    ticks: { color: '#8b949e' }
+                    ticks: { color: '#6c757d' }
                 }
             }
         }
@@ -190,30 +255,32 @@ function updateDailyPnlChart(trades) {
 }
 
 function updateCumulativePnlChart(trades) {
-    const sorted = [...trades].sort((a, b) => a.created_at.localeCompare(b.created_at));
+    const sorted = [...trades].sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
     let cumulative = 0;
     const data = sorted.map(t => {
         cumulative += (t.final_pnl || 0);
         return cumulative;
     });
-    const labels = sorted.map(t => t.created_at.substring(5, 10));
+    const labels = sorted.map(t => (t.created_at || '').substring(5, 10));
     
     if (cumulativePnlChart) cumulativePnlChart.destroy();
     
-    const ctx = document.getElementById('cumulativePnlChart').getContext('2d');
-    cumulativePnlChart = new Chart(ctx, {
+    const ctx = document.getElementById('cumulativePnlChart');
+    if (!ctx) return;
+    
+    cumulativePnlChart = new Chart(ctx.getContext('2d'), {
         type: 'line',
         data: {
             labels: labels,
             datasets: [{
-                label: 'Cumulative PnL (pts)',
+                label: currentLang === 'ar' ? 'الأرباح المتراكمة (نقاط)' : 'Cumulative PnL (pts)',
                 data: data,
-                borderColor: '#58a6ff',
-                backgroundColor: 'rgba(88, 166, 255, 0.1)',
+                borderColor: '#1971c2',
+                backgroundColor: 'rgba(25, 113, 194, 0.1)',
                 fill: true,
                 tension: 0.4,
                 pointRadius: 4,
-                pointBackgroundColor: '#58a6ff'
+                pointBackgroundColor: '#1971c2'
             }]
         },
         options: {
@@ -223,12 +290,12 @@ function updateCumulativePnlChart(trades) {
             },
             scales: {
                 y: {
-                    grid: { color: '#30363d' },
-                    ticks: { color: '#8b949e' }
+                    grid: { color: '#dee2e6' },
+                    ticks: { color: '#6c757d' }
                 },
                 x: {
                     grid: { display: false },
-                    ticks: { color: '#8b949e' }
+                    ticks: { color: '#6c757d' }
                 }
             }
         }
@@ -244,17 +311,19 @@ function updateSessionChart(trades) {
     
     const labels = Object.keys(sessionPnl);
     const data = labels.map(s => sessionPnl[s]);
-    const colors = data.map(v => v >= 0 ? '#3fb950' : '#f85149');
+    const colors = data.map(v => v >= 0 ? '#2b8a3e' : '#c92a2a');
     
     if (sessionChart) sessionChart.destroy();
     
-    const ctx = document.getElementById('sessionChart').getContext('2d');
-    sessionChart = new Chart(ctx, {
+    const ctx = document.getElementById('sessionChart');
+    if (!ctx) return;
+    
+    sessionChart = new Chart(ctx.getContext('2d'), {
         type: 'bar',
         data: {
             labels: labels.map(l => l.split('(')[0].trim()),
             datasets: [{
-                label: 'PnL by Session',
+                label: currentLang === 'ar' ? 'الربح حسب الجلسة' : 'PnL by Session',
                 data: data,
                 backgroundColor: colors,
                 borderRadius: 4
@@ -268,12 +337,12 @@ function updateSessionChart(trades) {
             },
             scales: {
                 x: {
-                    grid: { color: '#30363d' },
-                    ticks: { color: '#8b949e' }
+                    grid: { color: '#dee2e6' },
+                    ticks: { color: '#6c757d' }
                 },
                 y: {
                     grid: { display: false },
-                    ticks: { color: '#8b949e' }
+                    ticks: { color: '#6c757d' }
                 }
             }
         }
@@ -292,14 +361,16 @@ function updateInstrumentChart(trades) {
     
     if (instrumentChart) instrumentChart.destroy();
     
-    const ctx = document.getElementById('instrumentChart').getContext('2d');
-    instrumentChart = new Chart(ctx, {
+    const ctx = document.getElementById('instrumentChart');
+    if (!ctx) return;
+    
+    instrumentChart = new Chart(ctx.getContext('2d'), {
         type: 'doughnut',
         data: {
             labels: labels,
             datasets: [{
                 data: data.map(Math.abs),
-                backgroundColor: ['#d4a017', '#58a6ff', '#3fb950', '#f85149'],
+                backgroundColor: ['#e67700', '#1971c2', '#2b8a3e', '#c92a2a'],
                 borderWidth: 0
             }]
         },
@@ -308,7 +379,7 @@ function updateInstrumentChart(trades) {
             plugins: {
                 legend: {
                     position: 'bottom',
-                    labels: { color: '#8b949e' }
+                    labels: { color: '#6c757d' }
                 }
             }
         }
@@ -321,28 +392,31 @@ function updateInstrumentChart(trades) {
 
 function updateTradesTable(trades) {
     const tbody = document.getElementById('tradesBody');
+    if (!tbody) return;
     
-    if (trades.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" class="loading">No trades found</td></tr>';
+    if (!trades || trades.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="9" class="loading">${currentLang === 'ar' ? 'لا توجد صفقات' : 'No trades found'}</td></tr>`;
         return;
     }
     
     tbody.innerHTML = trades.slice(0, 10).map(t => {
-        const pnlClass = (t.final_pnl || 0) >= 0 ? 'pnl-positive' : 'pnl-negative';
-        const statusClass = (t.final_pnl || 0) >= 0 ? 'status-win' : 'status-loss';
-        const statusIcon = (t.final_pnl || 0) >= 0 ? '✅' : '❌';
+        const pnl = t.final_pnl || 0;
+        const pnlClass = pnl >= 0 ? 'pnl-positive' : 'pnl-negative';
+        const statusClass = pnl >= 0 ? 'status-win' : 'status-loss';
+        const statusIcon = pnl >= 0 ? '✅' : '❌';
+        const statusText = (t.status || '').replace(/_/g, ' ');
         
         return `
             <tr>
-                <td>${t.created_at.substring(0, 10)}</td>
+                <td>${(t.created_at || '').substring(0, 10)}</td>
                 <td>${t.symbol || 'XAU/USD'}</td>
                 <td>${t.type || '?'}</td>
                 <td>${(t.entry_price || 0).toFixed(2)}</td>
                 <td>${(t.stop_loss || 0).toFixed(2)}</td>
                 <td>${(t.tp1 || 0).toFixed(2)}</td>
                 <td>${(t.tp2 || 0).toFixed(2)}</td>
-                <td class="${pnlClass}">${(t.final_pnl || 0) > 0 ? '+' : ''}${(t.final_pnl || 0).toFixed(1)}</td>
-                <td class="${statusClass}">${statusIcon} ${(t.status || '').replace(/_/g, ' ')}</td>
+                <td class="${pnlClass}">${pnl > 0 ? '+' : ''}${pnl.toFixed(1)}</td>
+                <td class="${statusClass}">${statusIcon} ${statusText}</td>
             </tr>
         `;
     }).join('');
@@ -353,13 +427,15 @@ function updateTradesTable(trades) {
 // ═══════════════════════════════════════════════════════════
 
 async function loadReports() {
-    // Try to load from Supabase or storage
     try {
         const dailyReport = await fetchReport('daily');
         const weeklyReport = await fetchReport('weekly');
         
-        document.getElementById('dailyReport').textContent = dailyReport || 'No daily report available yet.';
-        document.getElementById('weeklyReport').textContent = weeklyReport || 'No weekly report available yet.';
+        const dailyEl = document.getElementById('dailyReport');
+        const weeklyEl = document.getElementById('weeklyReport');
+        
+        if (dailyEl) dailyEl.textContent = dailyReport || (currentLang === 'ar' ? 'لا يوجد تقرير يومي بعد.' : 'No daily report available yet.');
+        if (weeklyEl) weeklyEl.textContent = weeklyReport || (currentLang === 'ar' ? 'لا يوجد تقرير أسبوعي بعد.' : 'No weekly report available yet.');
     } catch (error) {
         console.error('Error loading reports:', error);
         loadDemoReports();
@@ -367,8 +443,7 @@ async function loadReports() {
 }
 
 async function fetchReport(type) {
-    // Try to fetch from Supabase
-    if (SUPABASE_URL !== 'https://your-project.supabase.co') {
+    try {
         const table = type === 'daily' ? 'daily_reports' : 'weekly_reports';
         const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}?order=created_at.desc&limit=1`, {
             headers: {
@@ -376,10 +451,16 @@ async function fetchReport(type) {
                 'Authorization': `Bearer ${SUPABASE_KEY}`
             }
         });
+        
+        if (!response.ok) {
+            return null;
+        }
+        
         const data = await response.json();
         return data[0]?.report_text || null;
+    } catch (error) {
+        return null;
     }
-    return null;
 }
 
 function loadDemoReports() {
@@ -401,11 +482,6 @@ function loadDemoReports() {
 📊 BY INSTRUMENT
   [+] XAU/USD: 2 trades | WR 100% | Net +1100 pts
   [-] WTI/USD: 1 trades | WR 0% | Net -550 pts
-────────────────────
-
-🌍 BY SESSION
-  [+] 🇬🇧 London (10:00-03:00 PM): 2 trades | Net +1100 pts
-  [-] 🇺🇸 New York (07:00 PM-12:00 AM): 1 trades | Net -550 pts
 ────────────────────
 
 🛡️ RISK GRADE
@@ -438,8 +514,11 @@ Week: 2026-06-20 → 2026-06-27
   Grade: A+
   ✅ System is profitable`;
 
-    document.getElementById('dailyReport').textContent = dailyReport;
-    document.getElementById('weeklyReport').textContent = weeklyReport;
+    const dailyEl = document.getElementById('dailyReport');
+    const weeklyEl = document.getElementById('weeklyReport');
+    
+    if (dailyEl) dailyEl.textContent = dailyReport;
+    if (weeklyEl) weeklyEl.textContent = weeklyReport;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -452,7 +531,11 @@ function loadDemoData() {
     updateCharts(trades);
     updateTradesTable(trades);
     loadDemoReports();
-    document.getElementById('lastUpdate').textContent = new Date().toLocaleString() + ' (Demo)';
+    
+    const lastUpdateEl = document.getElementById('lastUpdate');
+    if (lastUpdateEl) {
+        lastUpdateEl.textContent = new Date().toLocaleString() + ' (Demo)';
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -460,11 +543,18 @@ function loadDemoData() {
 // ═══════════════════════════════════════════════════════════
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Load dashboard data
     loadDashboardData();
     
     // Handle hash navigation
     const hash = window.location.hash.substring(1);
     if (hash && ['dashboard', 'pricing'].includes(hash)) {
         showSection(hash);
+    }
+    
+    // Set default language based on browser
+    const browserLang = navigator.language || navigator.userLanguage || 'en';
+    if (browserLang.startsWith('ar')) {
+        setLang('ar');
     }
 });
