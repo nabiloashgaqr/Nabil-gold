@@ -2,8 +2,8 @@
 // Reads Supabase using server-side environment variables only.
 // Required env in Vercel: SUPABASE_URL and SUPABASE_SERVICE_KEY (or SUPABASE_KEY).
 
-const CLOSED_EXCLUDED = ['OPEN', 'PARTIAL', 'TP1_HIT', 'PENDING'];
-const LIVE_STATUSES = ['OPEN', 'PARTIAL', 'TP1_HIT', 'PENDING'];
+const OUTCOME_STATUSES = ['TP1_HIT', 'TP2_HIT', 'SL_HIT'];
+const LIVE_STATUSES = [];
 
 function json(res, status, body) {
   res.statusCode = status;
@@ -291,8 +291,8 @@ module.exports = async function handler(req, res) {
 
   try {
     const limit = Math.min(Math.max(parseInt(req.query.limit || '150', 10) || 150, 20), 500);
-    const closedFilter = `not.in.(${CLOSED_EXCLUDED.join(',')})`;
-    const liveFilter = `in.(${LIVE_STATUSES.join(',')})`;
+    const closedFilter = `in.(${OUTCOME_STATUSES.join(',')})`;
+    const liveFilter = `in.(OPEN)`;
 
     const [closedRaw, liveRaw, dailyReports, weeklyReports, agentWeights] = await Promise.all([
       supabaseGet('trades', {
@@ -301,12 +301,7 @@ module.exports = async function handler(req, res) {
         order: 'created_at.desc',
         limit,
       }),
-      supabaseGet('trades', {
-        select: '*',
-        status: liveFilter,
-        order: 'created_at.desc',
-        limit: 80,
-      }),
+      Promise.resolve([]),
       supabaseGet('daily_reports', {
         select: '*',
         order: 'report_date.desc',
