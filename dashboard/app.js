@@ -5,7 +5,7 @@ const API_URL = (window.SMARTSIGNAL_API_URL || '/api/dashboard');
 const OUTCOME_STATUSES = new Set(['TP1_HIT', 'TP2_HIT', 'SL_HIT', 'BE_HIT', 'EXPIRED', 'MANUAL_CLOSE', 'CLOSED']);
 const LIVE_STATUSES = new Set([]);
 
-let currentLang = 'ar';
+let currentLang = 'en';
 let closedTrades = [];
 let liveTrades = [];
 let filteredTrades = [];
@@ -38,7 +38,7 @@ const I18N = {
     }
 };
 function tr(key) { return (I18N[currentLang] && I18N[currentLang][key]) || I18N.ar[key] || key; }
-function localeCode() { return currentLang === 'ar' ? 'ar-SA' : 'en-US'; }
+function localeCode() { return 'en-US'; }
 function formatDateTime(value) {
     const d = value ? new Date(value) : new Date();
     return d.toLocaleString(localeCode(), { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
@@ -46,103 +46,16 @@ function formatDateTime(value) {
 function reportText(r) { return currentLang === 'ar' ? (r.report_text_ar || r.report_text || '') : (r.report_text_en || r.report_text || ''); }
 function wordTrades(n) { return currentLang === 'ar' ? `${n} صفقات` : `${n} trades`; }
 function wordReports(n) { return currentLang === 'ar' ? `${n} تقارير` : `${n} reports`; }
-function setLang(lang) {
-    currentLang = lang === 'en' ? 'en' : 'ar';
-    document.documentElement.lang = currentLang;
-    document.documentElement.dir = currentLang === 'ar' ? 'rtl' : 'ltr';
-    localStorage.setItem('lang', currentLang);
-    document.querySelectorAll('[data-ar][data-en]').forEach(el => { el.textContent = el.getAttribute(`data-${currentLang}`); });
-    document.querySelectorAll('.lang-btn').forEach(btn => btn.classList.remove('active'));
-    const active = currentLang === 'ar' ? $('langAr') : $('langEn');
-    if (active) active.classList.add('active');
-    renderTradesTable(filteredTrades);
-    updateOpenTrades(liveTrades);
+function setLang(_lang) {
+    currentLang = 'en';
+    document.documentElement.lang = 'en';
+    document.documentElement.dir = 'ltr';
     if (dashboardPayload) {
         setText('lastUpdate', formatDateTime(dashboardPayload.generatedAt || Date.now()));
         renderReports(dashboardPayload);
-        }
+        updateCharts(filteredTrades);
+    }
 }
-
-
-function $(id) { return document.getElementById(id); }
-function setText(id, value) { const el = $(id); if (el) el.textContent = value; }
-function setHTML(id, value) { const el = $(id); if (el) el.innerHTML = value; }
-function num(value, fallback = 0) { const n = Number(value); return Number.isFinite(n) ? n : fallback; }
-function signed(value, decimals = 0) { const n = num(value); return `${n > 0 ? '+' : ''}${n.toFixed(decimals)}`; }
-function esc(value) {
-    return String(value ?? '').replace(/[&<>'"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[ch]));
-}
-function dateText(value) { return value ? String(value).substring(0, 10) : '-'; }
-function timeText(value) { return value ? String(value).replace('T', ' ').substring(0, 19) : '-'; }
-function pnlOf(t) {
-    // SL_HIT can be a real loss, breakeven, or positive trailing stop.
-    // Never force SL_HIT negative; use the realized PnL sign stored/calculated by trade management.
-    return num(t.pnl ?? t.final_pnl ?? t.current_pnl_points ?? t.current_pnl ?? 0);
-}
-function stopOutcomeOf(t) {
-    if (String(t.status || '').toUpperCase() !== 'SL_HIT') return null;
-    const pnl = pnlOf(t);
-    if (t.stop_outcome) return t.stop_outcome;
-    if (pnl > 0) return 'SL_PLUS';
-    if (pnl < 0) return 'SL_LOSS';
-    return 'SL_BE';
-}
-function displayStatus(t) {
-    const outcome = stopOutcomeOf(t);
-    if (outcome === 'SL_PLUS') return 'SL+';
-    if (outcome === 'SL_BE') return 'SL BE';
-    if (outcome === 'SL_LOSS') return 'SL LOSS';
-    return String(t.status || 'UNKNOWN').toUpperCase();
-}
-function statusClassOf(t) {
-    const pnl = pnlOf(t);
-    const outcome = stopOutcomeOf(t);
-    if (outcome === 'SL_PLUS') return 'win';
-    if (outcome === 'SL_BE') return 'neutral';
-    if (outcome === 'SL_LOSS') return 'loss';
-    return pnl > 0 || t.status === 'TP2_HIT' || t.status === 'TP1_HIT' ? 'win' : pnl < 0 ? 'loss' : 'neutral';
-}
-function tradeTime(t) { return t.created_at || t.entry_time || t.opened_at || t.updated_at || ''; }
-function closeTime(t) { return t.closed_at || t.close_time || ''; }
-function openTime(t) { return t.entry_time || t.created_at || t.opened_at || t.updated_at || ''; }
-function reportDate(t) { return dateText(openTime(t)); }
-function localHourJerusalem(value) {
-    const d = value ? new Date(value) : new Date();
-    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Jerusalem', hour: '2-digit', hour12: false }).formatToParts(d);
-    return Number(parts.find(p => p.type === 'hour')?.value || 0);
-}
-function sessionBucket(t) {
-    const h = localHourJerusalem(openTime(t));
-    if (h >= 3 && h < 10) return currentLang === 'ar' ? 'آسيا صباحاً' : 'Asia Morning';
-    if (h >= 10 && h < 15) return currentLang === 'ar' ? 'لندن / أوروبا ظهراً' : 'London / Europe Midday';
-    if (h >= 15 && h < 19) return currentLang === 'ar' ? 'لندن + أمريكا عصراً' : 'London + New York Afternoon';
-    if (h >= 19 && h < 24) return currentLang === 'ar' ? 'أمريكا مساءً' : 'New York Evening';
-    return currentLang === 'ar' ? 'أمريكا متأخرة ليلاً' : 'Late New York Night';
-}
-function isLiveStatus(status) { return false; }
-function isClosedStatus(status) { return OUTCOME_STATUSES.has(String(status || '').toUpperCase()); }
-
-function normalizeTrade(t) {
-    const status = String(t.status || 'UNKNOWN').toUpperCase();
-    return {
-        ...t,
-        id: t.id || '',
-        symbol: t.symbol || 'XAU/USD',
-        type: String(t.type || t.side || t.trade_type || '').toUpperCase(),
-        status,
-        pnl: pnlOf(t),
-        created_at: tradeTime(t),
-        closed_at: closeTime(t),
-    };
-}
-
-function toggleTheme() {
-    const isDark = document.body.classList.toggle('dark');
-    localStorage.setItem('theme', isDark ? 'dark' : 'light');
-    setText('themeBtn', isDark ? '☀️' : '🌙');
-    updateCharts(filteredTrades);
-}
-
 
 function showSection(sectionId) {
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
@@ -336,9 +249,7 @@ function updateCumulativePnlChart(trades) {
 }
 
 function updateSessionChart(trades) {
-    const order = currentLang === 'ar'
-        ? ['آسيا صباحاً', 'لندن / أوروبا ظهراً', 'لندن + أمريكا عصراً', 'أمريكا مساءً', 'أمريكا متأخرة ليلاً']
-        : ['Asia Morning', 'London / Europe Midday', 'London + New York Afternoon', 'New York Evening', 'Late New York Night'];
+    const order = ['Asia Morning', 'London / Europe Midday', 'London + New York Afternoon', 'New York Evening', 'Late New York Night'];
     const grouped = {};
     const counts = {};
     order.forEach(k => { grouped[k] = 0; counts[k] = 0; });
@@ -374,7 +285,7 @@ function updateSessionChart(trades) {
                 ...chartOptions().plugins,
                 tooltip: {
                     ...chartOptions().plugins.tooltip,
-                    callbacks: { label: ctx => ` ${signed(ctx.parsed.x, 1)} pts · ${counts[labels[ctx.dataIndex]]} ${currentLang === 'ar' ? 'صفقات' : 'trades'}` }
+                    callbacks: { label: ctx => ` ${signed(ctx.parsed.x, 1)} pts · ${counts[labels[ctx.dataIndex]]} ${'trades'}` }
                 }
             },
             scales: {
@@ -483,12 +394,12 @@ function updateOpenTrades(_trades) {
 
 
 function monthLabel(month) {
-    if (!month || month.length < 7) return currentLang === 'ar' ? 'بدون شهر' : 'No Month';
+    if (!month || month.length < 7) return 'No Month';
     const [y, m] = month.split('-');
     const namesAr = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
     const namesEn = ['January','February','March','April','May','June','July','August','September','October','November','December'];
     const idx = Math.max(0, Math.min(11, Number(m) - 1));
-    return currentLang === 'ar' ? `${namesAr[idx]} ${y}` : `${namesEn[idx]} ${y}`;
+    return `${namesEn[idx]} ${y}`;
 }
 function reportPeriod(report, type) {
     if (type === 'weekly') return `${report.week_start || '-'} → ${report.week_end || '-'}`;
@@ -509,7 +420,7 @@ function renderReportArchive(containerId, reports, type) {
     const el = $(containerId);
     if (!el) return;
     if (!reports.length) {
-        el.innerHTML = `<div class="empty">${currentLang === 'ar' ? 'لا توجد تقارير' : 'No reports'}</div>`;
+        el.innerHTML = `<div class="empty">${'No reports'}</div>`;
         return;
     }
     const groups = groupReportsByMonth(reports, type);
@@ -527,9 +438,9 @@ function renderReportArchive(containerId, reports, type) {
                 <button class="report-file-head" onclick="toggleReportFile('${rid}')">
                     <span class="file-icon">${type === 'weekly' ? '🗓️' : '📄'}</span>
                     <span class="file-title">${esc(period)}</span>
-                    <span class="file-meta">${wordTrades(trades)} · ${currentLang === 'ar' ? 'نسبة الربح' : 'WR'} ${wr.toFixed(1)}% · <b class="${net >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(net, 1)}</b></span>
+                    <span class="file-meta">${wordTrades(trades)} · ${'WR'} ${wr.toFixed(1)}% · <b class="${net >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(net, 1)}</b></span>
                 </button>
-                <pre id="${rid}" class="report-file-body">${esc(reportText(r) || (currentLang === 'ar' ? 'لا يوجد نص للتقرير' : 'No report text'))}</pre>
+                <pre id="${rid}" class="report-file-body">${esc(reportText(r) || ('No report text'))}</pre>
             </div>`;
         }).join('');
         return `<div class="report-month-folder">
@@ -548,7 +459,7 @@ function renderReports(payload) {
     const weekly = payload.weeklyReports || [];
     const latestDaily = daily[0];
     const latestWeekly = weekly[0];
-    setText('dailyReport', latestDaily ? (reportText(latestDaily) || (currentLang === 'ar' ? 'التقرير اليومي بدون نص' : 'Daily report has no text')) : tr('noDaily'));
+    setText('dailyReport', latestDaily ? (reportText(latestDaily) || ('Daily report has no text')) : tr('noDaily'));
     setText('weeklyReport', latestWeekly ? (reportText(latestWeekly) || JSON.stringify(latestWeekly.stats_json || {}, null, 2)) : tr('noWeekly'));
     renderReportArchive('dailyReportsArchive', daily, 'daily');
     renderReportArchive('weeklyReportsArchive', weekly, 'weekly');
@@ -575,8 +486,8 @@ function updateAgentPerformance() {
         const losses = num(a.losses ?? 0);
         const net = num(a.net_pnl ?? 0);
         const sourceLabel = a.source === 'computed_from_closed_trades'
-            ? (currentLang === 'ar' ? 'محسوب من الصفقات المغلقة' : 'Computed from closed trades')
-            : (currentLang === 'ar' ? 'من جدول agent_weights' : 'From agent_weights');
+            ? ('Computed from closed trades')
+            : ('From agent_weights');
         return `<div class="agent-card">
             <div class="agent-header"><span class="agent-icon">🤖</span><span class="agent-name">${esc(a.agent_name)}</span></div>
             <div class="agent-stats">
@@ -650,8 +561,7 @@ function refreshData() {
 window.addEventListener('click', (event) => { if (event.target === $('tradeModal')) closeModal(); });
 
 document.addEventListener('DOMContentLoaded', () => {
-    const savedLang = localStorage.getItem('lang') || 'ar';
-    setLang(savedLang);
+    setLang('en');
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme === 'dark') { document.body.classList.add('dark'); setText('themeBtn', '☀️'); }
     loadDashboardData();
