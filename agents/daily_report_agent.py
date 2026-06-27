@@ -102,53 +102,53 @@ class DailyReportAgent(BaseAgent):
         # Recommendations
         recommendations = "\n".join(f"• {html.escape(str(x))}" for x in stats.get("recommendations", [])[:4]) or "• Not enough data yet"
 
-        return f"""📊 <b>SmartSignal — {title_en}</b>
+        return f"""SmartSignal — {title_en}
 ━━━━━━━━━━━━━━━━━━━━━
 
-📅 <b>Period:</b> {html.escape(date.today().isoformat())}
+Period: {html.escape(date.today().isoformat())}
 
-📈 <b>Summary</b>
-• Total: {stats['total']} trades
-• Wins: {stats['wins']}  |  Losses: {stats['losses']}  |  BE: {stats['breakeven']}  |  Open: {stats['open']}
-• Win Rate: <b>{stats['win_rate']}%</b>
+SUMMARY
+  Total: {stats['total']} trades
+  Wins: {stats['wins']}  |  Losses: {stats['losses']}  |  BE: {stats['breakeven']}  |  Open: {stats['open']}
+  Win Rate: {stats['win_rate']}%
 
-💰 <b>Performance</b>
-• Net: <b>{stats['net_points']:+.1f} pts</b> (${stats['net_points'] / 10:+.1f})
-• Gross Profit: +{stats['gross_profit']:.1f} pts
-• Gross Loss: -{stats['gross_loss']:.1f} pts
-• Profit Factor: <b>{pf_display}</b>
-• Avg Win: +{stats['avg_win']:.1f}  |  Avg Loss: -{stats['avg_loss']:.1f}
-• Best Trade: {stats['best_trade']:+.1f}  |  Worst: {stats['worst_trade']:+.1f}
+PERFORMANCE
+  Net: {stats['net_points']:+.1f} pts (${stats['net_points'] / 10:+.1f})
+  Gross Profit: +{stats['gross_profit']:.1f} pts
+  Gross Loss: -{stats['gross_loss']:.1f} pts
+  Profit Factor: {pf_display}
+  Avg Win: +{stats['avg_win']:.1f}  |  Avg Loss: -{stats['avg_loss']:.1f}
+  Best Trade: {stats['best_trade']:+.1f}  |  Worst: {stats['worst_trade']:+.1f}
 
-🎯 <b>Win/Loss Streaks</b>
-• Best Streak: {streaks['best_win']} wins
-• Worst Streak: {streaks['worst_loss']} losses
-• Current: {streaks['current']}
+WIN/LOSS STREAKS
+  Best Streak: {streaks['best_win']} wins
+  Worst Streak: {streaks['worst_loss']} losses
+  Current: {streaks['current']}
 
-📊 <b>By Instrument</b>
+BY INSTRUMENT
 {instrument_lines}
 
-🧭 <b>By Direction</b>
-• BUY: {buy.get('count', 0)} trades → {buy.get('net', 0):+.1f} pts
-• SELL: {sell.get('count', 0)} trades → {sell.get('net', 0):+.1f} pts
+BY DIRECTION
+  BUY: {buy.get('count', 0)} trades → {buy.get('net', 0):+.1f} pts
+  SELL: {sell.get('count', 0)} trades → {sell.get('net', 0):+.1f} pts
 
 {trade_details}
 
 {risk}
 
-🧠 <b>Recommendations</b>
+RECOMMENDATIONS
 {recommendations}
 
-⚠️ Paper trading only — not financial advice.""".strip()
+Paper trading only — not financial advice.""".strip()
 
     def _format_instruments(self, by_instrument: Dict[str, Dict[str, Any]]) -> str:
         if not by_instrument:
-            return "• No instrument data"
+            return "  No instrument data"
         lines = []
         for symbol, data in sorted(by_instrument.items(), key=lambda x: x[1].get("net", 0), reverse=True):
-            emoji = "🟢" if data.get("net", 0) > 0 else "🔴" if data.get("net", 0) < 0 else "⚪"
+            icon = "[+]" if data.get("net", 0) > 0 else "[-]" if data.get("net", 0) < 0 else "[=]"
             lines.append(
-                f"• {emoji} <b>{html.escape(symbol)}</b>: "
+                f"  {icon} {symbol}: "
                 f"{data.get('count', 0)} trades | "
                 f"WR {data.get('win_rate', 0)}% | "
                 f"Net {data.get('net', 0):+.1f} pts"
@@ -163,7 +163,7 @@ class DailyReportAgent(BaseAgent):
         if not closed:
             return ""
 
-        lines = ["📋 <b>Trade Details</b>"]
+        lines = ["TRADE DETAILS"]
         for t in closed[-10:]:  # Last 10 trades
             symbol = str(t.get("symbol") or "XAU/USD")
             side = str(t.get("type") or t.get("side") or "?").upper()
@@ -173,29 +173,28 @@ class DailyReportAgent(BaseAgent):
             tp2 = self._f(t.get("tp2"))
             pnl = self._pnl(t)
             status = str(t.get("status", "?"))
-            result = str(t.get("result", "?"))
             sl_moved = t.get("sl_moved_to_entry", False)
 
-            # Result emoji
+            # Result icon
             if pnl > 0:
-                emoji = "✅"
+                icon = "[+]"
             elif pnl < 0:
-                emoji = "❌"
+                icon = "[-]"
             else:
-                emoji = "⚪"
+                icon = "[=]"
 
             # Status text
             status_text = status.replace("_", " ").title()
             if sl_moved and status in {"TP2_HIT", "BE_HIT"}:
-                status_text += " (SL→Entry)"
+                status_text += " (SL->Entry)"
 
             lines.append(
-                f"{emoji} <b>{side} {html.escape(symbol)}</b> | "
+                f"  {icon} {side} {symbol} | "
                 f"Entry {format_price(entry, symbol)} | "
                 f"SL {format_price(sl, symbol)} | "
                 f"TP1 {format_price(tp1, symbol)} | "
                 f"TP2 {format_price(tp2, symbol)} | "
-                f"<b>{pnl:+.1f} pts</b> | "
+                f"{pnl:+.1f} pts | "
                 f"{status_text}"
             )
 
@@ -262,16 +261,16 @@ class DailyReportAgent(BaseAgent):
         expectancy = (wr * avg_win) - ((1 - wr) * avg_loss) if avg_loss > 0 else avg_win * wr
 
         lines = [
-            "🛡️ <b>Risk Metrics</b>",
-            f"• Risk Grade: <b>{grade}</b>",
-            f"• Expectancy: {expectancy:+.1f} pts/trade",
-            f"• Profit Factor: {pf:.2f}" if pf < 99 else f"• Profit Factor: ∞",
+            "RISK METRICS",
+            f"  Risk Grade: {grade}",
+            f"  Expectancy: {expectancy:+.1f} pts/trade",
+            f"  Profit Factor: {pf:.2f}" if pf < 99 else f"  Profit Factor: ∞",
         ]
 
         if expectancy > 0:
-            lines.append("• System is profitable ✅")
+            lines.append("  System is profitable")
         else:
-            lines.append("• System needs review ⚠️")
+            lines.append("  System needs review")
 
         return "\n".join(lines)
 
