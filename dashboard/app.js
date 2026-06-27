@@ -87,7 +87,9 @@ function toggleTheme() {
     const isDark = document.body.classList.toggle('dark');
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
     setText('themeBtn', isDark ? '☀️' : '🌙');
+    updateCharts(filteredTrades);
 }
+
 
 function showSection(sectionId) {
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
@@ -144,6 +146,13 @@ function setError(message) {
     el.textContent = message;
 }
 
+function setChartEmpty(id, isEmpty) {
+    const el = $(id);
+    if (el) el.style.display = isEmpty ? 'flex' : 'none';
+}
+function safeDestroyChart(name) {
+    if (charts[name]) { charts[name].destroy(); charts[name] = null; }
+}
 function updateStats(trades, live) {
     const total = trades.length;
     const wins = trades.filter(t => pnlOf(t) > 0 || ['TP2_HIT'].includes(t.status));
@@ -185,13 +194,30 @@ function updateCharts(trades) {
 }
 
 function chartOptions(extra = {}) {
+    const isDark = document.body.classList.contains('dark');
+    const grid = isDark ? 'rgba(148,163,184,.14)' : 'rgba(148,163,184,.22)';
+    const tick = isDark ? '#94a3b8' : '#64748b';
     return {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
+        resizeDelay: 120,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+            legend: { display: false },
+            tooltip: {
+                backgroundColor: isDark ? '#111827' : '#ffffff',
+                titleColor: isDark ? '#f8fafc' : '#111827',
+                bodyColor: isDark ? '#f8fafc' : '#111827',
+                borderColor: grid,
+                borderWidth: 1,
+                padding: 12,
+                displayColors: false,
+                callbacks: { label: ctx => `PnL: ${signed(ctx.parsed.y ?? ctx.parsed, 0)} pts` }
+            }
+        },
         scales: {
-            y: { grid: { color: 'rgba(148,163,184,.2)' }, ticks: { color: '#6c757d' } },
-            x: { grid: { display: false }, ticks: { color: '#6c757d' } }
+            y: { beginAtZero: true, grid: { color: grid, drawBorder: false }, ticks: { color: tick, callback: v => signed(v, 0) } },
+            x: { grid: { display: false }, ticks: { color: tick, maxRotation: 0, autoSkip: true } }
         },
         ...extra,
     };
@@ -206,12 +232,35 @@ function updateDailyPnlChart(trades) {
     const labels = Object.keys(daily).sort().slice(-14);
     const data = labels.map(d => daily[d]);
     const ctx = $('dailyPnlChart');
+    setChartEmpty('dailyPnlEmpty', !data.length);
+    setText('dailyChartTotal', data.length ? signed(data.reduce((a,b)=>a+b,0)) : '--');
     if (!ctx || typeof Chart === 'undefined') return;
-    if (charts.daily) charts.daily.destroy();
+    safeDestroyChart('daily');
+    if (!data.length) return;
+    const gradient = ctx.getContext('2d').createLinearGradient(0, 0, 0, 320);
+    gradient.addColorStop(0, 'rgba(37,99,235,.9)');
+    gradient.addColorStop(1, 'rgba(6,182,212,.45)');
     charts.daily = new Chart(ctx.getContext('2d'), {
         type: 'bar',
-        data: { labels: labels.map(d => d.substring(5)), datasets: [{ data, backgroundColor: data.map(v => v >= 0 ? '#2b8a3e' : '#c92a2a'), borderRadius: 5 }] },
-        options: chartOptions(),
+        data: {
+            labels: labels.map(d => d.substring(5)),
+            datasets: [{
+                label: 'Daily PnL',
+                data,
+                backgroundColor: data.map(v => v >= 0 ? gradient : 'rgba(220,38,38,.72)'),
+                hoverBackgroundColor: data.map(v => v >= 0 ? 'rgba(22,163,74,.82)' : 'rgba(220,38,38,.88)'),
+                borderRadius: 10,
+                borderSkipped: false,
+                maxBarThickness: 46,
+            }]
+        },
+        options: chartOptions({
+            plugins: { ...chartOptions().plugins, tooltip: { ...chartOptions().plugins.tooltip } },
+            scales: {
+                y: { ...chartOptions().scales.y, grace: '15%' },
+                x: chartOptions().scales.x
+            }
+        }),
     });
 }
 
@@ -221,8 +270,10 @@ function updateCumulativePnlChart(trades) {
     const data = sorted.map(t => { cumulative += pnlOf(t); return cumulative; });
     const labels = sorted.map(t => dateText(closeTime(t) || tradeTime(t)).substring(5));
     const ctx = $('cumulativePnlChart');
+    setChartEmpty('cumulativePnlEmpty', !data.length);
     if (!ctx || typeof Chart === 'undefined') return;
-    if (charts.cumulative) charts.cumulative.destroy();
+    safeDestroyChart('cumulative');
+    if (!data.length) return;
     charts.cumulative = new Chart(ctx.getContext('2d'), {
         type: 'line',
         data: { labels, datasets: [{ data, borderColor: '#1971c2', backgroundColor: 'rgba(25,113,194,.14)', fill: true, tension: .35, pointRadius: 2 }] },
@@ -239,8 +290,10 @@ function updateSessionChart(trades) {
     const labels = Object.keys(grouped);
     const data = labels.map(k => grouped[k]);
     const ctx = $('sessionChart');
+    setChartEmpty('sessionEmpty', !data.length);
     if (!ctx || typeof Chart === 'undefined') return;
-    if (charts.session) charts.session.destroy();
+    safeDestroyChart('session');
+    if (!data.length) return;
     charts.session = new Chart(ctx.getContext('2d'), {
         type: 'bar',
         data: { labels, datasets: [{ data, backgroundColor: data.map(v => v >= 0 ? '#2b8a3e' : '#c92a2a'), borderRadius: 5 }] },
@@ -254,8 +307,10 @@ function updateInstrumentChart(trades) {
     const labels = Object.keys(grouped);
     const data = labels.map(k => grouped[k]);
     const ctx = $('instrumentChart');
+    setChartEmpty('instrumentEmpty', !data.length);
     if (!ctx || typeof Chart === 'undefined') return;
-    if (charts.instrument) charts.instrument.destroy();
+    safeDestroyChart('instrument');
+    if (!data.length) return;
     charts.instrument = new Chart(ctx.getContext('2d'), {
         type: 'doughnut',
         data: { labels, datasets: [{ data, backgroundColor: ['#e67700', '#1971c2', '#2b8a3e', '#c92a2a', '#7048e8'], borderWidth: 0 }] },
