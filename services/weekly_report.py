@@ -482,25 +482,24 @@ class WeeklyReportService:
             )
         agent_section = "\n".join(agent_lines) if agent_lines else "  No agent data"
 
-        # Per-session breakdown (improved names)
-        session_map = {
-            "Asian Session (00:00-07:00 UTC)": "🌏 Asian (03:00-10:00 AM)",
-            "London Session (07:00-12:00 UTC)": "🇬🇧 London (10:00-03:00 PM)",
-            "London-NY Overlap (12:00-16:00 UTC)": "🇺🇸🇬🇧 London-NY (03:00-07:00 PM)",
-            "New York Session (16:00-21:00 UTC)": "🇺🇸 New York (07:00 PM-12:00 AM)",
-            "Late NY Session (21:00-00:00 UTC)": "🌙 Late NY (12:00-03:00 AM)",
-            "unknown": "❓ Unknown",
-        }
+        # Per-session breakdown in a fixed, readable order for Telegram.
+        session_order = [
+            ("Asia Morning", "🌏 Asia Morning"),
+            ("London / Europe Midday", "🇬🇧 London / Europe Midday"),
+            ("London + New York Afternoon", "🇬🇧🇺🇸 London + New York Afternoon"),
+            ("New York Evening", "🇺🇸 New York Evening"),
+            ("Late New York Night", "🌙 Late New York Night"),
+        ]
         session_lines = []
-        for session, data in sorted(stats.by_session.items(), key=lambda x: x[1].get("pnl", 0), reverse=True):
-            icon = "[+]" if data.get("pnl", 0) > 0 else "[-]" if data.get("pnl", 0) < 0 else "[=]"
-            session_name = session_map.get(session, session)
+        for key, label in session_order:
+            data = stats.by_session.get(key, {"count": 0, "wins": 0, "pnl": 0.0, "win_rate_pct": 0.0})
+            pnl = float(data.get("pnl", 0) or 0)
+            icon = "[+]" if pnl > 0 else "[-]" if pnl < 0 else "[=]"
             session_lines.append(
-                f"  {icon} {session_name}: {data.get('count', 0)} trades | "
-                f"WR {data.get('win_rate_pct', 0)}% | "
-                f"Net {data.get('pnl', 0):+.0f} pts"
+                f"  {icon} {label}\n"
+                f"     Trades: {data.get('count', 0)} | WR: {data.get('win_rate_pct', 0)}% | Net: {pnl:+.0f} pts"
             )
-        session_section = "\n".join(session_lines) if session_lines else "  No session data"
+        session_section = "\n".join(session_lines)
 
         # Per-instrument breakdown
         instrument_lines = []
@@ -636,7 +635,9 @@ class WeeklyReportService:
 
     @staticmethod
     def _trade_time_text(trade: Dict[str, Any]) -> str:
-        for key in ("created_at", "opened_at", "entry_time", "updated_at"):
+        # Use the actual open/entry time first so daily/session reports match when the trade was opened,
+        # not when it was eventually closed.
+        for key in ("entry_time", "opened_at", "created_at", "updated_at"):
             value = trade.get(key)
             if value:
                 return str(value)
@@ -691,20 +692,49 @@ class WeeklyReportService:
 
     @staticmethod
     def _trade_session(trade: Dict[str, Any]) -> str:
-        """Extract session from trade data or signal_snapshot."""
-        # Direct fields
-        session = trade.get("session") or trade.get("current_session")
-        if session:
-            return str(session)
+        """Return an ordered, human-friendly trading session by open time.
 
-        # Extract from signal_snapshot
-        snapshot = trade.get("signal_snapshot") or {}
-        session_info = snapshot.get("session_info") or {}
-        session = session_info.get("current_session")
-        if session:
-            return str(session)
+        Labels are based on Asia/Jerusalem local time so the weekly Telegram
+        report matches the dashboard:
+        - Asia Morning
+        - London / Europe Midday
+        - London + New York Afternoon
+        - New York Evening
+        - Late New York Night
+        """
+        ts = WeeklyReportService._trade_time_text(trade)
+        try:
+            text = str(ts).replace("Z", "+00:00")
+            dt = datetime.fromisoformat(text)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            local = dt.astimezone(ZoneInfo("Asia/Jerusalem"))
+            h = local.hour
+        except Exception:  # noqa: BLE001
+            # Fallback to stored session label if timestamp parsing fails.
+            snapshot = trade.get("signal_snapshot") or {}
+            session_info = snapshot.get("session_info") or {}
+            raw = str(trade.get("session") or trade.get("current_session") or session_info.get("current_session") or "unknown")
+            raw_l = raw.lower()
+            if "asian" in raw_l:
+                return "Asia Morning"
+            if "london-ny" in raw_l or "overlap" in raw_l:
+                return "London + New York Afternoon"
+            if "london" in raw_l:
+                return "London / Europe Midday"
+            if "new york" in raw_l or "ny" in raw_l:
+                return "New York Evening"
+            return "Late New York Night"
 
-        return "unknown"
+        if 3 <= h < 10:
+            return "Asia Morning"
+        if 10 <= h < 15:
+            return "London / Europe Midday"
+        if 15 <= h < 19:
+            return "London + New York Afternoon"
+        if 19 <= h < 24:
+            return "New York Evening"
+        return "Late New York Night"
 
     def _safe_count(self, table: str, filters: Dict[str, Any]) -> int:
         """Best-effort count; never raises."""
