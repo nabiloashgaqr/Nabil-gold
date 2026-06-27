@@ -424,12 +424,12 @@ class WeeklyReportService:
 
         # Per-session breakdown (improved names)
         session_map = {
-            "Asian": "🌏 Asian (00:00-07:00 UTC)",
-            "London": "🇬🇧 London (07:00-12:00 UTC)",
-            "London-NY Overlap": "🇺🇸🇬🇧 London-NY Overlap (12:00-16:00 UTC)",
-            "New York": "🇺🇸 New York (16:00-21:00 UTC)",
-            "Late NY / Rollover": "🌙 Late NY (21:00-00:00 UTC)",
-            "unknown": "❓ Unknown Session",
+            "Asian Session (00:00-07:00 UTC)": "🌏 Asian (03:00-10:00 AM)",
+            "London Session (07:00-12:00 UTC)": "🇬🇧 London (10:00-03:00 PM)",
+            "London-NY Overlap (12:00-16:00 UTC)": "🇺🇸🇬🇧 London-NY (03:00-07:00 PM)",
+            "New York Session (16:00-21:00 UTC)": "🇺🇸 New York (07:00 PM-12:00 AM)",
+            "Late NY Session (21:00-00:00 UTC)": "🌙 Late NY (12:00-03:00 AM)",
+            "unknown": "❓ Unknown",
         }
         session_lines = []
         for session, data in sorted(stats.by_session.items(), key=lambda x: x[1].get("pnl", 0), reverse=True):
@@ -478,7 +478,7 @@ class WeeklyReportService:
         if best_instrument:
             best_instrument_line = f"\n🏆 Best Instrument: {best_instrument[0]} (Net {best_instrument[1].get('pnl', 0):+.0f} pts)"
 
-        separator = "───────────────────────────────────"
+        separator = "────────────────────"
 
         lines = [
             "📊 SmartSignal — Weekly Report",
