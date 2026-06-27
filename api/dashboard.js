@@ -67,6 +67,100 @@ function normalizeTrade(t) {
   };
 }
 
+
+function dateOnly(value) {
+  return value ? String(value).slice(0, 10) : '';
+}
+function reportTradeDate(t) {
+  return dateOnly(t.closed_at || t.close_time || t.created_at || t.entry_time || t.updated_at);
+}
+function buildGeneratedDailyReport(closedTrades) {
+  const today = new Date().toISOString().slice(0, 10);
+  let trades = closedTrades.filter(t => reportTradeDate(t) === today);
+  let period = today;
+  if (!trades.length && closedTrades.length) {
+    period = reportTradeDate(closedTrades[0]) || today;
+    trades = closedTrades.filter(t => reportTradeDate(t) === period);
+  }
+  const wins = trades.filter(t => Number(t.pnl) > 0).length;
+  const losses = trades.filter(t => Number(t.pnl) < 0).length;
+  const be = trades.filter(t => Number(t.pnl) === 0).length;
+  const net = trades.reduce((s, t) => s + (Number(t.pnl) || 0), 0);
+  const winRate = trades.length ? (wins / trades.length) * 100 : 0;
+  const lines = [
+    'SmartSignal — Daily Report',
+    `Date: ${period}`,
+    '────────────────────',
+    'SUMMARY',
+    `  Closed Trades: ${trades.length}`,
+    `  Wins: ${wins} | Losses: ${losses} | BE: ${be}`,
+    `  Win Rate: ${winRate.toFixed(1)}%`,
+    '',
+    'PERFORMANCE',
+    `  Net: ${net >= 0 ? '+' : ''}${net.toFixed(1)} pts`,
+    '',
+    'TRADE DETAILS',
+    ...trades.slice(0, 12).map(t => `  [${Number(t.pnl) >= 0 ? '+' : '-'}] ${t.type || ''} ${t.symbol || ''} | Entry ${t.entry_price ?? '-'} | ${Number(t.pnl) >= 0 ? '+' : ''}${Number(t.pnl || 0).toFixed(1)} pts | ${t.status}`),
+    '',
+    trades.length ? 'Source: Generated live from closed trades.' : 'No closed trades available for this period.',
+  ];
+  return { id: 'generated-daily', generated: true, report_date: period, created_at: new Date().toISOString(), report_text: lines.join('\n') };
+}
+function getWeekStart(date) {
+  const d = new Date(`${date}T00:00:00Z`);
+  const day = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() - day + 1);
+  return d.toISOString().slice(0, 10);
+}
+function addDays(date, days) {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+function buildGeneratedWeeklyReport(closedTrades) {
+  const today = new Date().toISOString().slice(0, 10);
+  let weekStart = getWeekStart(today);
+  let weekEnd = addDays(weekStart, 6);
+  let trades = closedTrades.filter(t => {
+    const d = reportTradeDate(t);
+    return d >= weekStart && d <= weekEnd;
+  });
+  if (!trades.length && closedTrades.length) {
+    const base = reportTradeDate(closedTrades[0]) || today;
+    weekStart = getWeekStart(base);
+    weekEnd = addDays(weekStart, 6);
+    trades = closedTrades.filter(t => {
+      const d = reportTradeDate(t);
+      return d >= weekStart && d <= weekEnd;
+    });
+  }
+  const wins = trades.filter(t => Number(t.pnl) > 0).length;
+  const losses = trades.filter(t => Number(t.pnl) < 0).length;
+  const be = trades.filter(t => Number(t.pnl) === 0).length;
+  const net = trades.reduce((s, t) => s + (Number(t.pnl) || 0), 0);
+  const winRate = trades.length ? (wins / trades.length) * 100 : 0;
+  const bySymbol = {};
+  trades.forEach(t => { bySymbol[t.symbol || 'Unknown'] = (bySymbol[t.symbol || 'Unknown'] || 0) + (Number(t.pnl) || 0); });
+  const lines = [
+    'SmartSignal — Weekly Report',
+    `Week: ${weekStart} → ${weekEnd}`,
+    '────────────────────',
+    'SUMMARY',
+    `  Closed Trades: ${trades.length}`,
+    `  Wins: ${wins} | Losses: ${losses} | BE: ${be}`,
+    `  Win Rate: ${winRate.toFixed(1)}%`,
+    '',
+    'PERFORMANCE',
+    `  Net: ${net >= 0 ? '+' : ''}${net.toFixed(1)} pts`,
+    '',
+    'BY SYMBOL',
+    ...Object.entries(bySymbol).map(([sym, pnl]) => `  ${sym}: ${pnl >= 0 ? '+' : ''}${Number(pnl).toFixed(1)} pts`),
+    '',
+    trades.length ? 'Source: Generated live from closed trades.' : 'No closed trades available for this week.',
+  ];
+  return { id: 'generated-weekly', generated: true, week_start: weekStart, week_end: weekEnd, status: 'GENERATED', created_at: new Date().toISOString(), report_text: lines.join('\n') };
+}
+
 function buildDailyReport(r) {
   if (!r) return null;
   const date = r.report_date || (r.created_at || '').slice(0, 10) || '-';
@@ -156,8 +250,8 @@ module.exports = async function handler(req, res) {
       summary: summarize(closedTrades, liveTrades),
       closedTrades,
       liveTrades,
-      dailyReports: (dailyReports || []).map(r => ({ ...r, report_text: r.report_text || buildDailyReport(r) })),
-      weeklyReports: weeklyReports || [],
+      dailyReports: (dailyReports && dailyReports.length ? dailyReports.map(r => ({ ...r, report_text: r.report_text || buildDailyReport(r) })) : [buildGeneratedDailyReport(closedTrades)]),
+      weeklyReports: (weeklyReports && weeklyReports.length ? weeklyReports : [buildGeneratedWeeklyReport(closedTrades)]),
       agentWeights: agentWeights || [],
     });
   } catch (error) {
