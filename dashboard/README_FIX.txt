@@ -1,39 +1,16 @@
-تم التصحيح الكامل للوحة في هذه الحزمة.
+هذه النسخة مخصصة لإصلاح مشكلة التنسيق الحالية.
 
-الملفات المعدلة:
-1) dashboard/index.html
-2) dashboard/app.js
-3) dashboard/api/dashboard.js
-4) dashboard/style.css
+الملفات النهائية في هذه الحزمة:
+- dashboard/index.html
+- dashboard/app.js
+- dashboard/style.css
+- dashboard/api/dashboard.js
 
-ما تم إصلاحه بالكامل:
-- إصلاح index.html إلى HTML سليم 100%
-- إصلاح app.js لأن الواجهة كانت تتوقف بسبب دوال مفقودة وأخطاء render
-- إصلاح dashboard/api/dashboard.js لأن fallback للتقرير اليومي كان يستدعي دالة غير معرّفة
-- إضافة تحسينات CSS لازمة للعناصر التي كانت موجودة في HTML/JS لكن بدون تنسيق كافٍ
+الإصلاح الأساسي الجديد:
+- استبدال style.css بملف كامل مستقل، وليس patch جزئي
+- هذا يحل مشكلة أن الموقع كان يحمل فقط جزءًا صغيرًا من التنسيقات
 
-سبب المشكلة الحقيقي:
-- الـ API أصبح يعمل
-- لكن الواجهة كانت لا ترسم البيانات بسبب أخطاء JS وHTML معًا
-
-طريقة الاستبدال:
-- انسخ الملفات إلى نفس المسارات بالضبط:
-  dashboard/index.html
-  dashboard/app.js
-  dashboard/style.css
-  dashboard/api/dashboard.js
-
-بعدها على Vercel:
-- تأكد أن Root Directory = dashboard
-- تأكد من وجود:
-  SUPABASE_URL
-  SUPABASE_SERVICE_KEY أو SUPABASE_KEY
-- ثم Redeploy
-
-اختبار النجاح:
-1) افتح /api/dashboard وتأكد أنه يرجع JSON
-2) افتح الصفحة الرئيسية وتأكد أن:
-   - الإحصائيات ليست --
-   - الجدول يظهر الصفقات
-   - الرسوم تظهر
-   - التقارير تظهر
+بعد الرفع:
+- تأكد من استبدال style.css بالكامل
+- ثم Redeploy على Vercel
+- ويفضل Redeploy without cache
