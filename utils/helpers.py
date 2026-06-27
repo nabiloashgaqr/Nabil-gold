@@ -92,6 +92,38 @@ def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
+
+def canonical_session_label(dt: datetime | None = None, tz_name: str = "Asia/Jerusalem") -> str:
+    """Return the canonical session label used across dashboard and Telegram.
+
+    Labels are based on local Asia/Jerusalem time:
+    - Asia Morning: 03:00-09:59
+    - London / Europe Midday: 10:00-14:59
+    - London + New York Afternoon: 15:00-18:59
+    - New York Evening: 19:00-23:59
+    - Late New York Night: 00:00-02:59
+    """
+    from zoneinfo import ZoneInfo
+
+    dt = dt or now_utc()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    try:
+        local = dt.astimezone(ZoneInfo(tz_name))
+    except Exception:  # noqa: BLE001
+        local = dt.astimezone(timezone.utc)
+    hour = local.hour
+    if 3 <= hour < 10:
+        return "Asia Morning"
+    if 10 <= hour < 15:
+        return "London / Europe Midday"
+    if 15 <= hour < 19:
+        return "London + New York Afternoon"
+    if 19 <= hour < 24:
+        return "New York Evening"
+    return "Late New York Night"
+
+
 def get_current_session(dt: datetime | None = None) -> str:
     """Return a clear FX session label with time range in UTC."""
     dt = dt or now_utc()
