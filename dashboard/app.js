@@ -5,7 +5,7 @@ const API_URL = (window.SMARTSIGNAL_API_URL || '/api/dashboard');
 const OUTCOME_STATUSES = new Set(['TP1_HIT', 'TP2_HIT', 'SL_HIT', 'BE_HIT', 'EXPIRED', 'MANUAL_CLOSE', 'CLOSED']);
 const LIVE_STATUSES = new Set([]);
 
-let currentLang = 'en';
+let currentLang = 'ar';
 let closedTrades = [];
 let liveTrades = [];
 let filteredTrades = [];
@@ -38,24 +38,87 @@ const I18N = {
     }
 };
 function tr(key) { return (I18N[currentLang] && I18N[currentLang][key]) || I18N.ar[key] || key; }
-function localeCode() { return 'en-US'; }
-function formatDateTime(value) {
-    const d = value ? new Date(value) : new Date();
-    return d.toLocaleString(localeCode(), { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+function setLang(lang) {
+    currentLang = lang === 'en' ? 'en' : 'ar';
+    document.documentElement.lang = currentLang;
+    document.documentElement.dir = currentLang === 'ar' ? 'rtl' : 'ltr';
+    localStorage.setItem('lang', currentLang);
+    document.querySelectorAll('[data-ar][data-en]').forEach(el => { el.textContent = el.getAttribute(`data-${currentLang}`); });
+    document.querySelectorAll('.lang-btn').forEach(btn => btn.classList.remove('active'));
+    const active = currentLang === 'ar' ? $('langAr') : $('langEn');
+    if (active) active.classList.add('active');
+    renderTradesTable(filteredTrades);
+    updateOpenTrades(liveTrades);
+    if (dashboardPayload) renderReports(dashboardPayload);
 }
-function reportText(r) { return currentLang === 'ar' ? (r.report_text_ar || r.report_text || '') : (r.report_text_en || r.report_text || ''); }
-function wordTrades(n) { return currentLang === 'ar' ? `${n} صفقات` : `${n} trades`; }
-function wordReports(n) { return currentLang === 'ar' ? `${n} تقارير` : `${n} reports`; }
-function setLang(_lang) {
-    currentLang = 'en';
-    document.documentElement.lang = 'en';
-    document.documentElement.dir = 'ltr';
-    if (dashboardPayload) {
-        setText('lastUpdate', formatDateTime(dashboardPayload.generatedAt || Date.now()));
-        renderReports(dashboardPayload);
-        updateCharts(filteredTrades);
-    }
+
+
+function $(id) { return document.getElementById(id); }
+function setText(id, value) { const el = $(id); if (el) el.textContent = value; }
+function setHTML(id, value) { const el = $(id); if (el) el.innerHTML = value; }
+function num(value, fallback = 0) { const n = Number(value); return Number.isFinite(n) ? n : fallback; }
+function signed(value, decimals = 0) { const n = num(value); return `${n > 0 ? '+' : ''}${n.toFixed(decimals)}`; }
+function esc(value) {
+    return String(value ?? '').replace(/[&<>'"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[ch]));
 }
+function dateText(value) { return value ? String(value).substring(0, 10) : '-'; }
+function timeText(value) { return value ? String(value).replace('T', ' ').substring(0, 19) : '-'; }
+function pnlOf(t) {
+    // SL_HIT can be a real loss, breakeven, or positive trailing stop.
+    // Never force SL_HIT negative; use the realized PnL sign stored/calculated by trade management.
+    return num(t.pnl ?? t.final_pnl ?? t.current_pnl_points ?? t.current_pnl ?? 0);
+}
+function stopOutcomeOf(t) {
+    if (String(t.status || '').toUpperCase() !== 'SL_HIT') return null;
+    const pnl = pnlOf(t);
+    if (t.stop_outcome) return t.stop_outcome;
+    if (pnl > 0) return 'SL_PLUS';
+    if (pnl < 0) return 'SL_LOSS';
+    return 'SL_BE';
+}
+function displayStatus(t) {
+    const outcome = stopOutcomeOf(t);
+    if (outcome === 'SL_PLUS') return 'SL+';
+    if (outcome === 'SL_BE') return 'SL BE';
+    if (outcome === 'SL_LOSS') return 'SL LOSS';
+    return String(t.status || 'UNKNOWN').toUpperCase();
+}
+function statusClassOf(t) {
+    const pnl = pnlOf(t);
+    const outcome = stopOutcomeOf(t);
+    if (outcome === 'SL_PLUS') return 'win';
+    if (outcome === 'SL_BE') return 'neutral';
+    if (outcome === 'SL_LOSS') return 'loss';
+    return pnl > 0 || t.status === 'TP2_HIT' || t.status === 'TP1_HIT' ? 'win' : pnl < 0 ? 'loss' : 'neutral';
+}
+function tradeTime(t) { return t.created_at || t.entry_time || t.opened_at || t.updated_at || ''; }
+function closeTime(t) { return t.closed_at || t.close_time || ''; }
+function openTime(t) { return t.entry_time || t.created_at || t.opened_at || t.updated_at || ''; }
+function reportDate(t) { return dateText(openTime(t)); }
+function isLiveStatus(status) { return false; }
+function isClosedStatus(status) { return OUTCOME_STATUSES.has(String(status || '').toUpperCase()); }
+
+function normalizeTrade(t) {
+    const status = String(t.status || 'UNKNOWN').toUpperCase();
+    return {
+        ...t,
+        id: t.id || '',
+        symbol: t.symbol || 'XAU/USD',
+        type: String(t.type || t.side || t.trade_type || '').toUpperCase(),
+        status,
+        pnl: pnlOf(t),
+        created_at: tradeTime(t),
+        closed_at: closeTime(t),
+    };
+}
+
+function toggleTheme() {
+    const isDark = document.body.classList.toggle('dark');
+    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+    setText('themeBtn', isDark ? '☀️' : '🌙');
+    updateCharts(filteredTrades);
+}
+
 
 function showSection(sectionId) {
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
@@ -83,11 +146,12 @@ async function loadDashboardData() {
         updateStats(filteredTrades, liveTrades);
         updateCharts(filteredTrades);
         renderTradesTable(filteredTrades);
+        renderDailyBreakdown(filteredTrades);
         updateOpenTrades(liveTrades);
         renderReports(payload);
         updateAgentPerformance();
 
-        setText('lastUpdate', formatDateTime(payload.generatedAt || Date.now()));
+        setText('lastUpdate', new Date(payload.generatedAt || Date.now()).toLocaleString('ar'));
         setText('dataSource', payload.source || 'api');
     } catch (error) {
         console.error('Dashboard load failed:', error);
@@ -97,10 +161,11 @@ async function loadDashboardData() {
         updateStats([], []);
         updateCharts([]);
         renderTradesTable([]);
+        renderDailyBreakdown([]);
         updateOpenTrades([]);
         renderReports({ dailyReports: [], weeklyReports: [] });
         setText('dataSource', 'خطأ');
-        setText('lastUpdate', formatDateTime(Date.now()));
+        setText('lastUpdate', new Date().toLocaleString('ar'));
         setError(`${tr('loadError')}: ${error.message.includes('404') ? tr('api404') : error.message}`);
     }
 }
@@ -249,18 +314,13 @@ function updateCumulativePnlChart(trades) {
 }
 
 function updateSessionChart(trades) {
-    const order = ['Asia Morning', 'London / Europe Midday', 'London + New York Afternoon', 'New York Evening', 'Late New York Night'];
     const grouped = {};
-    const counts = {};
-    order.forEach(k => { grouped[k] = 0; counts[k] = 0; });
     trades.forEach(t => {
-        const session = sessionBucket(t);
+        const session = String(t.session || t.session_name || 'Unknown').split('(')[0].trim();
         grouped[session] = (grouped[session] || 0) + pnlOf(t);
-        counts[session] = (counts[session] || 0) + 1;
     });
-    const labels = order.filter(k => counts[k] > 0 || grouped[k] !== 0);
+    const labels = Object.keys(grouped);
     const data = labels.map(k => grouped[k]);
-    const displayLabels = labels.map(k => `${k} (${counts[k]})`);
     const ctx = $('sessionChart');
     setChartEmpty('sessionEmpty', !data.length);
     if (!ctx || typeof Chart === 'undefined') return;
@@ -268,31 +328,8 @@ function updateSessionChart(trades) {
     if (!data.length) return;
     charts.session = new Chart(ctx.getContext('2d'), {
         type: 'bar',
-        data: {
-            labels: displayLabels,
-            datasets: [{
-                data,
-                backgroundColor: data.map(v => v >= 0 ? 'rgba(22,163,74,.72)' : 'rgba(220,38,38,.72)'),
-                borderColor: data.map(v => v >= 0 ? '#16a34a' : '#dc2626'),
-                borderWidth: 1,
-                borderRadius: 8,
-                maxBarThickness: 34,
-            }]
-        },
-        options: chartOptions({
-            indexAxis: 'y',
-            plugins: {
-                ...chartOptions().plugins,
-                tooltip: {
-                    ...chartOptions().plugins.tooltip,
-                    callbacks: { label: ctx => ` ${signed(ctx.parsed.x, 1)} pts · ${counts[labels[ctx.dataIndex]]} ${'trades'}` }
-                }
-            },
-            scales: {
-                x: chartOptions().scales.y,
-                y: { grid: { display: false }, ticks: { color: document.body.classList.contains('dark') ? '#94a3b8' : '#64748b' } }
-            }
-        }),
+        data: { labels, datasets: [{ data, backgroundColor: data.map(v => v >= 0 ? '#2b8a3e' : '#c92a2a'), borderRadius: 5 }] },
+        options: chartOptions({ indexAxis: 'y' }),
     });
 }
 
@@ -363,6 +400,7 @@ function applyFilters() {
     updateStats(filteredTrades, liveTrades);
     updateCharts(filteredTrades);
     renderTradesTable(filteredTrades);
+    renderDailyBreakdown(filteredTrades);
 }
 
 function clearFilters() {
@@ -371,8 +409,54 @@ function clearFilters() {
     updateStats(filteredTrades, liveTrades);
     updateCharts(filteredTrades);
     renderTradesTable(filteredTrades);
+    renderDailyBreakdown(filteredTrades);
 }
 
+
+function groupTradesByOpenDate(trades) {
+    const groups = {};
+    trades.forEach(t => {
+        const d = reportDate(t);
+        if (!groups[d]) groups[d] = [];
+        groups[d].push(t);
+    });
+    return groups;
+}
+
+function renderDailyBreakdown(trades) {
+    const el = $('dailyBreakdown');
+    if (!el) return;
+    const groups = groupTradesByOpenDate(trades);
+    const days = Object.keys(groups).sort().reverse();
+    if (!days.length) {
+        el.innerHTML = `<div class="empty">${currentLang === 'ar' ? 'لا توجد صفقات مغلقة' : 'No closed trades'}</div>`;
+        return;
+    }
+    el.innerHTML = days.map(day => {
+        const list = groups[day];
+        const wins = list.filter(t => pnlOf(t) > 0).length;
+        const losses = list.filter(t => pnlOf(t) < 0).length;
+        const be = list.filter(t => pnlOf(t) === 0).length;
+        const net = list.reduce((sum, t) => sum + pnlOf(t), 0);
+        const wr = list.length ? (wins / list.length) * 100 : 0;
+        const details = list.map(t => `<div class="daily-trade-row">
+            <span class="badge ${statusClassOf(t)}">${esc(displayStatus(t))}</span>
+            <strong>${esc(t.type)} ${esc(t.symbol)}</strong>
+            <span>Entry ${num(t.entry_price).toFixed(2)}</span>
+            <span class="${pnlOf(t) >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(pnlOf(t), 1)} pts</span>
+        </div>`).join('');
+        return `<div class="daily-day-card">
+            <div class="daily-day-head">
+                <div><strong>${esc(day)}</strong><span>${list.length} trades · WR ${wr.toFixed(1)}%</span></div>
+                <div class="daily-net ${net >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(net, 1)} pts</div>
+            </div>
+            <div class="daily-mini-stats">
+                <span>✅ ${wins}</span><span>❌ ${losses}</span><span>➖ ${be}</span>
+            </div>
+            <div class="daily-trades">${details}</div>
+        </div>`;
+    }).join('');
+}
 
 function exportToCSV() {
     if (!filteredTrades.length) return;
@@ -394,12 +478,12 @@ function updateOpenTrades(_trades) {
 
 
 function monthLabel(month) {
-    if (!month || month.length < 7) return 'No Month';
+    if (!month || month.length < 7) return currentLang === 'ar' ? 'بدون شهر' : 'No Month';
     const [y, m] = month.split('-');
     const namesAr = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
     const namesEn = ['January','February','March','April','May','June','July','August','September','October','November','December'];
     const idx = Math.max(0, Math.min(11, Number(m) - 1));
-    return `${namesEn[idx]} ${y}`;
+    return currentLang === 'ar' ? `${namesAr[idx]} ${y}` : `${namesEn[idx]} ${y}`;
 }
 function reportPeriod(report, type) {
     if (type === 'weekly') return `${report.week_start || '-'} → ${report.week_end || '-'}`;
@@ -420,7 +504,7 @@ function renderReportArchive(containerId, reports, type) {
     const el = $(containerId);
     if (!el) return;
     if (!reports.length) {
-        el.innerHTML = `<div class="empty">${'No reports'}</div>`;
+        el.innerHTML = `<div class="empty">${currentLang === 'ar' ? 'لا توجد تقارير' : 'No reports'}</div>`;
         return;
     }
     const groups = groupReportsByMonth(reports, type);
@@ -438,13 +522,13 @@ function renderReportArchive(containerId, reports, type) {
                 <button class="report-file-head" onclick="toggleReportFile('${rid}')">
                     <span class="file-icon">${type === 'weekly' ? '🗓️' : '📄'}</span>
                     <span class="file-title">${esc(period)}</span>
-                    <span class="file-meta">${wordTrades(trades)} · ${'WR'} ${wr.toFixed(1)}% · <b class="${net >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(net, 1)}</b></span>
+                    <span class="file-meta">${trades} trades · WR ${wr.toFixed(1)}% · <b class="${net >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(net, 1)}</b></span>
                 </button>
-                <pre id="${rid}" class="report-file-body">${esc(reportText(r) || ('No report text'))}</pre>
+                <pre id="${rid}" class="report-file-body">${esc(r.report_text || 'No report text')}</pre>
             </div>`;
         }).join('');
         return `<div class="report-month-folder">
-            <div class="folder-head"><div><span class="folder-icon">📁</span><strong>${esc(monthLabel(month))}</strong></div><span>${wordReports(list.length)} · <b class="${totalNet >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(totalNet, 1)}</b></span></div>
+            <div class="folder-head"><div><span class="folder-icon">📁</span><strong>${esc(monthLabel(month))}</strong></div><span>${list.length} ${currentLang === 'ar' ? 'تقارير' : 'reports'} · <b class="${totalNet >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(totalNet, 1)}</b></span></div>
             <div class="folder-body">${items}</div>
         </div>`;
     }).join('');
@@ -459,8 +543,8 @@ function renderReports(payload) {
     const weekly = payload.weeklyReports || [];
     const latestDaily = daily[0];
     const latestWeekly = weekly[0];
-    setText('dailyReport', latestDaily ? (reportText(latestDaily) || ('Daily report has no text')) : tr('noDaily'));
-    setText('weeklyReport', latestWeekly ? (reportText(latestWeekly) || JSON.stringify(latestWeekly.stats_json || {}, null, 2)) : tr('noWeekly'));
+    setText('dailyReport', latestDaily ? (latestDaily.report_text || 'Daily report has no text') : tr('noDaily'));
+    setText('weeklyReport', latestWeekly ? (latestWeekly.report_text || JSON.stringify(latestWeekly.stats_json || {}, null, 2)) : tr('noWeekly'));
     renderReportArchive('dailyReportsArchive', daily, 'daily');
     renderReportArchive('weeklyReportsArchive', weekly, 'weekly');
     setHTML('reportsBody', '');
@@ -486,8 +570,8 @@ function updateAgentPerformance() {
         const losses = num(a.losses ?? 0);
         const net = num(a.net_pnl ?? 0);
         const sourceLabel = a.source === 'computed_from_closed_trades'
-            ? ('Computed from closed trades')
-            : ('From agent_weights');
+            ? (currentLang === 'ar' ? 'محسوب من الصفقات المغلقة' : 'Computed from closed trades')
+            : (currentLang === 'ar' ? 'من جدول agent_weights' : 'From agent_weights');
         return `<div class="agent-card">
             <div class="agent-header"><span class="agent-icon">🤖</span><span class="agent-name">${esc(a.agent_name)}</span></div>
             <div class="agent-stats">
@@ -561,7 +645,8 @@ function refreshData() {
 window.addEventListener('click', (event) => { if (event.target === $('tradeModal')) closeModal(); });
 
 document.addEventListener('DOMContentLoaded', () => {
-    setLang('en');
+    const savedLang = localStorage.getItem('lang') || 'ar';
+    setLang(savedLang);
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme === 'dark') { document.body.classList.add('dark'); setText('themeBtn', '☀️'); }
     loadDashboardData();
