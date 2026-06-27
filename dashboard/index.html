@@ -42,8 +42,8 @@
           <div class="title-inline">
             <img class="page-logo" src="assets/smart-signal-logo.png" alt="SmartSignal logo" />
             <div>
-              <h1 data-ar="صفقات TP1 / TP2 / SL" data-en="TP1 / TP2 / SL Trades">صفقات TP1 / TP2 / SL</h1>
-              <p data-ar="تعرض اللوحة نتائج الصفقات فقط: TP1 و TP2 و SL — بدون صفقات حية أو معلقة." data-en="The dashboard shows outcome trades only: TP1, TP2 and SL — no live or pending trades.">تعرض اللوحة نتائج الصفقات فقط: TP1 و TP2 و SL — بدون صفقات حية أو معلقة.</p>
+              <h1 data-ar="كل الصفقات المغلقة" data-en="All Closed Trades">كل الصفقات المغلقة</h1>
+              <p data-ar="تعرض اللوحة كل الصفقات المغلقة بما فيها TP1 و TP2 و SL و EXPIRED — بدون صفقات حية أو معلقة." data-en="The dashboard shows all closed trades including TP1, TP2, SL and EXPIRED — no live or pending trades.">تعرض اللوحة كل الصفقات المغلقة بما فيها TP1 و TP2 و SL و EXPIRED — بدون صفقات حية أو معلقة.</p>
             </div>
           </div>
           <div class="compact-meta">
@@ -60,7 +60,7 @@
           <div class="kpi-card"><span class="kpi-icon blue">◎</span><div><p data-ar="نسبة الربح" data-en="Win Rate">نسبة الربح</p><strong id="winRate">--%</strong><div class="progress-bar"><div id="winRateBar" class="progress-fill"></div></div></div></div>
           <div class="kpi-card"><span class="kpi-icon gold">$</span><div><p data-ar="صافي النقاط" data-en="Net Points">صافي النقاط</p><strong id="netPoints">--</strong></div></div>
           <div class="kpi-card"><span class="kpi-icon purple">×</span><div><p>Profit Factor</p><strong id="profitFactor">--</strong></div></div>
-          <div class="kpi-card compact"><p data-ar="TP1/TP2/SL" data-en="TP1/TP2/SL">TP1/TP2/SL</p><strong id="liveCount">--</strong></div>
+          <div class="kpi-card compact"><p data-ar="مغلقة" data-en="Closed">مغلقة</p><strong id="liveCount">--</strong></div>
           <div class="kpi-card compact"><p data-ar="صفقات TP1" data-en="TP1 Trades">صفقات TP1</p><strong id="tp1Count">--</strong></div>
           <div class="kpi-card compact"><p data-ar="أفضل صفقة" data-en="Best Trade">أفضل صفقة</p><strong id="bestTrade">--</strong></div>
           <div class="kpi-card compact"><p data-ar="أسوأ صفقة" data-en="Worst Trade">أسوأ صفقة</p><strong id="worstTrade">--</strong></div>
@@ -97,7 +97,7 @@
         </div>
 
         <div class="table-card">
-          <div class="table-header"><div><h3 data-ar="صفقات TP1 / TP2 / SL" data-en="TP1 / TP2 / SL Trades">صفقات TP1 / TP2 / SL</h3><span id="tradesCount">(0)</span></div><small data-ar="لا يتم عرض OPEN / PARTIAL / PENDING" data-en="OPEN / PARTIAL / PENDING are hidden">لا يتم عرض OPEN / PARTIAL / PENDING</small></div>
+          <div class="table-header"><div><h3 data-ar="كل الصفقات المغلقة" data-en="All Closed Trades">كل الصفقات المغلقة</h3><span id="tradesCount">(0)</span></div><small data-ar="لا يتم عرض OPEN / PARTIAL / PENDING" data-en="OPEN / PARTIAL / PENDING are hidden">لا يتم عرض OPEN / PARTIAL / PENDING</small></div>
           <div class="table-container">
             <table id="tradesTable"><thead><tr><th data-ar="الدخول" data-en="Opened">الدخول</th><th data-ar="الإغلاق" data-en="Closed">الإغلاق</th><th data-ar="الرمز" data-en="Symbol">الرمز</th><th data-ar="النوع" data-en="Type">النوع</th><th>Entry</th><th>Close</th><th>PnL</th><th data-ar="الحالة" data-en="Status">الحالة</th><th data-ar="الثقة" data-en="Confidence">الثقة</th><th></th></tr></thead><tbody id="tradesBody"><tr><td colspan="10" class="loading">Loading...</td></tr></tbody></table>
           </div>

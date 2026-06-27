@@ -2,7 +2,7 @@
 // Secure version: no Supabase keys in frontend. Data comes from /api/dashboard.
 
 const API_URL = (window.SMARTSIGNAL_API_URL || '/api/dashboard');
-const OUTCOME_STATUSES = new Set(['TP1_HIT', 'TP2_HIT', 'SL_HIT']);
+const OUTCOME_STATUSES = new Set(['TP1_HIT', 'TP2_HIT', 'SL_HIT', 'BE_HIT', 'EXPIRED', 'MANUAL_CLOSE', 'CLOSED']);
 const LIVE_STATUSES = new Set([]);
 
 let currentLang = 'ar';
@@ -17,7 +17,7 @@ const I18N = {
     ar: {
         api404: 'ملف API غير منشور على Vercel: /api/dashboard يرجع 404. إذا كان Root Directory في Vercel هو dashboard، يجب رفع الملف داخل dashboard/api/dashboard.js ثم عمل Redeploy.',
         loadError: 'تعذر تحميل البيانات',
-        noClosed: 'لا توجد صفقات TP1 / TP2 / SL حسب الفلتر الحالي',
+        noClosed: 'لا توجد صفقات مغلقة حسب الفلتر الحالي',
         noLive: 'لا توجد صفقات حية أو TP1 حالياً',
         noDaily: 'لا يوجد تقرير يومي بعد.',
         noWeekly: 'لا يوجد تقرير أسبوعي بعد.',
@@ -28,7 +28,7 @@ const I18N = {
     en: {
         api404: 'Dashboard API is not deployed: /api/dashboard returns 404. If Vercel Root Directory is dashboard, upload dashboard/api/dashboard.js and redeploy.',
         loadError: 'Failed to load data',
-        noClosed: 'No TP1 / TP2 / SL trades match the current filter',
+        noClosed: 'No closed trades match the current filter',
         noLive: 'No live or TP1 trades right now',
         noDaily: 'No daily report yet.',
         noWeekly: 'No weekly report yet.',
@@ -63,7 +63,11 @@ function esc(value) {
 }
 function dateText(value) { return value ? String(value).substring(0, 10) : '-'; }
 function timeText(value) { return value ? String(value).replace('T', ' ').substring(0, 19) : '-'; }
-function pnlOf(t) { return num(t.pnl ?? t.final_pnl ?? t.current_pnl_points ?? t.current_pnl ?? 0); }
+function pnlOf(t) {
+    let pnl = num(t.pnl ?? t.final_pnl ?? t.current_pnl_points ?? t.current_pnl ?? 0);
+    if (String(t.status || '').toUpperCase() === 'SL_HIT' && pnl > 0) pnl = -Math.abs(pnl);
+    return pnl;
+}
 function tradeTime(t) { return t.created_at || t.entry_time || t.opened_at || t.updated_at || ''; }
 function closeTime(t) { return t.closed_at || t.close_time || ''; }
 function isLiveStatus(status) { return false; }
