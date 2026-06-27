@@ -2,8 +2,8 @@
 // Secure version: no Supabase keys in frontend. Data comes from /api/dashboard.
 
 const API_URL = (window.SMARTSIGNAL_API_URL || '/api/dashboard');
-const CLOSED_EXCLUDED = new Set(['OPEN', 'PARTIAL', 'TP1_HIT', 'PENDING']);
-const LIVE_STATUSES = new Set(['OPEN', 'PARTIAL', 'TP1_HIT', 'PENDING']);
+const OUTCOME_STATUSES = new Set(['TP1_HIT', 'TP2_HIT', 'SL_HIT']);
+const LIVE_STATUSES = new Set([]);
 
 let currentLang = 'ar';
 let closedTrades = [];
@@ -17,7 +17,7 @@ const I18N = {
     ar: {
         api404: 'ملف API غير منشور على Vercel: /api/dashboard يرجع 404. إذا كان Root Directory في Vercel هو dashboard، يجب رفع الملف داخل dashboard/api/dashboard.js ثم عمل Redeploy.',
         loadError: 'تعذر تحميل البيانات',
-        noClosed: 'لا توجد صفقات مغلقة حسب الفلتر الحالي',
+        noClosed: 'لا توجد صفقات TP1 / TP2 / SL حسب الفلتر الحالي',
         noLive: 'لا توجد صفقات حية أو TP1 حالياً',
         noDaily: 'لا يوجد تقرير يومي بعد.',
         noWeekly: 'لا يوجد تقرير أسبوعي بعد.',
@@ -28,7 +28,7 @@ const I18N = {
     en: {
         api404: 'Dashboard API is not deployed: /api/dashboard returns 404. If Vercel Root Directory is dashboard, upload dashboard/api/dashboard.js and redeploy.',
         loadError: 'Failed to load data',
-        noClosed: 'No closed trades match the current filter',
+        noClosed: 'No TP1 / TP2 / SL trades match the current filter',
         noLive: 'No live or TP1 trades right now',
         noDaily: 'No daily report yet.',
         noWeekly: 'No weekly report yet.',
@@ -66,8 +66,8 @@ function timeText(value) { return value ? String(value).replace('T', ' ').substr
 function pnlOf(t) { return num(t.pnl ?? t.final_pnl ?? t.current_pnl_points ?? t.current_pnl ?? 0); }
 function tradeTime(t) { return t.created_at || t.entry_time || t.opened_at || t.updated_at || ''; }
 function closeTime(t) { return t.closed_at || t.close_time || ''; }
-function isLiveStatus(status) { return LIVE_STATUSES.has(String(status || '').toUpperCase()); }
-function isClosedStatus(status) { return !CLOSED_EXCLUDED.has(String(status || '').toUpperCase()); }
+function isLiveStatus(status) { return false; }
+function isClosedStatus(status) { return OUTCOME_STATUSES.has(String(status || '').toUpperCase()); }
 
 function normalizeTrade(t) {
     const status = String(t.status || 'UNKNOWN').toUpperCase();
@@ -98,6 +98,7 @@ function showSection(sectionId) {
     document.querySelectorAll('.nav-link').forEach(link => {
         link.classList.toggle('active', link.getAttribute('href') === `#${sectionId}`);
     });
+    if (sectionId === 'live-trades') sectionId = 'dashboard';
     if (sectionId === 'agents') updateAgentPerformance();
 }
 
@@ -110,7 +111,7 @@ async function loadDashboardData() {
 
         dashboardPayload = payload;
         closedTrades = (payload.closedTrades || []).map(normalizeTrade).filter(t => isClosedStatus(t.status));
-        liveTrades = (payload.liveTrades || []).map(normalizeTrade).filter(t => isLiveStatus(t.status));
+        liveTrades = [];
         filteredTrades = [...closedTrades];
 
         updateStats(filteredTrades, liveTrades);
@@ -166,13 +167,13 @@ function updateStats(trades, live) {
     const best = pnls.length ? Math.max(...pnls) : 0;
     const worst = pnls.length ? Math.min(...pnls) : 0;
     const avg = total ? netPnl / total : 0;
-    const tp1Live = live.filter(t => t.status === 'TP1_HIT').length;
+    const tp1Live = trades.filter(t => t.status === 'TP1_HIT').length;
 
     setText('totalTrades', total);
     setText('winRate', `${winRate.toFixed(1)}%`);
     setText('netPoints', signed(netPnl));
     setText('profitFactor', profitFactor);
-    setText('liveCount', live.length);
+    setText('liveCount', trades.length);
     setText('tp1Count', tp1Live);
     setText('bestTrade', pnls.length ? signed(best) : '--');
     setText('worstTrade', pnls.length ? signed(worst) : '--');
@@ -392,39 +393,10 @@ function exportToCSV() {
     URL.revokeObjectURL(url);
 }
 
-function updateOpenTrades(trades) {
-    const tbody = $('openTradesBody');
-    const tp1 = trades.filter(t => t.status === 'TP1_HIT').length;
-    const unrealized = trades.reduce((s, t) => s + num(t.current_pnl_points ?? t.current_pnl ?? t.pnl ?? 0), 0);
-    setText('openTradesCount', trades.length);
-    setText('liveTp1Count', tp1);
-    setText('unrealizedPnl', signed(unrealized));
-    const pnlEl = $('unrealizedPnl');
-    if (pnlEl) pnlEl.style.color = unrealized >= 0 ? '#2b8a3e' : '#c92a2a';
-    if (!tbody) return;
-    if (!trades.length) {
-        tbody.innerHTML = `<tr><td colspan="11" class="empty">${tr('noLive')}</td></tr>`;
-        return;
-    }
-    tbody.innerHTML = trades.map(trade => {
-        const pnl = num(trade.current_pnl_points ?? trade.current_pnl ?? trade.pnl ?? 0);
-        const created = tradeTime(trade) ? new Date(tradeTime(trade)) : null;
-        const hours = created && !Number.isNaN(created.getTime()) ? Math.max(0, Math.floor((Date.now() - created.getTime()) / 3600000)) : '-';
-        return `<tr onclick='showTradeModalById(${JSON.stringify(trade.id)}, true)'>
-            <td>${esc(dateText(tradeTime(trade)))}</td>
-            <td><strong>${esc(trade.symbol)}</strong></td>
-            <td><span class="badge ${trade.type === 'BUY' ? 'buy' : 'sell'}">${esc(trade.type)}</span></td>
-            <td>${num(trade.entry_price).toFixed(2)}</td>
-            <td>${trade.current_price != null ? num(trade.current_price).toFixed(2) : '-'}</td>
-            <td>${trade.stop_loss != null ? num(trade.stop_loss).toFixed(2) : '-'}</td>
-            <td>${trade.tp1 != null ? num(trade.tp1).toFixed(2) : '-'}</td>
-            <td>${trade.tp2 != null ? num(trade.tp2).toFixed(2) : '-'}</td>
-            <td class="${pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}"><strong>${signed(pnl)}</strong></td>
-            <td><span class="badge open ${trade.status === 'TP1_HIT' ? 'tp1' : ''}">${esc(trade.status)}</span></td>
-            <td>${hours === '-' ? '-' : `${hours}h`}</td>
-        </tr>`;
-    }).join('');
+function updateOpenTrades(_trades) {
+    // Live trades section removed by request. Dashboard shows TP1 / TP2 / SL outcomes only.
 }
+
 
 function renderReports(payload) {
     const daily = payload.dailyReports || [];
@@ -540,7 +512,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (savedTheme === 'dark') { document.body.classList.add('dark'); setText('themeBtn', '☀️'); }
     loadDashboardData();
     const hash = window.location.hash.substring(1);
-    if (hash && ['dashboard', 'live-trades', 'reports', 'agents'].includes(hash)) showSection(hash);
+    if (hash && ['dashboard', 'reports', 'agents'].includes(hash)) showSection(hash);
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape') closeModal();
         if (e.key === '/' && document.activeElement?.tagName === 'BODY') { e.preventDefault(); $('searchInput')?.focus(); }

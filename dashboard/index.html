@@ -21,7 +21,6 @@
 
       <nav class="nav-links" aria-label="Dashboard navigation">
         <a href="#dashboard" class="nav-link active" onclick="showSection('dashboard')" data-ar="الرئيسية" data-en="Dashboard">الرئيسية</a>
-        <a href="#live-trades" class="nav-link" onclick="showSection('live-trades')" data-ar="الصفقات الحية / TP1" data-en="Live / TP1">الصفقات الحية / TP1</a>
         <a href="#reports" class="nav-link" onclick="showSection('reports')" data-ar="التقارير" data-en="Reports">التقارير</a>
         <a href="#agents" class="nav-link" onclick="showSection('agents')" data-ar="الوكلاء" data-en="Agents">الوكلاء</a>
       </nav>
@@ -39,31 +38,30 @@
 
     <main class="main-content">
       <section id="dashboard" class="section active">
-        <div class="hero-card">
-          <img class="hero-logo-watermark" src="assets/smart-signal-logo.png" alt="" aria-hidden="true" />
-          <div>
-            <div class="eyebrow" data-ar="Closed performance" data-en="Closed performance">Closed performance</div>
-            <h1 data-ar="لوحة الصفقات المغلقة" data-en="Closed Trades Dashboard">لوحة الصفقات المغلقة</h1>
-            <p class="hero-text">
-              <span data-ar="تعرض الإحصائيات والشارتات للصفقات المغلقة فقط. الصفقات الحية و TP1 في تبويب منفصل." data-en="Statistics and charts are based on closed trades only. Live and TP1 trades are in a separate tab.">تعرض الإحصائيات والشارتات للصفقات المغلقة فقط. الصفقات الحية و TP1 في تبويب منفصل.</span>
-            </p>
+        <div class="compact-title-card">
+          <div class="title-inline">
+            <img class="page-logo" src="assets/smart-signal-logo.png" alt="SmartSignal logo" />
+            <div>
+              <h1 data-ar="صفقات TP1 / TP2 / SL" data-en="TP1 / TP2 / SL Trades">صفقات TP1 / TP2 / SL</h1>
+              <p data-ar="تعرض اللوحة نتائج الصفقات فقط: TP1 و TP2 و SL — بدون صفقات حية أو معلقة." data-en="The dashboard shows outcome trades only: TP1, TP2 and SL — no live or pending trades.">تعرض اللوحة نتائج الصفقات فقط: TP1 و TP2 و SL — بدون صفقات حية أو معلقة.</p>
+            </div>
           </div>
-          <div class="hero-meta">
-            <div class="meta-item"><span data-ar="آخر تحديث" data-en="Last update">آخر تحديث</span><strong id="lastUpdate">--</strong></div>
-            <div class="meta-item"><span data-ar="المصدر" data-en="Source">المصدر</span><strong id="dataSource">--</strong></div>
-            <label class="auto-refresh"><input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()"><span data-ar="تحديث تلقائي" data-en="Auto refresh">تحديث تلقائي</span></label>
+          <div class="compact-meta">
+            <span><b data-ar="آخر تحديث" data-en="Last update">آخر تحديث</b> <strong id="lastUpdate">--</strong></span>
+            <span><b data-ar="المصدر" data-en="Source">المصدر</b> <strong id="dataSource">--</strong></span>
+            <label class="auto-refresh small"><input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()"><span data-ar="تحديث تلقائي" data-en="Auto refresh">تحديث تلقائي</span></label>
           </div>
         </div>
 
         <div id="errorBox" class="error-box" style="display:none"></div>
 
         <div class="kpi-grid">
-          <div class="kpi-card"><span class="kpi-icon green">✓</span><div><p data-ar="صفقات مغلقة" data-en="Closed Trades">صفقات مغلقة</p><strong id="totalTrades">--</strong></div></div>
+          <div class="kpi-card"><span class="kpi-icon green">✓</span><div><p data-ar="صفقات نتائج" data-en="Outcome Trades">صفقات نتائج</p><strong id="totalTrades">--</strong></div></div>
           <div class="kpi-card"><span class="kpi-icon blue">◎</span><div><p data-ar="نسبة الربح" data-en="Win Rate">نسبة الربح</p><strong id="winRate">--%</strong><div class="progress-bar"><div id="winRateBar" class="progress-fill"></div></div></div></div>
           <div class="kpi-card"><span class="kpi-icon gold">$</span><div><p data-ar="صافي النقاط" data-en="Net Points">صافي النقاط</p><strong id="netPoints">--</strong></div></div>
           <div class="kpi-card"><span class="kpi-icon purple">×</span><div><p>Profit Factor</p><strong id="profitFactor">--</strong></div></div>
-          <div class="kpi-card compact"><p data-ar="صفقات حية" data-en="Live Trades">صفقات حية</p><strong id="liveCount">--</strong></div>
-          <div class="kpi-card compact"><p data-ar="TP1 حي" data-en="Live TP1">TP1 حي</p><strong id="tp1Count">--</strong></div>
+          <div class="kpi-card compact"><p data-ar="TP1/TP2/SL" data-en="TP1/TP2/SL">TP1/TP2/SL</p><strong id="liveCount">--</strong></div>
+          <div class="kpi-card compact"><p data-ar="صفقات TP1" data-en="TP1 Trades">صفقات TP1</p><strong id="tp1Count">--</strong></div>
           <div class="kpi-card compact"><p data-ar="أفضل صفقة" data-en="Best Trade">أفضل صفقة</p><strong id="bestTrade">--</strong></div>
           <div class="kpi-card compact"><p data-ar="أسوأ صفقة" data-en="Worst Trade">أسوأ صفقة</p><strong id="worstTrade">--</strong></div>
           <div class="kpi-card compact"><p data-ar="متوسط الصفقة" data-en="Average Trade">متوسط الصفقة</p><strong id="avgTrade">--</strong></div>
@@ -99,18 +97,14 @@
         </div>
 
         <div class="table-card">
-          <div class="table-header"><div><h3 data-ar="الصفقات المغلقة" data-en="Closed Trades">الصفقات المغلقة</h3><span id="tradesCount">(0)</span></div><small data-ar="لا يتم عرض OPEN/PARTIAL/TP1 هنا" data-en="OPEN/PARTIAL/TP1 are excluded here">لا يتم عرض OPEN/PARTIAL/TP1 هنا</small></div>
+          <div class="table-header"><div><h3 data-ar="صفقات TP1 / TP2 / SL" data-en="TP1 / TP2 / SL Trades">صفقات TP1 / TP2 / SL</h3><span id="tradesCount">(0)</span></div><small data-ar="لا يتم عرض OPEN / PARTIAL / PENDING" data-en="OPEN / PARTIAL / PENDING are hidden">لا يتم عرض OPEN / PARTIAL / PENDING</small></div>
           <div class="table-container">
             <table id="tradesTable"><thead><tr><th data-ar="الدخول" data-en="Opened">الدخول</th><th data-ar="الإغلاق" data-en="Closed">الإغلاق</th><th data-ar="الرمز" data-en="Symbol">الرمز</th><th data-ar="النوع" data-en="Type">النوع</th><th>Entry</th><th>Close</th><th>PnL</th><th data-ar="الحالة" data-en="Status">الحالة</th><th data-ar="الثقة" data-en="Confidence">الثقة</th><th></th></tr></thead><tbody id="tradesBody"><tr><td colspan="10" class="loading">Loading...</td></tr></tbody></table>
           </div>
         </div>
       </section>
 
-      <section id="live-trades" class="section">
-        <div class="page-title"><h1 data-ar="الصفقات الحية وإدارة TP1" data-en="Live Trades & TP1 Management">الصفقات الحية وإدارة TP1</h1><p data-ar="تعرض OPEN / PARTIAL / TP1_HIT / PENDING فقط" data-en="Shows OPEN / PARTIAL / TP1_HIT / PENDING only">تعرض OPEN / PARTIAL / TP1_HIT / PENDING فقط</p></div>
-        <div class="mini-grid"><div class="mini-stat"><span>Live Trades</span><strong id="openTradesCount">--</strong></div><div class="mini-stat"><span>TP1 Hit</span><strong id="liveTp1Count">--</strong></div><div class="mini-stat"><span>Unrealized PnL</span><strong id="unrealizedPnl">--</strong></div></div>
-        <div class="table-card"><div class="table-container"><table id="openTradesTable"><thead><tr><th data-ar="التاريخ" data-en="Date">التاريخ</th><th data-ar="الرمز" data-en="Symbol">الرمز</th><th data-ar="النوع" data-en="Type">النوع</th><th>Entry</th><th>Current</th><th>SL</th><th>TP1</th><th>TP2</th><th>Live PnL</th><th>Status</th><th>Age</th></tr></thead><tbody id="openTradesBody"><tr><td colspan="11" class="loading">Loading...</td></tr></tbody></table></div></div>
-      </section>
+
 
       <section id="reports" class="section">
         <div class="page-title"><h1 data-ar="التقارير اليومية والأسبوعية" data-en="Daily & Weekly Reports">التقارير اليومية والأسبوعية</h1><p data-ar="من جداول Supabase" data-en="Loaded from Supabase reports tables">من جداول Supabase</p></div>
