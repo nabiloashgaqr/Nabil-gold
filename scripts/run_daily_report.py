@@ -10,10 +10,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -27,7 +29,6 @@ logger = logging.getLogger(__name__)
 
 
 def _eod_dir():
-    from pathlib import Path
     return Path(__file__).resolve().parents[1] / "storage"
 
 
@@ -164,6 +165,68 @@ def send_open_trades_report(db: DatabaseService, telegram: TelegramService) -> N
     except Exception as exc:  # noqa: BLE001
         logger.exception("خطأ في تقرير الصفقات المفتوحة: %s", exc)
         telegram.send_error_alert(f"Open trades report failed: {exc}")
+
+
+def save_daily_report_to_database(
+    db: DatabaseService,
+    *,
+    report_date: str,
+    stats: dict,
+    report_text: str,
+    closed_trades_count: int,
+) -> None:
+    """Persist the daily report into Supabase so the dashboard can read it.
+
+    This is intentionally best-effort: report delivery to Telegram should not fail
+    just because the archive insert/update failed. In production with Supabase it
+    upserts by report_date (select existing row then update, otherwise insert).
+    In local fallback it writes storage/daily_report.json for debugging.
+    """
+    recommendations = stats.get("recommendations") or []
+    payload = {
+        "report_date": report_date,
+        "total_signals": int(stats.get("total", 0) or 0),
+        "new_trades": int(stats.get("total", 0) or 0),
+        "closed_trades": int(closed_trades_count or 0),
+        "winning_trades": int(stats.get("wins", 0) or 0),
+        "losing_trades": int(stats.get("losses", 0) or 0),
+        "daily_pnl": float(stats.get("net_points", 0) or 0),
+        "win_rate": float(stats.get("win_rate", 0) or 0),
+        "market_summary": "Generated from SmartSignal closed/open trades.",
+        "technical_summary": f"PF={stats.get('profit_factor', 0)} | Best={stats.get('best_trade', 0)} | Worst={stats.get('worst_trade', 0)}",
+        "recommendations": "\n".join(str(x) for x in recommendations[:8]),
+        "report_text": report_text,
+        "stats_json": stats,
+        "recommendations_json": recommendations,
+        "status": "ok",
+    }
+
+    client = getattr(db, "client", None)
+    if getattr(db, "use_supabase", False) and client is not None:
+        try:
+            existing = client.table("daily_reports").select("id").eq("report_date", report_date).limit(1).execute()
+            rows = list(existing.data or [])
+            if rows:
+                client.table("daily_reports").update(payload).eq("id", rows[0]["id"]).execute()
+                logger.info("Saved daily report to Supabase: updated report_date=%s", report_date)
+            else:
+                client.table("daily_reports").insert(payload).execute()
+                logger.info("Saved daily report to Supabase: inserted report_date=%s", report_date)
+            return
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Failed to save daily report to Supabase: %s", exc)
+
+    # Local/debug fallback.
+    try:
+        storage = Path(__file__).resolve().parents[1] / "storage"
+        storage.mkdir(parents=True, exist_ok=True)
+        (storage / "daily_report.json").write_text(
+            json.dumps({**payload, "saved_at": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        logger.info("Saved daily report local fallback: storage/daily_report.json")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to save local daily report JSON: %s", exc)
 
 
 def main() -> None:
@@ -336,6 +399,13 @@ def main() -> None:
         if len(message) > 3900:
             message = message[:3850].rstrip() + "\n…\n━━━━━━━━━━━━━━━━━━━━━"
         telegram.send_message(message)
+        save_daily_report_to_database(
+            database,
+            report_date=datetime.now(timezone.utc).date().isoformat(),
+            stats=stats,
+            report_text=message,
+            closed_trades_count=len(closed_today),
+        )
         _cleanup_eod_sections()
         logger.info("✅ Sent consolidated daily summary (single message)")
 
