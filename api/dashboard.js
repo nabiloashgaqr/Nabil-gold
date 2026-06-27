@@ -124,24 +124,6 @@ function buildGeneratedDailyReports(closedTrades) {
       '',
       'Source: Generated live from closed trades grouped by open date.',
     ];
-    const textEn = lines.join('\n');
-    const textAr = [
-      'سمارت سيجنال — التقرير اليومي',
-      `التاريخ: ${period}`,
-      '────────────────────',
-      'الملخص',
-      `  الصفقات المغلقة: ${trades.length}`,
-      `  رابحة: ${wins} | خاسرة: ${losses} | تعادل: ${be}`,
-      `  نسبة الربح: ${winRate.toFixed(1)}%`,
-      '',
-      'الأداء',
-      `  الصافي: ${net >= 0 ? '+' : ''}${net.toFixed(1)} نقطة`,
-      '',
-      'تفاصيل الصفقات',
-      ...trades.slice(0, 20).map(t => `  ${Number(t.pnl) >= 0 ? '[+]' : '[-]'} ${t.type || ''} ${t.symbol || ''} | دخول ${t.entry_price ?? '-'} | ${Number(t.pnl) >= 0 ? '+' : ''}${Number(t.pnl || 0).toFixed(1)} نقطة | ${t.status}`),
-      '',
-      'المصدر: تقرير مولد من الصفقات المغلقة حسب تاريخ فتح الصفقة.',
-    ].join('\n');
     return {
       id: `generated-daily-${period}`,
       generated: true,
@@ -155,9 +137,7 @@ function buildGeneratedDailyReports(closedTrades) {
       daily_pnl: Number(net.toFixed(1)),
       win_rate: Number(winRate.toFixed(1)),
       created_at: new Date().toISOString(),
-      report_text: textEn,
-      report_text_en: textEn,
-      report_text_ar: textAr,
+      report_text: lines.join('\n'),
     };
   });
 }
@@ -165,7 +145,7 @@ function buildGeneratedDailyReport(closedTrades) {
   return buildGeneratedDailyReports(closedTrades)[0] || {
     id: 'generated-daily-empty', generated: true, report_type: 'daily', report_date: new Date().toISOString().slice(0,10),
     month: new Date().toISOString().slice(0,7), closed_trades: 0, daily_pnl: 0, win_rate: 0,
-    created_at: new Date().toISOString(), report_text: 'SmartSignal — Daily Report\nNo closed trades available.', report_text_en: 'SmartSignal — Daily Report\nNo closed trades available.', report_text_ar: 'سمارت سيجنال — التقرير اليومي\nلا توجد صفقات مغلقة.'
+    created_at: new Date().toISOString(), report_text: 'SmartSignal — Daily Report\nNo closed trades available.'
   };
 }
 
@@ -217,24 +197,6 @@ function buildGeneratedWeeklyReports(closedTrades) {
       '',
       'Source: Generated live from closed trades grouped by open week.',
     ];
-    const textEn = lines.join('\n');
-    const textAr = [
-      'سمارت سيجنال — التقرير الأسبوعي',
-      `الأسبوع: ${group.weekStart} → ${group.weekEnd}`,
-      '────────────────────',
-      'الملخص',
-      `  الصفقات المغلقة: ${trades.length}`,
-      `  رابحة: ${wins} | خاسرة: ${losses} | تعادل: ${be}`,
-      `  نسبة الربح: ${winRate.toFixed(1)}%`,
-      '',
-      'الأداء',
-      `  الصافي: ${net >= 0 ? '+' : ''}${net.toFixed(1)} نقطة`,
-      '',
-      'حسب الرمز',
-      ...Object.entries(bySymbol).map(([sym, pnl]) => `  ${sym}: ${pnl >= 0 ? '+' : ''}${Number(pnl).toFixed(1)} نقطة`),
-      '',
-      'المصدر: تقرير مولد من الصفقات المغلقة حسب أسبوع فتح الصفقة.',
-    ].join('\n');
     return {
       id: `generated-weekly-${group.weekStart}`,
       generated: true,
@@ -250,9 +212,7 @@ function buildGeneratedWeeklyReports(closedTrades) {
       net_pnl_points: Number(net.toFixed(1)),
       win_rate: Number(winRate.toFixed(1)),
       created_at: new Date().toISOString(),
-      report_text: textEn,
-      report_text_en: textEn,
-      report_text_ar: textAr,
+      report_text: lines.join('\n'),
     };
   });
 }
@@ -260,90 +220,8 @@ function buildGeneratedWeeklyReport(closedTrades) {
   return buildGeneratedWeeklyReports(closedTrades)[0] || {
     id: 'generated-weekly-empty', generated: true, report_type: 'weekly', week_start: new Date().toISOString().slice(0,10),
     week_end: new Date().toISOString().slice(0,10), month: new Date().toISOString().slice(0,7), status: 'GENERATED',
-    created_at: new Date().toISOString(), report_text: 'SmartSignal — Weekly Report\nNo closed trades available.', report_text_en: 'SmartSignal — Weekly Report\nNo closed trades available.', report_text_ar: 'سمارت سيجنال — التقرير الأسبوعي\nلا توجد صفقات مغلقة.'
+    created_at: new Date().toISOString(), report_text: 'SmartSignal — Weekly Report\nNo closed trades available.'
   };
-}
-
-
-function extractAgentVotes(trade) {
-  const ss = trade.signal_snapshot || {};
-  const votes = ss.votes || {};
-  const out = [];
-  for (const direction of ['BUY', 'SELL']) {
-    const arr = Array.isArray(votes[direction]) ? votes[direction] : [];
-    for (const v of arr) {
-      if (!v || !v.agent) continue;
-      out.push({
-        agent: String(v.agent).toLowerCase(),
-        signal: direction,
-        confidence: Number(v.adjusted_confidence ?? v.confidence ?? 0) || 0,
-        weight: Number(v.weight ?? 0) || 0,
-        score: Number(v.score ?? 0) || 0,
-      });
-    }
-  }
-  const ctx = ss.agent_context || ss.classic?.strongest_directional;
-  if (!out.length && ctx && ctx.agent && ctx.signal && ['BUY', 'SELL'].includes(String(ctx.signal).toUpperCase())) {
-    out.push({
-      agent: String(ctx.agent).toLowerCase(),
-      signal: String(ctx.signal).toUpperCase(),
-      confidence: Number(ctx.adjusted_confidence ?? ctx.confidence ?? 0) || 0,
-      weight: Number(ctx.weight ?? 0) || 0,
-      score: Number(ctx.score ?? 0) || 0,
-    });
-  }
-  return out;
-}
-
-function computeAgentPerformance(closedTrades, agentWeights = []) {
-  const defaultAgents = ['technical', 'classical', 'smc', 'price_action', 'multitimeframe'];
-  const stats = {};
-  function ensure(agent) {
-    if (!stats[agent]) {
-      const w = (agentWeights || []).find(a => String(a.agent_name || '').toLowerCase() === agent);
-      stats[agent] = {
-        agent_name: agent,
-        weight: Number(w?.weight ?? 0) || 0,
-        predictions: 0,
-        wins: 0,
-        losses: 0,
-        net_pnl: 0,
-        avg_confidence: 0,
-        confidence_sum: 0,
-        last_signal: null,
-        source: 'computed_from_closed_trades',
-      };
-    }
-    return stats[agent];
-  }
-  defaultAgents.forEach(ensure);
-  closedTrades.forEach(trade => {
-    const pnl = Number(trade.pnl ?? trade.final_pnl ?? trade.current_pnl ?? 0) || 0;
-    const tradeSide = String(trade.type || trade.side || trade.trade_type || '').toUpperCase();
-    const votes = extractAgentVotes(trade);
-    votes.forEach(v => {
-      const st = ensure(v.agent);
-      st.predictions += 1;
-      st.confidence_sum += v.confidence;
-      st.last_signal = v.signal;
-      if (!st.weight && v.weight) st.weight = v.weight;
-      const correct = v.signal === tradeSide ? pnl > 0 : pnl < 0;
-      if (correct) st.wins += 1;
-      else st.losses += 1;
-      st.net_pnl += v.signal === tradeSide ? pnl : -pnl;
-    });
-  });
-  return Object.values(stats).map(st => {
-    const winRate = st.predictions ? (st.wins / st.predictions) * 100 : null;
-    return {
-      ...st,
-      win_rate: winRate,
-      total_predictions: st.predictions,
-      avg_confidence: st.predictions ? st.confidence_sum / st.predictions : 0,
-      net_pnl: Number(st.net_pnl.toFixed(1)),
-      trend: st.predictions < 2 ? 'INSUFFICIENT_DATA' : winRate >= 60 ? 'IMPROVING' : winRate >= 45 ? 'STABLE' : 'DECLINING',
-    };
-  }).sort((a, b) => (b.predictions - a.predictions) || String(a.agent_name).localeCompare(String(b.agent_name)));
 }
 
 function summarize(closedTrades, liveTrades) {
