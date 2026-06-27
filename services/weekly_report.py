@@ -350,24 +350,97 @@ class WeeklyReportService:
     # Internals
     # ------------------------------------------------------------------ #
     def _fallback_message(self, stats: WeeklyStats) -> str:
-        """Simple text-only weekly summary."""
+        """Professional weekly report with full details."""
         pf = stats.profit_factor
         pf_display = "∞" if pf >= 99 or (pf in (0, 99.9) and stats.losses == 0 and stats.wins > 0) else pf
+
+        # Profit Factor calculation explanation
+        if stats.losses > 0:
+            pf_note = f"Gross Profit: +{stats.avg_win_points * stats.wins:.0f} / Gross Loss: {abs(stats.avg_loss_points * stats.losses):.0f}"
+        else:
+            pf_note = "No losses this week"
+
+        # Expectancy
+        wr = stats.win_rate / 100
+        expectancy = (wr * stats.avg_win_points) - ((1 - wr) * abs(stats.avg_loss_points)) if stats.avg_loss_points != 0 else wr * stats.avg_win_points
+
+        # Risk grade
+        score = 0
+        if stats.win_rate >= 60: score += 2
+        elif stats.win_rate >= 50: score += 1
+        if pf >= 2.0: score += 2
+        elif pf >= 1.5: score += 1
+        if stats.net_pnl_points > 0: score += 1
+        grades = {5: "A+", 4: "A", 3: "B", 2: "C", 1: "D", 0: "F"}
+        grade = grades.get(score, "F")
+
+        # System verdict
+        if expectancy > 0 and stats.win_rate >= 55:
+            verdict = "✅ System is profitable"
+        elif stats.net_pnl_points > 0:
+            verdict = "⚠️ Profitable but needs monitoring"
+        else:
+            verdict = "❌ System needs review"
+
+        # Per-agent breakdown
+        agent_lines = []
+        for agent, data in sorted(stats.by_agent.items(), key=lambda x: x[1].get("pnl", 0), reverse=True):
+            emoji = "🟢" if data.get("pnl", 0) > 0 else "🔴" if data.get("pnl", 0) < 0 else "⚪"
+            agent_lines.append(
+                f"  {emoji} {agent}: {data.get('count', 0)} trades | "
+                f"WR {data.get('win_rate_pct', 0)}% | "
+                f"Net {data.get('pnl', 0):+.0f} pts"
+            )
+        agent_section = "\n".join(agent_lines) if agent_lines else "  • No agent data"
+
+        # Per-session breakdown
+        session_lines = []
+        for session, data in sorted(stats.by_session.items(), key=lambda x: x[1].get("pnl", 0), reverse=True):
+            emoji = "🟢" if data.get("pnl", 0) > 0 else "🔴" if data.get("pnl", 0) < 0 else "⚪"
+            session_lines.append(
+                f"  {emoji} {session}: {data.get('count', 0)} trades | "
+                f"WR {data.get('win_rate_pct', 0)}% | "
+                f"Net {data.get('pnl', 0):+.0f} pts"
+            )
+        session_section = "\n".join(session_lines) if session_lines else "  • No session data"
+
+        # Best/Worst day
+        best_day_line = f"Best: {stats.best_day} ({stats.best_day_pnl:+.0f} pts)" if stats.best_day != "—" else "Best: —"
+        worst_day_line = f"Worst: {stats.worst_day} ({stats.worst_day_pnl:+.0f} pts)" if stats.worst_day != "—" else "Worst: —"
+
         lines = [
             "═══════════════════════════════════",
             "📊 SmartSignal — Weekly Report",
             f"Week: {stats.week_start} → {stats.week_end}",
             "═══════════════════════════════════",
             "",
-            f"📈 Total trades: {stats.total_trades}",
-            f"✅ Wins: {stats.wins}    ❌ Losses: {stats.losses}    ⚪ Break-even: {stats.break_even}",
-            f"🎯 Win rate: {stats.win_rate:.1f}%",
-            f"💰 Net points: {stats.net_pnl_points:+.2f}",
-            f"⚖️ Profit Factor: {pf_display}",
-            f"🏆 Largest win: {stats.largest_win_points:+.2f}",
-            f"💔 Largest loss: {stats.largest_loss_points:+.2f}",
+            "📈 <b>Summary</b>",
+            f"• Total trades: {stats.total_trades}",
+            f"• Wins: {stats.wins}  |  Losses: {stats.losses}  |  BE: {stats.break_even}  |  Open: {stats.open_trades}",
+            f"• Win Rate: {stats.win_rate:.1f}%",
             "",
-            "⚠️ Automated summary.",
+            "💰 <b>Performance</b>",
+            f"• Net: {stats.net_pnl_points:+.1f} pts (${stats.net_pnl_points / 10:+.1f})",
+            f"• Profit Factor: {pf_display}  ({pf_note})",
+            f"• Avg Win: +{stats.avg_win_points:.1f}  |  Avg Loss: {stats.avg_loss_points:.1f}",
+            f"• Best Trade: {stats.largest_win_points:+.1f}  |  Worst: {stats.largest_loss_points:+.1f}",
+            f"• Expectancy: {expectancy:+.1f} pts/trade",
+            "",
+            "🤖 <b>Agent Performance</b>",
+            agent_section,
+            "",
+            "📅 <b>Daily Breakdown</b>",
+            f"• {best_day_line}",
+            f"• {worst_day_line}",
+            "",
+            "🌍 <b>Session Performance</b>",
+            session_section,
+            "",
+            "🛡️ <b>Risk Grade</b>",
+            f"• Grade: {grade}",
+            f"• {verdict}",
+            "",
+            "⚠️ Paper trading only — not financial advice.",
         ]
         return "\n".join(lines)
 
