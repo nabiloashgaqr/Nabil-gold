@@ -219,7 +219,14 @@ CREATE TABLE IF NOT EXISTS daily_reports (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Dashboard archive fields for persisted daily report text/stats
+ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS report_text TEXT;
+ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS stats_json JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS recommendations_json JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'ok';
+
 CREATE INDEX IF NOT EXISTS idx_daily_reports_date ON daily_reports(report_date DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_daily_reports_report_date ON daily_reports(report_date);
 
 -- =====================================================
 -- 5) News Log
@@ -439,6 +446,7 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
 );
 
 CREATE INDEX IF NOT EXISTS idx_weekly_reports_week_start ON weekly_reports (week_start DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_weekly_reports_period ON weekly_reports (week_start, week_end);
 
 -- =====================================================
 -- 12) Row Level Security (RLS)
