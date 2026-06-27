@@ -53,6 +53,9 @@ async function supabaseGet(path, params = {}) {
 }
 
 function normalizePnlByStatus(_status, rawPnl) {
+  // Important: SL_HIT is not always a loss.
+  // If SL was moved to breakeven/trailing profit, SL_HIT can be BE or SL+.
+  // Therefore we trust stored realized PnL sign and classify the stop separately.
   return Number(rawPnl) || 0;
 }
 
@@ -82,14 +85,13 @@ function normalizeTrade(t) {
   };
 }
 
+
 function dateOnly(value) {
   return value ? String(value).slice(0, 10) : '';
 }
-
 function reportTradeDate(t) {
   return dateOnly(t.closed_at || t.close_time || t.created_at || t.entry_time || t.updated_at);
 }
-
 function buildGeneratedDailyReports(closedTrades) {
   const groups = {};
   closedTrades.forEach(t => {
@@ -98,7 +100,6 @@ function buildGeneratedDailyReports(closedTrades) {
     if (!groups[d]) groups[d] = [];
     groups[d].push(t);
   });
-
   return Object.keys(groups).sort().reverse().map(period => {
     const trades = groups[period];
     const wins = trades.filter(t => Number(t.pnl) > 0).length;
@@ -106,44 +107,23 @@ function buildGeneratedDailyReports(closedTrades) {
     const be = trades.filter(t => Number(t.pnl) === 0).length;
     const net = trades.reduce((s, t) => s + (Number(t.pnl) || 0), 0);
     const winRate = trades.length ? (wins / trades.length) * 100 : 0;
-
     const lines = [
       'SmartSignal — Daily Report',
       `Date: ${period}`,
       '────────────────────',
       'SUMMARY',
-      ` Closed Trades: ${trades.length}`,
-      ` Wins: ${wins} | Losses: ${losses} | BE: ${be}`,
-      ` Win Rate: ${winRate.toFixed(1)}%`,
+      `  Closed Trades: ${trades.length}`,
+      `  Wins: ${wins} | Losses: ${losses} | BE: ${be}`,
+      `  Win Rate: ${winRate.toFixed(1)}%`,
       '',
       'PERFORMANCE',
-      ` Net: ${net >= 0 ? '+' : ''}${net.toFixed(1)} pts`,
+      `  Net: ${net >= 0 ? '+' : ''}${net.toFixed(1)} pts`,
       '',
       'TRADE DETAILS',
-      ...trades.slice(0, 20).map(t => ` [${Number(t.pnl) >= 0 ? '+' : '-'}] ${t.type || ''} ${t.symbol || ''} | Entry ${t.entry_price ?? '-'} | ${Number(t.pnl) >= 0 ? '+' : ''}${Number(t.pnl || 0).toFixed(1)} pts | ${t.status}`),
+      ...trades.slice(0, 20).map(t => `  [${Number(t.pnl) >= 0 ? '+' : '-'}] ${t.type || ''} ${t.symbol || ''} | Entry ${t.entry_price ?? '-'} | ${Number(t.pnl) >= 0 ? '+' : ''}${Number(t.pnl || 0).toFixed(1)} pts | ${t.status}`),
       '',
-      'Source: Generated live from closed trades grouped by close date.',
+      'Source: Generated live from closed trades grouped by open date.',
     ];
-
-    const textEn = lines.join('\n');
-    const textAr = [
-      'سمارت سيجنال — التقرير اليومي',
-      `التاريخ: ${period}`,
-      '────────────────────',
-      'الملخص',
-      ` الصفقات المغلقة: ${trades.length}`,
-      ` رابحة: ${wins} | خاسرة: ${losses} | تعادل: ${be}`,
-      ` نسبة الربح: ${winRate.toFixed(1)}%`,
-      '',
-      'الأداء',
-      ` الصافي: ${net >= 0 ? '+' : ''}${net.toFixed(1)} نقطة`,
-      '',
-      'تفاصيل الصفقات',
-      ...trades.slice(0, 20).map(t => ` ${Number(t.pnl) >= 0 ? '[+]' : '[-]'} ${t.type || ''} ${t.symbol || ''} | دخول ${t.entry_price ?? '-'} | ${Number(t.pnl) >= 0 ? '+' : ''}${Number(t.pnl || 0).toFixed(1)} نقطة | ${t.status}`),
-      '',
-      'المصدر: تقرير مولد من الصفقات المغلقة حسب تاريخ إغلاق الصفقة.',
-    ].join('\n');
-
     return {
       id: `generated-daily-${period}`,
       generated: true,
@@ -157,52 +137,16 @@ function buildGeneratedDailyReports(closedTrades) {
       daily_pnl: Number(net.toFixed(1)),
       win_rate: Number(winRate.toFixed(1)),
       created_at: new Date().toISOString(),
-      report_text: textEn,
-      report_text_en: textEn,
-      report_text_ar: textAr,
+      report_text: lines.join('\n'),
     };
   });
 }
-
 function buildGeneratedDailyReport(closedTrades) {
   return buildGeneratedDailyReports(closedTrades)[0] || {
-    id: 'generated-daily-empty',
-    generated: true,
-    report_type: 'daily',
-    report_date: new Date().toISOString().slice(0, 10),
-    month: new Date().toISOString().slice(0, 7),
-    closed_trades: 0,
-    daily_pnl: 0,
-    win_rate: 0,
-    created_at: new Date().toISOString(),
-    report_text: 'SmartSignal — Daily Report\nNo closed trades available.',
-    report_text_en: 'SmartSignal — Daily Report\nNo closed trades available.',
-    report_text_ar: 'سمارت سيجنال — التقرير اليومي\nلا توجد صفقات مغلقة.',
+    id: 'generated-daily-empty', generated: true, report_type: 'daily', report_date: new Date().toISOString().slice(0,10),
+    month: new Date().toISOString().slice(0,7), closed_trades: 0, daily_pnl: 0, win_rate: 0,
+    created_at: new Date().toISOString(), report_text: 'SmartSignal — Daily Report\nNo closed trades available.'
   };
-}
-
-function buildDailyReportFromRow(report) {
-  const period = report.report_date || String(report.created_at || '').slice(0, 10) || new Date().toISOString().slice(0, 10);
-  const stats = report.stats_json || {};
-  const total = Number(report.closed_trades ?? stats.closed_trades ?? stats.total_trades ?? stats.total ?? 0) || 0;
-  const wins = Number(report.winning_trades ?? stats.winning_trades ?? stats.wins ?? 0) || 0;
-  const losses = Number(report.losing_trades ?? stats.losing_trades ?? stats.losses ?? 0) || 0;
-  const be = Number(report.breakeven_trades ?? stats.breakeven_trades ?? stats.break_even ?? 0) || 0;
-  const winRate = Number(report.win_rate ?? stats.win_rate_pct ?? stats.win_rate ?? 0) || 0;
-  const net = Number(report.daily_pnl ?? report.net_pnl_points ?? stats.net_pnl_points ?? stats.net_points ?? 0) || 0;
-
-  return [
-    'SmartSignal — Daily Report',
-    `Date: ${period}`,
-    '────────────────────',
-    'SUMMARY',
-    ` Closed Trades: ${total}`,
-    ` Wins: ${wins} | Losses: ${losses} | BE: ${be}`,
-    ` Win Rate: ${winRate.toFixed(1)}%`,
-    '',
-    'PERFORMANCE',
-    ` Net: ${net >= 0 ? '+' : ''}${net.toFixed(1)} pts`,
-  ].join('\n');
 }
 
 function getWeekStart(date) {
@@ -211,13 +155,11 @@ function getWeekStart(date) {
   d.setUTCDate(d.getUTCDate() - day + 1);
   return d.toISOString().slice(0, 10);
 }
-
 function addDays(date, days) {
   const d = new Date(`${date}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
-
 function buildGeneratedWeeklyReports(closedTrades) {
   const groups = {};
   closedTrades.forEach(t => {
@@ -229,7 +171,6 @@ function buildGeneratedWeeklyReports(closedTrades) {
     if (!groups[key]) groups[key] = { weekStart: ws, weekEnd: we, trades: [] };
     groups[key].trades.push(t);
   });
-
   return Object.values(groups).sort((a, b) => b.weekStart.localeCompare(a.weekStart)).map(group => {
     const trades = group.trades;
     const wins = trades.filter(t => Number(t.pnl) > 0).length;
@@ -238,47 +179,24 @@ function buildGeneratedWeeklyReports(closedTrades) {
     const net = trades.reduce((s, t) => s + (Number(t.pnl) || 0), 0);
     const winRate = trades.length ? (wins / trades.length) * 100 : 0;
     const bySymbol = {};
-    trades.forEach(t => {
-      bySymbol[t.symbol || 'Unknown'] = (bySymbol[t.symbol || 'Unknown'] || 0) + (Number(t.pnl) || 0);
-    });
-
+    trades.forEach(t => { bySymbol[t.symbol || 'Unknown'] = (bySymbol[t.symbol || 'Unknown'] || 0) + (Number(t.pnl) || 0); });
     const lines = [
       'SmartSignal — Weekly Report',
       `Week: ${group.weekStart} → ${group.weekEnd}`,
       '────────────────────',
       'SUMMARY',
-      ` Closed Trades: ${trades.length}`,
-      ` Wins: ${wins} | Losses: ${losses} | BE: ${be}`,
-      ` Win Rate: ${winRate.toFixed(1)}%`,
+      `  Closed Trades: ${trades.length}`,
+      `  Wins: ${wins} | Losses: ${losses} | BE: ${be}`,
+      `  Win Rate: ${winRate.toFixed(1)}%`,
       '',
       'PERFORMANCE',
-      ` Net: ${net >= 0 ? '+' : ''}${net.toFixed(1)} pts`,
+      `  Net: ${net >= 0 ? '+' : ''}${net.toFixed(1)} pts`,
       '',
       'BY SYMBOL',
-      ...Object.entries(bySymbol).map(([sym, pnl]) => ` ${sym}: ${pnl >= 0 ? '+' : ''}${Number(pnl).toFixed(1)} pts`),
+      ...Object.entries(bySymbol).map(([sym, pnl]) => `  ${sym}: ${pnl >= 0 ? '+' : ''}${Number(pnl).toFixed(1)} pts`),
       '',
-      'Source: Generated live from closed trades grouped by close week.',
+      'Source: Generated live from closed trades grouped by open week.',
     ];
-
-    const textEn = lines.join('\n');
-    const textAr = [
-      'سمارت سيجنال — التقرير الأسبوعي',
-      `الأسبوع: ${group.weekStart} → ${group.weekEnd}`,
-      '────────────────────',
-      'الملخص',
-      ` الصفقات المغلقة: ${trades.length}`,
-      ` رابحة: ${wins} | خاسرة: ${losses} | تعادل: ${be}`,
-      ` نسبة الربح: ${winRate.toFixed(1)}%`,
-      '',
-      'الأداء',
-      ` الصافي: ${net >= 0 ? '+' : ''}${net.toFixed(1)} نقطة`,
-      '',
-      'حسب الرمز',
-      ...Object.entries(bySymbol).map(([sym, pnl]) => ` ${sym}: ${pnl >= 0 ? '+' : ''}${Number(pnl).toFixed(1)} نقطة`),
-      '',
-      'المصدر: تقرير مولد من الصفقات المغلقة حسب أسبوع إغلاق الصفقة.',
-    ].join('\n');
-
     return {
       id: `generated-weekly-${group.weekStart}`,
       generated: true,
@@ -294,97 +212,16 @@ function buildGeneratedWeeklyReports(closedTrades) {
       net_pnl_points: Number(net.toFixed(1)),
       win_rate: Number(winRate.toFixed(1)),
       created_at: new Date().toISOString(),
-      report_text: textEn,
-      report_text_en: textEn,
-      report_text_ar: textAr,
+      report_text: lines.join('\n'),
     };
   });
 }
-
-function extractAgentVotes(trade) {
-  const ss = trade.signal_snapshot || {};
-  const votes = ss.votes || {};
-  const out = [];
-
-  for (const direction of ['BUY', 'SELL']) {
-    const arr = Array.isArray(votes[direction]) ? votes[direction] : [];
-    for (const v of arr) {
-      if (!v || !v.agent) continue;
-      out.push({
-        agent: String(v.agent).toLowerCase(),
-        signal: direction,
-        confidence: Number(v.adjusted_confidence ?? v.confidence ?? 0) || 0,
-        weight: Number(v.weight ?? 0) || 0,
-        score: Number(v.score ?? 0) || 0,
-      });
-    }
-  }
-
-  const ctx = ss.agent_context || ss.classic?.strongest_directional;
-  if (!out.length && ctx && ctx.agent && ctx.signal && ['BUY', 'SELL'].includes(String(ctx.signal).toUpperCase())) {
-    out.push({
-      agent: String(ctx.agent).toLowerCase(),
-      signal: String(ctx.signal).toUpperCase(),
-      confidence: Number(ctx.adjusted_confidence ?? ctx.confidence ?? 0) || 0,
-      weight: Number(ctx.weight ?? 0) || 0,
-      score: Number(ctx.score ?? 0) || 0,
-    });
-  }
-  return out;
-}
-
-function computeAgentPerformance(closedTrades, agentWeights = []) {
-  const defaultAgents = ['technical', 'classical', 'smc', 'price_action', 'multitimeframe'];
-  const stats = {};
-
-  function ensure(agent) {
-    if (!stats[agent]) {
-      const w = (agentWeights || []).find(a => String(a.agent_name || '').toLowerCase() === agent);
-      stats[agent] = {
-        agent_name: agent,
-        weight: Number(w?.weight ?? 0) || 0,
-        predictions: 0,
-        wins: 0,
-        losses: 0,
-        net_pnl: 0,
-        avg_confidence: 0,
-        confidence_sum: 0,
-        last_signal: null,
-        source: 'computed_from_closed_trades',
-      };
-    }
-    return stats[agent];
-  }
-
-  defaultAgents.forEach(ensure);
-  closedTrades.forEach(trade => {
-    const pnl = Number(trade.pnl ?? trade.final_pnl ?? trade.current_pnl ?? 0) || 0;
-    const tradeSide = String(trade.type || trade.side || trade.trade_type || '').toUpperCase();
-    const votes = extractAgentVotes(trade);
-    votes.forEach(v => {
-      const st = ensure(v.agent);
-      st.predictions += 1;
-      st.confidence_sum += v.confidence;
-      st.last_signal = v.signal;
-      if (!st.weight && v.weight) st.weight = v.weight;
-      const correct = v.signal === tradeSide ? pnl > 0 : pnl < 0;
-      if (correct) st.wins += 1;
-      else st.losses += 1;
-      st.net_pnl += v.signal === tradeSide ? pnl : -pnl;
-    });
-  });
-
-  return Object.values(stats).map(st => {
-    const winRate = st.predictions ? (st.wins / st.predictions) * 100 : null;
-    return {
-      ...st,
-      win_rate: winRate,
-      total_predictions: st.predictions,
-      avg_confidence: st.predictions ? st.confidence_sum / st.predictions : 0,
-      net_pnl: Number(st.net_pnl.toFixed(1)),
-      trend: st.predictions < 2 ? 'INSUFFICIENT_DATA' : winRate >= 60 ? 'IMPROVING' : winRate >= 45 ? 'STABLE' : 'DECLINING',
-    };
-  }).sort((a, b) => (b.predictions - a.predictions) || String(a.agent_name).localeCompare(String(b.agent_name)));
+function buildGeneratedWeeklyReport(closedTrades) {
+  return buildGeneratedWeeklyReports(closedTrades)[0] || {
+    id: 'generated-weekly-empty', generated: true, report_type: 'weekly', week_start: new Date().toISOString().slice(0,10),
+    week_end: new Date().toISOString().slice(0,10), month: new Date().toISOString().slice(0,7), status: 'GENERATED',
+    created_at: new Date().toISOString(), report_text: 'SmartSignal — Weekly Report\nNo closed trades available.'
+  };
 }
 
 function summarize(closedTrades, liveTrades) {
@@ -412,6 +249,7 @@ module.exports = async function handler(req, res) {
   try {
     const limit = Math.min(Math.max(parseInt(req.query.limit || '150', 10) || 150, 20), 500);
     const closedFilter = `in.(${OUTCOME_STATUSES.join(',')})`;
+    const liveFilter = `in.(OPEN)`;
 
     const [closedRaw, liveRaw, dailyReports, weeklyReports, agentWeights] = await Promise.all([
       supabaseGet('trades', {
@@ -442,25 +280,6 @@ module.exports = async function handler(req, res) {
     const liveTrades = (liveRaw || []).map(normalizeTrade);
     const agentPerformance = computeAgentPerformance(closedTrades, agentWeights || []);
 
-    const normalizedDailyReports = (dailyReports && dailyReports.length)
-      ? dailyReports.map(r => ({
-          ...r,
-          report_type: 'daily',
-          month: String(r.report_date || r.created_at || '').slice(0, 7),
-          report_text: r.report_text || buildDailyReportFromRow(r),
-          report_text_en: r.report_text_en || r.report_text || buildDailyReportFromRow(r),
-          report_text_ar: r.report_text_ar || r.report_text || buildDailyReportFromRow(r),
-        }))
-      : buildGeneratedDailyReports(closedTrades);
-
-    const normalizedWeeklyReports = (weeklyReports && weeklyReports.length)
-      ? weeklyReports.map(r => ({
-          ...r,
-          report_type: 'weekly',
-          month: String(r.week_start || r.created_at || '').slice(0, 7),
-        }))
-      : buildGeneratedWeeklyReports(closedTrades);
-
     return json(res, 200, {
       ok: true,
       source: 'supabase',
@@ -468,8 +287,8 @@ module.exports = async function handler(req, res) {
       summary: summarize(closedTrades, liveTrades),
       closedTrades,
       liveTrades,
-      dailyReports: normalizedDailyReports,
-      weeklyReports: normalizedWeeklyReports,
+      dailyReports: (dailyReports && dailyReports.length ? dailyReports.map(r => ({ ...r, report_type: 'daily', month: String(r.report_date || r.created_at || '').slice(0, 7), report_text: r.report_text || buildDailyReport(r) })) : buildGeneratedDailyReports(closedTrades)),
+      weeklyReports: (weeklyReports && weeklyReports.length ? weeklyReports.map(r => ({ ...r, report_type: 'weekly', month: String(r.week_start || r.created_at || '').slice(0, 7) })) : buildGeneratedWeeklyReports(closedTrades)),
       agentPerformance,
       agentWeights: agentWeights || [],
     });
