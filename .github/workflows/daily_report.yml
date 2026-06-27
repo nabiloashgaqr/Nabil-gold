@@ -5,10 +5,7 @@ concurrency:
   cancel-in-progress: true
 
 on:
-  schedule:
-    # Daily Report at 23:00 local time (Asia/Hebron/Asia-Jerusalem)
-    # Summer time: 20:00 UTC. Monday to Friday only (1-5).
-    - cron: "0 20 * * 1-5"  # 23:00 local, Mon-Fri
+  # Scheduling is handled externally by cron-job.org
   workflow_dispatch:
 
 jobs:

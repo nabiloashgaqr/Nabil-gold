@@ -6,9 +6,8 @@ concurrency:
 
 
 on:
+  # Scheduling is handled externally by cron-job.org
   workflow_dispatch:
-  schedule:
-    - cron: "15 20 * * 1-5"  # 23:15 Asia/Hebron, Mon-Fri (after daily report)
 
 jobs:
   dashboard:

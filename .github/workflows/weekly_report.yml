@@ -5,10 +5,7 @@ concurrency:
   cancel-in-progress: true
 
 on:
-  schedule:
-    # Weekly report: Saturday 10:00 local time (Asia/Hebron/Asia-Jerusalem).
-    # Summer time: 07:00 UTC.
-    - cron: "0 7 * * 6"  # Saturday 10:00 local
+  # Scheduling is handled externally by cron-job.org
   workflow_dispatch:
 
 jobs:
