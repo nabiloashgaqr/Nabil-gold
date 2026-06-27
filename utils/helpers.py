@@ -93,18 +93,18 @@ def now_utc() -> datetime:
 
 
 def get_current_session(dt: datetime | None = None) -> str:
-    """Return a rough FX session label in UTC."""
+    """Return a clear FX session label with time range in UTC."""
     dt = dt or now_utc()
     hour = dt.hour
     if 0 <= hour < 7:
-        return "Asian"
+        return "Asian Session (00:00-07:00 UTC)"
     if 7 <= hour < 12:
-        return "London"
+        return "London Session (07:00-12:00 UTC)"
     if 12 <= hour < 16:
-        return "London-NY Overlap"
+        return "London-NY Overlap (12:00-16:00 UTC)"
     if 16 <= hour < 21:
-        return "New York"
-    return "Late NY / Rollover"
+        return "New York Session (16:00-21:00 UTC)"
+    return "Late NY Session (21:00-00:00 UTC)"
 
 
 def is_market_open(dt: datetime | None = None) -> bool:
