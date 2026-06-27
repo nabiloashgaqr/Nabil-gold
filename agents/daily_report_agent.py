@@ -31,8 +31,10 @@ class DailyReportAgent(BaseAgent):
 
     def _stats(self, trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         total = len(trades)
-        winners = [t for t in trades if self._pnl(t) > 0 or t.get("status") in {"TP1_HIT", "TP2_HIT"}]
-        losers = [t for t in trades if self._pnl(t) < 0 or t.get("status") == "SL_HIT"]
+        # SL_HIT can be SL loss, breakeven, or SL+ after trailing/breakeven move.
+        # Classify resolved trades by actual PnL sign, not by status name alone.
+        winners = [t for t in trades if self._pnl(t) > 0]
+        losers = [t for t in trades if self._pnl(t) < 0]
         breakeven = [t for t in trades if t.get("status") == "BE_HIT" or self._pnl(t) == 0 and t.get("status") not in {"OPEN", "TP1_HIT"}]
         open_trades = [t for t in trades if t.get("status") in {"OPEN", "TP1_HIT", "PARTIAL"}]
         pnl_values = [self._pnl(t) for t in trades]
@@ -185,6 +187,18 @@ class DailyReportAgent(BaseAgent):
             )
         return "\n".join(lines)
 
+
+    def _display_status(self, trade: Dict[str, Any]) -> str:
+        status = str(trade.get("status", "?")).upper()
+        if status == "SL_HIT":
+            pnl = self._pnl(trade)
+            if pnl > 0:
+                return "SL+"
+            if pnl < 0:
+                return "SL LOSS"
+            return "SL BE"
+        return status.replace("_", " ").title()
+
     def _format_trade_details(self, trades: List[Dict[str, Any]]) -> str:
         if not trades:
             return ""
@@ -214,9 +228,9 @@ class DailyReportAgent(BaseAgent):
                 icon = "[=]"
 
             # Status text
-            status_text = status.replace("_", " ").title()
-            if sl_moved and status in {"TP2_HIT", "BE_HIT"}:
-                status_text += " (SL->Entry)"
+            status_text = self._display_status(t)
+            if sl_moved and status in {"TP2_HIT", "BE_HIT", "SL_HIT"}:
+                status_text += " (SL moved)"
 
             lines.append(
                 f"  {icon} {side} {symbol} | "
