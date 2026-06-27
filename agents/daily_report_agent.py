@@ -1,7 +1,8 @@
 """Daily/Weekly Report Agent.
 
-يجمع صفقات اليوم أو فترة محددة من قاعدة البيانات ويحسب إحصائيات الأداء ثم ينشئ
-تقريراً مناسباً للإرسال إلى تليجرام، مع تحليل حسب الوكيل والاتجاه والجلسة.
+Collects trades from the database, calculates performance statistics,
+and builds a professional Telegram report with per-instrument breakdown,
+trade details, and proper Profit Factor calculation.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from datetime import date
 from typing import Any, Dict, List
 
 from agents.base_agent import BaseAgent
+from utils.helpers import format_price
 
 
 class DailyReportAgent(BaseAgent):
@@ -21,11 +23,11 @@ class DailyReportAgent(BaseAgent):
 
     def generate(self, trades: List[Dict[str, Any]], title: str = "Daily Report") -> Dict[str, Any]:
         stats = self._stats(trades)
-        return {"agent": self.name, "date": date.today().isoformat(), "stats": stats, "text": self._format_report(stats, title=title)}
+        return {"agent": self.name, "date": date.today().isoformat(), "stats": stats, "text": self._format_report(stats, trades, title=title)}
 
     def generate_weekly(self, trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         stats = self._stats(trades)
-        return {"agent": self.name, "date": date.today().isoformat(), "stats": stats, "text": self._format_report(stats, title="Weekly Report")}
+        return {"agent": self.name, "date": date.today().isoformat(), "stats": stats, "text": self._format_report(stats, trades, title="Weekly Report")}
 
     def _stats(self, trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         total = len(trades)
@@ -49,6 +51,7 @@ class DailyReportAgent(BaseAgent):
         by_direction = self._by_direction(trades)
         by_agent = self._by_agent(trades)
         by_session = self._by_session(trades)
+        by_instrument = self._by_instrument(trades)
         recommendations = self._recommendations(total, win_rate, net, profit_factor, by_agent, by_direction)
         return {
             "total": total,
@@ -63,57 +66,214 @@ class DailyReportAgent(BaseAgent):
             "avg_win": avg_win,
             "avg_loss": avg_loss,
             "profit_factor": profit_factor,
+            "gross_profit": round(gross_profit, 1),
+            "gross_loss": round(gross_loss, 1),
             "by_direction": by_direction,
             "by_agent": by_agent,
             "by_session": by_session,
+            "by_instrument": by_instrument,
             "recommendations": recommendations,
         }
 
-    def _format_report(self, stats: Dict[str, Any], title: str = "Daily Report") -> str:
-        title_en = "Weekly Report" if "أسبوع" in title or "Weekly" in title else "Daily Report"
-        agent_lines = self._format_ranked(stats.get("by_agent", {}), empty="No agent-source data yet")
-        direction = stats.get("by_direction", {})
+    def _format_report(self, stats: Dict[str, Any], trades: List[Dict[str, Any]], title: str = "Daily Report") -> str:
+        title_en = "Weekly Report" if "weekly" in title.lower() else "Daily Report"
+
+        # Profit Factor
         pf = stats.get("profit_factor", 0)
-        pf_display = "∞" if pf >= 99 or (pf in (0, 99.9) and stats.get("losses", 0) == 0 and stats.get("wins", 0) > 0) else pf
-        pf_note = " (All profitable so far → ∞)" if pf_display == "∞" else ""
+        pf_display = "∞" if pf >= 99 else f"{pf:.2f}"
+
+        # Per-instrument breakdown
+        instrument_lines = self._format_instruments(stats.get("by_instrument", {}))
+
+        # Direction breakdown
+        direction = stats.get("by_direction", {})
+        buy = direction.get("BUY", {})
+        sell = direction.get("SELL", {})
+
+        # Trade details
+        trade_details = self._format_trade_details(trades)
+
+        # Win/Loss streaks
+        streaks = self._calculate_streaks(trades)
+
+        # Risk metrics
+        risk = self._risk_metrics(stats)
+
+        # Recommendations
         recommendations = "\n".join(f"• {html.escape(str(x))}" for x in stats.get("recommendations", [])[:4]) or "• Not enough data yet"
 
-        # Data quality note (prevents repetition & illogical reasons)
-        total = stats.get("total", 0)
-        dq_note = ""
-        if total >= 5 and stats.get("losses", 0) == 0:
-            dq_note = "• Data Quality: 100% win sample. PF shown as ∞ (no losses realized)."
-        elif total < 5:
-            dq_note = "• Data Quality: Small sample (keep paper trading)."
-
-        return f"""📋 <b>{html.escape(title_en)} - XAU/USD</b>
+        return f"""📊 <b>SmartSignal — {title_en}</b>
 ━━━━━━━━━━━━━━━━━━━━━
-📅 <b>Date:</b> {html.escape(date.today().isoformat())}
 
-📊 <b>Statistics</b>
-• Trades: {stats['total']} (Open: {stats['open']})
-• Win Rate: {stats['win_rate']}%   ({stats['wins']}W / {stats['losses']}L / {stats['breakeven']}BE)
+📅 <b>Period:</b> {html.escape(date.today().isoformat())}
+
+📈 <b>Summary</b>
+• Total: {stats['total']} trades
+• Wins: {stats['wins']}  |  Losses: {stats['losses']}  |  BE: {stats['breakeven']}  |  Open: {stats['open']}
+• Win Rate: <b>{stats['win_rate']}%</b>
 
 💰 <b>Performance</b>
-• Net: {stats['net_points']:+.1f} pts
-• Best: {stats['best_trade']:+.1f}   |   Worst: {stats['worst_trade']:+.1f}
-• Avg Win: {stats['avg_win']:.1f}   |   Avg Loss: -{stats['avg_loss']:.1f}
-• Profit Factor: {pf_display}{pf_note}
+• Net: <b>{stats['net_points']:+.1f} pts</b> (${stats['net_points'] / 10:+.1f})
+• Gross Profit: +{stats['gross_profit']:.1f} pts
+• Gross Loss: -{stats['gross_loss']:.1f} pts
+• Profit Factor: <b>{pf_display}</b>
+• Avg Win: +{stats['avg_win']:.1f}  |  Avg Loss: -{stats['avg_loss']:.1f}
+• Best Trade: {stats['best_trade']:+.1f}  |  Worst: {stats['worst_trade']:+.1f}
 
-🧭 <b>Direction</b>
-• BUY: {direction.get('BUY', {}).get('count', 0)} trades → {direction.get('BUY', {}).get('net', 0):+}
-• SELL: {direction.get('SELL', {}).get('count', 0)} trades → {direction.get('SELL', {}).get('net', 0):+}
+🎯 <b>Win/Loss Streaks</b>
+• Best Streak: {streaks['best_win']} wins
+• Worst Streak: {streaks['worst_loss']} losses
+• Current: {streaks['current']}
 
-🤖 <b>Best Sources</b>
-{agent_lines}
+📊 <b>By Instrument</b>
+{instrument_lines}
+
+🧭 <b>By Direction</b>
+• BUY: {buy.get('count', 0)} trades → {buy.get('net', 0):+.1f} pts
+• SELL: {sell.get('count', 0)} trades → {sell.get('net', 0):+.1f} pts
+
+{trade_details}
+
+{risk}
 
 🧠 <b>Recommendations</b>
 {recommendations}
-{dq_note}
 
-⚠️ Paper-trading only. Not financial advice.
-""".strip()
+⚠️ Paper trading only — not financial advice.""".strip()
 
+    def _format_instruments(self, by_instrument: Dict[str, Dict[str, Any]]) -> str:
+        if not by_instrument:
+            return "• No instrument data"
+        lines = []
+        for symbol, data in sorted(by_instrument.items(), key=lambda x: x[1].get("net", 0), reverse=True):
+            emoji = "🟢" if data.get("net", 0) > 0 else "🔴" if data.get("net", 0) < 0 else "⚪"
+            lines.append(
+                f"• {emoji} <b>{html.escape(symbol)}</b>: "
+                f"{data.get('count', 0)} trades | "
+                f"WR {data.get('win_rate', 0)}% | "
+                f"Net {data.get('net', 0):+.1f} pts"
+            )
+        return "\n".join(lines)
+
+    def _format_trade_details(self, trades: List[Dict[str, Any]]) -> str:
+        if not trades:
+            return ""
+
+        closed = [t for t in trades if t.get("status") not in {"OPEN", "TP1_HIT", "PARTIAL"}]
+        if not closed:
+            return ""
+
+        lines = ["📋 <b>Trade Details</b>"]
+        for t in closed[-10:]:  # Last 10 trades
+            symbol = str(t.get("symbol") or "XAU/USD")
+            side = str(t.get("type") or t.get("side") or "?").upper()
+            entry = self._f(t.get("entry_price"))
+            sl = self._f(t.get("stop_loss"))
+            tp1 = self._f(t.get("tp1"))
+            tp2 = self._f(t.get("tp2"))
+            pnl = self._pnl(t)
+            status = str(t.get("status", "?"))
+            result = str(t.get("result", "?"))
+            sl_moved = t.get("sl_moved_to_entry", False)
+
+            # Result emoji
+            if pnl > 0:
+                emoji = "✅"
+            elif pnl < 0:
+                emoji = "❌"
+            else:
+                emoji = "⚪"
+
+            # Status text
+            status_text = status.replace("_", " ").title()
+            if sl_moved and status in {"TP2_HIT", "BE_HIT"}:
+                status_text += " (SL→Entry)"
+
+            lines.append(
+                f"{emoji} <b>{side} {html.escape(symbol)}</b> | "
+                f"Entry {format_price(entry, symbol)} | "
+                f"SL {format_price(sl, symbol)} | "
+                f"TP1 {format_price(tp1, symbol)} | "
+                f"TP2 {format_price(tp2, symbol)} | "
+                f"<b>{pnl:+.1f} pts</b> | "
+                f"{status_text}"
+            )
+
+        return "\n".join(lines)
+
+    def _calculate_streaks(self, trades: List[Dict[str, Any]]) -> Dict[str, Any]:
+        best_win = 0
+        worst_loss = 0
+        current_win = 0
+        current_loss = 0
+
+        for t in trades:
+            pnl = self._pnl(t)
+            if pnl > 0:
+                current_win += 1
+                current_loss = 0
+                best_win = max(best_win, current_win)
+            elif pnl < 0:
+                current_loss += 1
+                current_win = 0
+                worst_loss = max(worst_loss, current_loss)
+            else:
+                current_win = 0
+                current_loss = 0
+
+        if current_win > 0:
+            current = f"{current_win} wins 🔥"
+        elif current_loss > 0:
+            current = f"{current_loss} losses ⚠️"
+        else:
+            current = "neutral"
+
+        return {
+            "best_win": best_win,
+            "worst_loss": worst_loss,
+            "current": current,
+        }
+
+    def _risk_metrics(self, stats: Dict[str, Any]) -> str:
+        win_rate = stats.get("win_rate", 0)
+        pf = stats.get("profit_factor", 0)
+        net = stats.get("net_points", 0)
+
+        # Risk grade
+        score = 0
+        if win_rate >= 60:
+            score += 2
+        elif win_rate >= 50:
+            score += 1
+        if pf >= 2.0:
+            score += 2
+        elif pf >= 1.5:
+            score += 1
+        if net > 0:
+            score += 1
+
+        grades = {5: "A+", 4: "A", 3: "B", 2: "C", 1: "D", 0: "F"}
+        grade = grades.get(score, "F")
+
+        # Expectancy
+        avg_win = stats.get("avg_win", 0)
+        avg_loss = stats.get("avg_loss", 0)
+        wr = win_rate / 100
+        expectancy = (wr * avg_win) - ((1 - wr) * avg_loss) if avg_loss > 0 else avg_win * wr
+
+        lines = [
+            "🛡️ <b>Risk Metrics</b>",
+            f"• Risk Grade: <b>{grade}</b>",
+            f"• Expectancy: {expectancy:+.1f} pts/trade",
+            f"• Profit Factor: {pf:.2f}" if pf < 99 else f"• Profit Factor: ∞",
+        ]
+
+        if expectancy > 0:
+            lines.append("• System is profitable ✅")
+        else:
+            lines.append("• System needs review ⚠️")
+
+        return "\n".join(lines)
 
     def _by_direction(self, trades: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         out = {"BUY": {"count": 0, "net": 0.0}, "SELL": {"count": 0, "net": 0.0}}
@@ -150,6 +310,22 @@ class DailyReportAgent(BaseAgent):
             out[session]["net"] = round(out[session]["net"] + self._pnl(trade), 1)
         return dict(out)
 
+    def _by_instrument(self, trades: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        out: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"count": 0, "wins": 0, "losses": 0, "net": 0.0})
+        for trade in trades:
+            symbol = str(trade.get("symbol") or "XAU/USD")
+            pnl = self._pnl(trade)
+            out[symbol]["count"] += 1
+            out[symbol]["net"] = round(out[symbol]["net"] + pnl, 1)
+            if pnl > 0:
+                out[symbol]["wins"] += 1
+            elif pnl < 0:
+                out[symbol]["losses"] += 1
+        for value in out.values():
+            closed = value["wins"] + value["losses"]
+            value["win_rate"] = round(value["wins"] / closed * 100, 1) if closed else 0
+        return dict(out)
+
     def _recommendations(self, total: int, win_rate: float, net: float, profit_factor: float, by_agent: Dict[str, Any], by_direction: Dict[str, Any]) -> List[str]:
         recs: List[str] = []
         if total < 5:
@@ -170,14 +346,6 @@ class DailyReportAgent(BaseAgent):
             recs.append("SELL outperforms BUY in the current sample; check Daily Bias before buying.")
         return recs[:8]
 
-    def _format_ranked(self, data: Dict[str, Dict[str, Any]], empty: str) -> str:
-        if not data:
-            return f"• {empty}"
-        lines = []
-        for name, value in sorted(data.items(), key=lambda x: x[1].get("net", 0), reverse=True)[:6]:
-            lines.append(f"• {html.escape(str(name))}: {value.get('count', 0)} trades | WR {value.get('win_rate', 0)}% | Net {value.get('net', 0):+}")
-        return "\n".join(lines)
-
     def _pnl(self, trade: Dict[str, Any]) -> float:
         for key in ("final_pnl", "current_pnl", "current_pnl_points"):
             value = trade.get(key)
@@ -187,3 +355,9 @@ class DailyReportAgent(BaseAgent):
                 except (TypeError, ValueError):
                     continue
         return 0.0
+
+    def _f(self, value: Any, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
