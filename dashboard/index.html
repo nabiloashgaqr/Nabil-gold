@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en" dir="ltr">
+<html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SmartSignal — Enhanced Dashboard</title>
+    <title>SmartSignal — Live Dashboard</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -12,64 +12,123 @@
         <div class="nav-brand">
             <span class="logo">📊</span>
             <span class="brand-name">SmartSignal</span>
-            <span class="badge-enhanced">Enhanced v2</span>
+            <span class="badge-enhanced">Live</span>
         </div>
         <div class="nav-links">
-            <a href="#dashboard" class="nav-link active" onclick="showSection('dashboard')">Dashboard</a>
-            <a href="#open-trades" class="nav-link" onclick="showSection('open-trades')">Open Trades</a>
-            <a href="#agents" class="nav-link" onclick="showSection('agents')">Agents</a>
+            <a href="#dashboard" class="nav-link active" onclick="showSection('dashboard')">الرئيسية</a>
+            <a href="#live-trades" class="nav-link" onclick="showSection('live-trades')">الصفقات الحية / TP1</a>
+            <a href="#reports" class="nav-link" onclick="showSection('reports')">التقارير</a>
+            <a href="#agents" class="nav-link" onclick="showSection('agents')">الوكلاء</a>
         </div>
         <div class="nav-right">
-            <button onclick="refreshData()" class="btn">🔄 Refresh</button>
-            <button onclick="toggleTheme()" id="themeBtn">🌙</button>
+            <button onclick="refreshData()" class="btn btn-refresh" id="refreshBtn">🔄 تحديث</button>
+            <label class="auto-refresh"><input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()"> تلقائي</label>
+            <button onclick="toggleTheme()" id="themeBtn" class="theme-btn">🌙</button>
         </div>
     </nav>
 
-    <section id="dashboard" class="section active">
-        <div class="stats-grid">
-            <div class="stat-card"><div class="stat-icon">📈</div><div class="stat-value" id="totalTrades">--</div><div class="stat-label">Total Trades</div></div>
-            <div class="stat-card success"><div class="stat-icon">🎯</div><div class="stat-value" id="winRate">--%</div><div class="stat-label">Win Rate</div></div>
-            <div class="stat-card success"><div class="stat-icon">💰</div><div class="stat-value" id="netPoints">--</div><div class="stat-label">Net Points</div></div>
-            <div class="stat-card"><div class="stat-icon">⚖️</div><div class="stat-value" id="profitFactor">--</div><div class="stat-label">Profit Factor</div></div>
-        </div>
+    <main>
+        <section id="dashboard" class="section active">
+            <div class="section-header">
+                <h2>لوحة الصفقات المغلقة فقط</h2>
+                <p class="muted">آخر تحديث: <span id="lastUpdate">--</span> · المصدر: <span id="dataSource">--</span></p>
+                <div id="errorBox" class="error-box" style="display:none"></div>
+            </div>
 
-        <div class="filters-bar">
-            <select id="filterSymbol" onchange="applyFilters()"><option value="">All Symbols</option><option value="XAU/USD">XAU/USD</option><option value="WTI/USD">WTI/USD</option></select>
-            <button onclick="clearFilters()" class="btn">Clear</button>
-            <button onclick="exportToCSV()" class="btn">Export CSV</button>
-        </div>
+            <div class="stats-grid">
+                <div class="stat-card"><div class="stat-icon">✅</div><div class="stat-value" id="totalTrades">--</div><div class="stat-label">صفقات مغلقة</div></div>
+                <div class="stat-card success"><div class="stat-icon">🎯</div><div class="stat-value" id="winRate">--%</div><div class="stat-label">نسبة الربح</div><div class="progress-bar"><div id="winRateBar" class="progress-fill"></div></div></div>
+                <div class="stat-card success"><div class="stat-icon">💰</div><div class="stat-value" id="netPoints">--</div><div class="stat-label">صافي النقاط</div></div>
+                <div class="stat-card"><div class="stat-icon">⚖️</div><div class="stat-value" id="profitFactor">--</div><div class="stat-label">Profit Factor</div></div>
+                <div class="stat-card"><div class="stat-icon">🚀</div><div class="stat-value" id="liveCount">--</div><div class="stat-label">صفقات حية</div></div>
+                <div class="stat-card"><div class="stat-icon">🥇</div><div class="stat-value" id="tp1Count">--</div><div class="stat-label">TP1 حي</div></div>
+                <div class="stat-card"><div class="stat-icon">📈</div><div class="stat-value" id="bestTrade">--</div><div class="stat-label">أفضل صفقة</div></div>
+                <div class="stat-card danger"><div class="stat-icon">📉</div><div class="stat-value" id="worstTrade">--</div><div class="stat-label">أسوأ صفقة</div></div>
+                <div class="stat-card"><div class="stat-icon">🧮</div><div class="stat-value" id="avgTrade">--</div><div class="stat-label">متوسط الصفقة</div></div>
+                <div class="stat-card"><div class="stat-icon">🔮</div><div class="stat-value" id="expectancy">--</div><div class="stat-label">Expectancy</div></div>
+            </div>
 
-        <div class="charts-grid">
-            <div class="chart-card"><h3>Daily PnL</h3><canvas id="dailyPnlChart"></canvas></div>
-            <div class="chart-card"><h3>Cumulative PnL</h3><canvas id="cumulativePnlChart"></canvas></div>
-        </div>
+            <div class="filters-bar">
+                <div class="filter-group">
+                    <label>الرمز</label>
+                    <select id="filterSymbol" onchange="applyFilters()"><option value="">كل الرموز</option><option value="XAU/USD">XAU/USD</option><option value="WTI/USD">WTI/USD</option></select>
+                </div>
+                <div class="filter-group">
+                    <label>النتيجة</label>
+                    <select id="filterResult" onchange="applyFilters()"><option value="">الكل</option><option value="win">رابحة</option><option value="loss">خاسرة</option><option value="be">تعادل</option></select>
+                </div>
+                <div class="filter-group">
+                    <label>من تاريخ</label>
+                    <input type="date" id="filterDateFrom" onchange="applyFilters()">
+                </div>
+                <div class="filter-group">
+                    <label>إلى تاريخ</label>
+                    <input type="date" id="filterDateTo" onchange="applyFilters()">
+                </div>
+                <div class="filter-group search-group">
+                    <label>بحث</label>
+                    <input id="searchInput" placeholder="رمز / حالة / نوع" oninput="applyFilters()">
+                </div>
+                <div class="filter-actions">
+                    <button onclick="clearFilters()" class="btn btn-secondary">مسح</button>
+                    <button onclick="exportToCSV()" class="btn btn-primary">تصدير CSV</button>
+                </div>
+            </div>
 
-        <div class="table-section">
-            <h3>Recent Trades</h3>
-            <table id="tradesTable">
-                <thead><tr><th>Date</th><th>Symbol</th><th>Type</th><th>Entry</th><th>PnL</th><th>Status</th><th>Actions</th></tr></thead>
-                <tbody id="tradesBody"></tbody>
-            </table>
-        </div>
-    </section>
+            <div class="charts-grid">
+                <div class="chart-card"><div class="chart-header"><h3>Daily PnL</h3><span class="chart-subtitle">مغلق فقط</span></div><canvas id="dailyPnlChart"></canvas></div>
+                <div class="chart-card"><div class="chart-header"><h3>Cumulative PnL</h3><span class="chart-subtitle">مغلق فقط</span></div><canvas id="cumulativePnlChart"></canvas></div>
+                <div class="chart-card"><div class="chart-header"><h3>By Session</h3><span class="chart-subtitle">مغلق فقط</span></div><canvas id="sessionChart"></canvas></div>
+                <div class="chart-card"><div class="chart-header"><h3>By Symbol</h3><span class="chart-subtitle">حجم الحركة</span></div><canvas id="instrumentChart"></canvas></div>
+            </div>
 
-    <section id="open-trades" class="section">
-        <h2>Open Trades</h2>
-        <table id="openTradesTable"><thead><tr><th>Date</th><th>Symbol</th><th>Type</th><th>PnL</th><th>Status</th></tr></thead><tbody id="openTradesBody"></tbody></table>
-    </section>
+            <div class="table-section">
+                <div class="table-header"><h3>الصفقات المغلقة <span id="tradesCount">(0)</span></h3><span class="muted">لا يتم عرض OPEN/PARTIAL/TP1 هنا</span></div>
+                <div class="table-container">
+                    <table id="tradesTable">
+                        <thead><tr><th>التاريخ</th><th>الإغلاق</th><th>الرمز</th><th>النوع</th><th>الدخول</th><th>الإغلاق</th><th>PnL</th><th>الحالة</th><th>الثقة</th><th>إجراء</th></tr></thead>
+                        <tbody id="tradesBody"><tr><td colspan="10" class="loading">جاري التحميل...</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
 
-    <section id="agents" class="section">
-        <h2>Agent Performance</h2>
-        <div class="agents-grid">
-            <div class="agent-card">Technical - 68%</div>
-            <div class="agent-card">SMC - 73%</div>
-            <div class="agent-card">Classical - 61%</div>
-        </div>
-    </section>
+        <section id="live-trades" class="section">
+            <div class="section-header"><h2>الصفقات الحية وإدارة TP1</h2><p class="muted">تعرض OPEN / PARTIAL / TP1_HIT / PENDING فقط</p></div>
+            <div class="stats-mini">
+                <div class="mini-stat"><span class="mini-label">Live Trades</span><span class="mini-value" id="openTradesCount">--</span></div>
+                <div class="mini-stat"><span class="mini-label">TP1 Hit</span><span class="mini-value" id="liveTp1Count">--</span></div>
+                <div class="mini-stat"><span class="mini-label">Unrealized PnL</span><span class="mini-value" id="unrealizedPnl">--</span></div>
+            </div>
+            <div class="table-section">
+                <div class="table-container">
+                    <table id="openTradesTable"><thead><tr><th>التاريخ</th><th>الرمز</th><th>النوع</th><th>الدخول</th><th>السعر الحالي</th><th>SL</th><th>TP1</th><th>TP2</th><th>PnL حي</th><th>الحالة</th><th>العمر</th></tr></thead><tbody id="openTradesBody"><tr><td colspan="11" class="loading">جاري التحميل...</td></tr></tbody></table>
+                </div>
+            </div>
+        </section>
+
+        <section id="reports" class="section">
+            <div class="section-header"><h2>التقارير اليومية والأسبوعية</h2><p class="muted">من جداول daily_reports و weekly_reports في Supabase</p></div>
+            <div class="reports-grid">
+                <div class="report-card"><h3>📅 التقرير اليومي الأخير</h3><pre id="dailyReport" class="report-content">جاري التحميل...</pre></div>
+                <div class="report-card"><h3>🗓️ التقرير الأسبوعي الأخير</h3><pre id="weeklyReport" class="report-content">جاري التحميل...</pre></div>
+            </div>
+            <div class="table-section">
+                <div class="table-header"><h3>سجل التقارير</h3></div>
+                <div class="table-container"><table><thead><tr><th>النوع</th><th>الفترة</th><th>تاريخ الإنشاء</th><th>الحالة</th></tr></thead><tbody id="reportsBody"></tbody></table></div>
+            </div>
+        </section>
+
+        <section id="agents" class="section">
+            <div class="section-header"><h2>أداء الوكلاء</h2><p class="muted">يعرض agent_weights إن وجدت</p></div>
+            <div class="agents-grid" id="agentsGrid"></div>
+            <div class="agent-summary">Consensus Strength: <strong id="consensusStrength">--</strong></div>
+        </section>
+    </main>
 
     <div id="tradeModal" class="modal" style="display:none">
         <div class="modal-content">
-            <span onclick="closeModal()" style="float:right;cursor:pointer">&times;</span>
+            <span onclick="closeModal()" class="close">&times;</span>
             <h2 id="modalTitle"></h2>
             <div id="modalBody"></div>
         </div>

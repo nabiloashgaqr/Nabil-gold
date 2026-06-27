@@ -101,10 +101,13 @@ body {
 }
 .lang-btn.active { background: var(--accent-blue); color: white; border-color: var(--accent-blue); }
 
-.theme-toggle button {
-    background: var(--bg-card); border: 1px solid var(--border);
+.theme-toggle button, .theme-btn {
+    background: var(--bg-card); border: 1px solid var(--border); color: var(--text-primary);
     padding: 5px 9px; border-radius: var(--radius-sm); cursor: pointer; font-size: 15px;
 }
+.muted { color: var(--text-secondary); font-size: 13px; }
+.error-box { background: var(--accent-red-bg); color: var(--accent-red); border: 1px solid rgba(201,42,42,.35); border-radius: var(--radius-sm); padding: 12px 14px; margin-top: 12px; font-weight: 600; }
+.search-group { min-width: 220px; flex: 1; }
 
 /* Sections */
 .section { display: none; padding: 24px; max-width: 1400px; margin: 0 auto; }
@@ -197,11 +200,13 @@ tr:hover { background: var(--bg-card-hover); }
 .badge.win { background: #d3f9d8; color: #2b8a3e; }
 .badge.loss { background: #ffe3e3; color: #c92a2a; }
 .badge.open { background: #e7f5ff; color: #1971c2; }
+.badge.tp1 { background: #fff3bf; color: #e67700; border: 1px solid rgba(230,119,0,.35); }
 .badge.neutral { background: #e9ecef; color: #495057; }
 
 body.dark .badge.buy { background: #2b4c2f; color: #7cd07c; }
 body.dark .badge.sell { background: #4a2c2c; color: #f28d8d; }
 body.dark .badge.open { background: #1f3a4c; color: #6eb9f0; }
+body.dark .badge.tp1 { background: #4a3a12; color: #ffd43b; }
 
 .pnl-positive { color: #2b8a3e; font-weight: 700; }
 .pnl-negative { color: #c92a2a; font-weight: 700; }
