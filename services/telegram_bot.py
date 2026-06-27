@@ -141,7 +141,10 @@ class TelegramService:
         if session_info.get("current_session"):
             sq = str(session_info.get("session_quality", "UNKNOWN"))
             quality_emoji = {"BEST": "⭐⭐⭐", "HIGH": "⭐⭐", "MEDIUM": "⭐", "LOW": "⚠️"}.get(sq, "")
-            header_bits.append(f"{html.escape(str(session_info.get('current_session')))} {quality_emoji}".strip())
+            session_name = str(session_info.get("current_session", ""))
+            # Add session emoji
+            session_emoji = "🌏" if "Asian" in session_name else "🇬🇧" if "London" in session_name and "NY" not in session_name else "🇺🇸🇬🇧" if "Overlap" in session_name else "🇺🇸" if "New York" in session_name else "🌙"
+            header_bits.append(f"{session_emoji} {session_name} {quality_emoji}".strip())
 
         # Robust run_source handling (always produce clean English, never "unknown run")
         run_source = str(decision.get("run_source", "") or decision.get("operation_mode", "") or "").lower().strip()
