@@ -18,3 +18,18 @@ body.dark{--bg:#08111f;--bg2:#0f172a;--panel:#111827;--panel2:#0b1220;--text:#f8
 .title-inline{display:flex;align-items:center;gap:14px;min-width:0}.page-logo{width:58px;height:58px;border-radius:18px;object-fit:cover;border:1px solid rgba(217,119,6,.45);box-shadow:0 8px 20px rgba(217,119,6,.16)}
 .compact-title-card h1{margin:0;font-size:clamp(22px,2vw,30px);letter-spacing:-.03em}.compact-title-card p{margin:4px 0 0;color:var(--muted);font-weight:700}.compact-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}.compact-meta span,.auto-refresh.small{background:var(--panel2);border:1px solid var(--border);border-radius:13px;padding:9px 11px;color:var(--muted);font-size:12px;font-weight:800}.compact-meta strong{color:var(--text);margin-inline-start:5px}.hero-card{display:none!important}.topbar{margin-bottom:14px}.main-content{padding-top:0}
 @media(max-width:800px){.compact-title-card{flex-direction:column;align-items:stretch}.compact-meta{justify-content:flex-start}.page-logo{width:50px;height:50px}}
+
+
+/* vNext: professional single-line top bar */
+.topbar{
+  flex-direction:row!important;
+  align-items:center!important;
+  flex-wrap:nowrap!important;
+  gap:12px!important;
+  padding:10px 12px!important;
+  border-radius:18px!important;
+  min-height:66px;
+}
+.brand-block{flex:0 0 auto;min-width:210px}.brand-logo{width:42px!important;height:42px!important;border-radius:13px!important}.brand-name{font-size:19px!important;line-height:1}.brand-subtitle{font-size:11px!important;white-space:nowrap;color:var(--gold)!important;font-weight:800}.status-pill{padding:4px 9px!important;font-size:11px!important}.nav-links{flex:1 1 auto;justify-content:center;flex-wrap:nowrap!important;overflow-x:auto;scrollbar-width:none;min-width:0}.nav-links::-webkit-scrollbar{display:none}.nav-link{white-space:nowrap;padding:8px 11px!important;font-size:12px!important}.top-actions{flex:0 0 auto;flex-wrap:nowrap!important;display:flex!important;align-items:center!important;width:auto!important}.btn-contact{white-space:nowrap;background:linear-gradient(135deg,#f59e0b,#d97706)!important;box-shadow:0 8px 18px rgba(217,119,6,.22);font-weight:900}.btn-contact:before{content:"✦";margin-inline-end:6px}.btn-ghost{white-space:nowrap}.segmented{flex:0 0 auto}.icon-btn{flex:0 0 auto}
+@media(max-width:980px){.topbar{overflow-x:auto;scrollbar-width:none}.topbar::-webkit-scrollbar{display:none}.brand-block{min-width:185px}.nav-links{justify-content:flex-start}.top-actions{margin-inline-start:auto}.btn-contact{padding-inline:12px!important}.btn-ghost{display:none!important}}
+@media(max-width:680px){.topbar{display:flex!important;flex-direction:row!important;align-items:center!important}.brand-subtitle,.status-pill{display:none!important}.brand-block{min-width:150px;width:auto!important}.top-actions{display:flex!important;grid-template-columns:none!important}.btn-contact{grid-column:auto!important}.nav-links{max-width:44vw}.lang-btn{padding:6px 8px!important}.icon-btn{width:36px!important;height:36px!important}}
