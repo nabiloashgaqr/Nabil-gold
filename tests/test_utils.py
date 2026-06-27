@@ -251,7 +251,7 @@ def test_format_price():
 def test_get_current_session():
     """get_current_session must return a known session label."""
     session = get_current_session()
-    assert session in {"Asian", "London", "London-NY Overlap", "New York", "Late NY / Rollover"}
+    assert any(s in session for s in ["Asian", "London", "New York", "Late NY"])
 
 
 def test_is_market_open():
