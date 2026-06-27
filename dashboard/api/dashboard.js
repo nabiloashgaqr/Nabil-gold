@@ -52,13 +52,19 @@ async function supabaseGet(path, params = {}) {
   return response.json();
 }
 
-function normalizePnlByStatus(status, rawPnl) {
-  let pnl = Number(rawPnl) || 0;
-  // In this dashboard, SL_HIT is treated as a losing stop event.
-  // Some old rows stored a positive final_pnl after stop/trailing logic;
-  // for performance metrics and Profit Factor we normalize SL_HIT to negative.
-  if (String(status || '').toUpperCase() === 'SL_HIT' && pnl > 0) pnl = -Math.abs(pnl);
-  return pnl;
+function normalizePnlByStatus(_status, rawPnl) {
+  // Important: SL_HIT is not always a loss.
+  // If SL was moved to breakeven/trailing profit, SL_HIT can be BE or SL+.
+  // Therefore we trust stored realized PnL sign and classify the stop separately.
+  return Number(rawPnl) || 0;
+}
+
+function stopOutcome(t, pnl) {
+  const status = String(t.status || '').toUpperCase();
+  if (status !== 'SL_HIT') return null;
+  if (pnl > 0) return 'SL_PLUS';
+  if (pnl < 0) return 'SL_LOSS';
+  return 'SL_BE';
 }
 
 function normalizeTrade(t) {
@@ -71,6 +77,7 @@ function normalizeTrade(t) {
     symbol: t.symbol || 'XAU/USD',
     type: String(t.type || t.side || t.trade_type || '').toUpperCase(),
     status,
+    stop_outcome: stopOutcome(t, pnl),
     raw_pnl: Number(rawPnl) || 0,
     pnl,
     created_at: t.created_at || t.entry_time || t.opened_at || t.updated_at || '',
