@@ -11,3 +11,4 @@ body.dark{--bg:#08111f;--bg2:#0f172a;--panel:#111827;--panel2:#0b1220;--text:#f8
 .hero-logo-watermark{position:absolute;inset:auto 24px 18px auto;width:190px;height:190px;object-fit:cover;border-radius:50%;opacity:.16;filter:saturate(1.05);pointer-events:none;z-index:0}
 [dir="rtl"] .hero-logo-watermark{inset:auto auto 18px 24px}.hero-card>div,.hero-meta{position:relative;z-index:1}
 @media(max-width:680px){.hero-logo-watermark{width:120px;height:120px;opacity:.12}.brand-logo{width:44px;height:44px}}
+.agent-source{margin-top:10px;color:var(--muted);font-size:11px;font-weight:800;border-top:1px solid var(--border);padding-top:10px}

@@ -440,32 +440,44 @@ function renderReports(payload) {
 }
 
 function updateAgentPerformance() {
-    const agents = (dashboardPayload?.agentWeights || []);
+    const agents = (dashboardPayload?.agentPerformance || dashboardPayload?.agentWeights || []);
     const grid = $('agentsGrid');
     if (!grid) return;
     if (!agents.length) {
         grid.innerHTML = ['technical', 'smc', 'classical', 'price_action', 'multitimeframe'].map(name => `
-            <div class="agent-card"><div class="agent-header"><span class="agent-icon">🤖</span><span class="agent-name">${name}</span></div><div class="muted">لا توجد بيانات agent_weights</div></div>
+            <div class="agent-card"><div class="agent-header"><span class="agent-icon">🤖</span><span class="agent-name">${name}</span></div><div class="muted">No performance data yet</div></div>
         `).join('');
         setText('consensusStrength', '--');
         return;
     }
     grid.innerHTML = agents.map(a => {
-        const wr = num(a.win_rate);
+        const hasComputed = a.win_rate !== null && a.win_rate !== undefined && Number.isFinite(Number(a.win_rate));
+        const wr = hasComputed ? num(a.win_rate) : 0;
         const weight = num(a.weight) * 100;
+        const predictions = num(a.total_predictions ?? a.predictions ?? 0);
+        const wins = num(a.wins ?? 0);
+        const losses = num(a.losses ?? 0);
+        const net = num(a.net_pnl ?? 0);
+        const sourceLabel = a.source === 'computed_from_closed_trades'
+            ? (currentLang === 'ar' ? 'محسوب من الصفقات المغلقة' : 'Computed from closed trades')
+            : (currentLang === 'ar' ? 'من جدول agent_weights' : 'From agent_weights');
         return `<div class="agent-card">
             <div class="agent-header"><span class="agent-icon">🤖</span><span class="agent-name">${esc(a.agent_name)}</span></div>
             <div class="agent-stats">
                 <div class="agent-metric"><span>Weight</span><strong>${weight.toFixed(1)}%</strong></div>
-                <div class="agent-metric"><span>Win Rate</span><strong>${wr.toFixed(1)}%</strong></div>
-                <div class="agent-metric"><span>Predictions</span><strong>${esc(a.total_predictions ?? 0)}</strong></div>
-                <div class="agent-metric"><span>Trend</span><strong>${esc(a.trend || 'STABLE')}</strong></div>
+                <div class="agent-metric"><span>Win Rate</span><strong>${hasComputed ? `${wr.toFixed(1)}%` : 'N/A'}</strong></div>
+                <div class="agent-metric"><span>Predictions</span><strong>${predictions}</strong></div>
+                <div class="agent-metric"><span>W / L</span><strong>${wins} / ${losses}</strong></div>
+                <div class="agent-metric"><span>Net PnL</span><strong class="${net >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(net, 1)}</strong></div>
+                <div class="agent-metric"><span>Trend</span><strong>${esc(a.trend || 'N/A')}</strong></div>
             </div>
-            <div class="agent-bar"><div class="agent-bar-fill" style="width:${Math.min(wr,100)}%"></div></div>
+            <div class="agent-bar"><div class="agent-bar-fill" style="width:${hasComputed ? Math.min(wr,100) : 0}%"></div></div>
+            <div class="agent-source">${sourceLabel}</div>
         </div>`;
     }).join('');
-    const avg = agents.length ? agents.reduce((s, a) => s + num(a.win_rate), 0) / agents.length : 0;
-    setText('consensusStrength', `${avg.toFixed(1)}%`);
+    const computable = agents.filter(a => a.win_rate !== null && a.win_rate !== undefined && Number.isFinite(Number(a.win_rate)) && num(a.total_predictions ?? a.predictions ?? 0) > 0);
+    const avg = computable.length ? computable.reduce((s, a) => s + num(a.win_rate), 0) / computable.length : 0;
+    setText('consensusStrength', computable.length ? `${avg.toFixed(1)}%` : '--');
 }
 
 function showTradeModalById(id, live = false) {
