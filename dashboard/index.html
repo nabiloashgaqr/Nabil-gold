@@ -6,149 +6,6 @@
   <title>SmartSignal — Professional Dashboard</title>
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <style>
-    .pricing-section {
-      padding: 40px 20px;
-      background: linear-gradient(135deg, #0f172a 0%, #1e2937 100%);
-      border-radius: 24px;
-      margin: 30px 0;
-      color: white;
-    }
-    .pricing-header {
-      text-align: center;
-      margin-bottom: 50px;
-    }
-    .pricing-header .badge-2026 {
-      display: inline-block;
-      background: linear-gradient(90deg, #f59e0b, #d97706);
-      color: white;
-      padding: 6px 18px;
-      border-radius: 50px;
-      font-size: 13px;
-      font-weight: 800;
-      letter-spacing: 1px;
-      margin-bottom: 16px;
-    }
-    .pricing-header h1 {
-      font-size: 42px;
-      font-weight: 900;
-      margin: 0 0 12px;
-      line-height: 1.1;
-    }
-    .pricing-header p {
-      font-size: 18px;
-      color: #94a3b8;
-      max-width: 620px;
-      margin: 0 auto;
-    }
-    .pricing-grid {
-      display: grid;
-      grid-template-columns: 1fr 1.15fr;
-      gap: 24px;
-      max-width: 1100px;
-      margin: 0 auto;
-    }
-    .pricing-card {
-      background: #1e2937;
-      border: 1px solid #334155;
-      border-radius: 20px;
-      padding: 32px 28px;
-      position: relative;
-      transition: all 0.3s ease;
-    }
-    .pricing-card.popular {
-      border: 2px solid #f59e0b;
-      transform: scale(1.03);
-      box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.4);
-    }
-    .popular-badge {
-      position: absolute;
-      top: -12px;
-      right: 28px;
-      background: linear-gradient(90deg, #f59e0b, #d97706);
-      color: white;
-      padding: 4px 16px;
-      border-radius: 9999px;
-      font-size: 12px;
-      font-weight: 800;
-      letter-spacing: 0.5px;
-    }
-    .pricing-card h3 {
-      font-size: 22px;
-      margin: 0 0 8px;
-      font-weight: 800;
-    }
-    .price {
-      font-size: 52px;
-      font-weight: 900;
-      line-height: 1;
-      margin: 16px 0 4px;
-    }
-    .price span {
-      font-size: 18px;
-      font-weight: 600;
-      color: #64748b;
-    }
-    .savings {
-      color: #22c55e;
-      font-weight: 700;
-      font-size: 15px;
-    }
-    .features {
-      margin: 24px 0;
-    }
-    .features li {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 10px;
-      font-size: 15px;
-    }
-    .features li:before {
-      content: "✓";
-      color: #22c55e;
-      font-weight: 900;
-    }
-    .btn-subscribe {
-      width: 100%;
-      padding: 16px;
-      font-size: 16px;
-      font-weight: 800;
-      border-radius: 14px;
-      border: none;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .btn-subscribe.primary {
-      background: linear-gradient(90deg, #f59e0b, #d97706);
-      color: white;
-    }
-    .btn-subscribe.secondary {
-      background: #334155;
-      color: #e2e8f0;
-      border: 1px solid #475569;
-    }
-    .payment-note {
-      text-align: center;
-      margin-top: 18px;
-      font-size: 13px;
-      color: #64748b;
-    }
-    .trust-bar {
-      display: flex;
-      justify-content: center;
-      gap: 30px;
-      margin-top: 50px;
-      flex-wrap: wrap;
-    }
-    .trust-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 14px;
-      color: #94a3b8;
-    }
-  </style>
 </head>
 <body>
   <div class="app-shell">
@@ -270,62 +127,85 @@
 
       <!-- PRICING SECTION -->
       <section id="pricing" class="section">
-        <div class="pricing-section">
-          <div class="pricing-header">
-            <div class="badge-2026">NEW FOR 2026</div>
-            <h1>The Future of Trading<br>Is Already Here</h1>
-            <p>Five intelligent AI agents work around the clock so you don’t have to.</p>
+        <div class="pricing-section pro-pricing" aria-labelledby="pricingTitle">
+          <div class="pricing-hero">
+            <div class="pricing-hero-copy">
+              <div class="pricing-kicker">Premium access · 2026</div>
+              <h1 id="pricingTitle">Trade smarter. Spend less time watching charts.</h1>
+              <p>SmartSignal delivers clear trading opportunities, performance reports, and Telegram updates in one simple experience built for Gold and Oil traders.</p>
+              <div class="pricing-hero-actions">
+                <button onclick="subscribePlan('quarterly')" class="btn-subscribe primary hero-cta">Start with the best value</button>
+                <a class="pricing-telegram" href="https://t.me/Smart_Pro2026" target="_blank" rel="noopener">Ask on Telegram</a>
+              </div>
+            </div>
+            <div class="pricing-snapshot" aria-label="What subscribers get">
+              <div><strong>24/5</strong><span>Market watch</span></div>
+              <div><strong>5 min</strong><span>Fresh reviews</span></div>
+              <div><strong>2</strong><span>Markets: Gold + Oil</span></div>
+              <div><strong>Direct</strong><span>Telegram alerts</span></div>
+            </div>
+          </div>
+
+          <div class="value-strip">
+            <div class="value-item"><span>⚡</span><strong>Fast signals</strong><small>Receive opportunities without sitting in front of charts all day.</small></div>
+            <div class="value-item"><span>🛡️</span><strong>Managed exits</strong><small>Updates for stop-loss, partial closes, and target progress.</small></div>
+            <div class="value-item"><span>📊</span><strong>Transparent reports</strong><small>Review closed trades, win rate, net points, and weekly performance.</small></div>
           </div>
 
           <div class="pricing-grid">
-            <!-- Monthly -->
-            <div class="pricing-card">
+            <div class="pricing-card plan-card">
+              <div class="plan-topline">Flexible entry</div>
               <h3>Monthly Access</h3>
+              <p class="plan-description">Best if you want to try SmartSignal with a short commitment.</p>
               <div class="price">$100 <span>/ month</span></div>
-              <div class="savings">Perfect to get started</div>
               <ul class="features">
-                <li>5 AI agents monitoring the market 24/7</li>
-                <li>Full analysis every 5 minutes</li>
-                <li>Trade management & updates every 5 minutes</li>
-                <li>Smart stop-loss moved to entry automatically</li>
-                <li>Intelligent trailing stop & partial closes</li>
-                <li>Weekly performance reports</li>
-                <li>Direct signals to your Telegram</li>
-                <li>Gold (XAU/USD) + Crude Oil (WTI/USD)</li>
+                <li>Real-time Telegram signal notifications</li>
+                <li>Gold (XAU/USD) and Crude Oil (WTI/USD)</li>
+                <li>Market opportunities reviewed every few minutes</li>
+                <li>Trade progress updates from entry to exit</li>
+                <li>Daily and weekly performance overview</li>
+                <li>Support and activation through Telegram</li>
               </ul>
               <button onclick="subscribePlan('monthly')" class="btn-subscribe secondary">Subscribe Monthly — $100</button>
-              <div class="payment-note">Pay with USDT (TRC20 / ERC20)</div>
+              <div class="payment-note">USDT payment accepted · Manual activation</div>
             </div>
 
-            <!-- 3 Months -->
-            <div class="pricing-card popular">
-              <div class="popular-badge">MOST POPULAR</div>
-              <h3>3-Month Plan</h3>
+            <div class="pricing-card plan-card popular">
+              <div class="popular-badge">BEST VALUE</div>
+              <div class="plan-topline">Recommended for serious traders</div>
+              <h3>3-Month Pro</h3>
+              <p class="plan-description">More time to evaluate performance, build consistency, and follow the system properly.</p>
               <div class="price">$200 <span>/ 3 months</span></div>
-              <div class="savings">Save $100 (33% OFF)</div>
+              <div class="savings">Save $100 compared with monthly billing</div>
               <ul class="features">
-                <li>Everything in Monthly, plus:</li>
-                <li>Priority support on Telegram</li>
-                <li>Early access to new agents & features</li>
-                <li>Advanced risk management tools</li>
-                <li>Monthly strategy review call (optional)</li>
-                <li>Best value for serious traders</li>
+                <li>Everything included in Monthly Access</li>
+                <li>Priority Telegram support</li>
+                <li>Better value for consistent signal following</li>
+                <li>Access to new dashboard improvements first</li>
+                <li>Monthly performance recap and review</li>
+                <li>Ideal for traders who want less screen time</li>
               </ul>
-              <button onclick="subscribePlan('quarterly')" class="btn-subscribe primary">Get 3 Months — $200 (Save $100)</button>
-              <div class="payment-note">Pay with USDT (TRC20 / ERC20) • Instant activation</div>
+              <button onclick="subscribePlan('quarterly')" class="btn-subscribe primary">Get 3 Months — $200</button>
+              <div class="payment-note">USDT payment accepted · Fast activation after confirmation</div>
             </div>
           </div>
 
-          <div class="trust-bar">
-            <div class="trust-item"><span>✓</span> <span>5 AI Agents</span></div>
-            <div class="trust-item"><span>✓</span> <span>Analysis every 5 min</span></div>
-            <div class="trust-item"><span>✓</span> <span>Smart Trade Management</span></div>
-            <div class="trust-item"><span>✓</span> <span>Zero screen time required</span></div>
+          <div class="conversion-panel">
+            <div>
+              <span class="conversion-label">Why traders choose SmartSignal</span>
+              <h2>Simple alerts. Clear performance. No complicated setup.</h2>
+              <p>Follow structured trading ideas, monitor results from the dashboard, and receive updates directly where you already communicate: Telegram.</p>
+            </div>
+            <div class="conversion-checks">
+              <span>✓ Built for busy traders</span>
+              <span>✓ Clean dashboard tracking</span>
+              <span>✓ Telegram-first experience</span>
+              <span>✓ Gold and Oil focus</span>
+            </div>
           </div>
 
-          <div style="text-align:center; margin-top:40px; color:#64748b; font-size:14px;">
-            <strong>2026 AI-Powered System</strong> — The first generation of autonomous multi-agent trading.<br>
-            We put the power of artificial intelligence directly in your hands.
+          <div class="pricing-footer-note">
+            <strong>Important:</strong> SmartSignal provides trading signals and performance tracking. Trading involves risk and results are not guaranteed.
           </div>
         </div>
       </section>
@@ -350,9 +230,9 @@
     }
 
     function subscribePlan(plan) {
-      const msg = plan === 'monthly' 
-        ? "Thank you! Please contact us on Telegram to complete your $100 monthly subscription with USDT."
-        : "Thank you! Please contact us on Telegram to complete your $200 3-month subscription with USDT (Save $100).";
+      const msg = plan === 'monthly'
+        ? "SmartSignal Monthly Access ($100). Contact us on Telegram to complete USDT payment and activation."
+        : "SmartSignal 3-Month Pro ($200). Best value — contact us on Telegram to complete USDT payment and activation.";
       alert(msg);
       window.open("https://t.me/Smart_Pro2026", "_blank");
     }
