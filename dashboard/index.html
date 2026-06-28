@@ -36,8 +36,8 @@
       <div class="top-actions">
         <a class="btn btn-contact" href="https://t.me/Smart_Pro2026" target="_blank">Talk to us on Telegram</a>
         <div class="segmented">
-          <button class="lang-btn active" onclick="setLang('en')">EN</button>
-          <button class="lang-btn" onclick="setLang('ar')">AR</button>
+          <button id="langEn" class="lang-btn" onclick="setLang('en')">EN</button>
+          <button id="langAr" class="lang-btn active" onclick="setLang('ar')">AR</button>
         </div>
         <button onclick="refreshData()" class="btn btn-ghost">Refresh</button>
         <button onclick="toggleTheme()" class="icon-btn">🌙</button>
@@ -130,98 +130,98 @@
         <div class="pricing-section pro-pricing pricing-unified" aria-labelledby="pricingTitle">
           <div class="pricing-hero unified-hero">
             <div class="pricing-hero-copy">
-              <div class="pricing-kicker">SmartSignal Pro · Live trading assistant</div>
-              <h1 id="pricingTitle">A smarter routine for traders who are tired of watching charts all day.</h1>
-              <p>Trading can pressure your psychology, drain your focus, and exhaust your nerves. SmartSignal Pro helps you follow Gold and Oil through organized signals, live monitoring, trade updates, and clear performance tracking — directly on Telegram.</p>
+              <div class="pricing-kicker" data-en="SmartSignal Pro · Live trading assistant" data-ar="سمارت سيجنال برو · مساعد تداول ذكي مباشر">SmartSignal Pro · Live trading assistant</div>
+              <h1 id="pricingTitle" data-en="A smarter routine for traders who are tired of watching charts all day." data-ar="روتين أذكى للمتداولين الذين أنهكتهم مراقبة الشارت طوال اليوم.">A smarter routine for traders who are tired of watching charts all day.</h1>
+              <p data-en="Trading can pressure your psychology, drain your focus, and exhaust your nerves. SmartSignal Pro helps you follow Gold and Oil through organized signals, live monitoring, trade updates, and clear performance tracking — directly on Telegram." data-ar="التداول يضغط على نفسية المتداول، يستنزف التركيز، ويرهق الأعصاب. يساعدك SmartSignal Pro على متابعة الذهب والنفط عبر إشارات منظمة، مراقبة حية، تحديثات للصفقات، وتتبع أداء واضح — مباشرة على Telegram.">Trading can pressure your psychology, drain your focus, and exhaust your nerves. SmartSignal Pro helps you follow Gold and Oil through organized signals, live monitoring, trade updates, and clear performance tracking — directly on Telegram.</p>
               <div class="pricing-hero-actions">
-                <button onclick="subscribePlan('quarterly')" class="btn-subscribe primary hero-cta">Get 3 Months — $200</button>
-                <a class="pricing-telegram" href="https://t.me/Smart_Pro2026" target="_blank" rel="noopener">Talk to us on Telegram</a>
+                <button onclick="subscribePlan('quarterly')" class="btn-subscribe primary hero-cta" data-en="Get 3 Months — $200" data-ar="احصل على 3 أشهر — $200">Get 3 Months — $200</button>
+                <a class="pricing-telegram" href="https://t.me/Smart_Pro2026" target="_blank" rel="noopener" data-en="Talk to us on Telegram" data-ar="تواصل معنا على Telegram">Talk to us on Telegram</a>
               </div>
             </div>
             <div class="pricing-snapshot unified-snapshot" aria-label="SmartSignal live monitoring">
-              <div><strong>5 min</strong><span>New opportunity analysis</span></div>
-              <div><strong>5 min</strong><span>Open trade updates</span></div>
-              <div><strong>5+</strong><span>Analysis and risk agents</span></div>
-              <div><strong>24/5</strong><span>Market-focused monitoring</span></div>
+              <div><strong>5 min</strong><span data-en="New opportunity analysis" data-ar="تحليل فرص جديدة">New opportunity analysis</span></div>
+              <div><strong>5 min</strong><span data-en="Open trade updates" data-ar="تحديث الصفقات المفتوحة">Open trade updates</span></div>
+              <div><strong>5+</strong><span data-en="Analysis and risk agents" data-ar="وكلاء تحليل ومخاطر">Analysis and risk agents</span></div>
+              <div><strong>24/5</strong><span data-en="Market-focused monitoring" data-ar="متابعة مركزة للسوق">Market-focused monitoring</span></div>
             </div>
           </div>
 
           <div class="psychology-band unified-band">
             <div class="psychology-icon">🧠</div>
             <div>
-              <span class="conversion-label">Built for trader psychology</span>
-              <h2>The market does not only test your strategy. It tests your patience, fear, and discipline.</h2>
-              <p>Many traders get exhausted by over-watching candles, chasing moves, doubting entries, and reacting emotionally. SmartSignal Pro gives you a more structured routine: wait for the alert, follow the update, and review the results clearly.</p>
+              <span class="conversion-label" data-en="Built for trader psychology" data-ar="مصمم لنفسية المتداول">Built for trader psychology</span>
+              <h2 data-en="The market does not only test your strategy. It tests your patience, fear, and discipline." data-ar="السوق لا يختبر استراتيجيتك فقط؛ بل يختبر صبرك، خوفك، وانضباطك.">The market does not only test your strategy. It tests your patience, fear, and discipline.</h2>
+              <p data-en="Many traders get exhausted by over-watching candles, chasing moves, doubting entries, and reacting emotionally. SmartSignal Pro gives you a more structured routine: wait for the alert, follow the update, and review the results clearly." data-ar="كثير من المتداولين يُرهقون أنفسهم بمراقبة الشموع باستمرار، مطاردة الحركة، التردد في الدخول، والتفاعل العاطفي مع كل حركة. SmartSignal Pro يمنحك روتيناً أكثر تنظيماً: انتظر التنبيه، تابع التحديث، وراجع النتائج بوضوح.">Many traders get exhausted by over-watching candles, chasing moves, doubting entries, and reacting emotionally. SmartSignal Pro gives you a more structured routine: wait for the alert, follow the update, and review the results clearly.</p>
             </div>
           </div>
 
           <div class="live-monitoring-grid">
             <div class="live-monitoring-card">
               <span class="monitor-icon">🔎</span>
-              <strong>New opportunities every 5 minutes</strong>
-              <p>The system reviews the market repeatedly to detect fresh setups on Gold and Oil without requiring you to stay glued to the chart.</p>
+              <strong data-en="New opportunities every 5 minutes" data-ar="تحليل فرص جديدة كل 5 دقائق">New opportunities every 5 minutes</strong>
+              <p data-en="The system reviews the market repeatedly to detect fresh setups on Gold and Oil without requiring you to stay glued to the chart." data-ar="يراجع النظام السوق بشكل متكرر لرصد فرص جديدة على الذهب والنفط، دون الحاجة للبقاء أمام الشارت طوال اليوم.">The system reviews the market repeatedly to detect fresh setups on Gold and Oil without requiring you to stay glued to the chart.</p>
             </div>
             <div class="live-monitoring-card">
               <span class="monitor-icon">📡</span>
-              <strong>Open trade updates every 5 minutes</strong>
-              <p>Existing trades are followed continuously with updates for movement, protection, targets, stop-loss, and important status changes.</p>
+              <strong data-en="Open trade updates every 5 minutes" data-ar="تحديث الصفقات المفتوحة كل 5 دقائق">Open trade updates every 5 minutes</strong>
+              <p data-en="Existing trades are followed continuously with updates for movement, protection, targets, stop-loss, and important status changes." data-ar="تتم متابعة الصفقات المفتوحة باستمرار مع تحديثات حول الحركة، الحماية، الأهداف، وقف الخسارة، وأي تغييرات مهمة في الحالة.">Existing trades are followed continuously with updates for movement, protection, targets, stop-loss, and important status changes.</p>
             </div>
             <div class="live-monitoring-card">
               <span class="monitor-icon">🛡️</span>
-              <strong>News, trend, and risk awareness</strong>
-              <p>SmartSignal combines core analysis agents with news-risk and trend context to reduce noise and improve decision discipline.</p>
+              <strong data-en="News, trend, and risk awareness" data-ar="وعي بالأخبار والترند والمخاطر">News, trend, and risk awareness</strong>
+              <p data-en="SmartSignal combines core analysis agents with news-risk and trend context to reduce noise and improve decision discipline." data-ar="يجمع SmartSignal بين وكلاء التحليل الأساسيين وسياق الأخبار والترند والمخاطر لتقليل الضوضاء وتحسين الانضباط في القرار.">SmartSignal combines core analysis agents with news-risk and trend context to reduce noise and improve decision discipline.</p>
             </div>
           </div>
 
           <div class="pricing-plans-simple">
             <div class="section-heading compact">
-              <span class="conversion-label">Simple pricing</span>
-              <h2>Same full access. Choose only the duration.</h2>
-              <p>There is no feature difference between the plans. Every subscriber gets the full SmartSignal Pro experience.</p>
+              <span class="conversion-label" data-en="Simple pricing" data-ar="أسعار بسيطة">Simple pricing</span>
+              <h2 data-en="Same full access. Choose only the duration." data-ar="نفس الوصول الكامل. اختر مدة الاشتراك فقط.">Same full access. Choose only the duration.</h2>
+              <p data-en="There is no feature difference between the plans. Every subscriber gets the full SmartSignal Pro experience." data-ar="لا يوجد أي فرق في المزايا بين الباقتين. كل مشترك يحصل على تجربة SmartSignal Pro كاملة.">There is no feature difference between the plans. Every subscriber gets the full SmartSignal Pro experience.</p>
             </div>
             <div class="pricing-grid simple-plan-grid">
               <div class="pricing-card plan-card">
-                <div class="plan-topline">Monthly access</div>
-                <h3>1 Month</h3>
-                <p class="plan-description">Start with a flexible monthly subscription.</p>
-                <div class="price">$100 <span>/ month</span></div>
-                <button onclick="subscribePlan('monthly')" class="btn-subscribe secondary">Subscribe Monthly — $100</button>
-                <div class="payment-note">USDT payment accepted · Activation after confirmation</div>
+                <div class="plan-topline" data-en="Monthly access" data-ar="اشتراك شهري">Monthly access</div>
+                <h3 data-en="1 Month" data-ar="شهر واحد">1 Month</h3>
+                <p class="plan-description" data-en="Start with a flexible monthly subscription." data-ar="ابدأ باشتراك شهري مرن.">Start with a flexible monthly subscription.</p>
+                <div class="price">$100 <span data-en="/ month" data-ar="/ شهر">/ month</span></div>
+                <button onclick="subscribePlan('monthly')" class="btn-subscribe secondary" data-en="Subscribe Monthly — $100" data-ar="اشترك شهرياً — $100">Subscribe Monthly — $100</button>
+                <div class="payment-note" data-en="USDT payment accepted · Activation after confirmation" data-ar="الدفع عبر USDT · التفعيل بعد التأكيد">USDT payment accepted · Activation after confirmation</div>
               </div>
 
               <div class="pricing-card plan-card popular">
-                <div class="popular-badge">BEST VALUE</div>
-                <div class="plan-topline">3-month access</div>
-                <h3>3 Months</h3>
-                <p class="plan-description">Best value for following performance over a longer period.</p>
-                <div class="price">$200 <span>/ 3 months</span></div>
-                <div class="savings">Save $100 compared with monthly billing</div>
-                <button onclick="subscribePlan('quarterly')" class="btn-subscribe primary">Get 3 Months — $200</button>
-                <div class="payment-note">USDT payment accepted · Fast activation after confirmation</div>
+                <div class="popular-badge" data-en="BEST VALUE" data-ar="الأفضل قيمة">BEST VALUE</div>
+                <div class="plan-topline" data-en="3-month access" data-ar="اشتراك 3 أشهر">3-month access</div>
+                <h3 data-en="3 Months" data-ar="3 أشهر">3 Months</h3>
+                <p class="plan-description" data-en="Best value for following performance over a longer period." data-ar="أفضل قيمة لمتابعة الأداء خلال فترة أطول.">Best value for following performance over a longer period.</p>
+                <div class="price">$200 <span data-en="/ 3 months" data-ar="/ كل 3 أشهر">/ 3 months</span></div>
+                <div class="savings" data-en="Save $100 compared with monthly billing" data-ar="وفّر $100 مقارنة بالدفع الشهري">Save $100 compared with monthly billing</div>
+                <button onclick="subscribePlan('quarterly')" class="btn-subscribe primary" data-en="Get 3 Months — $200" data-ar="احصل على 3 أشهر — $200">Get 3 Months — $200</button>
+                <div class="payment-note" data-en="USDT payment accepted · Fast activation after confirmation" data-ar="الدفع عبر USDT · تفعيل سريع بعد التأكيد">USDT payment accepted · Fast activation after confirmation</div>
               </div>
             </div>
           </div>
 
           <div class="subscriber-benefits">
             <div class="section-heading compact">
-              <span class="conversion-label">Included for all subscribers</span>
-              <h2>One complete benefits table for every plan</h2>
+              <span class="conversion-label" data-en="Included for all subscribers" data-ar="مزايا لكل المشتركين">Included for all subscribers</span>
+              <h2 data-en="One complete benefits table for every plan" data-ar="جدول مزايا واحد لكل الباقات">One complete benefits table for every plan</h2>
             </div>
             <div class="comparison-table-wrap">
               <table class="comparison-table benefits-table">
-                <thead><tr><th>Subscriber benefit</th><th>Included</th></tr></thead>
+                <thead><tr><th data-en="Subscriber benefit" data-ar="مزايا المشترك">Subscriber benefit</th><th data-en="Included" data-ar="مشمول">Included</th></tr></thead>
                 <tbody>
-                  <tr><td>Telegram signal notifications</td><td>✓</td></tr>
-                  <tr><td>Gold (XAU/USD) and Crude Oil (WTI/USD)</td><td>✓</td></tr>
-                  <tr><td>5 core analysis agents</td><td>✓</td></tr>
-                  <tr><td>News risk awareness</td><td>✓</td></tr>
-                  <tr><td>Trend / daily bias context</td><td>✓</td></tr>
-                  <tr><td>New opportunity analysis every 5 minutes</td><td>✓</td></tr>
-                  <tr><td>Open trade updates every 5 minutes</td><td>✓</td></tr>
-                  <tr><td>Trade management status updates</td><td>✓</td></tr>
-                  <tr><td>Performance dashboard access</td><td>✓</td></tr>
-                  <tr><td>Daily and weekly performance reports</td><td>✓</td></tr>
-                  <tr><td>Telegram support and activation</td><td>✓</td></tr>
+                  <tr><td data-en="Telegram signal notifications" data-ar="تنبيهات الإشارات عبر Telegram">Telegram signal notifications</td><td>✓</td></tr>
+                  <tr><td data-en="Gold (XAU/USD) and Crude Oil (WTI/USD)" data-ar="الذهب XAU/USD والنفط WTI/USD">Gold (XAU/USD) and Crude Oil (WTI/USD)</td><td>✓</td></tr>
+                  <tr><td data-en="5 core analysis agents" data-ar="5 وكلاء تحليل رئيسيين">5 core analysis agents</td><td>✓</td></tr>
+                  <tr><td data-en="News risk awareness" data-ar="وعي بمخاطر الأخبار">News risk awareness</td><td>✓</td></tr>
+                  <tr><td data-en="Trend / daily bias context" data-ar="سياق الترند والاتجاه اليومي">Trend / daily bias context</td><td>✓</td></tr>
+                  <tr><td data-en="New opportunity analysis every 5 minutes" data-ar="تحليل فرص جديدة كل 5 دقائق">New opportunity analysis every 5 minutes</td><td>✓</td></tr>
+                  <tr><td data-en="Open trade updates every 5 minutes" data-ar="تحديث الصفقات المفتوحة كل 5 دقائق">Open trade updates every 5 minutes</td><td>✓</td></tr>
+                  <tr><td data-en="Trade management status updates" data-ar="تحديثات إدارة حالة الصفقة">Trade management status updates</td><td>✓</td></tr>
+                  <tr><td data-en="Performance dashboard access" data-ar="الوصول إلى لوحة الأداء">Performance dashboard access</td><td>✓</td></tr>
+                  <tr><td data-en="Daily and weekly performance reports" data-ar="تقارير أداء يومية وأسبوعية">Daily and weekly performance reports</td><td>✓</td></tr>
+                  <tr><td data-en="Telegram support and activation" data-ar="الدعم والتفعيل عبر Telegram">Telegram support and activation</td><td>✓</td></tr>
                 </tbody>
               </table>
             </div>
@@ -229,61 +229,59 @@
 
           <div class="agents-showcase unified-agents">
             <div class="section-heading">
-              <span class="conversion-label">How SmartSignal helps</span>
-              <h2>A complete signal-following experience, not just random alerts</h2>
-              <p>SmartSignal Pro combines multiple analysis perspectives with news, trend, risk awareness, live trade follow-up, and clear reporting — so your routine becomes calmer and more organized.</p>
+              <span class="conversion-label" data-en="How SmartSignal helps" data-ar="كيف يساعدك SmartSignal">How SmartSignal helps</span>
+              <h2 data-en="A complete signal-following experience, not just random alerts" data-ar="تجربة متابعة إشارات كاملة، وليست تنبيهات عشوائية">A complete signal-following experience, not just random alerts</h2>
+              <p data-en="SmartSignal Pro combines multiple analysis perspectives with news, trend, risk awareness, live trade follow-up, and clear reporting — so your routine becomes calmer and more organized." data-ar="يجمع SmartSignal Pro بين عدة زوايا تحليلية مع الأخبار والترند والمخاطر والمتابعة الحية للصفقات والتقارير الواضحة — ليصبح روتينك أكثر هدوءاً وتنظيماً.">SmartSignal Pro combines multiple analysis perspectives with news, trend, risk awareness, live trade follow-up, and clear reporting — so your routine becomes calmer and more organized.</p>
             </div>
             <div class="agent-feature-grid">
-              <div class="agent-feature"><b>Technical Agent</b><span>Reads momentum, indicators, and technical conditions.</span></div>
-              <div class="agent-feature"><b>Classical Agent</b><span>Watches support, resistance, and classic market zones.</span></div>
-              <div class="agent-feature"><b>SMC Agent</b><span>Focuses on liquidity areas and high-interest price zones.</span></div>
-              <div class="agent-feature"><b>Price Action Agent</b><span>Observes candles, rejection, and buyer/seller behavior.</span></div>
-              <div class="agent-feature"><b>Multi-Timeframe Agent</b><span>Checks whether the idea fits the bigger market picture.</span></div>
-              <div class="agent-feature accent"><b>News Risk Agent</b><span>Helps avoid unstable periods around important events.</span></div>
-              <div class="agent-feature accent"><b>Trend / Daily Bias Agent</b><span>Highlights whether the opportunity aligns with the current direction.</span></div>
-              <div class="agent-feature accent"><b>Trade Updates</b><span>Follows open trades and sends important status changes.</span></div>
+              <div class="agent-feature"><b data-en="Technical Agent" data-ar="وكيل التحليل الفني">Technical Agent</b><span data-en="Reads momentum, indicators, and technical conditions." data-ar="يقرأ الزخم والمؤشرات والحالة الفنية للسوق.">Reads momentum, indicators, and technical conditions.</span></div>
+              <div class="agent-feature"><b data-en="Classical Agent" data-ar="وكيل التحليل الكلاسيكي">Classical Agent</b><span data-en="Watches support, resistance, and classic market zones." data-ar="يراقب الدعوم والمقاومات والمناطق السعرية الكلاسيكية.">Watches support, resistance, and classic market zones.</span></div>
+              <div class="agent-feature"><b data-en="SMC Agent" data-ar="وكيل السيولة SMC">SMC Agent</b><span data-en="Focuses on liquidity areas and high-interest price zones." data-ar="يركز على مناطق السيولة والمناطق السعرية المهمة.">Focuses on liquidity areas and high-interest price zones.</span></div>
+              <div class="agent-feature"><b data-en="Price Action Agent" data-ar="وكيل حركة السعر">Price Action Agent</b><span data-en="Observes candles, rejection, and buyer/seller behavior." data-ar="يراقب الشموع والرفض السعري وسلوك المشترين والبائعين.">Observes candles, rejection, and buyer/seller behavior.</span></div>
+              <div class="agent-feature"><b data-en="Multi-Timeframe Agent" data-ar="وكيل تعدد الفريمات">Multi-Timeframe Agent</b><span data-en="Checks whether the idea fits the bigger market picture." data-ar="يتأكد أن الفكرة متوافقة مع الصورة الأكبر للسوق.">Checks whether the idea fits the bigger market picture.</span></div>
+              <div class="agent-feature accent"><b data-en="News Risk Agent" data-ar="وكيل الأخبار والمخاطر">News Risk Agent</b><span data-en="Helps avoid unstable periods around important events." data-ar="يساعد على تجنب الفترات غير المستقرة حول الأخبار المهمة.">Helps avoid unstable periods around important events.</span></div>
+              <div class="agent-feature accent"><b data-en="Trend / Daily Bias Agent" data-ar="وكيل الترند والاتجاه اليومي">Trend / Daily Bias Agent</b><span data-en="Highlights whether the opportunity aligns with the current direction." data-ar="يوضح ما إذا كانت الفرصة منسجمة مع الاتجاه الحالي للسوق.">Highlights whether the opportunity aligns with the current direction.</span></div>
+              <div class="agent-feature accent"><b data-en="Trade Updates" data-ar="تحديثات الصفقات">Trade Updates</b><span data-en="Follows open trades and sends important status changes." data-ar="يتابع الصفقات المفتوحة ويرسل تغييرات الحالة المهمة.">Follows open trades and sends important status changes.</span></div>
             </div>
           </div>
 
           <div class="conversion-panel unified-conversion">
             <div>
-              <span class="conversion-label">Less pressure. More structure.</span>
-              <h2>Stop letting every candle control your emotions.</h2>
-              <p>The goal is to reduce chart fatigue and emotional reactions by giving you a clear process: receive the signal, follow the trade update, and measure performance over time.</p>
+              <span class="conversion-label" data-en="Less pressure. More structure." data-ar="ضغط أقل. تنظيم أكثر.">Less pressure. More structure.</span>
+              <h2 data-en="Stop letting every candle control your emotions." data-ar="لا تجعل كل شمعة تتحكم في مشاعرك.">Stop letting every candle control your emotions.</h2>
+              <p data-en="The goal is to reduce chart fatigue and emotional reactions by giving you a clear process: receive the signal, follow the trade update, and measure performance over time." data-ar="الهدف هو تقليل إرهاق الشارت وردود الفعل العاطفية عبر عملية واضحة: استلم الإشارة، تابع تحديث الصفقة، وقِس الأداء مع الوقت.">The goal is to reduce chart fatigue and emotional reactions by giving you a clear process: receive the signal, follow the trade update, and measure performance over time.</p>
             </div>
             <div class="conversion-checks">
-              <span>✓ Reduces chart fatigue</span>
-              <span>✓ Helps avoid FOMO chasing</span>
-              <span>✓ Keeps performance visible</span>
-              <span>✓ Built for busy traders</span>
+              <span data-en="✓ Reduces chart fatigue" data-ar="✓ يقلل إرهاق مراقبة الشارت">✓ Reduces chart fatigue</span>
+              <span data-en="✓ Helps avoid FOMO chasing" data-ar="✓ يساعد على تجنب مطاردة الفرص بعاطفة">✓ Helps avoid FOMO chasing</span>
+              <span data-en="✓ Keeps performance visible" data-ar="✓ يجعل الأداء واضحاً أمامك">✓ Keeps performance visible</span>
+              <span data-en="✓ Built for busy traders" data-ar="✓ مناسب للمتداولين المشغولين">✓ Built for busy traders</span>
             </div>
           </div>
 
           <div class="faq-block unified-faq">
             <div class="section-heading compact">
-              <span class="conversion-label">Questions before joining</span>
-              <h2>Frequently asked questions</h2>
+              <span class="conversion-label" data-en="Questions before joining" data-ar="أسئلة قبل الاشتراك">Questions before joining</span>
+              <h2 data-en="Frequently asked questions" data-ar="الأسئلة الشائعة">Frequently asked questions</h2>
             </div>
             <div class="faq-grid">
-              <div class="faq-item"><b>Is there any difference between the two plans?</b><span>No. Both plans include the same SmartSignal Pro features. The only difference is the subscription duration and price.</span></div>
-              <div class="faq-item"><b>How often does the system monitor the market?</b><span>New opportunity analysis runs every 5 minutes, and open trade updates also run every 5 minutes.</span></div>
-              <div class="faq-item"><b>How do I receive signals?</b><span>Signals and trade updates are delivered directly through Telegram after activation.</span></div>
-              <div class="faq-item"><b>Does SmartSignal Pro guarantee profit?</b><span>No. Trading involves risk. SmartSignal Pro provides signals, organization, and tracking, but results are not guaranteed.</span></div>
+              <div class="faq-item"><b data-en="Is there any difference between the two plans?" data-ar="هل يوجد فرق بين الباقتين؟">Is there any difference between the two plans?</b><span data-en="No. Both plans include the same SmartSignal Pro features. The only difference is the subscription duration and price." data-ar="لا. كلا الباقتين تشملان نفس مزايا SmartSignal Pro. الفرق الوحيد هو مدة الاشتراك والسعر.">No. Both plans include the same SmartSignal Pro features. The only difference is the subscription duration and price.</span></div>
+              <div class="faq-item"><b data-en="How often does the system monitor the market?" data-ar="كم مرة يراقب النظام السوق؟">How often does the system monitor the market?</b><span data-en="New opportunity analysis runs every 5 minutes, and open trade updates also run every 5 minutes." data-ar="تحليل الفرص الجديدة يتم كل 5 دقائق، وتحديث الصفقات المفتوحة يتم أيضاً كل 5 دقائق.">New opportunity analysis runs every 5 minutes, and open trade updates also run every 5 minutes.</span></div>
+              <div class="faq-item"><b data-en="How do I receive signals?" data-ar="كيف تصلني الإشارات؟">How do I receive signals?</b><span data-en="Signals and trade updates are delivered directly through Telegram after activation." data-ar="تصلك الإشارات وتحديثات الصفقات مباشرة عبر Telegram بعد التفعيل.">Signals and trade updates are delivered directly through Telegram after activation.</span></div>
+              <div class="faq-item"><b data-en="Does SmartSignal Pro guarantee profit?" data-ar="هل يضمن SmartSignal Pro الربح؟">Does SmartSignal Pro guarantee profit?</b><span data-en="No. Trading involves risk. SmartSignal Pro provides signals, organization, and tracking, but results are not guaranteed." data-ar="لا. التداول ينطوي على مخاطر. SmartSignal Pro يقدم إشارات وتنظيماً وتتبعاً للأداء، لكنه لا يضمن النتائج.">No. Trading involves risk. SmartSignal Pro provides signals, organization, and tracking, but results are not guaranteed.</span></div>
             </div>
           </div>
 
           <div class="final-cta unified-final-cta">
-            <h2>Choose your access and start following the market with a smarter routine.</h2>
-            <p>Get organized alerts, 5-minute opportunity analysis, 5-minute open trade updates, and transparent performance tracking for Gold and Oil.</p>
+            <h2 data-en="Choose your access and start following the market with a smarter routine." data-ar="اختر مدة اشتراكك وابدأ متابعة السوق بروتين أذكى.">Choose your access and start following the market with a smarter routine.</h2>
+            <p data-en="Get organized alerts, 5-minute opportunity analysis, 5-minute open trade updates, and transparent performance tracking for Gold and Oil." data-ar="احصل على إشارات منظمة، تحليل فرص كل 5 دقائق، تحديث الصفقات المفتوحة كل 5 دقائق، وتتبع أداء شفاف للذهب والنفط.">Get organized alerts, 5-minute opportunity analysis, 5-minute open trade updates, and transparent performance tracking for Gold and Oil.</p>
             <div class="pricing-hero-actions center">
-              <button onclick="subscribePlan('quarterly')" class="btn-subscribe primary hero-cta">Get 3 Months — $200</button>
-              <a class="pricing-telegram" href="https://t.me/Smart_Pro2026" target="_blank" rel="noopener">Contact Telegram</a>
+              <button onclick="subscribePlan('quarterly')" class="btn-subscribe primary hero-cta" data-en="Get 3 Months — $200" data-ar="احصل على 3 أشهر — $200">Get 3 Months — $200</button>
+              <a class="pricing-telegram" href="https://t.me/Smart_Pro2026" target="_blank" rel="noopener" data-en="Contact Telegram" data-ar="تواصل عبر Telegram">Contact Telegram</a>
             </div>
           </div>
 
-          <div class="pricing-footer-note">
-            <strong>Risk notice:</strong> SmartSignal Pro is a signal, analysis, and performance tracking service. Trading involves risk, and past or current results do not guarantee future results.
-          </div>
+          <div class="pricing-footer-note"><strong data-en="Risk notice:" data-ar="تنبيه المخاطر:">Risk notice:</strong> <span data-en="SmartSignal Pro is a signal, analysis, and performance tracking service. Trading involves risk, and past or current results do not guarantee future results." data-ar="SmartSignal Pro هو خدمة إشارات وتحليل وتتبع أداء. التداول ينطوي على مخاطر، والنتائج السابقة أو الحالية لا تضمن النتائج المستقبلية.">SmartSignal Pro is a signal, analysis, and performance tracking service. Trading involves risk, and past or current results do not guarantee future results.</span></div>
         </div>
       </section>
 
@@ -307,9 +305,14 @@
     }
 
     function subscribePlan(plan) {
+      const isAr = document.documentElement.lang === 'ar' || document.documentElement.dir === 'rtl';
       const msg = plan === 'monthly'
-        ? "SmartSignal Pro Monthly Access ($100). Same full access — contact us on Telegram to complete USDT payment and activation."
-        : "SmartSignal Pro 3-Month Access ($200). Same full access, better value — contact us on Telegram to complete USDT payment and activation.";
+        ? (isAr
+          ? "SmartSignal Pro اشتراك شهري ($100). نفس الوصول الكامل — تواصل معنا على Telegram لإتمام الدفع عبر USDT والتفعيل."
+          : "SmartSignal Pro Monthly Access ($100). Same full access — contact us on Telegram to complete USDT payment and activation.")
+        : (isAr
+          ? "SmartSignal Pro اشتراك 3 أشهر ($200). نفس الوصول الكامل وقيمة أفضل — تواصل معنا على Telegram لإتمام الدفع عبر USDT والتفعيل."
+          : "SmartSignal Pro 3-Month Access ($200). Same full access, better value — contact us on Telegram to complete USDT payment and activation.");
       alert(msg);
       window.open("https://t.me/Smart_Pro2026", "_blank");
     }

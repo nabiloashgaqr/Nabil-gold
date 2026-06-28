@@ -656,7 +656,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (savedTheme === 'dark') { document.body.classList.add('dark'); setText('themeBtn', '☀️'); }
     loadDashboardData();
     const hash = window.location.hash.substring(1);
-    if (hash && ['dashboard', 'reports', 'agents'].includes(hash)) showSection(hash);
+    if (hash && ['dashboard', 'reports', 'agents', 'pricing'].includes(hash)) showSection(hash);
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape') closeModal();
         if (e.key === '/' && document.activeElement?.tagName === 'BODY') { e.preventDefault(); $('searchInput')?.focus(); }
