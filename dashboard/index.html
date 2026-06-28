@@ -152,6 +152,7 @@
 </head>
 <body>
   <div class="app-shell">
+    <!-- Top Navigation Bar -->
     <header class="topbar">
       <div class="brand-block">
         <img class="brand-logo" src="assets/smart-signal-logo.png" alt="SmartSignal" />
@@ -188,10 +189,11 @@
 
     <main class="main-content">
 
-      <!-- DASHBOARD SECTION (Original Full) -->
+      <!-- DASHBOARD SECTION -->
       <section id="dashboard" class="section active">
         <div id="errorBox" class="error-box" style="display:none"></div>
 
+        <!-- KPI Grid (Original) -->
         <div class="kpi-grid">
           <div class="kpi-card"><span class="kpi-icon green">✓</span><div><p>Outcome Trades</p><strong id="totalTrades">--</strong></div></div>
           <div class="kpi-card"><span class="kpi-icon blue">◎</span><div><p>Win Rate</p><strong id="winRate">--%</strong><div class="progress-bar"><div id="winRateBar" class="progress-fill"></div></div></div></div>
@@ -205,43 +207,46 @@
           <div class="kpi-card compact"><p>Expectancy</p><strong id="expectancy">--</strong></div>
         </div>
 
+        <!-- Toolbar -->
         <div class="toolbar-card">
-          <div class="filter-group"><label>Symbol</label><select id="filterSymbol" onchange="applyFilters()"><option value="">All Symbols</option><option value="XAU/USD">XAU/USD</option><option value="WTI/USD">WTI/USD</option></select></div>
-          <div class="filter-group"><label>Result</label><select id="filterResult" onchange="applyFilters()"><option value="">All</option><option value="win">Win</option><option value="loss">Loss</option><option value="be">Break Even</option></select></div>
-          <div class="filter-group"><label>From Date</label><input type="date" id="filterDateFrom" onchange="applyFilters()"></div>
-          <div class="filter-group"><label>To Date</label><input type="date" id="filterDateTo" onchange="applyFilters()"></div>
-          <div class="filter-group search-group"><label>Search</label><input id="searchInput" placeholder="Symbol / Status / ID" oninput="applyFilters()"></div>
+          <div class="filter-group"><label>Symbol</label><select id="filterSymbol" onchange="applyFilters()"><option value="">All</option><option value="XAU/USD">XAU/USD</option><option value="WTI/USD">WTI/USD</option></select></div>
+          <div class="filter-group"><label>Result</label><select id="filterResult" onchange="applyFilters()"><option value="">All</option><option value="win">Win</option><option value="loss">Loss</option></select></div>
+          <div class="filter-group"><label>From</label><input type="date" id="filterDateFrom" onchange="applyFilters()"></div>
+          <div class="filter-group"><label>To</label><input type="date" id="filterDateTo" onchange="applyFilters()"></div>
+          <div class="filter-group search-group"><label>Search</label><input id="searchInput" placeholder="Search..." oninput="applyFilters()"></div>
           <div class="toolbar-actions">
             <button onclick="clearFilters()" class="btn btn-ghost">Clear</button>
             <button onclick="exportToCSV()" class="btn btn-primary">Export CSV</button>
           </div>
         </div>
 
+        <!-- Charts -->
         <div class="charts-grid">
           <div class="chart-card primary-chart">
-            <div class="chart-header"><div><h3>Daily PnL</h3><span>Closed only</span></div><strong id="dailyChartTotal">--</strong></div>
-            <div class="chart-area"><canvas id="dailyPnlChart"></canvas><div class="chart-empty" id="dailyPnlEmpty">No closed trades</div></div>
+            <div class="chart-header"><div><h3>Daily PnL</h3></div><strong id="dailyChartTotal">--</strong></div>
+            <div class="chart-area"><canvas id="dailyPnlChart"></canvas></div>
           </div>
           <div class="chart-card">
-            <div class="chart-header"><div><h3>Cumulative PnL</h3><span>Cumulative</span></div></div>
-            <div class="chart-area"><canvas id="cumulativePnlChart"></canvas><div class="chart-empty" id="cumulativePnlEmpty">No closed trades</div></div>
+            <div class="chart-header"><h3>Cumulative PnL</h3></div>
+            <div class="chart-area"><canvas id="cumulativePnlChart"></canvas></div>
           </div>
           <div class="chart-card">
-            <div class="chart-header"><div><h3>By Session</h3><span>Asia / Europe / America</span></div></div>
-            <div class="chart-area"><canvas id="sessionChart"></canvas><div class="chart-empty" id="sessionEmpty">No data</div></div>
+            <div class="chart-header"><h3>By Session</h3></div>
+            <div class="chart-area"><canvas id="sessionChart"></canvas></div>
           </div>
           <div class="chart-card">
-            <div class="chart-header"><div><h3>By Symbol</h3><span>By symbol</span></div></div>
-            <div class="chart-area"><canvas id="instrumentChart"></canvas><div class="chart-empty" id="instrumentEmpty">No data</div></div>
+            <div class="chart-header"><h3>By Symbol</h3></div>
+            <div class="chart-area"><canvas id="instrumentChart"></canvas></div>
           </div>
         </div>
 
+        <!-- Trades Table -->
         <div class="table-card">
-          <div class="table-header"><div><h3>All Closed Trades</h3><span id="tradesCount">(0)</span></div><small>OPEN / PARTIAL / PENDING are hidden</small></div>
+          <div class="table-header"><div><h3>All Closed Trades</h3><span id="tradesCount">(0)</span></div></div>
           <div class="table-container">
             <table id="tradesTable">
-              <thead><tr><th>Opened</th><th>Closed</th><th>Symbol</th><th>Type</th><th>Entry</th><th>Close</th><th>PnL</th><th>Status</th><th>Confidence</th><th></th></tr></thead>
-              <tbody id="tradesBody"><tr><td colspan="10" class="loading">Loading...</td></tr></tbody>
+              <thead><tr><th>Opened</th><th>Closed</th><th>Symbol</th><th>Type</th><th>Entry</th><th>Close</th><th>PnL</th><th>Status</th><th>Confidence</th></tr></thead>
+              <tbody id="tradesBody"><tr><td colspan="9" class="loading">Loading...</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -249,26 +254,16 @@
 
       <!-- REPORTS SECTION -->
       <section id="reports" class="section">
-        <div class="page-title"><h1>Daily & Weekly Reports</h1><p>Loaded from Supabase reports tables</p></div>
+        <div class="page-title"><h1>Daily & Weekly Reports</h1></div>
         <div class="reports-grid">
           <div class="report-card"><h3>Latest Daily Report</h3><pre id="dailyReport" class="report-content">Loading...</pre></div>
           <div class="report-card"><h3>Latest Weekly Report</h3><pre id="weeklyReport" class="report-content">Loading...</pre></div>
-        </div>
-        <div class="report-archive-grid">
-          <div class="table-card report-archive-card">
-            <div class="table-header"><div><h3>Daily Reports Archive</h3></div><small>Grouped by month</small></div>
-            <div id="dailyReportsArchive" class="reports-archive"></div>
-          </div>
-          <div class="table-card report-archive-card">
-            <div class="table-header"><div><h3>Weekly Reports Archive</h3></div><small>Grouped by month</small></div>
-            <div id="weeklyReportsArchive" class="reports-archive"></div>
-          </div>
         </div>
       </section>
 
       <!-- AGENTS SECTION -->
       <section id="agents" class="section">
-        <div class="page-title"><h1>Agent Performance</h1><p>Weights and performance of analysis agents</p></div>
+        <div class="page-title"><h1>Agent Performance</h1></div>
         <div class="agents-grid" id="agentsGrid"></div>
         <div class="agent-summary">Consensus Strength: <strong id="consensusStrength">--</strong></div>
       </section>
@@ -345,7 +340,13 @@
     function showSection(section) {
       document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
       document.getElementById(section).classList.add('active');
-      document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
+      
+      document.querySelectorAll('.nav-link').forEach(link => {
+        link.classList.remove('active');
+        if (link.getAttribute('onclick') && link.getAttribute('onclick').includes(section)) {
+          link.classList.add('active');
+        }
+      });
     }
 
     function subscribePlan(plan) {
