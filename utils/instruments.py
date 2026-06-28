@@ -23,8 +23,10 @@ DEFAULT_INSTRUMENTS: Dict[str, Dict[str, Any]] = {
     "WTI/USD": {
         "symbol": "WTI/USD", "name": "WTI Crude Oil", "category": "oil",
         "point_size": 0.01, "price_decimals": 2,
-        "min_sl_distance_points": 300, "trailing_distance": 100, "trailing_step": 30,
-        "early_breakeven_points": 100, "duplicate_zone_points": 100,
+        # Oil uses 0.01 USD per point. A balanced intraday floor is $1.20,
+        # with earlier protection and a tighter trailing profile than gold.
+        "min_sl_distance_points": 120, "trailing_distance": 70, "trailing_step": 25,
+        "early_breakeven_points": 70, "duplicate_zone_points": 100,
     },
 }
 
