@@ -107,3 +107,11 @@ body.dark .pricing-unified.pro-pricing{
 [dir=rtl] .pricing-unified .comparison-table td{text-align:right}
 [dir=rtl] .pricing-unified .comparison-table th:last-child,
 [dir=rtl] .pricing-unified .comparison-table td:last-child{text-align:center}
+
+/* Pricing banner four-word summary + compact agent cards */
+.project-words{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:20px}
+.project-words span{display:inline-flex;align-items:center;justify-content:center;padding:9px 13px;border-radius:999px;background:var(--panel2);border:1px solid var(--border);color:var(--text);font-size:13px;font-weight:950;box-shadow:var(--shadow2)}
+.pricing-unified .compact-agent-grid .agent-feature{min-height:76px;justify-content:center;align-items:center;text-align:center;padding:16px}
+.pricing-unified .compact-agent-grid .agent-feature b{font-size:15px;line-height:1.35}
+[dir=rtl] .project-words{justify-content:flex-start}
+@media(max-width:680px){.project-words span{flex:1;min-width:120px}.pricing-unified .compact-agent-grid .agent-feature{min-height:68px}}
