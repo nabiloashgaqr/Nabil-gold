@@ -152,6 +152,7 @@
 </head>
 <body>
   <div class="app-shell">
+    <!-- Top Navigation -->
     <header class="topbar">
       <div class="brand-block">
         <img class="brand-logo" src="assets/smart-signal-logo.png" alt="SmartSignal" />
@@ -184,7 +185,8 @@
     </header>
 
     <main class="main-content">
-      <!-- DASHBOARD SECTION -->
+
+      <!-- DASHBOARD SECTION (Original) -->
       <section id="dashboard" class="section active">
         <div class="compact-title-card" style="margin-bottom:20px">
           <div>
@@ -192,15 +194,52 @@
             <p>Real-time performance of your AI trading system</p>
           </div>
         </div>
+
+        <!-- KPI Grid -->
+        <div class="kpi-grid">
+          <div class="kpi-card"><span class="kpi-icon green">✓</span><div><p>Outcome Trades</p><strong id="totalTrades">--</strong></div></div>
+          <div class="kpi-card"><span class="kpi-icon blue">◎</span><div><p>Win Rate</p><strong id="winRate">--%</strong></div></div>
+          <div class="kpi-card"><span class="kpi-icon gold">$</span><div><p>Net Points</p><strong id="netPoints">--</strong></div></div>
+          <div class="kpi-card"><span class="kpi-icon purple">×</span><div><p>Profit Factor</p><strong id="profitFactor">--</strong></div></div>
+        </div>
+
+        <!-- Charts -->
+        <div class="charts-grid">
+          <div class="chart-card primary-chart">
+            <div class="chart-header"><h3>Daily PnL</h3></div>
+            <div class="chart-area"><canvas id="dailyPnlChart"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header"><h3>Cumulative PnL</h3></div>
+            <div class="chart-area"><canvas id="cumulativePnlChart"></canvas></div>
+          </div>
+        </div>
+
+        <!-- Trades Table -->
+        <div class="table-card">
+          <div class="table-header"><h3>All Closed Trades</h3></div>
+          <div class="table-container">
+            <table id="tradesTable">
+              <thead><tr><th>Opened</th><th>Symbol</th><th>Type</th><th>PnL</th><th>Status</th></tr></thead>
+              <tbody id="tradesBody"><tr><td colspan="5" class="loading">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
       </section>
 
       <!-- REPORTS SECTION -->
-      <section id="reports" class="section"></section>
+      <section id="reports" class="section">
+        <div class="page-title"><h1>Reports</h1></div>
+        <div class="report-card"><h3>Latest Weekly Report</h3><pre id="weeklyReport">Loading...</pre></div>
+      </section>
 
       <!-- AGENTS SECTION -->
-      <section id="agents" class="section"></section>
+      <section id="agents" class="section">
+        <div class="page-title"><h1>Agents Performance</h1></div>
+        <div class="agents-grid" id="agentsGrid"></div>
+      </section>
 
-      <!-- PRICING SECTION -->
+      <!-- PRICING SECTION (New) -->
       <section id="pricing" class="section">
         <div class="pricing-section">
           <div class="pricing-header">
@@ -218,12 +257,11 @@
               <ul class="features">
                 <li>5 AI agents monitoring the market 24/7</li>
                 <li>Full analysis every 5 minutes</li>
-                <li>Trade management & updates every 5 minutes</li>
-                <li>Smart stop-loss moved to entry automatically</li>
-                <li>Intelligent trailing stop & partial closes</li>
-                <li>Weekly performance reports</li>
-                <li>Direct signals to your Telegram</li>
-                <li>Gold (XAU/USD) + Crude Oil (WTI/USD)</li>
+                <li>Trade management every 5 minutes</li>
+                <li>Smart stop-loss to entry</li>
+                <li>Intelligent trailing stop</li>
+                <li>Weekly reports</li>
+                <li>Telegram signals</li>
               </ul>
               <button onclick="subscribePlan('monthly')" class="btn-subscribe secondary">Subscribe Monthly — $100</button>
               <div class="payment-note">Pay with USDT (TRC20 / ERC20)</div>
@@ -236,31 +274,29 @@
               <div class="price">$200 <span>/ 3 months</span></div>
               <div class="savings">Save $100 (33% OFF)</div>
               <ul class="features">
-                <li>Everything in Monthly, plus:</li>
-                <li>Priority support on Telegram</li>
-                <li>Early access to new agents & features</li>
-                <li>Advanced risk management tools</li>
-                <li>Monthly strategy review call (optional)</li>
-                <li>Best value for serious traders</li>
+                <li>Everything in Monthly +</li>
+                <li>Priority Telegram support</li>
+                <li>Early access to new features</li>
+                <li>Advanced risk tools</li>
               </ul>
               <button onclick="subscribePlan('quarterly')" class="btn-subscribe primary">Get 3 Months — $200 (Save $100)</button>
-              <div class="payment-note">Pay with USDT (TRC20 / ERC20) • Instant activation</div>
+              <div class="payment-note">Pay with USDT • Instant activation</div>
             </div>
           </div>
 
           <div class="trust-bar">
-            <div class="trust-item"><span>✓</span> <span>5 AI Agents</span></div>
-            <div class="trust-item"><span>✓</span> <span>Analysis every 5 min</span></div>
-            <div class="trust-item"><span>✓</span> <span>Smart Trade Management</span></div>
-            <div class="trust-item"><span>✓</span> <span>Zero screen time required</span></div>
+            <div class="trust-item"><span>✓</span> 5 AI Agents</div>
+            <div class="trust-item"><span>✓</span> Analysis every 5 min</div>
+            <div class="trust-item"><span>✓</span> Smart Trade Management</div>
+            <div class="trust-item"><span>✓</span> Zero screen time</div>
           </div>
 
           <div style="text-align:center; margin-top:40px; color:#64748b; font-size:14px;">
-            <strong>2026 AI-Powered System</strong> — The first generation of autonomous multi-agent trading.<br>
-            We put the power of artificial intelligence directly in your hands.
+            <strong>2026 AI-Powered System</strong> — We put the power of artificial intelligence directly in your hands.
           </div>
         </div>
       </section>
+
     </main>
   </div>
 
@@ -269,16 +305,29 @@
     function showSection(section) {
       document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
       document.getElementById(section).classList.add('active');
-      document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
+      
+      document.querySelectorAll('.nav-link').forEach(link => {
+        link.classList.remove('active');
+        if (link.getAttribute('onclick') && link.getAttribute('onclick').includes(section)) {
+          link.classList.add('active');
+        }
+      });
     }
 
     function subscribePlan(plan) {
       const msg = plan === 'monthly' 
-        ? "Thank you! Please contact us on Telegram to complete your $100 monthly subscription with USDT."
-        : "Thank you! Please contact us on Telegram to complete your $200 3-month subscription with USDT (Save $100).";
+        ? "Thank you! Contact us on Telegram for $100 monthly USDT subscription."
+        : "Thank you! Contact us on Telegram for $200 (3 months) USDT subscription (Save $100).";
       alert(msg);
       window.open("https://t.me/Smart_Pro2026", "_blank");
     }
+
+    // Initialize dashboard on load
+    document.addEventListener('DOMContentLoaded', function() {
+      if (typeof initDashboard === 'function') {
+        initDashboard();
+      }
+    });
   </script>
 </body>
 </html>
