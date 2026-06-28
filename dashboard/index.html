@@ -152,7 +152,6 @@
 </head>
 <body>
   <div class="app-shell">
-    <!-- Top Navigation -->
     <header class="topbar">
       <div class="brand-block">
         <img class="brand-logo" src="assets/smart-signal-logo.png" alt="SmartSignal" />
@@ -173,6 +172,7 @@
       <div class="topbar-meta">
         <span class="top-meta-pill"><b>Last update</b> <strong id="lastUpdate">--</strong></span>
         <span class="top-meta-pill"><b>Source</b> <strong id="dataSource">--</strong></span>
+        <label class="top-meta-pill auto-refresh"><input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()"><span>Auto</span></label>
       </div>
 
       <div class="top-actions">
@@ -181,47 +181,67 @@
           <button class="lang-btn active" onclick="setLang('en')">EN</button>
           <button class="lang-btn" onclick="setLang('ar')">AR</button>
         </div>
+        <button onclick="refreshData()" class="btn btn-ghost">Refresh</button>
+        <button onclick="toggleTheme()" class="icon-btn">🌙</button>
       </div>
     </header>
 
     <main class="main-content">
 
-      <!-- DASHBOARD SECTION (Original) -->
+      <!-- DASHBOARD SECTION (Original Full) -->
       <section id="dashboard" class="section active">
-        <div class="compact-title-card" style="margin-bottom:20px">
-          <div>
-            <h1>SmartSignal Dashboard</h1>
-            <p>Real-time performance of your AI trading system</p>
-          </div>
-        </div>
+        <div id="errorBox" class="error-box" style="display:none"></div>
 
-        <!-- KPI Grid -->
         <div class="kpi-grid">
           <div class="kpi-card"><span class="kpi-icon green">✓</span><div><p>Outcome Trades</p><strong id="totalTrades">--</strong></div></div>
-          <div class="kpi-card"><span class="kpi-icon blue">◎</span><div><p>Win Rate</p><strong id="winRate">--%</strong></div></div>
+          <div class="kpi-card"><span class="kpi-icon blue">◎</span><div><p>Win Rate</p><strong id="winRate">--%</strong><div class="progress-bar"><div id="winRateBar" class="progress-fill"></div></div></div></div>
           <div class="kpi-card"><span class="kpi-icon gold">$</span><div><p>Net Points</p><strong id="netPoints">--</strong></div></div>
           <div class="kpi-card"><span class="kpi-icon purple">×</span><div><p>Profit Factor</p><strong id="profitFactor">--</strong></div></div>
+          <div class="kpi-card compact"><p>Closed</p><strong id="liveCount">--</strong></div>
+          <div class="kpi-card compact"><p>TP1 Trades</p><strong id="tp1Count">--</strong></div>
+          <div class="kpi-card compact"><p>Best Trade</p><strong id="bestTrade">--</strong></div>
+          <div class="kpi-card compact"><p>Worst Trade</p><strong id="worstTrade">--</strong></div>
+          <div class="kpi-card compact"><p>Average Trade</p><strong id="avgTrade">--</strong></div>
+          <div class="kpi-card compact"><p>Expectancy</p><strong id="expectancy">--</strong></div>
         </div>
 
-        <!-- Charts -->
+        <div class="toolbar-card">
+          <div class="filter-group"><label>Symbol</label><select id="filterSymbol" onchange="applyFilters()"><option value="">All Symbols</option><option value="XAU/USD">XAU/USD</option><option value="WTI/USD">WTI/USD</option></select></div>
+          <div class="filter-group"><label>Result</label><select id="filterResult" onchange="applyFilters()"><option value="">All</option><option value="win">Win</option><option value="loss">Loss</option><option value="be">Break Even</option></select></div>
+          <div class="filter-group"><label>From Date</label><input type="date" id="filterDateFrom" onchange="applyFilters()"></div>
+          <div class="filter-group"><label>To Date</label><input type="date" id="filterDateTo" onchange="applyFilters()"></div>
+          <div class="filter-group search-group"><label>Search</label><input id="searchInput" placeholder="Symbol / Status / ID" oninput="applyFilters()"></div>
+          <div class="toolbar-actions">
+            <button onclick="clearFilters()" class="btn btn-ghost">Clear</button>
+            <button onclick="exportToCSV()" class="btn btn-primary">Export CSV</button>
+          </div>
+        </div>
+
         <div class="charts-grid">
           <div class="chart-card primary-chart">
-            <div class="chart-header"><h3>Daily PnL</h3></div>
-            <div class="chart-area"><canvas id="dailyPnlChart"></canvas></div>
+            <div class="chart-header"><div><h3>Daily PnL</h3><span>Closed only</span></div><strong id="dailyChartTotal">--</strong></div>
+            <div class="chart-area"><canvas id="dailyPnlChart"></canvas><div class="chart-empty" id="dailyPnlEmpty">No closed trades</div></div>
           </div>
           <div class="chart-card">
-            <div class="chart-header"><h3>Cumulative PnL</h3></div>
-            <div class="chart-area"><canvas id="cumulativePnlChart"></canvas></div>
+            <div class="chart-header"><div><h3>Cumulative PnL</h3><span>Cumulative</span></div></div>
+            <div class="chart-area"><canvas id="cumulativePnlChart"></canvas><div class="chart-empty" id="cumulativePnlEmpty">No closed trades</div></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header"><div><h3>By Session</h3><span>Asia / Europe / America</span></div></div>
+            <div class="chart-area"><canvas id="sessionChart"></canvas><div class="chart-empty" id="sessionEmpty">No data</div></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header"><div><h3>By Symbol</h3><span>By symbol</span></div></div>
+            <div class="chart-area"><canvas id="instrumentChart"></canvas><div class="chart-empty" id="instrumentEmpty">No data</div></div>
           </div>
         </div>
 
-        <!-- Trades Table -->
         <div class="table-card">
-          <div class="table-header"><h3>All Closed Trades</h3></div>
+          <div class="table-header"><div><h3>All Closed Trades</h3><span id="tradesCount">(0)</span></div><small>OPEN / PARTIAL / PENDING are hidden</small></div>
           <div class="table-container">
             <table id="tradesTable">
-              <thead><tr><th>Opened</th><th>Symbol</th><th>Type</th><th>PnL</th><th>Status</th></tr></thead>
-              <tbody id="tradesBody"><tr><td colspan="5" class="loading">Loading...</td></tr></tbody>
+              <thead><tr><th>Opened</th><th>Closed</th><th>Symbol</th><th>Type</th><th>Entry</th><th>Close</th><th>PnL</th><th>Status</th><th>Confidence</th><th></th></tr></thead>
+              <tbody id="tradesBody"><tr><td colspan="10" class="loading">Loading...</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -229,17 +249,31 @@
 
       <!-- REPORTS SECTION -->
       <section id="reports" class="section">
-        <div class="page-title"><h1>Reports</h1></div>
-        <div class="report-card"><h3>Latest Weekly Report</h3><pre id="weeklyReport">Loading...</pre></div>
+        <div class="page-title"><h1>Daily & Weekly Reports</h1><p>Loaded from Supabase reports tables</p></div>
+        <div class="reports-grid">
+          <div class="report-card"><h3>Latest Daily Report</h3><pre id="dailyReport" class="report-content">Loading...</pre></div>
+          <div class="report-card"><h3>Latest Weekly Report</h3><pre id="weeklyReport" class="report-content">Loading...</pre></div>
+        </div>
+        <div class="report-archive-grid">
+          <div class="table-card report-archive-card">
+            <div class="table-header"><div><h3>Daily Reports Archive</h3></div><small>Grouped by month</small></div>
+            <div id="dailyReportsArchive" class="reports-archive"></div>
+          </div>
+          <div class="table-card report-archive-card">
+            <div class="table-header"><div><h3>Weekly Reports Archive</h3></div><small>Grouped by month</small></div>
+            <div id="weeklyReportsArchive" class="reports-archive"></div>
+          </div>
+        </div>
       </section>
 
       <!-- AGENTS SECTION -->
       <section id="agents" class="section">
-        <div class="page-title"><h1>Agents Performance</h1></div>
+        <div class="page-title"><h1>Agent Performance</h1><p>Weights and performance of analysis agents</p></div>
         <div class="agents-grid" id="agentsGrid"></div>
+        <div class="agent-summary">Consensus Strength: <strong id="consensusStrength">--</strong></div>
       </section>
 
-      <!-- PRICING SECTION (New) -->
+      <!-- PRICING SECTION -->
       <section id="pricing" class="section">
         <div class="pricing-section">
           <div class="pricing-header">
@@ -257,11 +291,12 @@
               <ul class="features">
                 <li>5 AI agents monitoring the market 24/7</li>
                 <li>Full analysis every 5 minutes</li>
-                <li>Trade management every 5 minutes</li>
-                <li>Smart stop-loss to entry</li>
-                <li>Intelligent trailing stop</li>
-                <li>Weekly reports</li>
-                <li>Telegram signals</li>
+                <li>Trade management & updates every 5 minutes</li>
+                <li>Smart stop-loss moved to entry automatically</li>
+                <li>Intelligent trailing stop & partial closes</li>
+                <li>Weekly performance reports</li>
+                <li>Direct signals to your Telegram</li>
+                <li>Gold (XAU/USD) + Crude Oil (WTI/USD)</li>
               </ul>
               <button onclick="subscribePlan('monthly')" class="btn-subscribe secondary">Subscribe Monthly — $100</button>
               <div class="payment-note">Pay with USDT (TRC20 / ERC20)</div>
@@ -274,25 +309,28 @@
               <div class="price">$200 <span>/ 3 months</span></div>
               <div class="savings">Save $100 (33% OFF)</div>
               <ul class="features">
-                <li>Everything in Monthly +</li>
-                <li>Priority Telegram support</li>
-                <li>Early access to new features</li>
-                <li>Advanced risk tools</li>
+                <li>Everything in Monthly, plus:</li>
+                <li>Priority support on Telegram</li>
+                <li>Early access to new agents & features</li>
+                <li>Advanced risk management tools</li>
+                <li>Monthly strategy review call (optional)</li>
+                <li>Best value for serious traders</li>
               </ul>
               <button onclick="subscribePlan('quarterly')" class="btn-subscribe primary">Get 3 Months — $200 (Save $100)</button>
-              <div class="payment-note">Pay with USDT • Instant activation</div>
+              <div class="payment-note">Pay with USDT (TRC20 / ERC20) • Instant activation</div>
             </div>
           </div>
 
           <div class="trust-bar">
-            <div class="trust-item"><span>✓</span> 5 AI Agents</div>
-            <div class="trust-item"><span>✓</span> Analysis every 5 min</div>
-            <div class="trust-item"><span>✓</span> Smart Trade Management</div>
-            <div class="trust-item"><span>✓</span> Zero screen time</div>
+            <div class="trust-item"><span>✓</span> <span>5 AI Agents</span></div>
+            <div class="trust-item"><span>✓</span> <span>Analysis every 5 min</span></div>
+            <div class="trust-item"><span>✓</span> <span>Smart Trade Management</span></div>
+            <div class="trust-item"><span>✓</span> <span>Zero screen time required</span></div>
           </div>
 
           <div style="text-align:center; margin-top:40px; color:#64748b; font-size:14px;">
-            <strong>2026 AI-Powered System</strong> — We put the power of artificial intelligence directly in your hands.
+            <strong>2026 AI-Powered System</strong> — The first generation of autonomous multi-agent trading.<br>
+            We put the power of artificial intelligence directly in your hands.
           </div>
         </div>
       </section>
@@ -300,34 +338,23 @@
     </main>
   </div>
 
+  <div id="tradeModal" class="modal" style="display:none"><div class="modal-content"><span onclick="closeModal()" class="close">&times;</span><h2 id="modalTitle"></h2><div id="modalBody"></div></div></div>
+
   <script src="app.js"></script>
   <script>
     function showSection(section) {
       document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
       document.getElementById(section).classList.add('active');
-      
-      document.querySelectorAll('.nav-link').forEach(link => {
-        link.classList.remove('active');
-        if (link.getAttribute('onclick') && link.getAttribute('onclick').includes(section)) {
-          link.classList.add('active');
-        }
-      });
+      document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
     }
 
     function subscribePlan(plan) {
       const msg = plan === 'monthly' 
-        ? "Thank you! Contact us on Telegram for $100 monthly USDT subscription."
-        : "Thank you! Contact us on Telegram for $200 (3 months) USDT subscription (Save $100).";
+        ? "Thank you! Please contact us on Telegram to complete your $100 monthly subscription with USDT."
+        : "Thank you! Please contact us on Telegram to complete your $200 3-month subscription with USDT (Save $100).";
       alert(msg);
       window.open("https://t.me/Smart_Pro2026", "_blank");
     }
-
-    // Initialize dashboard on load
-    document.addEventListener('DOMContentLoaded', function() {
-      if (typeof initDashboard === 'function') {
-        initDashboard();
-      }
-    });
   </script>
 </body>
 </html>
