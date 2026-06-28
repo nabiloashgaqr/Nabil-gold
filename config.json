@@ -353,11 +353,12 @@
       "category": "oil",
       "point_size": 0.01,
       "price_decimals": 2,
-      "min_sl_distance_points": 300,
-      "trailing_distance": 100,
-      "trailing_step": 30,
-      "early_breakeven_points": 100,
-      "duplicate_zone_points": 100
+      "min_sl_distance_points": 120,
+      "trailing_distance": 70,
+      "trailing_step": 25,
+      "early_breakeven_points": 70,
+      "duplicate_zone_points": 100,
+      "description_oil_risk_profile": "Balanced WTI profile: 1 point = $0.01, SL floor 120 pts ($1.20), breakeven at +70 pts ($0.70), trailing gap 70 pts and step 25 pts."
     }
   ]
 }
