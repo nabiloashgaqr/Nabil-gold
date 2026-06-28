@@ -1,111 +1,428 @@
-# Nabil Gold — Multi-Asset Paper Trading Bot
+# SmartSignal Pro / Nabil Gold
 
-Automated trading signal system for **Gold (XAU/USD)** and **WTI Oil** using a 5-agent weighted consensus. Runs on GitHub Actions with zero cost. No external AI APIs required.
+نظام إشارات ومتابعة أداء آلي متعدد الأصول، مخصص حالياً لـ **الذهب XAU/USD** و **النفط WTI/USD**، يعتمد على عدة وكلاء تحليل واستراتيجيات مترابطة لإنتاج إشارات منظمة، متابعتها، وتسجيل نتائجها.
 
-> Paper trading only — not financial advice.
+> تنبيه: النظام مخصص للإشارات، التحليل، المتابعة، وقياس الأداء. التداول ينطوي على مخاطر ولا توجد أي ضمانات للربح.
 
 ---
 
-## How It Works
+## الفكرة المختصرة
 
+- نظام آلي لمراقبة السوق وإنتاج إشارات تداول.
+- يعمل على الذهب والنفط.
+- يستخدم عدة وكلاء تحليل بدلاً من الاعتماد على مؤشر واحد.
+- يراجع فرص جديدة كل **5 دقائق**.
+- يحدث الصفقات المفتوحة كل **5 دقائق**.
+- يرسل الإشارات والتحديثات عبر Telegram.
+- يخزن الصفقات والتقارير في Supabase.
+- يعرض النتائج في Dashboard على Vercel.
+- يدعم العربية والإنجليزية في الواجهة.
+
+---
+
+## كيف يعمل النظام
+
+```text
+Twelve Data Market Data
+→ Multi-Timeframe OHLCV
+→ 5 Core Analysis Agents
+→ News / Session / Trend / Risk Context
+→ Weighted Consensus Decision
+→ Risk Management + SL/TP Calculation
+→ Telegram Signal
+→ Supabase Trade Record
+→ Open Trade Management
+→ Daily / Weekly Reports
+→ Performance Dashboard
 ```
-Twelve Data API
-  → 5 Analysis Agents
-  → Weighted Consensus
-  → News / Session / Risk Filters
-  → Telegram Signal
-  → Supabase Trade Record
-  → Trade Management (SL / TP / Trailing)
+
+---
+
+## الأصول المدعومة
+
+| الأصل | الرمز الداخلي | الاسم | حجم النقطة | عدد الكسور |
+|---|---|---|---:|---:|
+| Gold | `XAU/USD` | Gold | `0.10` | 2 |
+| Oil | `WTI/USD` | WTI Crude Oil | `0.01` | 2 |
+
+### أسماء النفط المقبولة داخلياً
+
+يتم تحويل الأسماء التالية إلى:
+
+```text
+WTI/USD
 ```
 
-## Agents
+- `WTI`
+- `USOIL`
+- `OIL`
+- `WTICO_USD`
 
-| Agent | Role |
+---
+
+## حساب النقاط
+
+النظام يخزن الربح والخسارة والمسافات بوحدة **points**.
+
+### الذهب XAU/USD
+
+- `1 point = 0.10$`
+- `10 points = 1.00$`
+- `300 points = 30.00$`
+
+### النفط WTI/USD
+
+- `1 point = 0.01$`
+- `100 points = 1.00$`
+- `120 points = 1.20$`
+
+---
+
+## إعدادات الذهب الحالية
+
+```json
+{
+  "symbol": "XAU/USD",
+  "point_size": 0.10,
+  "min_sl_distance_points": 300,
+  "early_breakeven_points": 100,
+  "trailing_distance": 100,
+  "trailing_step": 30,
+  "duplicate_zone_points": 50
+}
+```
+
+### معناها على الذهب
+
+| الإعداد | النقاط | حركة السعر |
+|---|---:|---:|
+| Minimum SL | 300 | 30.00$ |
+| Early Breakeven | 100 | 10.00$ |
+| Trailing Distance | 100 | 10.00$ |
+| Trailing Step | 30 | 3.00$ |
+| Duplicate Zone | 50 | 5.00$ |
+
+---
+
+## إعدادات النفط الحالية
+
+```json
+{
+  "symbol": "WTI/USD",
+  "point_size": 0.01,
+  "min_sl_distance_points": 120,
+  "early_breakeven_points": 70,
+  "trailing_distance": 70,
+  "trailing_step": 25,
+  "duplicate_zone_points": 100
+}
+```
+
+### معناها على النفط
+
+| الإعداد | النقاط | حركة السعر |
+|---|---:|---:|
+| Minimum SL | 120 | 1.20$ |
+| Early Breakeven | 70 | 0.70$ |
+| Trailing Distance | 70 | 0.70$ |
+| Trailing Step | 25 | 0.25$ |
+| Duplicate Zone | 100 | 1.00$ |
+
+---
+
+## وكلاء التحليل الأساسيون
+
+| الوكيل | الدور |
 |---|---|
-| Technical | RSI, EMA, MACD, ATR, Bollinger |
-| Classical | Support/Resistance, Patterns, Fibonacci |
-| SMC | Order Blocks, Liquidity, FVG |
-| Price Action | Candlestick Patterns, Rejection |
-| Multi-Timeframe | 5m/15m/1H/4H Alignment |
+| Technical Agent | يقرأ المؤشرات والزخم والحالة الفنية. |
+| Classical Agent | يراقب الدعوم والمقاومات والنماذج الكلاسيكية. |
+| SMC Agent | يركز على السيولة، Order Blocks، FVG، ومناطق الاهتمام. |
+| Price Action Agent | يقرأ الشموع، الرفض السعري، وسلوك المشترين والبائعين. |
+| Multi-Timeframe Agent | يقارن 5m / 15m / 1H / 4H لتأكيد الصورة الأكبر. |
 
-## Decision Rules
+---
 
-- Minimum **2 agents** must agree on direction
-- Net weighted confidence must be **≥ 65%**
-- Counter-trend trades against Daily Bias need **≥ 75%**
-- Agents below 60% confidence are excluded
+## وكلاء وسياقات إضافية
 
-## Instruments
+- **News Risk Agent**: يراعي مخاطر الأخبار والحركة غير المستقرة.
+- **Daily Bias / Trend Context**: يحدد الاتجاه اليومي وسياق الترند.
+- **Trading Session Context**: يراعي جودة الجلسة ووقت التداول.
+- **Risk Management Agent**: يحسب الدخول، الوقف، الأهداف، ونسبة العائد للمخاطرة.
+- **Open Trades Manager**: يتابع الصفقات المفتوحة ويحدث حالتها.
+- **Daily / Weekly Report Agents**: يولد تقارير الأداء اليومية والأسبوعية.
 
-| Symbol | Type | Point Size |
-|---|---|---|
-| XAU/USD | Gold | $0.10 |
-| WTI/USD | Oil | $0.01 |
+---
 
-## Trade Management
+## قواعد القرار
 
-| Event | Action |
+- لا يتم إرسال الإشارة بناءً على مؤشر واحد.
+- يجب وجود توافق بين عدة وكلاء.
+- يتم استخدام **Weighted Consensus** بين الوكلاء.
+- الحد الأدنى للثقة العامة: `65%`.
+- الصفقات عكس الاتجاه اليومي تحتاج ثقة أعلى: `75%`.
+- الوكلاء أقل من `60%` ثقة يتم استبعادهم من التأثير.
+- الحد الأدنى لعدد الوكلاء المتفقين: `2`.
+
+---
+
+## إدارة المخاطر
+
+- احتساب SL بناءً على ATR / دعم / مقاومة / SMC / منطقة الدخول.
+- تطبيق حد أدنى لمسافة الوقف حسب الأصل.
+- إعادة حساب الأهداف عند توسيع الوقف للحفاظ على R:R.
+- الحد الأدنى لنسبة R:R: `1.5`.
+- سقف R:R لتجنب أهداف غير واقعية: `4.0`.
+- دعم تحديد حجم الصفقة حسب رأس المال ونسبة المخاطرة.
+- حساب قيمة النقطة يختلف حسب الأصل:
+  - الذهب: قيمة النقطة للوت القياسي محسوبة كـ `10$` تقريباً.
+  - النفط: قيمة النقطة للوت القياسي محسوبة كـ `10$` تقريباً.
+
+---
+
+## إدارة الصفقة بعد الدخول
+
+- متابعة الصفقات المفتوحة كل 5 دقائق.
+- نقل SL إلى الدخول عند تحقق ربح مبكر:
+  - الذهب: `+100 points`.
+  - النفط: `+70 points`.
+- تفعيل Trailing Stop بعد حماية الصفقة.
+- التريلينغ لا يتحرك إلا عند تحقق step مناسب.
+- دعم TP1 و TP2 و TP3.
+- دعم الإغلاق الجزئي عند TP1.
+- دعم حماية الصفقات الرابحة من الإغلاق الزمني إذا أصبح الوقف مؤمناً.
+- إرسال تحديثات Telegram عند الأحداث المهمة.
+
+---
+
+## أنواع أحداث الصفقة
+
+- `PENDING`
+- `OPEN`
+- `PARTIAL`
+- `TP1_HIT`
+- `TP2_HIT`
+- `SL_HIT`
+- `BE_HIT`
+- `EXPIRED`
+- `MANUAL_CLOSE`
+- `CLOSED`
+
+### ملاحظة مهمة حول SL_HIT
+
+`SL_HIT` لا يعني دائماً خسارة.
+
+قد يكون:
+
+- خسارة إذا كان PnL سالباً.
+- تعادل إذا كان SL عند الدخول.
+- ربح إذا كان SL قد تحرك مع التريلينغ.
+
+لذلك يعتمد النظام على قيمة PnL الفعلية وليس اسم الحالة فقط.
+
+---
+
+## الجداول الزمنية
+
+| المهمة | التكرار |
 |---|---|
-| +100 points | Move SL to entry |
-| After breakeven | Trailing stop (100pt gap, 30pt step) |
-| TP1 | Partial close (50%) |
-| TP2 | Full close |
-| 24 hours | Expire (if not protected) |
+| تحليل فرص جديدة | كل 5 دقائق |
+| تحديث الصفقات المفتوحة | كل 5 دقائق |
+| التقرير اليومي | 23:00 |
+| التقرير الأسبوعي | السبت 10:00 |
 
-## Schedule
+### نافذة التداول
 
-| Job | Frequency |
+- المنطقة الزمنية: `Asia/Hebron`.
+- توليد الإشارات الجديدة: من 03:00 إلى 22:00.
+- إدارة الصفقات المفتوحة يمكن أن تستمر خارج نافذة الإشارات لحماية الصفقة.
+
+---
+
+## مصادر البيانات
+
+- المصدر الأساسي: **Twelve Data**.
+- يتم جلب بيانات 5m ثم إعادة بناء الفريمات الأخرى عند تفعيل resampling.
+- الفريمات المستخدمة:
+  - `5m`
+  - `15m`
+  - `1H`
+  - `4H`
+- لا يسمح باستخدام بيانات synthetic في الإنتاج إلا إذا تم تفعيله صراحة.
+
+---
+
+## التخزين وقاعدة البيانات
+
+- المزود: **Supabase**.
+- يتم تخزين:
+  - الإشارات.
+  - الصفقات.
+  - حالة الصفقة.
+  - PnL بالنقاط.
+  - التقارير اليومية والأسبوعية.
+  - بيانات الأداء والتعلم.
+- يوجد ملف schema:
+
+```text
+supabase_schema_unified.sql
+```
+
+---
+
+## Telegram
+
+يستخدم Telegram لإرسال:
+
+- إشارات الدخول.
+- تفاصيل Entry / SL / TP.
+- تحديثات نقل الوقف.
+- تحديثات التريلينغ.
+- TP / SL / BE.
+- التقارير اليومية والأسبوعية.
+- رسائل الاختبار والتنبيه.
+
+---
+
+## Dashboard
+
+ملفات اللوحة:
+
+```text
+dashboard/index.html
+dashboard/style.css
+dashboard/app.js
+api/dashboard.js
+```
+
+### أقسام اللوحة
+
+- Dashboard
+- Reports
+- Agents
+- SmartSignal Pro
+- Plans & Payment
+
+### تعرض اللوحة
+
+- عدد الصفقات المغلقة.
+- Win Rate.
+- Net Points.
+- Profit Factor.
+- Best / Worst Trade.
+- Average Trade.
+- Expectancy.
+- Daily PnL.
+- Cumulative PnL.
+- الأداء حسب الجلسة.
+- الأداء حسب الأصل.
+- جدول الصفقات المغلقة.
+- التقارير اليومية والأسبوعية.
+- أداء الوكلاء.
+
+---
+
+## صفحة SmartSignal Pro التسويقية
+
+تشرح:
+
+- المشكلة النفسية في التداول.
+- أن النظام آلي لمتابعة الإشارات.
+- كيف يعمل النظام من المراقبة حتى التقارير.
+- ما يحصل عليه المشترك.
+- شرح الوكلاء.
+- الفرق بين النظام و Expert Advisor التقليدي.
+- الأسئلة الشائعة.
+
+---
+
+## صفحة Plans & Payment
+
+تحتوي على:
+
+- السعر الشهري: `$100`.
+- سعر 3 أشهر: `$200`.
+- مزايا الاشتراك.
+- الدفع عبر USDT TRC20.
+- عنوان المحفظة مع زر نسخ.
+- إرسال صورة الدفعة.
+- إرسال اسم مستخدم Telegram.
+- التفعيل عبر رابط دعوة خاص أو إضافة يدوية.
+
+---
+
+## الفرق عن Expert Advisor EA
+
+- النظام ليس EA واحداً باستراتيجية واحدة.
+- هو طبقة ذكاء تداول متعددة الوكلاء والاستراتيجيات.
+- يعمل حالياً كنظام إشارات ومتابعة أداء.
+- يمكن تطويره لاحقاً نحو تنفيذ آلي اختياري على حساب المستخدم.
+- المتداول حالياً يحتفظ بقرار التنفيذ.
+- النظام يوفر تحليل، تنبيهات، إدارة صفقات، وتقارير أداء.
+
+---
+
+## التشغيل الآلي
+
+يعمل عبر GitHub Actions و cron-job.org.
+
+### Workflows رئيسية
+
+- `analyze.yml`
+- `update_trades.yml`
+- `daily_report.yml`
+- `weekly_report.yml`
+- `dashboard.yml`
+- `tests.yml`
+- `telegram_test.yml`
+
+---
+
+## ملفات الدخول الرئيسية
+
+```text
+main.py
+scripts/run_analysis.py
+scripts/run_trade_updates.py
+scripts/run_daily_report.py
+scripts/run_weekly_report.py
+scripts/run_learning.py
+scripts/generate_dashboard.py
+```
+
+---
+
+## هيكل المشروع
+
+```text
+Nabil-gold/
+├── agents/                 # وكلاء التحليل والقرار وإدارة الصفقات
+├── services/               # البيانات، قاعدة البيانات، Telegram، التقارير
+├── scripts/                # نقاط تشغيل GitHub Actions والمهام
+├── utils/                  # أدوات مساعدة، المؤشرات، تعريف الأصول
+├── tests/                  # اختبارات المشروع
+├── dashboard/              # واجهة اللوحة
+├── api/                    # API الخاص باللوحة على Vercel
+├── config.json             # الإعدادات الرئيسية
+├── supabase_schema_unified.sql
+└── README.md
+```
+
+---
+
+## متغيرات البيئة المطلوبة
+
+| المتغير | الاستخدام |
 |---|---|
-| Analysis | Every 5 min, 3AM–10PM |
-| Trade Update | Every 5 min (offset by 1 min) |
-| Daily Report | 11:00 PM |
-| Weekly Report | Saturday 10:00 AM |
+| `TWELVEDATA_API_KEY` | بيانات السوق |
+| `TELEGRAM_BOT_TOKEN` | إرسال Telegram |
+| `TELEGRAM_CHAT_ID` | قناة/محادثة Telegram |
+| `SUPABASE_URL` | قاعدة البيانات |
+| `SUPABASE_KEY` | مفتاح Supabase |
+| `SUPABASE_SERVICE_KEY` | API آمن للوحة على Vercel عند الحاجة |
 
-## Setup
+---
 
-### 1. Get API Key (Free)
-
-Register at [twelvedata.com/register](https://twelvedata.com/register) — 800 calls/day
-
-### 2. Add GitHub Secrets
-
-`Settings → Secrets and variables → Actions`
-
-| Secret | Required |
-|---|---|
-| `TWELVEDATA_API_KEY` | ✅ |
-| `TELEGRAM_BOT_TOKEN` | ✅ |
-| `TELEGRAM_CHAT_ID` | ✅ |
-| `SUPABASE_URL` | ✅ |
-| `SUPABASE_KEY` | ✅ |
-
-### 3. Setup Supabase
-
-Run `supabase_schema_unified.sql` in Supabase SQL Editor.
-
-### 4. Setup Cron Jobs
-
-**Analysis** (cron-job.org):
-```
-*/5 3-22 * * 1-5
-```
-
-**Trade Update** (cron-job.org):
-```
-1/5 3-22 * * 1-5
-```
-
-## GitHub Actions
-
-| Workflow | Trigger |
-|---|---|
-| `analyze.yml` | cron-job.org |
-| `update_trades.yml` | cron-job.org |
-| `daily_report.yml` | Schedule |
-| `weekly_report.yml` | Schedule |
-| `tests.yml` | Push/PR |
-
-## Local Run
+## تشغيل محلي
 
 ```bash
 pip install -r requirements.txt
@@ -113,26 +430,34 @@ python -m pytest -q
 python scripts/run_analysis.py
 ```
 
-## Project Structure
+---
 
-```
-Nabil-gold/
-├── agents/           # Analysis + decision agents
-├── services/         # Market data, DB, Telegram
-├── scripts/          # Entry points for workflows
-├── tests/            # 299 tests
-├── config.json       # All settings
-└── supabase_schema_unified.sql
-```
+## ملاحظات مهمة
 
-## Tech Stack
-
-- **Python 3.11+** — zero external AI APIs
-- **Twelve Data** — market data (free tier)
-- **Supabase** — PostgreSQL persistence
-- **Telegram Bot** — notifications
-- **GitHub Actions** — stateless runner
+- النظام Paper / Signal-following وليس ضمان ربح.
+- النتائج تعتمد على السوق والتنفيذ وإدارة المخاطر.
+- يجب اختبار أي إعدادات جديدة على فترة كافية قبل اعتمادها.
+- إعدادات النفط الحالية تم ضبطها كبروفايل متوازن:
+  - SL: 120 نقطة.
+  - BE: 70 نقطة.
+  - Trailing: 70 نقطة.
+  - Step: 25 نقطة.
+- إعدادات الذهب الحالية بقيت:
+  - SL: 300 نقطة.
+  - BE: 100 نقطة.
+  - Trailing: 100 نقطة.
+  - Step: 30 نقطة.
 
 ---
 
-**Paper first. Measure everything.**
+## ملخص سريع
+
+- **SmartSignal Pro** = إشارات + متابعة صفقات + تقارير أداء.
+- **الأصول** = Gold + WTI Oil.
+- **التحليل** = عدة وكلاء + توافق موزون.
+- **التحديث** = كل 5 دقائق للفرص والصفقات.
+- **الإدارة** = SL / TP / Breakeven / Trailing.
+- **الواجهة** = Dashboard + Reports + Agents + Plans.
+- **التواصل** = Telegram.
+- **التخزين** = Supabase.
+- **التشغيل** = GitHub Actions + cron-job.org.
