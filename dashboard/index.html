@@ -21,10 +21,11 @@
       </div>
 
       <nav class="nav-links">
-        <a href="#dashboard" class="nav-link active" onclick="showSection('dashboard')">Dashboard</a>
-        <a href="#reports" class="nav-link" onclick="showSection('reports')">Reports</a>
-        <a href="#agents" class="nav-link" onclick="showSection('agents')">Agents</a>
-        <a href="#pricing" class="nav-link" onclick="showSection('pricing')">Get Pro</a>
+        <a href="#dashboard" class="nav-link active" onclick="showSection('dashboard')" data-en="Dashboard" data-ar="اللوحة">Dashboard</a>
+        <a href="#reports" class="nav-link" onclick="showSection('reports')" data-en="Reports" data-ar="التقارير">Reports</a>
+        <a href="#agents" class="nav-link" onclick="showSection('agents')" data-en="Agents" data-ar="الوكلاء">Agents</a>
+        <a href="#pricing" class="nav-link" onclick="showSection('pricing')" data-en="SmartSignal Pro" data-ar="سمارت سيجنال برو">SmartSignal Pro</a>
+        <a href="#subscribe" class="nav-link" onclick="showSection('subscribe')" data-en="Plans & Payment" data-ar="الأسعار والدفع">Plans & Payment</a>
       </nav>
 
       <div class="topbar-meta">
@@ -140,7 +141,7 @@
                 <span data-en="Report" data-ar="تقارير">Report</span>
               </div>
               <div class="overview-actions">
-                <button class="btn btn-primary" onclick="showSection('subscribe'); location.hash='subscribe'" data-en="View plans & payment" data-ar="عرض الأسعار والدفع">View plans & payment</button>
+                <a class="btn btn-primary" href="#subscribe" onclick="showSection('subscribe')" data-en="View plans & payment" data-ar="عرض الأسعار والدفع">View plans & payment</a>
               </div>
             </div>
             <div class="pricing-native-metrics">
@@ -230,71 +231,77 @@
           <div class="overview-bottom-cta pricing-native-card">
             <h2 data-en="Ready to subscribe?" data-ar="جاهز للاشتراك؟">Ready to subscribe?</h2>
             <p data-en="Plans, wallet address, copy button, and payment instructions are on a separate page to keep this overview focused." data-ar="الأسعار، عنوان المحفظة، زر النسخ، وتعليمات الدفع موجودة في صفحة منفصلة حتى تبقى هذه الصفحة منظمة.">Plans, wallet address, copy button, and payment instructions are on a separate page to keep this overview focused.</p>
-            <button class="btn btn-primary" onclick="showSection('subscribe'); location.hash='subscribe'" data-en="Open plans & payment" data-ar="فتح صفحة الأسعار والدفع">Open plans & payment</button>
+            <a class="btn btn-primary" href="#subscribe" onclick="showSection('subscribe')" data-en="Open plans & payment" data-ar="فتح صفحة الأسعار والدفع">Open plans & payment</a>
           </div>
         </div>
       </section>
 
-      <!-- SUBSCRIBE / PAYMENT SECTION -->
+      <!-- PLANS & PAYMENT SECTION -->
       <section id="subscribe" class="section">
-        <div class="pricing-native subscribe-page" aria-labelledby="subscribeTitle">
+        <div class="pricing-native subscribe-page embedded-subscribe" aria-labelledby="subscribeTitle">
           <div class="pricing-native-head subscribe-head">
             <div>
               <span class="pricing-native-kicker" data-en="Plans & Payment" data-ar="الأسعار والدفع">Plans & Payment</span>
               <h1 id="subscribeTitle" data-en="Choose your access, then send payment proof" data-ar="اختر مدة الاشتراك ثم أرسل إثبات الدفع">Choose your access, then send payment proof</h1>
               <p data-en="Both plans include the full SmartSignal Pro experience. The only difference is duration and price." data-ar="كلتا الباقتين تشملان تجربة SmartSignal Pro كاملة. الفرق الوحيد هو مدة الاشتراك والسعر.">Both plans include the full SmartSignal Pro experience. The only difference is duration and price.</p>
-              <button class="btn btn-ghost" onclick="showSection('pricing'); location.hash='pricing'" data-en="Back to overview" data-ar="العودة للشرح">Back to overview</button>
+              <a class="btn btn-ghost" href="#pricing" onclick="showSection('pricing')" data-en="Back to SmartSignal Pro" data-ar="العودة لشرح SmartSignal Pro">Back to SmartSignal Pro</a>
             </div>
             <div class="subscribe-summary">
               <strong data-en="Full access includes" data-ar="الوصول الكامل يشمل">Full access includes</strong>
-              <span data-en="Signals + 5-min monitoring + trade updates + reports" data-ar="إشارات + متابعة كل 5 دقائق + تحديثات صفقات + تقارير">Signals + 5-min monitoring + trade updates + reports</span>
+              <span data-en="Signals + 5-minute monitoring + open-trade updates + dashboard reports" data-ar="إشارات + متابعة كل 5 دقائق + تحديثات صفقات مفتوحة + تقارير لوحة الأداء">Signals + 5-minute monitoring + open-trade updates + dashboard reports</span>
             </div>
           </div>
 
-          <div class="pricing-native-card pricing-plans-card">
-            <div class="native-section-title">
-              <span class="native-card-label" data-en="Simple pricing" data-ar="أسعار بسيطة">Simple pricing</span>
-              <h2 data-en="Same full access. Choose only the duration." data-ar="نفس الوصول الكامل. اختر مدة الاشتراك فقط.">Same full access. Choose only the duration.</h2>
-            </div>
-            <div class="native-plan-grid">
-              <div class="native-plan">
-                <span data-en="Monthly Access" data-ar="اشتراك شهري">Monthly Access</span>
-                <strong>$100</strong>
-                <small data-en="per month" data-ar="شهرياً">per month</small>
+          <div class="subscribe-layout">
+            <div class="pricing-native-card pricing-plans-card subscribe-main-card">
+              <div class="native-section-title">
+                <span class="native-card-label" data-en="Simple pricing" data-ar="أسعار بسيطة">Simple pricing</span>
+                <h2 data-en="Same features. Choose the duration." data-ar="نفس المزايا. اختر مدة الاشتراك.">Same features. Choose the duration.</h2>
               </div>
-              <div class="native-plan highlighted">
-                <em data-en="Best value" data-ar="الأفضل قيمة">Best value</em>
-                <span data-en="3-Month Access" data-ar="اشتراك 3 أشهر">3-Month Access</span>
-                <strong>$200</strong>
-                <small data-en="every 3 months · save $100" data-ar="كل 3 أشهر · وفّر $100">every 3 months · save $100</small>
+              <div class="native-plan-grid subscribe-plan-grid">
+                <div class="native-plan">
+                  <span data-en="Monthly Access" data-ar="اشتراك شهري">Monthly Access</span>
+                  <strong>$100</strong>
+                  <small data-en="per month" data-ar="شهرياً">per month</small>
+                </div>
+                <div class="native-plan highlighted">
+                  <em data-en="Best value" data-ar="الأفضل قيمة">Best value</em>
+                  <span data-en="3-Month Access" data-ar="اشتراك 3 أشهر">3-Month Access</span>
+                  <strong>$200</strong>
+                  <small data-en="every 3 months · save $100" data-ar="كل 3 أشهر · وفّر $100">every 3 months · save $100</small>
+                </div>
+              </div>
+            </div>
+
+            <div class="pricing-native-card subscribe-includes-card subscribe-main-card">
+              <div class="native-section-title">
+                <span class="native-card-label" data-en="What you receive" data-ar="على ماذا ستحصل">What you receive</span>
+                <h2 data-en="Included for every subscriber" data-ar="مشمول لكل مشترك">Included for every subscriber</h2>
+              </div>
+              <div class="native-benefits-list subscribe-benefits-list compact-subscribe-benefits">
+                <div><span>✓</span><p data-en="Telegram signals for Gold and Oil" data-ar="إشارات Telegram للذهب والنفط">Telegram signals for Gold and Oil</p></div>
+                <div><span>✓</span><p data-en="New opportunity analysis every 5 minutes" data-ar="تحليل فرص جديدة كل 5 دقائق">New opportunity analysis every 5 minutes</p></div>
+                <div><span>✓</span><p data-en="Open trade updates every 5 minutes" data-ar="تحديث الصفقات المفتوحة كل 5 دقائق">Open trade updates every 5 minutes</p></div>
+                <div><span>✓</span><p data-en="5 core analysis agents" data-ar="5 وكلاء تحليل رئيسيين">5 core analysis agents</p></div>
+                <div><span>✓</span><p data-en="News, trend, session, and risk context" data-ar="سياق الأخبار والترند والجلسات والمخاطر">News, trend, session, and risk context</p></div>
+                <div><span>✓</span><p data-en="Smart trade management updates" data-ar="تحديثات إدارة ذكية للصفقة">Smart trade management updates</p></div>
+                <div><span>✓</span><p data-en="Performance dashboard" data-ar="لوحة أداء">Performance dashboard</p></div>
+                <div><span>✓</span><p data-en="Daily and weekly performance reports" data-ar="تقارير أداء يومية وأسبوعية">Daily and weekly performance reports</p></div>
               </div>
             </div>
           </div>
 
-          <div class="pricing-native-card subscribe-includes-card">
+          <div id="paymentInstructions" class="pricing-native-card payment-card standalone-payment-card">
             <div class="native-section-title">
-              <span class="native-card-label" data-en="You will receive" data-ar="ستحصل على">You will receive</span>
-              <h2 data-en="Everything included for every subscriber" data-ar="كل شيء مشمول لكل مشترك">Everything included for every subscriber</h2>
-            </div>
-            <div class="native-benefits-list subscribe-benefits-list">
-              <div><span>✓</span><p data-en="Telegram signals for Gold and Oil" data-ar="إشارات Telegram للذهب والنفط">Telegram signals for Gold and Oil</p></div>
-              <div><span>✓</span><p data-en="New opportunity analysis every 5 minutes" data-ar="تحليل فرص جديدة كل 5 دقائق">New opportunity analysis every 5 minutes</p></div>
-              <div><span>✓</span><p data-en="Open trade updates every 5 minutes" data-ar="تحديث الصفقات المفتوحة كل 5 دقائق">Open trade updates every 5 minutes</p></div>
-              <div><span>✓</span><p data-en="Performance dashboard and reports" data-ar="لوحة أداء وتقارير">Performance dashboard and reports</p></div>
-            </div>
-          </div>
-
-          <div id="paymentInstructions" class="pricing-native-card payment-card">
-            <div class="native-section-title">
-              <span class="native-card-label" data-en="How to subscribe" data-ar="طريقة الاشتراك">How to subscribe</span>
-              <h2 data-en="Pay with USDT TRC20, then send your payment proof" data-ar="ادفع عبر USDT TRC20 ثم أرسل إثبات الدفع">Pay with USDT TRC20, then send your payment proof</h2>
-              <p data-en="For secure activation, send the payment screenshot, transaction hash if available, and your Telegram username. We will verify the payment and send you a private group invite or add you manually." data-ar="للتفعيل الآمن، أرسل صورة الدفعة، وهاش العملية إن وجد، واسم مستخدم Telegram الخاص بك. بعد التحقق من الدفع سنرسل لك رابط دعوة خاص للمجموعة أو نضيفك يدوياً.">For secure activation, send the payment screenshot, transaction hash if available, and your Telegram username. We will verify the payment and send you a private group invite or add you manually.</p>
+              <span class="native-card-label" data-en="Payment instructions" data-ar="تعليمات الدفع">Payment instructions</span>
+              <h2 data-en="Pay with USDT TRC20, then send your proof" data-ar="ادفع عبر USDT TRC20 ثم أرسل إثبات الدفع">Pay with USDT TRC20, then send your proof</h2>
+              <p data-en="After payment, send the screenshot, transaction hash if available, and your Telegram username. After verification, we send a private invite link or add you manually." data-ar="بعد الدفع، أرسل صورة الدفعة، وهاش العملية إن وجد، واسم مستخدم Telegram الخاص بك. بعد التحقق، نرسل لك رابط دعوة خاص أو نضيفك يدوياً.">After payment, send the screenshot, transaction hash if available, and your Telegram username. After verification, we send a private invite link or add you manually.</p>
             </div>
 
             <div class="payment-steps">
               <div><b>1</b><span data-en="Pay USDT on TRC20 network" data-ar="ادفع USDT على شبكة TRC20">Pay USDT on TRC20 network</span></div>
-              <div><b>2</b><span data-en="Copy the wallet address below" data-ar="انسخ عنوان المحفظة بالأسفل">Copy the wallet address below</span></div>
-              <div><b>3</b><span data-en="Send payment screenshot + Telegram username" data-ar="أرسل صورة الدفعة + اسم مستخدم Telegram">Send payment screenshot + Telegram username</span></div>
+              <div><b>2</b><span data-en="Copy the wallet address" data-ar="انسخ عنوان المحفظة">Copy the wallet address</span></div>
+              <div><b>3</b><span data-en="Send screenshot + Telegram username" data-ar="أرسل صورة الدفعة + اسم مستخدم Telegram">Send screenshot + Telegram username</span></div>
             </div>
 
             <div class="wallet-box">
@@ -307,14 +314,14 @@
             </div>
 
             <div class="activation-note">
-              <strong data-en="Recommended activation process:" data-ar="الإجراء الأفضل للتفعيل:">Recommended activation process:</strong>
-              <span data-en="Send the payment screenshot and your Telegram username first. After verification, a private invite link is safer and cleaner than a public link. Manual add can be used if the invite link does not work." data-ar="أرسل صورة الدفعة واسم مستخدم Telegram أولاً. بعد التحقق، رابط دعوة خاص ومحدود أفضل وأكثر أماناً من رابط عام. ويمكن استخدام الإضافة اليدوية إذا لم يعمل رابط الدعوة.">Send the payment screenshot and your Telegram username first. After verification, a private invite link is safer and cleaner than a public link. Manual add can be used if the invite link does not work.</span>
+              <strong data-en="Best activation process:" data-ar="أفضل إجراء للتفعيل:">Best activation process:</strong>
+              <span data-en="Send payment proof and Telegram username first. A private invite link is safer than a public group link; manual add is available if needed." data-ar="أرسل إثبات الدفع واسم مستخدم Telegram أولاً. رابط الدعوة الخاص أكثر أماناً من رابط عام للمجموعة، ويمكن الإضافة اليدوية عند الحاجة.">Send payment proof and Telegram username first. A private invite link is safer than a public group link; manual add is available if needed.</span>
             </div>
 
             <a class="btn btn-contact single-telegram-cta" href="https://t.me/Smart_Pro2026" target="_blank" rel="noopener" data-en="Send payment proof on Telegram" data-ar="إرسال إثبات الدفع على Telegram">Send payment proof on Telegram</a>
           </div>
 
-          <div class="pricing-footer-note native-risk"><strong data-en="Risk notice:" data-ar="تنبيه المخاطر:">Risk notice:</strong> <span data-en="SmartSignal Pro is a signal, analysis, and performance tracking service. Trading involves risk, and past or current results do not guarantee future results." data-ar="SmartSignal Pro هو خدمة إشارات وتحليل وتتبع أداء. التداول ينطوي على مخاطر، والنتائج السابقة أو الحالية لا تضمن النتائج المستقبلية.">SmartSignal Pro is a signal, analysis, and performance tracking service. Trading involves risk, and past or current results do not guarantee future results.</span></div>
+          <div class="pricing-footer-note native-risk"><strong data-en="Risk notice:" data-ar="تنبيه المخاطر:">Risk notice:</strong> <span data-en="SmartSignal Pro is a signal, analysis, and performance tracking service. Trading involves risk, and results are not guaranteed." data-ar="SmartSignal Pro هو خدمة إشارات وتحليل وتتبع أداء. التداول ينطوي على مخاطر، والنتائج غير مضمونة.">SmartSignal Pro is a signal, analysis, and performance tracking service. Trading involves risk, and results are not guaranteed.</span></div>
         </div>
       </section>
 
