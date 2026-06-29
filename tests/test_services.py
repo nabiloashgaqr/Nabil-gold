@@ -311,3 +311,62 @@ def test_telegram_daily_report():
     service = TelegramService({"telegram": {"bot_token": None, "chat_id": None}})
     result = service.send_daily_report("📋 Daily Report\nTotal: 5\nWins: 3")
     assert result is False
+
+def test_yahoo_fallback_used_when_twelvedata_fails(monkeypatch):
+    """When Twelve Data fails/quota is exhausted, XAU/USD can fall back to Yahoo."""
+    config = {
+        "symbol": "XAU/USD",
+        "primary_timeframe": "5m",
+        "timeframes": ["5m"],
+        "data_source": {"fallback": "yahoo_finance"},
+    }
+    service = MarketDataService(config)
+    service.api_key = "dummy"
+    monkeypatch.setattr(service, "_fetch_data", lambda *_a, **_k: None)
+
+    class _Resp:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "chart": {
+                    "result": [{
+                        "timestamp": [1710000000, 1710000300],
+                        "indicators": {"quote": [{
+                            "open": [4000.0, 4001.0],
+                            "high": [4002.0, 4004.0],
+                            "low": [3999.0, 4000.5],
+                            "close": [4001.0, 4003.0],
+                            "volume": [0, 0],
+                        }]},
+                    }],
+                    "error": None,
+                }
+            }
+
+    calls = []
+
+    def _fake_get(url, params=None, headers=None, timeout=None):
+        calls.append((url, params, headers, timeout))
+        return _Resp()
+
+    monkeypatch.setattr(service.session, "get", _fake_get)
+    payload = service.get_ohlcv("5m", outputsize=10)
+    assert payload["source"] == "yahoo_finance_fallback"
+    assert payload["current_price"] == 4003.0
+    assert payload["data"][-1]["high"] == 4004.0
+    assert calls and "XAUUSD=X" in calls[0][0]
+
+
+def test_yahoo_fallback_not_used_when_disabled(monkeypatch):
+    service = MarketDataService({"symbol": "XAU/USD", "data_source": {"fallback": None}})
+    service.api_key = "dummy"
+    monkeypatch.setattr(service, "_fetch_data", lambda *_a, **_k: None)
+
+    def _should_not_call_yahoo(*_a, **_k):  # pragma: no cover
+        raise AssertionError("Yahoo fallback should be disabled")
+
+    monkeypatch.setattr(service, "_fetch_yahoo_chart", _should_not_call_yahoo)
+    payload = service.get_ohlcv("5m", outputsize=5)
+    assert payload["source"] == "synthetic_demo"
