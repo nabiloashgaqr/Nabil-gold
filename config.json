@@ -211,7 +211,9 @@
     "open_trade": {
       "block_same_direction_in_zone": true,
       "block_same_direction_any_price": false,
-      "description": "حماية تكديس الصفقات المفتوحة: امنع فتح صفقة بنفس الاتجاه داخل نفس منطقة السعر (in_zone). فعّل any_price=true إذا أردت صفقة واحدة فقط لكل اتجاه بغضّ النظر عن السعر."
+      "max_open_same_direction": 3,
+      "description_max_open_same_direction": "حد أقصى للصفقات المفتوحة بنفس الاتجاه على نفس الرمز. مثال: إذا توجد 3 صفقات SELL مفتوحة، تُمنع صفقة SELL رابعة فقط، بينما BUY يبقى مسموحاً.",
+      "description": "حماية تكديس الصفقات المفتوحة: امنع فتح صفقة بنفس الاتجاه داخل نفس منطقة السعر (in_zone)، ولا تسمح بأكثر من max_open_same_direction صفقات مفتوحة بنفس الاتجاه. فعّل any_price=true إذا أردت صفقة واحدة فقط لكل اتجاه بغضّ النظر عن السعر."
     },
     "cooldown": {
       "lookback_hours": 6,
