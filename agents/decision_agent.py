@@ -189,6 +189,7 @@ class DecisionAgent(BaseAgent):
             }
 
         selected_metrics = buy if decision == "BUY" else sell if decision == "SELL" else None
+        supporting_evidence = self._supporting_evidence(decision, selected_metrics, votes)
         return {
             "decision": decision,
             "confidence": round(float(confidence), 1),
@@ -203,6 +204,7 @@ class DecisionAgent(BaseAgent):
             "total_voting_agents": total,
             "strongest_agent": strongest.get("agent") if strongest else None,
             "strongest_directional": strongest_ctx,
+            "supporting_evidence": supporting_evidence,
             "rejection_reason": rejection_reason,
             "consensus": {
                 "mode": "5_agent_weighted_consensus",
@@ -216,6 +218,45 @@ class DecisionAgent(BaseAgent):
                 },
             },
         }
+
+    def _supporting_evidence(self, decision: str, selected_metrics: Dict[str, Any] | None, votes: Dict[str, list]) -> list[str]:
+        """Build concise human-readable consensus evidence for the signal message."""
+        if decision not in {"BUY", "SELL"} or not selected_metrics:
+            return []
+        supporters = selected_metrics.get("supporters", []) or []
+        opponents = selected_metrics.get("opponents", []) or []
+        confidence = float(selected_metrics.get("confidence", 0) or 0)
+        support_count = int(selected_metrics.get("support_count", 0) or 0)
+        support_avg = float(selected_metrics.get("support_avg_confidence", 0) or 0)
+        opposition_count = int(selected_metrics.get("opposition_count", 0) or 0)
+        edge = float(selected_metrics.get("edge", 0) or 0)
+
+        names = {
+            "technical": "Technical",
+            "classical": "Classical",
+            "smc": "SMC",
+            "price_action": "Price Action",
+            "multitimeframe": "Multi-Timeframe",
+        }
+        support_labels = [names.get(str(a), str(a).replace("_", " ").title()) for a in supporters]
+        opponent_labels = [names.get(str(a), str(a).replace("_", " ").title()) for a in opponents]
+
+        evidence: list[str] = []
+        if support_labels:
+            evidence.append(
+                f"Qualified supporters: {', '.join(support_labels)} backed {decision} "
+                f"with weighted confidence {confidence:.0f}%"
+            )
+        if support_count:
+            evidence.append(
+                f"Consensus quality: {support_count} qualified agent(s), "
+                f"average supporter confidence {support_avg:.0f}%, weighted edge {edge:.2f}"
+            )
+        if opposition_count:
+            evidence.append(f"Opposition check: {opposition_count} opposing agent(s) were deducted from the final score")
+        elif opponent_labels:
+            evidence.append(f"Opposition check: no qualified opposing vote against {decision}")
+        return evidence
 
     def _direction_metrics(self, side: str, votes: Dict[str, list]) -> Dict[str, Any]:
         opposite = "SELL" if side == "BUY" else "BUY"
@@ -451,6 +492,7 @@ class DecisionAgent(BaseAgent):
             "votes": analysis.get("votes", {}),
             "weights": analysis.get("weights", {}),
             "classic": analysis.get("classic", {}),
+            "supportive_evidence": (analysis.get("classic", {}) or {}).get("supporting_evidence", []),
             "agent_context": (analysis.get("classic", {}) or {}).get("strongest_directional"),
             "consensus_mode": True,
             "learning": analysis.get("learning", {}),
