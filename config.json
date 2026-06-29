@@ -331,7 +331,8 @@
     },
     {
       "symbol": "WTI/USD",
-      "enabled": true
+      "enabled": false,
+      "description_disabled": "WTI/USD disabled temporarily: the free Twelve Data plan does not provide real time_series data for oil (needs Basic plan or higher). Set this back to true after upgrading the plan or adding an oil-capable data source."
     }
   ],
   "instruments": [
