@@ -397,3 +397,31 @@ def test_yahoo_fallback_does_not_use_futures_for_xau_spot_management(monkeypatch
     assert payload["source"] == "synthetic_demo"
     assert any("XAUUSD=X" in url for url in seen)
     assert not any("GC=F" in url or "MGC=F" in url for url in seen)
+
+
+def test_swissquote_spot_quote_payload_for_xau(monkeypatch):
+    service = MarketDataService({"symbol": "XAU/USD"})
+
+    class _Resp:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [{
+                "spreadProfilePrices": [
+                    {"spreadProfile": "wide", "bid": 4039.0, "ask": 4041.0},
+                    {"spreadProfile": "tight", "bid": 4039.5, "ask": 4040.1},
+                ]
+            }]
+
+    def _fake_get(url, headers=None, timeout=None):
+        assert "XAU/USD" in url
+        return _Resp()
+
+    monkeypatch.setattr(service.session, "get", _fake_get)
+    payload = service.get_spot_quote_payload()
+    assert payload is not None
+    assert payload["source"] == "swissquote_spot_quote_fallback"
+    assert payload["current_price"] == 4039.8
+    candle = payload["data"][0]
+    assert candle["high"] == candle["low"] == candle["close"] == 4039.8
