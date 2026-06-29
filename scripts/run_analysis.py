@@ -928,18 +928,30 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         allow_synthetic = bool(config.get("data_source", {}).get("allow_synthetic_in_production", False))
         synthetic_sources = synthetic_timeframe_sources(data)
         if os.environ.get("GITHUB_ACTIONS") == "true" and synthetic_sources and not allow_synthetic:
-            logger.error("Skipping %s: synthetic_demo data detected.", symbol)
+            logger.error("Skipping %s analysis: synthetic_demo data detected.", symbol)
+            # If active trades exist, still try to update them from a live spot
+            # quote snapshot. This is trade-management only, not analysis.
+            quote_payload = market_data.get_spot_quote_payload() if has_symbol_active_trades else None
+            if quote_payload:
+                logger.warning("Using Swissquote spot quote fallback for %s active trade management", symbol)
+                _update_open_trades_from_market_payload(
+                    config=config,
+                    data=quote_payload,
+                    database=database,
+                    telegram=telegram,
+                )
             if should_send_hourly_status(config):
                 telegram.send_message(
                     "🟡 <b>SmartSignal — Market Status</b>\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
                     f"🧭 Symbol under review: {html.escape(symbol)}\n"
                     "🎯 Decision: WAIT\n"
-                    "📊 Data blocked\n\n"
+                    "📊 Data blocked for analysis\n\n"
                     "<b>Reason:</b>\n"
-                    f"• Synthetic/demo data detected for {html.escape(symbol)}; production signals are blocked\n\n"
+                    f"• Synthetic/demo candles detected for {html.escape(symbol)}; production signals are blocked\n\n"
                     "<b>Notes:</b>\n"
                     "• Configure/verify TWELVEDATA_API_KEY, quota, and symbol availability\n"
+                    "• Open trades may still be updated from live spot quote fallback if available\n"
                     "━━━━━━━━━━━━━━━━━━━━"
                 )
             return

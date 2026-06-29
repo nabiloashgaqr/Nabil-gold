@@ -180,12 +180,21 @@ def main() -> None:
             price_payload = market_data.get_ohlcv(base_tf, outputsize=5)
             allow_synthetic = bool(symbol_config.get("data_source", {}).get("allow_synthetic_in_production", False))
             if os.environ.get("GITHUB_ACTIONS") == "true" and price_payload.get("source") == "synthetic_demo" and not allow_synthetic:
-                logger.error("Trade updates stopped for %s: all real data sources failed (Twelve Data + fallback)", symbol)
-                telegram.send_error_alert(
-                    "Trade updates stopped: all real data sources failed "
-                    "(Twelve Data quota/key and Yahoo fallback unavailable)"
-                )
-                continue
+                # For trade management only, try a live XAU/USD spot quote before
+                # giving up. This does not provide historical candles for
+                # analysis, but it is safer than stopping SL/TP management and
+                # safer than using GC=F futures as a proxy.
+                quote_payload = market_data.get_spot_quote_payload()
+                if quote_payload:
+                    logger.warning("Using Swissquote spot quote fallback for %s trade updates", symbol)
+                    price_payload = quote_payload
+                else:
+                    logger.error("Trade updates stopped for %s: all real data sources failed", symbol)
+                    telegram.send_error_alert(
+                        "Trade updates stopped: all real data sources failed "
+                        "(Twelve Data quota/key, Yahoo spot fallback, and Swissquote quote unavailable)"
+                    )
+                    continue
             symbol_price = price_payload.get("current_price")
             if not symbol_price:
                 logger.error("Failed to fetch price for symbol %s", symbol)
