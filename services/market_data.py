@@ -54,9 +54,11 @@ class MarketDataService:
     }
 
     YAHOO_SYMBOL_MAP = {
-        "XAU/USD": "XAUUSD=X",
-        "XAUUSD": "XAUUSD=X",
-        "GOLD": "XAUUSD=X",
+        # Try spot first; if Yahoo no longer serves it, fall back to COMEX gold
+        # futures (GC=F / MGC=F), which Yahoo reliably exposes as free 5m OHLC.
+        "XAU/USD": ["XAUUSD=X", "GC=F", "MGC=F"],
+        "XAUUSD": ["XAUUSD=X", "GC=F", "MGC=F"],
+        "GOLD": ["GC=F", "MGC=F"],
         # Yahoo does not provide a reliable free WTI/USD 5m spot series here.
     }
 
@@ -208,9 +210,11 @@ class MarketDataService:
         Twelve Data fails so it protects quota without becoming the primary data
         source. Currently enabled for XAU/USD only.
         """
-        yahoo_symbol = self.YAHOO_SYMBOL_MAP.get(str(self.symbol).upper())
-        if not yahoo_symbol:
+        yahoo_symbols = self.YAHOO_SYMBOL_MAP.get(str(self.symbol).upper())
+        if not yahoo_symbols:
             return None
+        if isinstance(yahoo_symbols, str):
+            yahoo_symbols = [yahoo_symbols]
 
         interval_map = {
             "1m": "1m",
@@ -243,40 +247,49 @@ class MarketDataService:
         }
         headers = {"User-Agent": "Mozilla/5.0 SmartSignalPro/1.0"}
 
-        try:
-            resp = self.session.get(
-                self.YAHOO_CHART_URL.format(symbol=yahoo_symbol),
-                params=params,
-                headers=headers,
-                timeout=20,
-            )
-            resp.raise_for_status()
-            raw = resp.json()
-            result = ((raw.get("chart") or {}).get("result") or [None])[0]
-            if not result:
-                err = (raw.get("chart") or {}).get("error")
-                self.logger.warning("Yahoo Finance fallback error for %s: %s", self.symbol, err)
-                return None
-            timestamps = result.get("timestamp") or []
-            quote = (((result.get("indicators") or {}).get("quote") or [{}])[0]) or {}
-            candles = self._normalize_yahoo_chart(timestamps, quote)
-            if not candles:
-                return None
-            if len(candles) > outputsize:
-                candles = candles[-outputsize:]
-            current_price = float(candles[-1]["close"])
-            return {
-                "symbol": self.symbol,
-                "timeframe": timeframe,
-                "data": candles,
-                "current_price": current_price,
-                "spread_points": None,
-                "last_updated": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-                "source": "yahoo_finance_fallback",
-            }
-        except Exception as exc:  # noqa: BLE001
-            self.logger.warning("Yahoo Finance fallback failed %s %s: %s", self.symbol, timeframe, exc)
-            return None
+        for yahoo_symbol in yahoo_symbols:
+            try:
+                resp = self.session.get(
+                    self.YAHOO_CHART_URL.format(symbol=yahoo_symbol),
+                    params=params,
+                    headers=headers,
+                    timeout=20,
+                )
+                resp.raise_for_status()
+                raw = resp.json()
+                result = ((raw.get("chart") or {}).get("result") or [None])[0]
+                if not result:
+                    err = (raw.get("chart") or {}).get("error")
+                    self.logger.warning(
+                        "Yahoo Finance fallback error for %s via %s: %s",
+                        self.symbol,
+                        yahoo_symbol,
+                        err,
+                    )
+                    continue
+                timestamps = result.get("timestamp") or []
+                quote = (((result.get("indicators") or {}).get("quote") or [{}])[0]) or {}
+                candles = self._normalize_yahoo_chart(timestamps, quote)
+                if not candles:
+                    self.logger.warning("Yahoo Finance fallback returned no candles for %s via %s", self.symbol, yahoo_symbol)
+                    continue
+                if len(candles) > outputsize:
+                    candles = candles[-outputsize:]
+                current_price = float(candles[-1]["close"])
+                return {
+                    "symbol": self.symbol,
+                    "timeframe": timeframe,
+                    "data": candles,
+                    "current_price": current_price,
+                    "spread_points": None,
+                    "last_updated": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                    "source": "yahoo_finance_fallback",
+                    "provider_symbol": yahoo_symbol,
+                }
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning("Yahoo Finance fallback failed %s %s via %s: %s", self.symbol, timeframe, yahoo_symbol, exc)
+                continue
+        return None
 
     def _normalize_yahoo_chart(self, timestamps: List[Any], quote: Dict[str, Any]) -> List[Dict[str, Any]]:
         from utils.instruments import price_decimals
