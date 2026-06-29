@@ -1,4 +1,4 @@
-name: 📊 Gold Analysis Bot
+name: 📊 SmartSignal Multi-Asset Analysis
 
 concurrency:
   group: analyze-${{ github.ref }}
