@@ -372,41 +372,28 @@ def test_yahoo_fallback_not_used_when_disabled(monkeypatch):
     assert payload["source"] == "synthetic_demo"
 
 
-def test_yahoo_fallback_tries_gold_futures_when_spot_symbol_missing(monkeypatch):
-    """Yahoo may not serve XAUUSD=X; fallback should then try GC=F."""
+
+def test_yahoo_fallback_does_not_use_futures_for_xau_spot_management(monkeypatch):
+    """GC=F/MGC=F are futures, not XAU/USD spot; never use them for SL/TP."""
     service = MarketDataService({"symbol": "XAU/USD", "data_source": {"fallback": "yahoo_finance"}})
     service.api_key = "dummy"
     monkeypatch.setattr(service, "_fetch_data", lambda *_a, **_k: None)
 
     class _Resp:
-        def __init__(self, ok: bool):
-            self.ok = ok
-
         def raise_for_status(self):
             return None
 
         def json(self):
-            if not self.ok:
-                return {"chart": {"result": None, "error": {"code": "Not Found"}}}
-            return {
-                "chart": {"result": [{
-                    "timestamp": [1710000000],
-                    "indicators": {"quote": [{
-                        "open": [4050.0], "high": [4058.0], "low": [4048.0], "close": [4056.8], "volume": [0],
-                    }]},
-                }], "error": None}
-            }
+            return {"chart": {"result": None, "error": {"code": "Not Found"}}}
 
     seen = []
 
     def _fake_get(url, params=None, headers=None, timeout=None):
         seen.append(url)
-        return _Resp(ok="GC=F" in url)
+        return _Resp()
 
     monkeypatch.setattr(service.session, "get", _fake_get)
     payload = service.get_ohlcv("5m", outputsize=5)
-    assert payload["source"] == "yahoo_finance_fallback"
-    assert payload["provider_symbol"] == "GC=F"
-    assert payload["current_price"] == 4056.8
+    assert payload["source"] == "synthetic_demo"
     assert any("XAUUSD=X" in url for url in seen)
-    assert any("GC=F" in url for url in seen)
+    assert not any("GC=F" in url or "MGC=F" in url for url in seen)
