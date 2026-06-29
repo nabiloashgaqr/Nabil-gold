@@ -26,13 +26,14 @@ from agents.risk_management_agent import RiskManagementAgent
 from agents.smc_agent import SMCAgent
 from agents.technical_agent import TechnicalAgent
 from agents.trading_session_agent import TradingSessionAgent
+from agents.open_trades_manager import OpenTradesManager
 from services.database import DatabaseService
 from services.dynamic_risk import DynamicRiskManager, should_block_signal
 from services.market_data import MarketDataService
 from services.telegram_bot import TelegramService
 from services.learning_service import get_learning_service
 from utils.helpers import load_config, setup_logging
-from utils.instruments import enabled_instruments, config_for_instrument, price_to_points, points_to_price
+from utils.instruments import enabled_instruments, config_for_instrument, normalize_symbol, price_to_points, points_to_price
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -780,54 +781,131 @@ async def _check_scale_in(
             logger.error("📊 Scale-in %s failed: Telegram delivery error", trade_type)
 
 
+def _latest_candle_extremes(data: Dict[str, Any]) -> tuple[float, float]:
+    """Return latest 5m candle high/low from the already-fetched payload.
+
+    ``get_gold_data`` may expose the primary timeframe (15m) in ``data`` while
+    also carrying the fetched base 5m candles in ``timeframes['5m']``. Trade
+    management must use the latest 5m candle, not the latest 15m bucket, because
+    updates run every 5 minutes.
+    """
+    current = float(data.get("current_price") or 0.0)
+    tf_payloads = data.get("timeframes", {}) or {}
+    base_payload = tf_payloads.get("5m") or tf_payloads.get("5min") or {}
+    candles = (base_payload.get("data") if isinstance(base_payload, dict) else None) or data.get("data") or []
+    latest = candles[-1] if candles else {}
+    try:
+        high = float(latest.get("high") or current)
+        low = float(latest.get("low") or current)
+    except (AttributeError, TypeError, ValueError):
+        high = current
+        low = current
+    if high < low:
+        high, low = low, high
+    return high, low
+
+
+def _update_open_trades_from_market_payload(
+    *,
+    config: Dict[str, Any],
+    data: Dict[str, Any],
+    database: DatabaseService,
+    telegram: TelegramService,
+) -> List[Dict[str, Any]]:
+    """Update active trades using the same 5m payload fetched for analysis.
+
+    This avoids a second Twelve Data call every 5 minutes. The analysis payload
+    already includes the latest 5m candle, so trade management reuses its
+    close/high/low for TP/SL/BE/trailing checks.
+    """
+    symbol = normalize_symbol(config.get("symbol", "XAU/USD"))
+    open_trades = database.get_open_trades()
+    symbol_trades = [
+        trade for trade in open_trades
+        if normalize_symbol(trade.get("symbol") or config.get("symbol", "XAU/USD")) == symbol
+    ]
+    if not symbol_trades:
+        return []
+
+    high, low = _latest_candle_extremes(data)
+    current_price = float(data.get("current_price") or 0.0)
+    if current_price <= 0:
+        return []
+
+    eod_quiet = os.environ.get("EOD_QUIET", "").lower() in {"1", "true", "yes"}
+    telegram_for_events = None if eod_quiet else telegram
+    manager = OpenTradesManager(config)
+    evaluations = manager.update_trades(
+        open_trades=symbol_trades,
+        current_price=current_price,
+        candle_high=high,
+        candle_low=low,
+        database=database,
+        telegram=telegram_for_events,
+        now=datetime.now(timezone.utc),
+    )
+    logger.info(
+        "Updated %s active trade(s) for %s using shared market payload (high=%s low=%s close=%s)",
+        len(symbol_trades), symbol, high, low, current_price,
+    )
+    return evaluations
+
+
 async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
-    """Run one analysis cycle for one configured symbol."""
+    """Run one analysis/update cycle for one configured symbol."""
 
     telegram = TelegramService(config)
 
     try:
-        # ── Check trading hours first ──
+        # ── Initialize DB/session first (no market-data call yet) ───────────
+        # We only fetch Twelve Data when we actually need it: either trading is
+        # allowed for new analysis, or there are active trades that must be
+        # managed. This keeps the daily quota low outside trading windows.
+        database = DatabaseService(config)
+        symbol = str(config.get("symbol", "XAU/USD"))
+        normalized_symbol = normalize_symbol(symbol)
+        open_trades_snapshot = database.get_open_trades()
+        has_symbol_active_trades = any(
+            normalize_symbol(t.get("symbol") or symbol) == normalized_symbol
+            for t in open_trades_snapshot
+        )
+
         session = TradingSessionAgent(config).check()
         logger.info(
-            "🔍 Session: %s | Quality: %s | Allowed: %s",
+            "🔍 Session: %s | Quality: %s | Allowed: %s | Active trades for %s: %s",
             session.get("current_session") or "خارج Session",
             session.get("session_quality", "N/A"),
             session.get("trading_allowed"),
+            symbol,
+            has_symbol_active_trades,
         )
 
-        if not session.get("trading_allowed"):
+        if not session.get("trading_allowed") and not has_symbol_active_trades:
             logger.info(
-                "🚫 Outside trading hours (%s) - No analysis. Reason: %s",
+                "🚫 Outside trading hours (%s) and no active %s trades — no market-data fetch.",
                 session.get("current_session") or "غير محدد",
-                session.get("reason", ""),
+                symbol,
             )
             if should_send_hourly_status(config):
-                # Price may not be fetched yet; use placeholder or skip price if unavailable
-                price_text = "N/A"
                 telegram.send_message(
                     "🟡 <b>SmartSignal — Market Status</b>\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
-                    f"📈 Price: {price_text}\n"
-                    f"🎯 Decision: WAIT\n"
-                    f"📊 Outside trading hours\n\n"
+                    "📈 Price: N/A\n"
+                    "🎯 Decision: WAIT\n"
+                    "📊 Outside trading hours\n\n"
                     f"<b>Reason:</b>\n• {html.escape(str(session.get('reason', 'Outside trading hours')))}\n"
                     f"<b>Session:</b> {html.escape(str(session.get('current_session') or 'N/A'))}\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
-                    "<i>Market status • Next market status in ~1 hour</i>"
+                    "<i>Market status • No active trades to update</i>"
                 )
-            return  # ══ لا تحليل خارج الجلسات ══
+            return
 
-        # ── Initialize services ──
+        # ── Single shared market-data fetch ────────────────────────────────
+        # The same payload is reused for both trade updates and signal analysis.
         market_data = MarketDataService(config)
-        database = DatabaseService(config)
-
-        logger.info("Fetching market data...")
+        logger.info("Fetching shared market data payload for %s...", symbol)
         data = market_data.get_gold_data()
-        symbol = str(config.get("symbol", "XAU/USD"))
         if not data:
-            # Do not let a secondary instrument fail silently. When an explicit
-            # Market Status run is requested, report the skipped symbol to
-            # Telegram so WTI/Oil visibility is clear.
             logger.error("Failed to fetch data for %s — skipping", symbol)
             if should_send_hourly_status(config):
                 telegram.send_message(
@@ -839,13 +917,14 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                     "<b>Reason:</b>\n"
                     f"• Could not fetch market data for {html.escape(symbol)}\n\n"
                     "<b>Notes:</b>\n"
-                    "• Analysis skipped for this symbol only\n"
+                    "• Analysis/update skipped for this symbol only\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
                     "<i>Market status • Check Twelve Data symbol/API availability</i>"
                 )
             return
 
-        # Safety: never send production signals from synthetic/demo prices on GitHub Actions.
+        # Safety: never send production signals or update paper trades from
+        # synthetic/demo prices on GitHub Actions.
         allow_synthetic = bool(config.get("data_source", {}).get("allow_synthetic_in_production", False))
         synthetic_sources = synthetic_timeframe_sources(data)
         if os.environ.get("GITHUB_ACTIONS") == "true" and synthetic_sources and not allow_synthetic:
@@ -860,8 +939,36 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                     "<b>Reason:</b>\n"
                     f"• Synthetic/demo data detected for {html.escape(symbol)}; production signals are blocked\n\n"
                     "<b>Notes:</b>\n"
-                    "• Configure/verify TWELVEDATA_API_KEY and symbol availability\n"
+                    "• Configure/verify TWELVEDATA_API_KEY, quota, and symbol availability\n"
                     "━━━━━━━━━━━━━━━━━━━━"
+                )
+            return
+
+        # ── Update open trades using the same fetched payload ───────────────
+        if has_symbol_active_trades:
+            _update_open_trades_from_market_payload(
+                config=config,
+                data=data,
+                database=database,
+                telegram=telegram,
+            )
+
+        if not session.get("trading_allowed"):
+            logger.info(
+                "🚫 Outside trading hours (%s) — active trades were updated; skipping new signal analysis.",
+                session.get("current_session") or "غير محدد",
+            )
+            if should_send_hourly_status(config):
+                telegram.send_message(
+                    "🟡 <b>SmartSignal — Market Status</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    f"📈 Price: {data.get('current_price')}\n"
+                    "🎯 Decision: WAIT\n"
+                    "📊 Outside trading hours\n\n"
+                    f"<b>Reason:</b>\n• {html.escape(str(session.get('reason', 'Outside trading hours')))}\n"
+                    f"<b>Session:</b> {html.escape(str(session.get('current_session') or 'N/A'))}\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    "<i>Market status • Active trades updated from shared 5m candle</i>"
                 )
             return
 
@@ -1078,18 +1185,9 @@ async def run_analysis_async() -> None:
     """Run analysis for all enabled instruments."""
     base_config = load_config()
     instruments = enabled_instruments(base_config)
-    telegram = TelegramService(base_config)
-
-    # Pre-check: verify data API key works before running any symbol.
-    # Use MarketDataService from the module level so tests can monkeypatch it.
-    test_service = MarketDataService(base_config)
-    test_payload = test_service.get_ohlcv("5m", outputsize=3)
-    if test_payload and test_payload.get("source") == "synthetic_demo":
-        allow_synth = bool(base_config.get("data_source", {}).get("allow_synthetic_in_production", False))
-        if os.environ.get("GITHUB_ACTIONS") == "true" and not allow_synth:
-            telegram.send_error_alert("TWELVEDATA_API_KEY is missing or invalid")
-            logger.error("TWELVEDATA_API_KEY not working — aborting all symbols")
-            return
+    # No separate Twelve Data pre-check here. The actual analysis/update cycle
+    # performs one shared market-data fetch per enabled symbol and handles API
+    # failure there. This avoids burning an extra API call every 5 minutes.
 
     for instrument in instruments:
         cfg = config_for_instrument(base_config, instrument)

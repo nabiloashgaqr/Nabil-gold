@@ -1,7 +1,7 @@
 """Validate GitHub Actions runtime configuration before running bot jobs.
 
 This script intentionally prints only missing secret names and never prints values.
-It also tests that Twelve Data API key is actually valid by making a real API call.
+For quota protection, it checks that the Twelve Data key exists but does not make a live Twelve Data API call on every scheduled run.
 
 Usage:
     python scripts/validate_setup.py analyze
@@ -151,24 +151,17 @@ def main() -> int:
         print("\nAdd them in: GitHub repo → Settings → Secrets and variables → Actions")
         return 1
 
-    # ── Live connectivity test for market data API ──────────────────
+    # ── Market-data key guard (no live API call) ─────────────────────
+    # Do NOT test Twelve Data connectivity here on every scheduled run: that
+    # burns one extra quota call every 5 minutes. The analysis/update cycle will
+    # make the single real market-data call it needs and handle API errors there.
     if "TWELVEDATA_API_KEY" in required:
         if not _has_data_key():
             print("❌ TWELVEDATA_API_KEY not found!")
             print("   Get a free key: https://twelvedata.com/register (800 calls/day)")
             print("   Add in: GitHub repo → Settings → Secrets → TWELVEDATA_API_KEY")
             return 1
-
-        print("🔑 Testing Twelve Data API key...")
-        ok, msg = _test_twelvedata_key()
-        if ok:
-            print(f"   ✅ {msg}")
-        else:
-            print(f"   ❌ {msg}")
-            print()
-            print("Fix: Go to https://twelvedata.com/register → get a free key")
-            print("     Then add it in: GitHub repo → Settings → Secrets → TWELVEDATA_API_KEY")
-            return 1
+        print("🔑 TWELVEDATA_API_KEY is configured (live quota test skipped to save API calls).")
 
     print(f"✅ Setup validation passed for mode: {mode}")
     return 0
