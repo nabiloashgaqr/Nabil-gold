@@ -477,10 +477,14 @@ def _build_market_status_message(
     else:
         gate_line = f"📊 Consensus: WAIT  •  Agents ≥{agent_thr}%  •  Entry ≥{min_consensus:.0f}%"
         rejection = classic.get("rejection_reason") or "No valid weighted consensus signal"
-        _append_unique_reason(reason_lines, rejection)
         rejection_key = _reason_key(rejection)
-        # Avoid repeating: "Need at least 2..." and "Rules: at least 2...".
-        if not ("at least" in rejection_key and "weighted confidence" in rejection_key):
+        # Keep only one consensus-rule line, but normalize its wording so it is
+        # clean, non-duplicated, and uses the ≥ symbol expected by tests/users.
+        if "at least" in rejection_key and "weighted confidence" in rejection_key:
+            rejection = f"Need at least 2 agents with weighted confidence ≥{min_consensus:.0f}%"
+            _append_unique_reason(reason_lines, rejection)
+        else:
+            _append_unique_reason(reason_lines, rejection)
             _append_unique_reason(reason_lines, f"Rules: at least 2 agents with weighted confidence ≥{min_consensus:.0f}%")
 
     opp_agent = (classic.get("strongest_directional") or {}).get("agent")
