@@ -100,11 +100,17 @@
 
         <!-- Trades Table -->
         <div class="table-card">
-          <div class="table-header"><div><h3>All Closed Trades</h3><span id="tradesCount">(0)</span></div></div>
+          <div class="table-header">
+            <div>
+              <h3 data-en="Latest Closed Trades" data-ar="آخر الصفقات المغلقة">Latest Closed Trades</h3>
+              <span id="tradesCount">(0)</span>
+              <small class="table-limit-note" data-en="Showing latest 50 only. Older closed trades are summarized in Reports." data-ar="يتم عرض آخر 50 صفقة فقط. الصفقات الأقدم يتم تلخيصها في التقارير.">Showing latest 50 only. Older closed trades are summarized in Reports.</small>
+            </div>
+          </div>
           <div class="table-container">
             <table id="tradesTable">
-              <thead><tr><th>Opened</th><th>Closed</th><th>Symbol</th><th>Type</th><th>Entry</th><th>Close</th><th>PnL</th><th>Status</th><th>Confidence</th></tr></thead>
-              <tbody id="tradesBody"><tr><td colspan="9" class="loading">Loading...</td></tr></tbody>
+              <thead><tr><th>Opened</th><th>Closed</th><th>Symbol</th><th>Type</th><th>Entry</th><th>Close</th><th>PnL</th><th>Status</th><th>Confidence</th><th>Details</th></tr></thead>
+              <tbody id="tradesBody"><tr><td colspan="10" class="loading">Loading...</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -112,10 +118,23 @@
 
       <!-- REPORTS SECTION -->
       <section id="reports" class="section">
-        <div class="page-title"><h1>Daily & Weekly Reports</h1></div>
+        <div class="page-title">
+          <h1 data-en="Daily & Weekly Reports" data-ar="التقارير اليومية والأسبوعية">Daily & Weekly Reports</h1>
+          <p data-en="Closed trade history beyond the latest 50 trades is organized here by report folders." data-ar="تاريخ الصفقات المغلقة بعد آخر 50 صفقة يتم تنظيمه هنا داخل مجلدات التقارير.">Closed trade history beyond the latest 50 trades is organized here by report folders.</p>
+        </div>
         <div class="reports-grid">
-          <div class="report-card"><h3>Latest Daily Report</h3><pre id="dailyReport" class="report-content">Loading...</pre></div>
-          <div class="report-card"><h3>Latest Weekly Report</h3><pre id="weeklyReport" class="report-content">Loading...</pre></div>
+          <div class="report-card"><h3 data-en="Latest Daily Report" data-ar="آخر تقرير يومي">Latest Daily Report</h3><pre id="dailyReport" class="report-content">Loading...</pre></div>
+          <div class="report-card"><h3 data-en="Latest Weekly Report" data-ar="آخر تقرير أسبوعي">Latest Weekly Report</h3><pre id="weeklyReport" class="report-content">Loading...</pre></div>
+        </div>
+        <div class="report-archive-grid">
+          <div class="table-card report-archive-card">
+            <div class="table-header"><div><h3 data-en="Daily Reports Archive" data-ar="أرشيف التقارير اليومية">Daily Reports Archive</h3><span id="dailyReportsCount"></span></div></div>
+            <div id="dailyReportsArchive" class="reports-archive"><div class="loading">Loading...</div></div>
+          </div>
+          <div class="table-card report-archive-card">
+            <div class="table-header"><div><h3 data-en="Weekly Reports Archive" data-ar="أرشيف التقارير الأسبوعية">Weekly Reports Archive</h3><span id="weeklyReportsCount"></span></div></div>
+            <div id="weeklyReportsArchive" class="reports-archive"><div class="loading">Loading...</div></div>
+          </div>
         </div>
       </section>
 

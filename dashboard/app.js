@@ -4,6 +4,7 @@
 const API_URL = (window.SMARTSIGNAL_API_URL || '/api/dashboard');
 const OUTCOME_STATUSES = new Set(['TP1_HIT', 'TP2_HIT', 'SL_HIT', 'BE_HIT', 'EXPIRED', 'MANUAL_CLOSE', 'CLOSED']);
 const LIVE_STATUSES = new Set([]);
+const CLOSED_TRADES_TABLE_LIMIT = 50;
 
 let currentLang = 'ar';
 let closedTrades = [];
@@ -232,7 +233,7 @@ function updateStats(trades, live) {
     setText('worstTrade', pnls.length ? signed(worst) : '--');
     setText('avgTrade', total ? signed(avg) : '--');
     setText('expectancy', total ? signed(avg) : '--');
-    setText('tradesCount', `(${total})`);
+    setText('tradesCount', total > CLOSED_TRADES_TABLE_LIMIT ? `(${CLOSED_TRADES_TABLE_LIMIT}/${total})` : `(${total})`);
 
     const netEl = $('netPoints');
     if (netEl) netEl.style.color = netPnl >= 0 ? '#2b8a3e' : '#c92a2a';
@@ -409,7 +410,8 @@ function renderTradesTable(trades) {
         tbody.innerHTML = `<tr><td colspan="10" class="empty">${tr('noClosed')}</td></tr>`;
         return;
     }
-    tbody.innerHTML = trades.slice(0, 120).map(trade => {
+    const visibleTrades = trades.slice(0, CLOSED_TRADES_TABLE_LIMIT);
+    tbody.innerHTML = visibleTrades.map(trade => {
         const pnl = pnlOf(trade);
         const statusClass = statusClassOf(trade);
         return `<tr onclick='showTradeModalById(${JSON.stringify(trade.id)})'>
@@ -552,6 +554,8 @@ function renderReports(payload) {
     setText('weeklyReport', latestWeekly ? (reportText(latestWeekly) || JSON.stringify(latestWeekly.stats_json || {}, null, 2)) : tr('noWeekly'));
     renderReportArchive('dailyReportsArchive', daily, 'daily');
     renderReportArchive('weeklyReportsArchive', weekly, 'weekly');
+    setText('dailyReportsCount', daily.length ? wordReports(daily.length) : '');
+    setText('weeklyReportsCount', weekly.length ? wordReports(weekly.length) : '');
     setHTML('reportsBody', '');
 }
 
