@@ -129,8 +129,11 @@ def _trade_entry_price(trade: Dict[str, Any]) -> float | None:
     return None
 
 
-# Trade lifecycle states (mirrors agents/open_trades_manager.py).
-_OPEN_STATUSES = {"OPEN", "PARTIAL", "TP1_HIT"}
+# Trade lifecycle states treated as active exposure by signal filters.
+# PENDING is included because DatabaseService.get_open_trades() returns pending
+# limit/stop orders too; a pending SELL still represents same-direction exposure
+# and should count toward stacking/exposure caps.
+_OPEN_STATUSES = {"OPEN", "PARTIAL", "TP1_HIT", "PENDING"}
 _LOSS_STATUSES = {"SL_HIT"}
 _WIN_STATUSES = {"TP2_HIT"}
 _BREAKEVEN_STATUSES = {"BE_HIT", "EXPIRED", "MANUAL_CLOSE"}
@@ -188,16 +191,21 @@ def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService,
     """Return a human-readable reason if this signal should be blocked as a
     duplicate / churn / revenge re-entry. Otherwise return None.
 
-    Professional, outcome-aware design — two clearly separated concerns:
+    Professional, outcome-aware design — three clearly separated concerns:
 
-    1) OPEN-POSITION STACKING PROTECTION (true duplicate)
+    1) SAME-DIRECTION EXPOSURE CAP
+       If there are already N open trades on the same symbol and same direction,
+       block only that direction. Example: 3 open SELL trades block the 4th SELL,
+       while a BUY signal remains allowed.
+
+    2) OPEN-POSITION STACKING PROTECTION (true duplicate)
        If a same-direction trade is still OPEN/TP1_HIT:
          * block if it sits within ``price_zone_points`` of the new entry
            (you'd be doubling the same position at the same level), OR
          * block unconditionally if ``block_same_direction_any_price`` is set
            (only one open position per direction at a time).
 
-    2) RECENTLY-CLOSED COOLDOWN (anti-churn / anti-revenge)
+    3) RECENTLY-CLOSED COOLDOWN (anti-churn / anti-revenge)
        For same-direction trades CLOSED within ``lookback_hours``, apply an
        outcome-aware cooldown, but ONLY when the new entry is in the same price
        zone (a genuinely different price area is a new setup, not a repeat):
@@ -238,6 +246,12 @@ def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService,
         open_cfg.get('block_same_direction_any_price', filt.get('block_if_open_same_direction', False))
     )
     block_open_in_zone = bool(open_cfg.get('block_same_direction_in_zone', True))
+    max_open_same_direction = int(
+        open_cfg.get(
+            'max_open_same_direction',
+            filt.get('max_open_same_direction', 3),
+        )
+    )
 
     cooldown_cfg = filt.get('cooldown', {}) or {}
     legacy_cooldown = float(filt.get('lookback_minutes', 90))
@@ -273,7 +287,20 @@ def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService,
         if _trade_direction(trade) == direction:
             _add(trade)
 
-    # ── 1) Open-position stacking protection ───────────────────────────────
+    # ── 1) Same-direction exposure cap ────────────────────────────────────
+    # Do not allow the book to keep adding the same directional exposure.
+    # Example: 3 open SELL trades block only a 4th SELL. Opposite BUY signals
+    # are not blocked by this rule.
+    if max_open_same_direction > 0:
+        open_same_direction = [t for t in candidates if _trade_outcome(t) == "OPEN"]
+        if len(open_same_direction) >= max_open_same_direction:
+            return (
+                f"Same-direction exposure cap: {len(open_same_direction)} open {direction} "
+                f"trade(s) already exist on {symbol}. Limit is {max_open_same_direction}; "
+                f"blocking another {direction}. Opposite direction remains allowed."
+            )
+
+    # ── 2) Open-position stacking protection ───────────────────────────────
     for trade in candidates:
         if _trade_outcome(trade) != "OPEN":
             continue
@@ -294,7 +321,7 @@ def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService,
                     f"({pts:.0f}pts away, zone={price_zone_points:.0f}pts) — would stack the same level."
                 )
 
-    # ── 2) Recently-closed, outcome-aware cooldown (same zone only) ────────
+    # ── 3) Recently-closed, outcome-aware cooldown (same zone only) ────────
     cooldown_by_outcome = {
         "LOSS": cooldown_after_loss,
         "BREAKEVEN": cooldown_after_breakeven,
