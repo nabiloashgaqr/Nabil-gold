@@ -11,7 +11,11 @@
   "entry_timeframe": "15m",
   "data_source": {
     "primary": "twelvedata",
-    "fallback": null,
+    "fallback": "yahoo_finance",
+    "fallback_sources": [
+      "yahoo_finance"
+    ],
+    "description_fallback": "Fallback مجاني عند انتهاء كوتة Twelve Data. يستخدم Yahoo Finance chart API غير الرسمي لشموع XAU/USD 5m، ثم يعاد اشتقاق 15m/1H/4H محلياً. لأنه غير رسمي، يُستخدم كاحتياطي فقط وليس كمصدر أساسي.",
     "api_keys": {
       "twelvedata": "ENV:TWELVEDATA_API_KEY"
     },
