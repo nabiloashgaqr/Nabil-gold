@@ -150,17 +150,9 @@ class TelegramService:
         )
         header_bits.append(f"{session_emoji} {session_name} {quality_emoji}".strip())
 
-        # Robust run_source handling (always produce clean English, never "unknown run")
-        run_source = str(decision.get("run_source", "") or decision.get("operation_mode", "") or "").lower().strip()
-        run_map = {
-            "scheduled": "Scheduled run",
-            "schedule": "Scheduled run",
-            "manual": "Manual run",
-            "workflow_dispatch": "Manual run",
-            "observation": "Observation mode",
-        }
-        run_source_text = run_map.get(run_source, "Analysis run")
-        header_bits.append(run_source_text)
+        # Do not show run source (manual/workflow_dispatch/scheduled) to users.
+        # cron-job.org triggers workflow_dispatch, which looked like "Manual run"
+        # and confused subscribers even though the run was automated.
         header_line = " · ".join(b for b in header_bits if b)
 
         # ── Price / confidence / quality (single line) ─────────────────────
@@ -503,7 +495,40 @@ class TelegramService:
             if cleaned:
                 candidates.append(cleaned)
 
-        # 3) Daily-bias alignment, only when it agrees with the trade.
+        # 3) Technical rationale from the agents that actually supported the trade.
+        agent_details = decision.get("agent_details", {}) or {}
+        votes = decision.get("votes", {}) or {}
+        direction = str(decision.get("decision", "")).upper()
+        side_votes = votes.get(direction, []) if direction in {"BUY", "SELL"} else []
+        supporting_agents = [str(v.get("agent", "")).lower() for v in side_votes if v.get("agent")]
+        for agent_key in supporting_agents:
+            detail = agent_details.get(agent_key, {}) or {}
+            label = str(detail.get("label") or agent_key.replace("_", " ").title())
+            summary = self._clean_ai_field(detail.get("summary"))
+            if summary:
+                candidates.append(f"{label}: {summary}")
+                continue
+            signals = detail.get("signals") or []
+            if isinstance(signals, (list, tuple)):
+                compact = "; ".join(self._clean_ai_field(x) for x in signals[:2] if self._clean_ai_field(x))
+                if compact:
+                    candidates.append(f"{label}: {compact}")
+
+        # 4) Risk/management rationale when available.
+        risk = decision.get("risk", {}) or {}
+        if risk.get("approved"):
+            sl = (risk.get("stop_loss", {}) or {}).get("distance_points")
+            tp2 = (risk.get("take_profit", {}) or {}).get("tp2", {}) or {}
+            rr = tp2.get("rr_ratio")
+            bits = []
+            if sl:
+                bits.append(f"SL {float(sl):.0f} pts")
+            if rr:
+                bits.append(f"TP2 R:R {float(rr):.2f}")
+            if bits:
+                candidates.append("Risk approved: " + ", ".join(bits))
+
+        # 5) Daily-bias alignment, only when it agrees with the trade.
         daily_bias = decision.get("daily_bias", {}) or {}
         bias = str(daily_bias.get("bias", "NEUTRAL")).upper()
         direction = str(decision.get("decision", "")).upper()
@@ -538,7 +563,7 @@ class TelegramService:
                 continue
             seen.add(key)
             merged.append(c)
-            if len(merged) >= 4:
+            if len(merged) >= 6:
                 break
 
         if not merged:
