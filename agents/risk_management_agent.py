@@ -675,11 +675,23 @@ class RiskManagementAgent(BaseAgent):
         consecutive_losses = int(portfolio.get("consecutive_losses", 0) or 0)
         spread_value = None if spread_points is None or str(spread_points).strip().lower() in {"", "unknown", "none"} else self._f(spread_points)
 
+        # SL width is instrument-specific and expressed in project points:
+        # - XAU/USD: wide only when > 300 pts ($30 with point_size=0.10)
+        # - WTI/USD: wide only when > 120 pts ($1.20 with point_size=0.01)
+        # Use max_sl_distance_points if explicitly configured; otherwise the
+        # instrument min_sl_distance_points doubles as the maximum allowed width.
+        max_sl_points = self._f(
+            self.settings.get("max_sl_distance_points", self.settings.get("min_sl_distance_points", 0.0)),
+            0.0,
+        )
+        risk_distance_points = abs(price_to_points(risk_distance, self.symbol))
+        sl_width_ok = True if max_sl_points <= 0 else risk_distance_points <= max_sl_points
+
         return {
             "atr_filter": atr >= min_atr,
             "spread_filter": True if spread_value is None else spread_value <= max_spread,
             "rr_filter": rr_tp2 >= min_rr,
-            "sl_width_filter": risk_distance <= atr * 3.0,
+            "sl_width_filter": sl_width_ok,
             "target_distance_filter": tp1_distance >= atr * 1.0,
             "max_open_trades_filter": open_trades_count < max_open_trades,
             "max_daily_signals_filter": today_signals_count < max_daily_signals,
