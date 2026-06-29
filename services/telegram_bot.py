@@ -409,6 +409,22 @@ class TelegramService:
         text = " ".join(str(value).split())
         if not text or text.upper() in {"N/A", "NONE", "NULL", "-"}:
             return ""
+        # Make SMC liquidity-sweep wording subscriber-friendly. "Buy-side"
+        # and "Sell-side" are technical liquidity terms, but many users read
+        # them as trade directions. Replace them with plain price-action wording.
+        text = text.replace(
+            "Buy-side liquidity sweep detected",
+            "Sweep above recent highs detected",
+        ).replace(
+            "Sell-side liquidity sweep detected",
+            "Sweep below recent lows detected",
+        ).replace(
+            "bearish after sweep",
+            "bearish reversal context",
+        ).replace(
+            "bullish after sweep",
+            "bullish reversal context",
+        )
         return html.escape(text)
 
     @staticmethod
