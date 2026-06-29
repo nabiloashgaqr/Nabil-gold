@@ -746,17 +746,46 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
 
         logger.info("Fetching market data...")
         data = market_data.get_gold_data()
+        symbol = str(config.get("symbol", "XAU/USD"))
         if not data:
-            # Pre-check already sent the error alert. Just log and skip.
-            logger.error("Failed to fetch data for %s — skipping", config.get("symbol"))
+            # Do not let a secondary instrument fail silently. When an explicit
+            # Market Status run is requested, report the skipped symbol to
+            # Telegram so WTI/Oil visibility is clear.
+            logger.error("Failed to fetch data for %s — skipping", symbol)
+            if should_send_hourly_status(config):
+                telegram.send_message(
+                    "🟡 <b>SmartSignal — Market Status</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🧭 Symbol under review: {html.escape(symbol)}\n"
+                    "🎯 Decision: WAIT\n"
+                    "📊 Data unavailable\n\n"
+                    "<b>Reason:</b>\n"
+                    f"• Could not fetch market data for {html.escape(symbol)}\n\n"
+                    "<b>Notes:</b>\n"
+                    "• Analysis skipped for this symbol only\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    "<i>Market status • Check Twelve Data symbol/API availability</i>"
+                )
             return
 
         # Safety: never send production signals from synthetic/demo prices on GitHub Actions.
         allow_synthetic = bool(config.get("data_source", {}).get("allow_synthetic_in_production", False))
         synthetic_sources = synthetic_timeframe_sources(data)
         if os.environ.get("GITHUB_ACTIONS") == "true" and synthetic_sources and not allow_synthetic:
-            # Pre-check already sent the error alert. Just log and skip.
-            logger.error("Skipping %s: synthetic_demo data detected.", config.get("symbol"))
+            logger.error("Skipping %s: synthetic_demo data detected.", symbol)
+            if should_send_hourly_status(config):
+                telegram.send_message(
+                    "🟡 <b>SmartSignal — Market Status</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🧭 Symbol under review: {html.escape(symbol)}\n"
+                    "🎯 Decision: WAIT\n"
+                    "📊 Data blocked\n\n"
+                    "<b>Reason:</b>\n"
+                    f"• Synthetic/demo data detected for {html.escape(symbol)}; production signals are blocked\n\n"
+                    "<b>Notes:</b>\n"
+                    "• Configure/verify TWELVEDATA_API_KEY and symbol availability\n"
+                    "━━━━━━━━━━━━━━━━━━━━"
+                )
             return
 
         # سياق الحساب/المحفظة
