@@ -145,3 +145,33 @@ def test_invalidation_shown_when_structural_condition():
     d["ai"]["invalidation"] = "Close above the bearish order block / structure break"
     text = _capture_signal(d)
     assert "Invalidation" in text
+
+
+def test_smc_liquidity_terms_are_subscriber_friendly():
+    """SMC buy-side/sell-side are liquidity terms, not trade directions.
+
+    The Telegram message should say 'sweep above highs' / 'sweep below lows'
+    so subscribers do not confuse a bearish SELL setup with a BUY signal.
+    """
+    d = _full_decision()
+    d["decision"] = "SELL"
+    d["signal"]["type"] = "SELL"
+    d["votes"] = {
+        "SELL": [{"agent": "smc", "confidence": 82}],
+        "WAIT": [],
+    }
+    d["agent_details"] = {
+        "smc": {
+            "label": "SMC",
+            "direction": "SELL",
+            "confidence": 82,
+            "signals": [
+                "Market structure is bearish",
+                "Buy-side liquidity sweep detected (STRONG) - bearish after sweep",
+            ],
+        }
+    }
+    text = _capture_signal(d)
+    assert "Buy-side liquidity sweep" not in text
+    assert "Sell-side liquidity sweep" not in text
+    assert "Sweep above recent highs detected (STRONG) - bearish reversal context" in text
