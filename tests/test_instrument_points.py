@@ -33,9 +33,13 @@ def test_wti_points_are_cents() -> None:
     assert price_to_points(1.0, "WTI/USD") == 100.0
 
 
-def test_config_has_gold_and_wti_only() -> None:
-    symbols = [item["symbol"] for item in enabled_instruments(load_config())]
-    assert symbols == [
-        "XAU/USD",
-        "WTI/USD",
-    ]
+def test_config_enabled_symbols_are_gold_only_while_wti_is_disabled() -> None:
+    """WTI remains defined, but is disabled until a paid/oil-capable data source exists."""
+    config = load_config()
+    enabled_symbols = [item["symbol"] for item in enabled_instruments(config)]
+    configured_symbols = {item.get("symbol"): item for item in config.get("symbols", [])}
+    instrument_symbols = {item.get("symbol") for item in config.get("instruments", [])}
+
+    assert enabled_symbols == ["XAU/USD"]
+    assert configured_symbols["WTI/USD"].get("enabled") is False
+    assert {"XAU/USD", "WTI/USD"}.issubset(instrument_symbols)
