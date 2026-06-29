@@ -520,6 +520,36 @@ def _build_market_status_message(
         "<i>Market status • Next market status in ~1 hour</i>"
     )
 
+
+def _compact_agent_details(all_results: Dict[str, Any]) -> Dict[str, Any]:
+    """Small human-readable rationale payload for Telegram signal messages."""
+    labels = {
+        "technical": "Technical",
+        "classical": "Classical",
+        "smc": "SMC",
+        "price_action": "Price Action",
+        "multitimeframe": "Multi-Timeframe",
+    }
+    details: Dict[str, Any] = {}
+    for key, label in labels.items():
+        result = all_results.get(key, {}) or {}
+        direction = str(result.get("direction") or result.get("signal") or "WAIT").upper()
+        if direction in {"NEUTRAL", "HOLD", "NO_TRADE", "NONE", ""}:
+            direction = "WAIT"
+        signals = result.get("signals") or result.get("reasons") or []
+        if not isinstance(signals, list):
+            signals = [signals] if signals else []
+        summary = result.get("summary") or result.get("reasoning") or ""
+        details[key] = {
+            "label": label,
+            "direction": direction,
+            "confidence": result.get("confidence", 0),
+            "summary": summary,
+            "signals": [str(x) for x in signals[:4] if x],
+        }
+    return details
+
+
 def run_agent(agent_name: str, agent: Any, data: Dict[str, Any]) -> Dict[str, Any]:
     """Run one agent safely so one failure does not stop the workflow."""
     try:
@@ -832,6 +862,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         except Exception:
             learning_service = None
         decision = await DecisionAgent(config, learning_service=learning_service).decide_async(all_results)
+        decision["agent_details"] = _compact_agent_details(all_results)
         decision["symbol"] = config.get("symbol", "XAU/USD")
         if decision.get("signal"):
             decision["signal"]["symbol"] = decision["symbol"]
