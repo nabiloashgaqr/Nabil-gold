@@ -23,6 +23,11 @@ on:
 
 jobs:
   update-trades:
+    # Disabled by default to protect the Twelve Data daily quota.
+    # The analysis workflow now updates open trades using the same market-data
+    # payload it already fetched for analysis. Run this workflow only as an
+    # emergency/manual fallback with force_update=true.
+    if: ${{ github.event.inputs.force_update == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
