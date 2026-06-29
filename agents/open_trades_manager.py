@@ -20,7 +20,7 @@ class OpenTradesManager(BaseAgent):
     """Evaluate and update open trades for the stateless GitHub Actions runner."""
 
     name = "open_trades_manager"
-    OPEN_STATUSES = {"OPEN", "TP1_HIT"}
+    OPEN_STATUSES = {"OPEN", "PARTIAL", "TP1_HIT"}
     CLOSED_STATUSES = {"TP2_HIT", "SL_HIT", "BE_HIT", "EXPIRED", "MANUAL_CLOSE"}
     # Telegram notifications are intentionally restricted to real trade-state
     # changes. Informational markers such as NEAR_TP1 / LONG_RUNNING /
