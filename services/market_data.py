@@ -1,8 +1,10 @@
 """Market data service for all configured instruments.
 
 Primary source: **Twelve Data**.
-Free fallback for XAU/USD: Yahoo Finance chart API (unofficial) when Twelve Data
-fails or its quota is exhausted. Synthetic data remains only for local tests /
+Free fallback for XAU/USD spot only: Yahoo Finance chart API (unofficial) when
+Twelve Data fails or its quota is exhausted. Futures symbols are deliberately
+not used for XAU/USD SL/TP management because they can falsely trigger stops.
+Synthetic data remains only for local tests /
 development; production workflows block synthetic prices unless explicitly allowed.
 """
 
@@ -54,11 +56,12 @@ class MarketDataService:
     }
 
     YAHOO_SYMBOL_MAP = {
-        # Try spot first; if Yahoo no longer serves it, fall back to COMEX gold
-        # futures (GC=F / MGC=F), which Yahoo reliably exposes as free 5m OHLC.
-        "XAU/USD": ["XAUUSD=X", "GC=F", "MGC=F"],
-        "XAUUSD": ["XAUUSD=X", "GC=F", "MGC=F"],
-        "GOLD": ["GC=F", "MGC=F"],
+        # IMPORTANT: For XAU/USD trade management we must use spot-compatible
+        # symbols only. Do NOT fall back to futures such as GC=F/MGC=F for live
+        # SL/TP decisions: futures can trade several dollars away from XAU spot
+        # and may falsely trigger stops/targets.
+        "XAU/USD": ["XAUUSD=X"],
+        "XAUUSD": ["XAUUSD=X"],
         # Yahoo does not provide a reliable free WTI/USD 5m spot series here.
     }
 
