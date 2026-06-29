@@ -1,10 +1,9 @@
 """Market data service for all configured instruments.
 
-Fetches OHLCV data from **Twelve Data** (primary and exclusive).
-Free tier: 800 calls/day — enough for 8 symbols every 5 minutes.
-
-A synthetic fallback exists **only** for local tests / development;
-production workflows block synthetic prices unless explicitly allowed.
+Primary source: **Twelve Data**.
+Free fallback for XAU/USD: Yahoo Finance chart API (unofficial) when Twelve Data
+fails or its quota is exhausted. Synthetic data remains only for local tests /
+development; production workflows block synthetic prices unless explicitly allowed.
 """
 
 from __future__ import annotations
@@ -23,9 +22,10 @@ from utils.helpers import load_config
 
 
 class MarketDataService:
-    """Fetch and normalize OHLCV data — Twelve Data only."""
+    """Fetch and normalize OHLCV data with a quota-saving fallback."""
 
     TWELVEDATA_URL = "https://api.twelvedata.com/time_series"
+    YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 
     TF_MINUTES = {
         "5m": 5,
@@ -51,6 +51,13 @@ class MarketDataService:
         "WTI/USD": "WTI/USD",
         "USOIL": "WTI/USD",
         "WTICO_USD": "WTI/USD",
+    }
+
+    YAHOO_SYMBOL_MAP = {
+        "XAU/USD": "XAUUSD=X",
+        "XAUUSD": "XAUUSD=X",
+        "GOLD": "XAUUSD=X",
+        # Yahoo does not provide a reliable free WTI/USD 5m spot series here.
     }
 
     def __init__(self, config: Dict[str, Any] | None = None) -> None:
@@ -114,8 +121,21 @@ class MarketDataService:
         if self.api_key and self.api_key != "YOUR_API_KEY":
             payload = self._fetch_data(timeframe, outputsize)
 
+        if payload is None and self._yahoo_fallback_enabled():
+            payload = self._fetch_yahoo_chart(timeframe, outputsize)
+            if payload is not None:
+                self.logger.warning(
+                    "Using Yahoo Finance fallback for %s %s after Twelve Data failed/quota exhausted.",
+                    self.symbol,
+                    timeframe,
+                )
+
         if payload is None:
-            self.logger.warning("Using synthetic demo data for %s %s. Configure TWELVEDATA_API_KEY.", self.symbol, timeframe)
+            self.logger.warning(
+                "Using synthetic demo data for %s %s. Configure TWELVEDATA_API_KEY or fallback source.",
+                self.symbol,
+                timeframe,
+            )
             payload = self._generate_synthetic_data(timeframe, outputsize)
 
         self._cache[cache_key] = {"cached_at": time.time(), "payload": payload}
@@ -173,6 +193,121 @@ class MarketDataService:
                 time.sleep(0.5 * (attempt + 1))
 
         return None
+
+    # ── Yahoo Finance fallback (free/unofficial) ─────────────────────
+    def _yahoo_fallback_enabled(self) -> bool:
+        data_cfg = self.config.get("data_source", {}) or {}
+        fallback = str(data_cfg.get("fallback") or "").lower()
+        fallback_sources = [str(x).lower() for x in (data_cfg.get("fallback_sources") or [])]
+        return fallback == "yahoo_finance" or "yahoo_finance" in fallback_sources
+
+    def _fetch_yahoo_chart(self, timeframe: str, outputsize: int) -> Dict[str, Any] | None:
+        """Fetch intraday OHLCV from Yahoo Finance chart API.
+
+        This is an unofficial free fallback. It is intentionally used only after
+        Twelve Data fails so it protects quota without becoming the primary data
+        source. Currently enabled for XAU/USD only.
+        """
+        yahoo_symbol = self.YAHOO_SYMBOL_MAP.get(str(self.symbol).upper())
+        if not yahoo_symbol:
+            return None
+
+        interval_map = {
+            "1m": "1m",
+            "5m": "5m",
+            "15m": "15m",
+            "30m": "30m",
+            "1H": "60m",
+            "4H": "60m",  # fetch 60m then resample callers can aggregate if needed
+            "1D": "1d",
+        }
+        interval = interval_map.get(timeframe)
+        if not interval:
+            return None
+
+        tf_minutes = int(self.TF_MINUTES.get(timeframe, 5) or 5)
+        # Yahoo intraday ranges are limited. For our use case, 7-10 days of 5m
+        # candles is enough because higher timeframes are resampled locally.
+        if tf_minutes <= 5:
+            range_value = "10d"
+        elif tf_minutes <= 60:
+            range_value = "60d"
+        else:
+            range_value = "6mo"
+
+        params = {
+            "range": range_value,
+            "interval": interval,
+            "includePrePost": "true",
+            "events": "history",
+        }
+        headers = {"User-Agent": "Mozilla/5.0 SmartSignalPro/1.0"}
+
+        try:
+            resp = self.session.get(
+                self.YAHOO_CHART_URL.format(symbol=yahoo_symbol),
+                params=params,
+                headers=headers,
+                timeout=20,
+            )
+            resp.raise_for_status()
+            raw = resp.json()
+            result = ((raw.get("chart") or {}).get("result") or [None])[0]
+            if not result:
+                err = (raw.get("chart") or {}).get("error")
+                self.logger.warning("Yahoo Finance fallback error for %s: %s", self.symbol, err)
+                return None
+            timestamps = result.get("timestamp") or []
+            quote = (((result.get("indicators") or {}).get("quote") or [{}])[0]) or {}
+            candles = self._normalize_yahoo_chart(timestamps, quote)
+            if not candles:
+                return None
+            if len(candles) > outputsize:
+                candles = candles[-outputsize:]
+            current_price = float(candles[-1]["close"])
+            return {
+                "symbol": self.symbol,
+                "timeframe": timeframe,
+                "data": candles,
+                "current_price": current_price,
+                "spread_points": None,
+                "last_updated": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                "source": "yahoo_finance_fallback",
+            }
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("Yahoo Finance fallback failed %s %s: %s", self.symbol, timeframe, exc)
+            return None
+
+    def _normalize_yahoo_chart(self, timestamps: List[Any], quote: Dict[str, Any]) -> List[Dict[str, Any]]:
+        from utils.instruments import price_decimals
+        decimals = price_decimals(self.symbol)
+        opens = quote.get("open") or []
+        highs = quote.get("high") or []
+        lows = quote.get("low") or []
+        closes = quote.get("close") or []
+        volumes = quote.get("volume") or []
+        candles: List[Dict[str, Any]] = []
+        for idx, ts in enumerate(timestamps):
+            try:
+                open_price = opens[idx]
+                high_price = highs[idx]
+                low_price = lows[idx]
+                close_price = closes[idx]
+                if open_price is None or high_price is None or low_price is None or close_price is None:
+                    continue
+                dt = datetime.fromtimestamp(int(ts), tz=timezone.utc)
+                candles.append({
+                    "time": dt.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                    "open": round(float(open_price), decimals),
+                    "high": round(float(high_price), decimals),
+                    "low": round(float(low_price), decimals),
+                    "close": round(float(close_price), decimals),
+                    "volume": float(volumes[idx] if idx < len(volumes) and volumes[idx] is not None else 0),
+                })
+            except (TypeError, ValueError, IndexError):
+                continue
+        candles.sort(key=lambda x: x["time"])
+        return candles
 
     def _normalize_values(self, values: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         from utils.instruments import price_decimals
