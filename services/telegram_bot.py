@@ -102,7 +102,7 @@ class TelegramService:
 
         The layout deliberately consolidates everything into a few labelled
         sections instead of a long stack of one-off rows:
-          * header (instrument, direction, time, session, run source)
+          * header (instrument, direction, time, session)
           * one price/confidence/quality line
           * ENTRY / STOP / TAKE PROFIT block (with per-TP R:R)
           * AGENT VOTES table (all five analysis agents)
@@ -135,7 +135,7 @@ class TelegramService:
             "STOP": "🚀 Stop (breakout)",
         }.get(entry_kind, "⚡ Market (immediate)")
 
-        # ── Header: time · session · run source ────────────────────────────
+        # ── Header: time · session ────────────────────────────────────────
         header_bits: List[str] = [self._now_text()]
         session_info = decision.get("session_info", {}) or {}
         sq = str(session_info.get("session_quality", "UNKNOWN"))
@@ -504,17 +504,37 @@ class TelegramService:
         for agent_key in supporting_agents:
             detail = agent_details.get(agent_key, {}) or {}
             label = str(detail.get("label") or agent_key.replace("_", " ").title())
-            summary = self._clean_ai_field(detail.get("summary"))
-            if summary:
-                candidates.append(f"{label}: {summary}")
-                continue
             signals = detail.get("signals") or []
+            added_signal = False
             if isinstance(signals, (list, tuple)):
                 compact = "; ".join(self._clean_ai_field(x) for x in signals[:2] if self._clean_ai_field(x))
                 if compact:
                     candidates.append(f"{label}: {compact}")
+                    added_signal = True
+            summary = self._clean_ai_field(detail.get("summary"))
+            if summary and not added_signal:
+                candidates.append(f"{label}: {summary}")
 
-        # 4) Risk/management rationale when available.
+        # 4) If only a small number of agents supported the trade, add concise
+        # context from WAIT agents too, so subscribers understand the full picture.
+        waiting_agents = [str(v.get("agent", "")).lower() for v in (votes.get("WAIT", []) or []) if v.get("agent")]
+        wait_bits: List[str] = []
+        for agent_key in waiting_agents:
+            detail = agent_details.get(agent_key, {}) or {}
+            label = str(detail.get("label") or agent_key.replace("_", " ").title())
+            signals = detail.get("signals") or []
+            cleaned = ""
+            if isinstance(signals, (list, tuple)):
+                cleaned = self._clean_ai_field(next((x for x in signals if self._clean_ai_field(x)), ""))
+            if not cleaned:
+                cleaned = self._clean_ai_field(detail.get("summary"))
+            if cleaned:
+                wait_bits.append(f"{label} waited: {cleaned}")
+            if len(wait_bits) >= 2:
+                break
+        candidates.extend(wait_bits)
+
+        # 5) Risk/management rationale when available.
         risk = decision.get("risk", {}) or {}
         if risk.get("approved"):
             sl = (risk.get("stop_loss", {}) or {}).get("distance_points")
@@ -526,7 +546,9 @@ class TelegramService:
             if rr:
                 bits.append(f"TP2 R:R {float(rr):.2f}")
             if bits:
-                candidates.append("Risk approved: " + ", ".join(bits))
+                management = self._format_management_line().replace("• <b>Management:</b> ", "")
+                management = management.replace("<b>", "").replace("</b>", "")
+                candidates.append("Risk approved: " + ", ".join(bits) + f"; management: {management}")
 
         # 5) Daily-bias alignment, only when it agrees with the trade.
         daily_bias = decision.get("daily_bias", {}) or {}
@@ -536,7 +558,7 @@ class TelegramService:
         if aligned and daily_bias.get("confidence"):
             candidates.append(f"Daily bias aligned: {direction} ({float(daily_bias.get('confidence', 0)):.0f}%)")
 
-        # 4) Agreement count among the five analysis agents.
+        # 6) Agreement count among the five analysis agents.
         votes = decision.get("votes", {}) or {}
         side_votes = votes.get(direction, []) if direction in {"BUY", "SELL"} else []
         agree = len(side_votes)
@@ -544,7 +566,7 @@ class TelegramService:
         if direction in {"BUY", "SELL"} and agree and total:
             candidates.append(f"{agree} of {total} agents agree on direction")
 
-        # 5) Fallback to the classical reasoning summary if no details are present.
+        # 7) Fallback to the classical reasoning summary if no details are present.
         if not candidates:
             for reason in decision.get("reasons", []) or []:
                 cleaned = self._clean_ai_field(reason)
@@ -563,7 +585,7 @@ class TelegramService:
                 continue
             seen.add(key)
             merged.append(c)
-            if len(merged) >= 6:
+            if len(merged) >= 8:
                 break
 
         if not merged:
