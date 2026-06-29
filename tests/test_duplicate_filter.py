@@ -187,3 +187,65 @@ def test_legacy_keys_still_work():
     # Open trade in zone should still block via legacy fallback defaults.
     db = _FakeDB(open_trades=[{"id": "t1", "type": "SELL", "entry_price": 4131.0, "status": "OPEN"}])
     assert ra.duplicate_signal_reason(_decision("SELL", 4130.0), db, legacy) is not None
+
+
+# ── Same-direction exposure cap ───────────────────────────────────────────
+def test_three_open_same_direction_blocks_fourth_same_direction():
+    cfg = {
+        "duplicate_signal_filter": {
+            "enabled": True,
+            "price_zone_points": 50,
+            "open_trade": {
+                "block_same_direction_in_zone": True,
+                "block_same_direction_any_price": False,
+                "max_open_same_direction": 3,
+            },
+        }
+    }
+    db = _FakeDB(open_trades=[
+        {"id": "s1", "type": "SELL", "symbol": "XAU/USD", "entry_price": 4200.0, "status": "OPEN"},
+        {"id": "s2", "type": "SELL", "symbol": "XAU/USD", "entry_price": 4180.0, "status": "TP1_HIT"},
+        {"id": "s3", "type": "SELL", "symbol": "XAU/USD", "entry_price": 4160.0, "status": "PARTIAL"},
+    ])
+    reason = ra.duplicate_signal_reason(_decision("SELL", 4130.0), db, cfg)
+    assert reason and "exposure cap" in reason.lower()
+    assert "blocking another SELL" in reason
+
+
+def test_three_open_sell_do_not_block_buy_signal():
+    cfg = {
+        "duplicate_signal_filter": {
+            "enabled": True,
+            "price_zone_points": 50,
+            "open_trade": {
+                "block_same_direction_in_zone": True,
+                "block_same_direction_any_price": False,
+                "max_open_same_direction": 3,
+            },
+        }
+    }
+    db = _FakeDB(open_trades=[
+        {"id": "s1", "type": "SELL", "symbol": "XAU/USD", "entry_price": 4200.0, "status": "OPEN"},
+        {"id": "s2", "type": "SELL", "symbol": "XAU/USD", "entry_price": 4180.0, "status": "TP1_HIT"},
+        {"id": "s3", "type": "SELL", "symbol": "XAU/USD", "entry_price": 4160.0, "status": "PARTIAL"},
+    ])
+    assert ra.duplicate_signal_reason(_decision("BUY", 4130.0), db, cfg) is None
+
+
+def test_two_open_same_direction_allowed_when_out_of_duplicate_zone():
+    cfg = {
+        "duplicate_signal_filter": {
+            "enabled": True,
+            "price_zone_points": 50,
+            "open_trade": {
+                "block_same_direction_in_zone": True,
+                "block_same_direction_any_price": False,
+                "max_open_same_direction": 3,
+            },
+        }
+    }
+    db = _FakeDB(open_trades=[
+        {"id": "s1", "type": "SELL", "symbol": "XAU/USD", "entry_price": 4200.0, "status": "OPEN"},
+        {"id": "s2", "type": "SELL", "symbol": "XAU/USD", "entry_price": 4180.0, "status": "TP1_HIT"},
+    ])
+    assert ra.duplicate_signal_reason(_decision("SELL", 4130.0), db, cfg) is None
