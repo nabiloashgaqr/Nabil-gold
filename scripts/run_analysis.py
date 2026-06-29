@@ -392,19 +392,75 @@ def _is_news_hard_block(decision: Dict[str, Any], all_results: Dict[str, Any]) -
     return False
 
 
+
+def _reason_key(text: str) -> str:
+    """Normalize reason text enough to prevent repeated rule lines."""
+    value = str(text or "").lower()
+    value = value.replace("&gt;=", ">=").replace("≥", ">=")
+    value = value.replace("with weighted confidence", "weighted confidence")
+    return " ".join(value.split())
+
+
+def _append_unique_reason(lines: List[str], text: str) -> None:
+    clean = str(text or "").strip()
+    if not clean:
+        return
+    key = _reason_key(clean)
+    existing = [_reason_key(line.lstrip("• ")) for line in lines]
+    if key not in existing:
+        lines.append(f"• {clean}")
+
+
+def _market_prices_text(config: Dict[str, Any] | None, current_symbol: str, current_price: float) -> str:
+    """Return a compact price block for all enabled instruments.
+
+    Market Status is product-level, so it shows Gold and Oil prices with their
+    symbols. The decision/reasons still describe the instrument currently being
+    analyzed.
+    """
+    try:
+        base_config = config or load_config()
+        instruments = enabled_instruments(base_config)
+    except Exception:
+        base_config = config or {}
+        instruments = [{"symbol": current_symbol or "XAU/USD"}]
+
+    lines: List[str] = []
+    seen: set[str] = set()
+    for instrument in instruments:
+        symbol = str(instrument.get("symbol") or "").strip() or "XAU/USD"
+        if symbol in seen:
+            continue
+        seen.add(symbol)
+        price: float | None = None
+        if symbol == current_symbol and current_price > 0:
+            price = current_price
+        else:
+            try:
+                symbol_config = config_for_instrument(base_config, instrument)
+                payload = MarketDataService(symbol_config).get_ohlcv("5m", outputsize=3)
+                if payload:
+                    price = _safe_float(payload.get("current_price"), 0.0)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Could not fetch status price for %s: %s", symbol, exc)
+        price_label = f"{price:.2f}" if price and price > 0 else "N/A"
+        lines.append(f"• {html.escape(symbol)}: {html.escape(price_label)}")
+    return "\n".join(lines) if lines else f"• {html.escape(current_symbol or 'XAU/USD')}: N/A"
+
+
 def _build_market_status_message(
     decision: Dict[str, Any],
     all_results: Dict[str, Any],
     database: DatabaseService,
+    config: Dict[str, Any] | None = None,
 ) -> str:
-    """Build the hourly/explicit Market Status Telegram message.
-
-    Special-case hard news blocks so the message explains that news overrode the
-    agent consensus decision.
-    """
+    """Build the hourly/explicit Market Status Telegram message."""
     warnings = _dedupe_warnings(decision.get("warnings") or [])
     warnings_text = "\n".join(f"• {html.escape(str(w))}" for w in warnings[:6]) or "• No special warnings"
-    price_text = f"{_safe_float(decision.get('current_price', all_results.get('current_price', 0))):.2f}"
+    current_symbol = str(decision.get("symbol") or all_results.get("symbol") or (config or {}).get("symbol") or "XAU/USD")
+    current_price = _safe_float(decision.get("current_price", all_results.get("current_price", 0)), 0.0)
+    prices_text = _market_prices_text(config, current_symbol, current_price)
+
     classic = decision.get("classic", {}) or {}
     consensus = classic.get("consensus", {}) or {}
     rules = consensus.get("rules", {}) or {}
@@ -413,32 +469,35 @@ def _build_market_status_message(
     min_consensus = _safe_float(rules.get("min_consensus_confidence", 65), 65)
     news_hard_block = _is_news_hard_block(decision, all_results)
 
-    reason_lines = []
+    reason_lines: List[str] = []
     if news_hard_block:
         gate_line = f"📊 Gate: NEWS BLOCK  •  Consensus overridden  •  Agents ≥{agent_thr}%"
-        reason_lines.append("• News hard block active — trading is paused during the event cooling window")
-        reason_lines.append("• Agent consensus is ignored until the news filter clears")
+        _append_unique_reason(reason_lines, "News hard block active — trading is paused during the event cooling window")
+        _append_unique_reason(reason_lines, "Agent consensus is ignored until the news filter clears")
     else:
         gate_line = f"📊 Consensus: WAIT  •  Agents ≥{agent_thr}%  •  Entry ≥{min_consensus:.0f}%"
         rejection = classic.get("rejection_reason") or "No valid weighted consensus signal"
-        reason_lines.append(f"• {rejection}")
-        reason_lines.append(f"• Rules: at least 2 agents with weighted confidence ≥{min_consensus:.0f}%")
+        _append_unique_reason(reason_lines, rejection)
+        rejection_key = _reason_key(rejection)
+        # Avoid repeating: "Need at least 2..." and "Rules: at least 2...".
+        if not ("at least" in rejection_key and "weighted confidence" in rejection_key):
+            _append_unique_reason(reason_lines, f"Rules: at least 2 agents with weighted confidence ≥{min_consensus:.0f}%")
 
     opp_agent = (classic.get("strongest_directional") or {}).get("agent")
     opp_conf = (classic.get("strongest_directional") or {}).get("confidence", 0)
     if opp_agent and opp_conf:
-        reason_lines.append(f"• Strongest agent: {opp_agent} ({opp_conf}%)")
+        _append_unique_reason(reason_lines, f"Strongest agent: {opp_agent} ({opp_conf}%)")
 
     tech = all_results.get("technical", {}) or {}
     t = tech.get("technical", {}) or {}
     if t.get("rsi"):
-        reason_lines.append(f"• RSI: {t['rsi']}")
+        _append_unique_reason(reason_lines, f"RSI: {t['rsi']}")
     levels = t.get("key_levels") or {}
     if isinstance(levels, dict):
         sup = levels.get("nearest_support")
         res = levels.get("nearest_resistance")
         if sup or res:
-            reason_lines.append(f"• Levels: Support {sup}  •  Resistance {res}")
+            _append_unique_reason(reason_lines, f"Levels: Support {sup}  •  Resistance {res}")
 
     open_count = len(database.get_open_trades())
     open_note = f"• Open trades: {open_count}" if open_count > 0 else "• No open trades"
@@ -447,7 +506,8 @@ def _build_market_status_message(
     return (
         "🟡 <b>SmartSignal — Market Status</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        f"📈 Price: {price_text}\n"
+        f"📈 <b>Prices:</b>\n{prices_text}\n"
+        f"🧭 Symbol under review: {html.escape(current_symbol)}\n"
         "🎯 Decision: WAIT\n"
         f"{gate_line}\n\n"
         f"<b>Reason:</b>\n{html.escape(reason_text)}\n\n"
@@ -455,7 +515,6 @@ def _build_market_status_message(
         "━━━━━━━━━━━━━━━━━━━━\n"
         "<i>Market status • Next market status in ~1 hour</i>"
     )
-
 
 def run_agent(agent_name: str, agent: Any, data: Dict[str, Any]) -> Dict[str, Any]:
     """Run one agent safely so one failure does not stop the workflow."""
@@ -876,7 +935,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 decision.get("warnings"),
             )
             if should_send_hourly_status(config):
-                telegram.send_message(_build_market_status_message(decision, all_results, database))
+                telegram.send_message(_build_market_status_message(decision, all_results, database, config))
 
         # ── Fixed-risk scale-in check ──
         # After main signal handling, check if we should scale into any open trade
