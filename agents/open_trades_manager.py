@@ -92,12 +92,26 @@ class OpenTradesManager(BaseAgent):
         database: Any | None = None,
         telegram: Any | None = None,
         now: datetime | None = None,
+        candle_high: float | None = None,
+        candle_low: float | None = None,
     ) -> List[Dict[str, Any]]:
-        """Evaluate all open trades, persist updates and send Telegram events."""
+        """Evaluate all open trades, persist updates and send Telegram events.
+
+        ``current_price`` is the latest candle close. ``candle_high``/``candle_low``
+        are optional intrabar extremes from the same update candle. When supplied,
+        TP/SL/BE/fill checks use high/low so a level touched inside the 5-minute
+        candle is not missed just because the candle closed back away from it.
+        """
         evaluations: List[Dict[str, Any]] = []
         now = now or datetime.now(timezone.utc)
         for trade in open_trades:
-            evaluation = self.evaluate_trade(trade, current_price, now=now)
+            evaluation = self.evaluate_trade(
+                trade,
+                current_price,
+                now=now,
+                candle_high=candle_high,
+                candle_low=candle_low,
+            )
             evaluations.append(evaluation)
             trade_id = str(trade.get("id", ""))
             events = evaluation.get("events", []) or []
@@ -140,8 +154,21 @@ class OpenTradesManager(BaseAgent):
                 database.update_trade(trade_id, evaluation["updates"])
         return evaluations
 
-    def evaluate_trade(self, trade: Dict[str, Any], current_price: float, now: datetime | None = None) -> Dict[str, Any]:
-        """Return updates/events for a single trade without external side effects."""
+    def evaluate_trade(
+        self,
+        trade: Dict[str, Any],
+        current_price: float,
+        now: datetime | None = None,
+        candle_high: float | None = None,
+        candle_low: float | None = None,
+    ) -> Dict[str, Any]:
+        """Return updates/events for a single trade without external side effects.
+
+        ``current_price`` remains the displayed/latest close. If the caller
+        provides the latest candle high/low, hard level checks use those extremes:
+        BUY targets use high, BUY stops use low; SELL targets use low, SELL stops
+        use high. This catches TP/SL touches within a 5-minute candle.
+        """
         now = now or datetime.now(timezone.utc)
         trade_type = str(trade.get("type", "BUY")).upper()
         symbol = str(trade.get("symbol") or self.config.get("symbol", "XAU/USD"))
@@ -155,17 +182,35 @@ class OpenTradesManager(BaseAgent):
         partial_close = self._bool(trade.get("partial_close", False))
         previous_mfe = self._f(trade.get("max_favorable_excursion"), 0.0)
         previous_mae = self._f(trade.get("max_adverse_excursion"), 0.0)
+        high_price = self._f(candle_high, current_price)
+        low_price = self._f(candle_low, current_price)
+        if high_price < low_price:
+            high_price, low_price = low_price, high_price
 
         # ── PENDING (un-filled LIMIT/STOP) order handling ───────────────────
         # A pending order is NOT a live position: it has no PnL until price
         # actually touches the entry. Only then does it become OPEN. This fixes
         # phantom fills/profits where a far LIMIT was treated as already filled.
         if old_status == "PENDING":
-            return self._evaluate_pending(trade, current_price, now, trade_type, entry, tp1, symbol)
+            return self._evaluate_pending(
+                trade,
+                current_price,
+                now,
+                trade_type,
+                entry,
+                tp1,
+                symbol,
+                candle_high=high_price,
+                candle_low=low_price,
+            )
 
         pnl_points = calculate_pips(entry, current_price, trade_type, symbol)
-        max_favorable_excursion = max(previous_mfe, pnl_points)
-        max_adverse_excursion = min(previous_mae, pnl_points)
+        favorable_price = high_price if trade_type == "BUY" else low_price
+        adverse_price = low_price if trade_type == "BUY" else high_price
+        favorable_points = calculate_pips(entry, favorable_price, trade_type, symbol)
+        adverse_points = calculate_pips(entry, adverse_price, trade_type, symbol)
+        max_favorable_excursion = max(previous_mfe, pnl_points, favorable_points)
+        max_adverse_excursion = min(previous_mae, pnl_points, adverse_points)
         management_phase = self._management_phase(old_status, sl_moved_to_entry, partial_close, pnl_points)
         exit_warning = self._exit_warning(trade_type, entry, stop_loss, tp1, current_price, pnl_points)
         new_status = old_status
@@ -193,17 +238,33 @@ class OpenTradesManager(BaseAgent):
                 },
             }
 
-        # 1) Hard outcomes first: TP2, BE/SL. TP2 has priority if price is already beyond full target.
-        if self._hit_tp2(trade_type, current_price, tp2):
-            new_status = "TP2_HIT"
-            events.append("TP2_HIT")
-            result = "WIN"
-            close_price = current_price
-            final_pnl = pnl_points
-        elif (
+        def _target_touched(level: float) -> bool:
+            if level <= 0:
+                return False
+            return high_price >= level if trade_type == "BUY" else low_price <= level
+
+        def _stop_touched(level: float) -> bool:
+            if level <= 0:
+                return False
+            return low_price <= level if trade_type == "BUY" else high_price >= level
+
+        def _breakeven_touched() -> bool:
+            return low_price <= entry if trade_type == "BUY" else high_price >= entry
+
+        tp2_touched = _target_touched(tp2)
+        tp1_touched = _target_touched(tp1)
+        sl_touched = _stop_touched(stop_loss)
+        be_touched = _breakeven_touched()
+
+        # 1) Hard outcomes first using candle high/low when available.
+        # Conservative ambiguity rule: if the same 5m candle touched both a
+        # protective stop/breakeven and a target, close at the protective level.
+        # OHLC data cannot prove which level was hit first, so this avoids
+        # overstating paper-trading performance.
+        if (
             sl_moved_to_entry
             and self._beyond_breakeven(trade_type, stop_loss, entry)
-            and self._hit_sl(trade_type, current_price, stop_loss)
+            and sl_touched
         ):
             # The persisted stop_loss has been trailed past breakeven (see the
             # progressive-trailing branch below) and price has now pulled back
@@ -217,19 +278,25 @@ class OpenTradesManager(BaseAgent):
             result = "WIN" if trailing_exit_pnl > 0 else "BREAKEVEN"
             close_price = stop_loss
             final_pnl = round(trailing_exit_pnl, 1)
-        elif sl_moved_to_entry and self._hit_break_even(trade_type, current_price, entry):
+        elif sl_moved_to_entry and be_touched:
             new_status = "BE_HIT"
             events.append("BE_HIT")
             result = "BREAKEVEN"
             close_price = entry
             final_pnl = 0.0
-        elif self._hit_sl(trade_type, current_price, stop_loss):
+        elif sl_touched:
             new_status = "SL_HIT"
             events.append("SL_HIT")
             result = "LOSS"
-            close_price = current_price
-            final_pnl = pnl_points
-        elif old_status == "OPEN" and self._hit_tp1(trade_type, current_price, tp1):
+            close_price = stop_loss
+            final_pnl = calculate_pips(entry, stop_loss, trade_type, symbol)
+        elif tp2_touched:
+            new_status = "TP2_HIT"
+            events.append("TP2_HIT")
+            result = "WIN"
+            close_price = tp2
+            final_pnl = calculate_pips(entry, tp2, trade_type, symbol)
+        elif old_status == "OPEN" and tp1_touched:
             new_status = "TP1_HIT"
             events.append("TP1_HIT")
             partial_close = True
@@ -307,6 +374,8 @@ class OpenTradesManager(BaseAgent):
 
         updates: Dict[str, Any] = {
             "current_price": round(current_price, 2),
+            "last_candle_high": round(high_price, 2),
+            "last_candle_low": round(low_price, 2),
             "current_pnl": round(pnl_points, 1),
             "current_pnl_points": round(pnl_points, 1),
             "max_favorable_excursion": round(max_favorable_excursion, 1),
@@ -409,34 +478,57 @@ class OpenTradesManager(BaseAgent):
             return None
         return None
 
-    def _order_filled(self, order_type: str, trade_type: str, entry: float, current_price: float) -> bool:
-        """True when a pending LIMIT/STOP order would fill at current price.
+    def _order_filled(
+        self,
+        order_type: str,
+        trade_type: str,
+        entry: float,
+        current_price: float,
+        candle_high: float | None = None,
+        candle_low: float | None = None,
+    ) -> bool:
+        """True when a pending LIMIT/STOP order would fill by candle touch.
 
         LIMIT: price returns to a better level than market at signal time.
-          BUY_LIMIT  fills when price falls to/through entry  (price <= entry)
-          SELL_LIMIT fills when price rises to/through entry  (price >= entry)
+          BUY_LIMIT  fills when low falls to/through entry   (low <= entry)
+          SELL_LIMIT fills when high rises to/through entry  (high >= entry)
         STOP: price breaks beyond entry in the trade direction.
-          BUY_STOP   fills when price rises to/through entry  (price >= entry)
-          SELL_STOP  fills when price falls to/through entry  (price <= entry)
-        Falls back to a sensible default from trade_type if order_type missing.
+          BUY_STOP   fills when high rises to/through entry  (high >= entry)
+          SELL_STOP  fills when low falls to/through entry   (low <= entry)
+        Falls back to current_price when high/low are not provided.
         """
+        high = self._f(candle_high, current_price)
+        low = self._f(candle_low, current_price)
+        if high < low:
+            high, low = low, high
         ot = str(order_type or "").upper()
         if not ot or ot.endswith("MARKET"):
             return True
         if ot == "BUY_LIMIT":
-            return current_price <= entry
+            return low <= entry
         if ot == "SELL_LIMIT":
-            return current_price >= entry
+            return high >= entry
         if ot == "BUY_STOP":
-            return current_price >= entry
+            return high >= entry
         if ot == "SELL_STOP":
-            return current_price <= entry
+            return low <= entry
         # Unknown -> infer from kind via trade direction (treat as LIMIT pullback).
         if trade_type == "BUY":
-            return current_price <= entry
-        return current_price >= entry
+            return low <= entry
+        return high >= entry
 
-    def _evaluate_pending(self, trade, current_price, now, trade_type, entry, tp1, symbol):
+    def _evaluate_pending(
+        self,
+        trade,
+        current_price,
+        now,
+        trade_type,
+        entry,
+        tp1,
+        symbol,
+        candle_high: float | None = None,
+        candle_low: float | None = None,
+    ):
         """Activate a pending order on touch, else keep it waiting (no PnL).
 
         Cancellation of stale pending orders is handled by the signal pipeline
@@ -449,9 +541,15 @@ class OpenTradesManager(BaseAgent):
         never materialises.
         """
         order_type = str(trade.get("order_type") or trade.get("order_kind") or "").upper()
-        filled = self._order_filled(order_type, trade_type, entry, current_price)
+        high_price = self._f(candle_high, current_price)
+        low_price = self._f(candle_low, current_price)
+        if high_price < low_price:
+            high_price, low_price = low_price, high_price
+        filled = self._order_filled(order_type, trade_type, entry, current_price, high_price, low_price)
         base_updates = {
             "current_price": round(current_price, 2),
+            "last_candle_high": round(high_price, 2),
+            "last_candle_low": round(low_price, 2),
             "last_updated": self._iso(now),
         }
 
