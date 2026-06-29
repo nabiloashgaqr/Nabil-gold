@@ -537,9 +537,29 @@ def _compact_agent_details(all_results: Dict[str, Any]) -> Dict[str, Any]:
         if direction in {"NEUTRAL", "HOLD", "NO_TRADE", "NONE", ""}:
             direction = "WAIT"
         signals = result.get("signals") or result.get("reasons") or []
+        if not signals and key == "technical":
+            tech = result.get("technical", {}) or {}
+            signals = tech.get("reasons") or []
         if not isinstance(signals, list):
             signals = [signals] if signals else []
         summary = result.get("summary") or result.get("reasoning") or ""
+        if not summary and key == "technical":
+            tech = result.get("technical", {}) or {}
+            trend = tech.get("trend")
+            rsi = tech.get("rsi")
+            macd = tech.get("macd")
+            support = tech.get("support")
+            resistance = tech.get("resistance")
+            bits = []
+            if trend:
+                bits.append(f"trend {trend}")
+            if rsi:
+                bits.append(f"RSI {rsi}")
+            if macd:
+                bits.append(f"MACD {macd}")
+            if support or resistance:
+                bits.append(f"nearest support {support}, resistance {resistance}")
+            summary = "Technical context: " + ", ".join(bits) if bits else ""
         details[key] = {
             "label": label,
             "direction": direction,
@@ -863,6 +883,10 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             learning_service = None
         decision = await DecisionAgent(config, learning_service=learning_service).decide_async(all_results)
         decision["agent_details"] = _compact_agent_details(all_results)
+        if decision.get("supportive_evidence"):
+            decision.setdefault("ai", {})["supportive_evidence"] = decision.get("supportive_evidence")
+        elif (decision.get("classic", {}) or {}).get("supporting_evidence"):
+            decision.setdefault("ai", {})["supportive_evidence"] = (decision.get("classic", {}) or {}).get("supporting_evidence")
         decision["symbol"] = config.get("symbol", "XAU/USD")
         if decision.get("signal"):
             decision["signal"]["symbol"] = decision["symbol"]
