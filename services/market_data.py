@@ -28,6 +28,7 @@ class MarketDataService:
 
     TWELVEDATA_URL = "https://api.twelvedata.com/time_series"
     YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+    SWISSQUOTE_QUOTE_URL = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/{symbol}"
 
     TF_MINUTES = {
         "5m": 5,
@@ -400,6 +401,67 @@ class MarketDataService:
                 "volume": sum(float(c.get("volume") or 0) for c in group),
             })
         return out
+
+    # ── Spot quote fallback for trade management only ────────────────
+    def get_spot_quote_payload(self) -> Dict[str, Any] | None:
+        """Return a one-candle spot quote payload for trade updates.
+
+        This is intentionally NOT used for signal analysis because it is a quote
+        snapshot, not historical OHLC. It is safe for emergency trade management
+        when Twelve Data quota is exhausted: high=low=close=mid spot price, so it
+        cannot falsely trigger levels from a different instrument such as GC=F.
+        """
+        if str(self.symbol).upper() not in {"XAU/USD", "XAUUSD"}:
+            return None
+        try:
+            resp = self.session.get(
+                self.SWISSQUOTE_QUOTE_URL.format(symbol="XAU/USD"),
+                headers={"User-Agent": "Mozilla/5.0 SmartSignalPro/1.0"},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            raw = resp.json()
+            best_bid = None
+            best_ask = None
+            best_spread = None
+            for block in raw if isinstance(raw, list) else []:
+                for item in block.get("spreadProfilePrices", []) or []:
+                    try:
+                        bid = float(item.get("bid"))
+                        ask = float(item.get("ask"))
+                    except (TypeError, ValueError):
+                        continue
+                    if bid <= 0 or ask <= 0:
+                        continue
+                    spread = abs(ask - bid)
+                    if best_spread is None or spread < best_spread:
+                        best_bid, best_ask, best_spread = bid, ask, spread
+            if best_bid is None or best_ask is None:
+                return None
+            price = (best_bid + best_ask) / 2.0
+            from utils.instruments import price_decimals
+            decimals = price_decimals(self.symbol)
+            now = datetime.now(timezone.utc).replace(microsecond=0)
+            candle = {
+                "time": now.isoformat().replace("+00:00", "Z"),
+                "open": round(price, decimals),
+                "high": round(price, decimals),
+                "low": round(price, decimals),
+                "close": round(price, decimals),
+                "volume": 0.0,
+            }
+            return {
+                "symbol": self.symbol,
+                "timeframe": "quote",
+                "data": [candle],
+                "current_price": float(candle["close"]),
+                "spread_points": None,
+                "last_updated": candle["time"],
+                "source": "swissquote_spot_quote_fallback",
+            }
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("Swissquote spot quote fallback failed for %s: %s", self.symbol, exc)
+            return None
 
     # ── Helpers ─────────────────────────────────────────────────────
     def _parse_dt(self, value: str) -> datetime:
