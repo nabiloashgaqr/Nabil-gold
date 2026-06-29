@@ -188,9 +188,18 @@ def main() -> None:
                 logger.error("Failed to fetch price for symbol %s", symbol)
                 continue
             current_price = float(symbol_price)
+            latest_candle = (price_payload.get("data") or [{}])[-1] or {}
+            try:
+                candle_high = float(latest_candle.get("high") or current_price)
+                candle_low = float(latest_candle.get("low") or current_price)
+            except (TypeError, ValueError):
+                candle_high = current_price
+                candle_low = current_price
             evaluations.extend(manager.update_trades(
                 open_trades=symbol_trades,
                 current_price=current_price,
+                candle_high=candle_high,
+                candle_low=candle_low,
                 database=database,
                 telegram=telegram_for_events,
                 now=datetime.now(timezone.utc),
