@@ -192,7 +192,7 @@ def main() -> None:
                     logger.error("Trade updates stopped for %s: all real data sources failed", symbol)
                     telegram.send_error_alert(
                         "Trade updates stopped: all real data sources failed "
-                        "(Twelve Data quota/key, Yahoo spot fallback, and Swissquote quote unavailable)"
+                        "(Twelve Data quota/key and Swissquote spot quote unavailable)"
                     )
                     continue
             symbol_price = price_payload.get("current_price")
