@@ -291,11 +291,11 @@ class SMCAgent(BaseAgent):
         if sweep.get("occurred") and sweep.get("type") == "sell_side":
             add = 3.4 if sweep.get("confirmation") == "STRONG" else 2.6
             score += add
-            signals.append(f"Sell-side liquidity sweep detected ({sweep.get('confirmation')}) - bullish after sweep")
+            signals.append(f"Sweep below recent lows detected ({sweep.get('confirmation')}) - bullish reversal context")
         elif sweep.get("occurred") and sweep.get("type") == "buy_side":
             sub = 3.4 if sweep.get("confirmation") == "STRONG" else 2.6
             score -= sub
-            signals.append(f"Buy-side liquidity sweep detected ({sweep.get('confirmation')}) - bearish after sweep")
+            signals.append(f"Sweep above recent highs detected ({sweep.get('confirmation')}) - bearish reversal context")
 
         for block in order_blocks:
             zone_obj = block.get("zone", {})
