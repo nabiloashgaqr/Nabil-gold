@@ -156,3 +156,46 @@ def test_plain_breakeven_hit_still_works_when_stop_not_yet_trailed() -> None:
     assert result["new_status"] == "BE_HIT"
     assert result["updates"]["result"] == "BREAKEVEN"
     assert "TRAILING_SL_HIT" not in result["events"]
+
+
+def test_buy_tp1_detected_from_candle_high_even_if_close_below_target() -> None:
+    manager = OpenTradesManager({"trade_management": {"auto_move_sl_to_entry_after_tp1": True}})
+    # Close is below TP1, but the 5m candle high touched TP1.
+    result = manager.evaluate_trade(base_trade(), 2354.0, candle_high=2356.2, candle_low=2352.0)
+    assert result["new_status"] == "TP1_HIT"
+    assert "TP1_HIT" in result["events"]
+    assert "MOVE_SL_TO_BE" in result["events"]
+    assert result["updates"]["last_candle_high"] == 2356.2
+    assert result["updates"]["last_candle_low"] == 2352.0
+
+
+def test_sell_stop_loss_detected_from_candle_high_even_if_close_below_stop() -> None:
+    manager = OpenTradesManager()
+    trade = base_trade(type="SELL", entry_price=2350.0, stop_loss=2356.0, tp1=2344.0, tp2=2338.0)
+    # Close is still below SL, but the 5m candle high touched the SELL stop.
+    result = manager.evaluate_trade(trade, 2353.0, candle_high=2356.2, candle_low=2348.5)
+    assert result["new_status"] == "SL_HIT"
+    assert "SL_HIT" in result["events"]
+    assert result["updates"]["result"] == "LOSS"
+    assert result["updates"]["close_price"] == 2356.0
+
+
+def test_same_candle_touching_tp_and_sl_uses_conservative_stop_priority() -> None:
+    manager = OpenTradesManager()
+    # BUY trade: high touches TP2, low touches SL in the same 5m candle.
+    # With OHLC only, order is unknown, so the manager must choose SL.
+    result = manager.evaluate_trade(base_trade(), 2351.0, candle_high=2362.5, candle_low=2343.8)
+    assert result["new_status"] == "SL_HIT"
+    assert "SL_HIT" in result["events"]
+    assert "TP2_HIT" not in result["events"]
+    assert result["updates"]["result"] == "LOSS"
+    assert result["updates"]["close_price"] == 2344.0
+
+
+def test_pending_sell_limit_fills_from_candle_high_touch() -> None:
+    manager = OpenTradesManager({"order_execution": {"entry_style": "market"}})
+    trade = base_trade(type="SELL", status="PENDING", order_type="SELL_LIMIT", entry_price=2355.0)
+    # Close is below entry, but high touched the pending sell limit.
+    result = manager.evaluate_trade(trade, 2352.0, candle_high=2355.1, candle_low=2350.0)
+    assert result["new_status"] == "OPEN"
+    assert result["events"] == ["ORDER_FILLED"]
