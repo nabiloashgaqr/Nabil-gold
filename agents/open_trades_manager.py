@@ -255,6 +255,32 @@ class OpenTradesManager(BaseAgent):
         tp1_touched = _target_touched(tp1)
         sl_touched = _stop_touched(stop_loss)
         be_touched = _breakeven_touched()
+        hours_open = self._hours_open(trade, now)
+
+        # Informational age/risk markers are still recorded even if the same
+        # cycle also expires the trade.
+        if old_status == "OPEN" and hours_open >= self.time_warning_hours and "LONG_RUNNING" not in updates_sent:
+            events.append("LONG_RUNNING")
+        if exit_warning and "EXIT_WARNING" not in updates_sent:
+            events.append("EXIT_WARNING")
+
+        # Time-expiry is a lifecycle rule and must be evaluated before any new
+        # trailing movement. If keep_protected_winners_open=false, legacy
+        # behavior is to expire even protected winners instead of extending them
+        # via trailing.
+        if self.expire_after_hours > 0 and old_status == "OPEN" and hours_open >= self.expire_after_hours:
+            protected_winner = (
+                self.keep_protected_winners_open
+                and sl_moved_to_entry
+                and self._beyond_breakeven_or_at(trade_type, stop_loss, entry)
+                and pnl_points > 0
+            )
+            if not protected_winner:
+                new_status = "EXPIRED"
+                events.append("EXPIRED")
+                result = "EXPIRED"
+                close_price = current_price
+                final_pnl = pnl_points
 
         # If a trade is already protected (TP1/BE/trailing phase), use the
         # candle's favorable extreme to advance TP2/trailing BEFORE checking the
@@ -264,7 +290,7 @@ class OpenTradesManager(BaseAgent):
         # This fixes missed TP2/under-trailed exits when only close was used.
         protected_branch_handled = False
         protected_trade = bool(sl_moved_to_entry) and old_status in {"OPEN", "PARTIAL", "TP1_HIT"}
-        if protected_trade:
+        if protected_trade and new_status in self.OPEN_STATUSES and "EXPIRED" not in events:
             protected_branch_handled = True
             if tp2_touched:
                 new_status = "TP2_HIT"
@@ -358,10 +384,9 @@ class OpenTradesManager(BaseAgent):
             progress = self._progress_to_tp1(trade_type, entry, tp1, current_price)
             if old_status == "OPEN" and progress >= self.near_tp1_progress and "NEAR_TP1" not in updates_sent:
                 events.append("NEAR_TP1")
-            hours_open = self._hours_open(trade, now)
-            if old_status == "OPEN" and hours_open >= self.time_warning_hours and "LONG_RUNNING" not in updates_sent:
+            if old_status == "OPEN" and hours_open >= self.time_warning_hours and "LONG_RUNNING" not in updates_sent and "LONG_RUNNING" not in events:
                 events.append("LONG_RUNNING")
-            if exit_warning and "EXIT_WARNING" not in updates_sent:
+            if exit_warning and "EXIT_WARNING" not in updates_sent and "EXIT_WARNING" not in events:
                 events.append("EXIT_WARNING")
             if self.expire_after_hours > 0 and old_status == "OPEN" and hours_open >= self.expire_after_hours:
                 # Don't force-close a WINNING trade whose stop is already locked
