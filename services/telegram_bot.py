@@ -609,6 +609,62 @@ class TelegramService:
         body = "\n".join(f"• {m}" for m in merged)
         return f"💡 <b>WHY THIS TRADE</b>\n{body}"
 
+
+    _CLOSING_EVENTS = {"TP2_HIT", "SL_HIT", "TRAILING_SL_HIT", "BE_HIT", "EXPIRED", "MANUAL_CLOSE"}
+    _CLOSED_STATUSES = {"TP2_HIT", "SL_HIT", "BE_HIT", "EXPIRED", "MANUAL_CLOSE"}
+
+    def _pnl_display_for_event(
+        self,
+        trade: Dict[str, Any],
+        event_type: str,
+        current_price: float,
+        pnl_points: float,
+        evaluation: Dict[str, Any] | None = None,
+    ) -> tuple[str, float, str, str]:
+        """Return (label, pnl_points, emoji, optional_exit_line) for Telegram.
+
+        For closing events, never show floating/current PnL as the result. Use
+        the actual realized PnL from final_pnl/final_pnl_points, or calculate it
+        from the real close_price (SL/TP/BE). The live current price remains a
+        separate line so subscribers don't confuse a later quote with the actual
+        execution/exit result.
+        """
+        evaluation = evaluation or {}
+        updates = evaluation.get("updates", {}) or {}
+        symbol = str(trade.get("symbol") or self.config.get("symbol", "XAU/USD"))
+        new_status = str(evaluation.get("new_status", trade.get("status", "")) or "").upper()
+        is_closing = event_type in self._CLOSING_EVENTS or new_status in self._CLOSED_STATUSES
+
+        display_pnl = float(pnl_points or 0.0)
+        label = "Current PnL"
+        exit_line = ""
+
+        if is_closing:
+            label = "Actual PnL"
+            found = False
+            for key in ("final_pnl", "final_pnl_points"):
+                value = updates.get(key)
+                if value is not None:
+                    try:
+                        display_pnl = float(value)
+                        found = True
+                        break
+                    except (TypeError, ValueError):
+                        continue
+            close_price = updates.get("close_price")
+            if close_price is not None:
+                exit_line = f"🏁 <b>Exit Price:</b> {format_price(close_price, symbol)}"
+                if not found:
+                    try:
+                        entry = float(trade.get("entry_price"))
+                        side = str(trade.get("type") or trade.get("side") or "BUY").upper()
+                        display_pnl = float(calculate_pips(entry, float(close_price), side, symbol))
+                    except (TypeError, ValueError):
+                        pass
+
+        emoji = "✅" if display_pnl > 0 else "➖" if display_pnl == 0 else "❌"
+        return label, display_pnl, emoji, exit_line
+
     def send_trade_event(
         self,
         trade: Dict[str, Any],
@@ -636,7 +692,9 @@ class TelegramService:
         }
         title = event_titles.get(event_type, "🔄 Trade Update")
         symbol = str(trade.get("symbol") or self.config.get("symbol", "XAU/USD"))
-        pnl_emoji = "✅" if pnl_points > 0 else "➖" if pnl_points == 0 else "❌"
+        pnl_label, display_pnl, pnl_emoji, exit_price_line = self._pnl_display_for_event(
+            trade, event_type, current_price, pnl_points, evaluation
+        )
         old_status = evaluation.get("old_status", trade.get("status", "OPEN"))
         new_status = evaluation.get("new_status", old_status)
         progress = evaluation.get("progress_to_tp1")
@@ -662,7 +720,8 @@ class TelegramService:
 🎯 <b>TP1:</b> {format_price(trade.get('tp1'), symbol)}
 🎯 <b>TP2:</b> {format_price(trade.get('tp2'), symbol)}
 💰 <b>Current Price:</b> {format_price(current_price, symbol)}
-📈 <b>Current PnL:</b> {pnl_points:+.1f} pts {pnl_emoji}
+{exit_price_line}
+📈 <b>{pnl_label}:</b> {display_pnl:+.1f} pts {pnl_emoji}
 📌 <b>Status:</b> {self._status_text(old_status, new_status)}
 {extra_text}
 
@@ -727,7 +786,9 @@ class TelegramService:
         title = event_titles.get(ordered[0], "🔄 Trade Update")
         symbol = str(trade.get("symbol") or self.config.get("symbol", "XAU/USD"))
 
-        pnl_emoji = "✅" if pnl_points > 0 else "➖" if pnl_points == 0 else "❌"
+        pnl_label, display_pnl, pnl_emoji, exit_price_line = self._pnl_display_for_event(
+            trade, ordered[0], current_price, pnl_points, evaluation
+        )
         old_status = evaluation.get("old_status", trade.get("status", "OPEN"))
         new_status = evaluation.get("new_status", old_status)
         progress = evaluation.get("progress_to_tp1")
@@ -761,7 +822,8 @@ class TelegramService:
 🎯 <b>TP1:</b> {format_price(trade.get('tp1'), symbol)}
 🎯 <b>TP2:</b> {format_price(trade.get('tp2'), symbol)}
 💰 <b>Current Price:</b> {format_price(current_price, symbol)}
-📈 <b>Current PnL:</b> {pnl_points:+.1f} pts {pnl_emoji}
+{exit_price_line}
+📈 <b>{pnl_label}:</b> {display_pnl:+.1f} pts {pnl_emoji}
 📌 <b>Status:</b> {self._status_text(old_status, new_status)}
 {extra_text}
 
