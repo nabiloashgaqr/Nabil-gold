@@ -102,3 +102,18 @@ def test_report_date_env_regenerates_yesterday(monkeypatch):
     assert "SL+ / Profit Locked" in cap["t"]
     # Historical repair must not mix today's live open trades into yesterday.
     assert "Open Trades:</b> none" in cap["t"] or "Open Trades: none" in cap["t"]
+
+
+def test_breakeven_excluded_from_win_rate_denominator(monkeypatch):
+    today = [
+        {"type": "SELL", "status": "TP2_HIT", "final_pnl": 700.0, "signal_snapshot": {}},
+        {"type": "SELL", "status": "SL_HIT", "final_pnl": 548.0, "signal_snapshot": {}},
+        {"type": "SELL", "status": "SL_HIT", "final_pnl": 487.0, "signal_snapshot": {}},
+        {"type": "SELL", "status": "BE_HIT", "final_pnl": 0.0, "signal_snapshot": {}},
+        {"type": "SELL", "status": "SL_HIT", "final_pnl": -300.0, "signal_snapshot": {}},
+        {"type": "SELL", "status": "SL_HIT", "final_pnl": -300.0, "signal_snapshot": {}},
+    ]
+    text = _run(today, [], monkeypatch)
+    assert "Trades: 6 (✅ 3 · ❌ 2 · ➖ 1" in text
+    assert "Win rate: 60.0%" in text
+    assert "Win rate: 50.0%" not in text
