@@ -538,6 +538,26 @@ def _build_market_status_message(
     open_note = f"• Open trades: {open_count}" if open_count > 0 else "• No open trades"
     reason_text = "\n".join(reason_lines)
 
+    news_block = ""
+    gemini_news = decision.get("gemini_news_review", {}) or {}
+    if gemini_news.get("available"):
+        risk_level = str(gemini_news.get("risk_level") or "").upper()
+        posture = str(gemini_news.get("trading_posture") or "").upper()
+        summary = str(gemini_news.get("summary") or "").strip()
+        zones = [str(x).strip() for x in (gemini_news.get("specific_risk_zones") or []) if str(x).strip() and str(x).strip() != "…"]
+        if risk_level in {"HIGH", "EXTREME"} or posture in {"CAUTION", "WAIT_FOR_CANDLE_CLOSE", "NO_TRADE"} or summary:
+            news_lines = ["📰 <b>Gemini News</b>"]
+            if risk_level:
+                news_lines.append(f"• Risk: {html.escape(risk_level)}")
+            if posture:
+                news_lines.append(f"• Posture: {html.escape(posture)}")
+            if summary and "insufficient data" not in summary.lower():
+                news_lines.append(f"• Summary: {html.escape(summary)}")
+            if zones:
+                news_lines.append(f"• Risk Zones: {html.escape(' | '.join(zones[:2]))}")
+            if len(news_lines) > 1:
+                news_block = "\n\n" + "\n".join(news_lines)
+
     return (
         "🟡 <b>SmartSignal — Market Status</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
@@ -546,7 +566,8 @@ def _build_market_status_message(
         "🎯 Decision: WAIT\n"
         f"{gate_line}\n\n"
         f"<b>Reason:</b>\n{html.escape(reason_text)}\n\n"
-        f"<b>Notes:</b>\n{html.escape(open_note)}\n{warnings_text}\n"
+        f"<b>Notes:</b>\n{html.escape(open_note)}\n{warnings_text}"
+        f"{news_block}\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "<i>Market status • Next market status in ~1 hour</i>"
     )
