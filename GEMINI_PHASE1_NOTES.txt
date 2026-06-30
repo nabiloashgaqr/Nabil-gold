@@ -1,0 +1,10 @@
+Modified files for Gemini Phase 1 reviewer integration:
+- services/llm_review.py
+- scripts/run_analysis.py
+- scripts/run_learning.py
+
+Behavior:
+- Optional Gemini review after DecisionAgent (reviewer only; does not block trades)
+- Optional Gemini learning summary enrichment in run_learning.py
+- Requires GEMINI_API_KEY in environment to activate
+- Uses model default: gemini-2.5-flash (override with GEMINI_MODEL)
