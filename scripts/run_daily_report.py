@@ -268,11 +268,20 @@ def main() -> None:
         def _pts(trade) -> float:
             """Realized/floating PnL in POINTS (gold: 1 USD = 10 points).
 
-            OpenTradesManager already stores final_pnl/current_pnl/* in POINTS
-            (from calculate_pips), so those are used as-is. Only when deriving
-            from raw entry/close prices do we apply the ×10 conversion.
+            Important: an ``SL_HIT`` row is not automatically a loss. After
+            breakeven/trailing, ``SL_HIT`` can mean a profitable protected exit
+            (SL+). For closed trades, prefer FINAL realized PnL over any stale
+            floating/current PnL fields left from an earlier update. This keeps
+            the daily report consistent with the Performance block.
             """
-            for key in ("final_pnl_points", "current_pnl_points", "final_pnl", "current_pnl"):
+            status = str(trade.get("status", "")).upper()
+            is_closed = status not in {"OPEN", "TP1_HIT", "PARTIAL", "PENDING"}
+            keys = (
+                ("final_pnl", "final_pnl_points", "current_pnl", "current_pnl_points")
+                if is_closed
+                else ("current_pnl", "current_pnl_points", "final_pnl", "final_pnl_points")
+            )
+            for key in keys:
                 v = trade.get(key)
                 if v is not None:
                     try:
@@ -285,6 +294,14 @@ def main() -> None:
             px = float(trade.get("close_price") or trade.get("current_price") or entry or 0)
             symbol = str(trade.get("symbol") or "XAU/USD")
             return calculate_pips(entry, px, typ, symbol)
+
+        def _status_label(trade, points: float) -> str:
+            status = str(trade.get("status", "")).upper()
+            if status == "SL_HIT" and points > 0:
+                return "SL+ / Profit Locked"
+            if status == "SL_HIT" and points == 0:
+                return "SL / Breakeven"
+            return status
 
         def _usd(points: float) -> float:
             return points / 10.0
@@ -330,7 +347,7 @@ def main() -> None:
                 typ = str(t.get("type") or t.get("trade_type", "BUY")).upper()
                 p = _pts(t)
                 sign = "🟢" if p > 0 else "🔴" if p < 0 else "➖"
-                status = str(t.get("status", "")).upper()
+                status = _status_label(t, p)
                 lines.append(f"{sign} {typ} {p:+.0f} pts ({_usd(p):+.1f}$) · {status}")
             if len(closed_today) > 8:
                 lines.append(f"• … and {len(closed_today) - 8} more")

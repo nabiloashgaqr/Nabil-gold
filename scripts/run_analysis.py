@@ -152,15 +152,10 @@ def _trade_outcome(trade: Dict[str, Any]) -> str:
     if result in {"WIN", "LOSS", "BREAKEVEN"}:
         return result
 
-    if status in _LOSS_STATUSES:
-        return "LOSS"
-    if status in _WIN_STATUSES:
-        return "WIN"
-    if status in _BREAKEVEN_STATUSES:
-        return "BREAKEVEN"
-
-    # Fallback to realized PnL when status/result are missing.
-    for key in ("final_pnl", "current_pnl"):
+    # SL_HIT can be a real loss, breakeven, or profitable trailing SL+ exit.
+    # Therefore, whenever PnL exists, classify by PnL sign before falling back
+    # to the status name.
+    for key in ("final_pnl", "final_pnl_points", "current_pnl", "current_pnl_points"):
         try:
             pnl = float(trade.get(key))
         except (TypeError, ValueError):
@@ -169,6 +164,13 @@ def _trade_outcome(trade: Dict[str, Any]) -> str:
             return "WIN"
         if pnl < 0:
             return "LOSS"
+        return "BREAKEVEN"
+
+    if status in _LOSS_STATUSES:
+        return "LOSS"
+    if status in _WIN_STATUSES:
+        return "WIN"
+    if status in _BREAKEVEN_STATUSES:
         return "BREAKEVEN"
     return "BREAKEVEN"
 
