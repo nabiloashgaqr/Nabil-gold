@@ -484,11 +484,11 @@ def main() -> None:
             if daily_review.get("available"):
                 lines.append("🧠 <b>Gemini Daily Review</b>")
                 if daily_review.get("summary"):
-                    lines.append(f"• {daily_review.get('summary')}")
+                    lines.append(f"• Summary: {daily_review.get('summary')}")
                 for key, label in (("strengths", "Strengths"), ("warnings", "Warnings"), ("tomorrow_focus", "Tomorrow")):
-                    values = daily_review.get(key) or []
+                    values = [str(x) for x in (daily_review.get(key) or []) if str(x).strip() and str(x).strip() != "…"]
                     if values:
-                        lines.append(f"• <b>{label}:</b> " + " | ".join(str(x) for x in values[:3]))
+                        lines.append(f"• <b>{label}:</b> " + " | ".join(values[:2]))
                 lines.append("")
         except Exception as gemini_exc:
             logger.warning("Gemini daily report skipped: %s", gemini_exc)

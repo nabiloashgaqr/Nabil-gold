@@ -93,24 +93,24 @@ def main() -> str | None:
             })
             if review.get("available"):
                 lines = [summary, "", "🧠 Gemini Learning Review"]
-                if review.get("summary"):
-                    lines.append(str(review.get("summary")))
                 if review.get("execution_score") is not None:
-                    lines.append(f"Execution Score: {review.get('execution_score')}/10")
+                    lines.append(f"• Execution Score: {review.get('execution_score')}/10")
                 psychological_flags = review.get("psychological_flags") or []
-                if psychological_flags:
-                    lines.append("Psychological Flags:")
-                    lines.extend(f"- {x}" for x in psychological_flags[:4])
+                compact_psych = [str(x) for x in psychological_flags[:2] if str(x).strip() and str(x).strip() != "…"]
+                if compact_psych:
+                    lines.append("• Psychological: " + " | ".join(compact_psych))
                 technical_errors = review.get("technical_errors") or []
-                if technical_errors:
-                    lines.append("Technical Errors:")
-                    lines.extend(f"- {x}" for x in technical_errors[:4])
+                compact_errors = [str(x) for x in technical_errors[:2] if str(x).strip() and str(x).strip() != "…"]
+                if compact_errors:
+                    lines.append("• Technical Errors: " + " | ".join(compact_errors))
                 recurring_patterns = review.get("recurring_patterns") or []
-                if recurring_patterns:
-                    lines.append("Recurring Patterns:")
-                    lines.extend(f"- {x}" for x in recurring_patterns[:4])
+                compact_patterns = [str(x) for x in recurring_patterns[:2] if str(x).strip() and str(x).strip() != "…"]
+                if compact_patterns:
+                    lines.append("• Patterns: " + " | ".join(compact_patterns))
                 if review.get("next_session_adjustment"):
-                    lines.append(f"Next Session Adjustment: {review.get('next_session_adjustment')}")
+                    lines.append(f"• Next Session: {review.get('next_session_adjustment')}")
+                elif review.get("summary"):
+                    lines.append(f"• Summary: {review.get('summary')}")
                 summary = "\n".join(lines)
         except Exception as gemini_exc:
             logger.warning("Gemini learning review skipped: %s", gemini_exc)
