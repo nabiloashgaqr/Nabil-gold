@@ -23,6 +23,7 @@ def _run(today, open_t, monkeypatch):
     monkeypatch.setattr(rd, "TelegramService", lambda *a, **k: _Tg())
     db = MagicMock()
     db.get_today_trades.return_value = today
+    db.get_trades_for_date.return_value = today
     db.get_open_trades.return_value = open_t
     db.get_recent_trades.return_value = today
     monkeypatch.setattr(rd, "DatabaseService", lambda *a, **k: db)
@@ -70,3 +71,34 @@ def test_no_trades_today_graceful(monkeypatch):
     text = _run([], [], monkeypatch)
     assert "Closed Trades:</b> none today" in text or "Closed Trades: none today" in text
     assert "Open Trades:" in text
+
+
+def test_report_date_env_regenerates_yesterday(monkeypatch):
+    cap = {}
+
+    class _Tg:
+        def send_message(self, text, **k):
+            cap["t"] = text
+            return True
+        def send_error_alert(self, *a, **k):
+            return True
+
+    db = MagicMock()
+    db.get_trades_for_date.return_value = [
+        {"type": "SELL", "status": "SL_HIT", "entry_price": 4031.8, "final_pnl": 186.0, "signal_snapshot": {}}
+    ]
+    db.get_open_trades.return_value = [{"type": "BUY", "status": "OPEN", "entry_price": 1, "current_price": 1}]
+    monkeypatch.setenv("REPORT_DATE", "2026-06-29")
+    monkeypatch.setattr(rd, "TelegramService", lambda *a, **k: _Tg())
+    monkeypatch.setattr(rd, "DatabaseService", lambda *a, **k: db)
+    monkeypatch.setattr(rd, "_read_eod_section", lambda name: "")
+    monkeypatch.setattr(rd, "_cleanup_eod_sections", lambda: None)
+
+    rd.main()
+
+    db.get_trades_for_date.assert_called_once()
+    assert db.get_trades_for_date.call_args.args[0] == "2026-06-29"
+    assert "2026-06-29" in cap["t"]
+    assert "SL+ / Profit Locked" in cap["t"]
+    # Historical repair must not mix today's live open trades into yesterday.
+    assert "Open Trades:</b> none" in cap["t"] or "Open Trades: none" in cap["t"]
