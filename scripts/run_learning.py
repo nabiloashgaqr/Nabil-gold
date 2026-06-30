@@ -74,6 +74,34 @@ def main() -> str | None:
         # بناء تقرير التعلم
         summary = learning_service.get_learning_summary()
 
+        # ── Optional Gemini learning review (Phase 1 reviewer only) ──
+        try:
+            gemini = get_gemini_review_service(config)
+            review = gemini.summarize_learning({
+                "report_date": report.report_date,
+                "overall_win_rate": report.overall_win_rate,
+                "total_trades_analyzed": report.total_trades_analyzed,
+                "changes_summary": report.changes_summary,
+                "top_performers": report.top_performers,
+                "bottom_performers": report.bottom_performers,
+                "recommendations": report.recommendations,
+            })
+            if review.get("available"):
+                lines = [summary, "", "🧠 Gemini Learning Review"]
+                if review.get("summary"):
+                    lines.append(str(review.get("summary")))
+                lessons = review.get("lessons") or []
+                if lessons:
+                    lines.append("Lessons:")
+                    lines.extend(f"- {x}" for x in lessons[:4])
+                warnings = review.get("warnings") or []
+                if warnings:
+                    lines.append("Warnings:")
+                    lines.extend(f"- {x}" for x in warnings[:4])
+                summary = "\n".join(lines)
+        except Exception as gemini_exc:
+            logger.warning("Gemini learning review skipped: %s", gemini_exc)
+
         # إرسال تقرير التعلم (إلا في وضع الكتم الخاص بنهاية اليوم)
         if _quiet_mode():
             logger.info("🔇 EOD_QUIET: لن تُرسل رسالة تعلّم منفصلة (ستُدمج في التقرير اليومي)")
