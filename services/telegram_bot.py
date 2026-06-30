@@ -182,6 +182,7 @@ class TelegramService:
 
         # ── Gemini review (option 2: verdict + summary + strengths/risks) ──
         gemini_block = self._format_gemini_review(decision)
+        gemini_news_block = self._format_gemini_news_review(decision)
 
         # ── RISK NOTE / INVALIDATION / counter-trend (only if meaningful) ──
         extra_lines: List[str] = []
@@ -256,6 +257,9 @@ class TelegramService:
         if gemini_block:
             sections.append(thin)
             sections.append(gemini_block)
+        if gemini_news_block:
+            sections.append(thin)
+            sections.append(gemini_news_block)
         if risk_block:
             sections.append(thin)
             sections.append(risk_block)
@@ -403,6 +407,34 @@ class TelegramService:
         if clean_risks:
             lines.append(f"• <b>Risks:</b> {' | '.join(clean_risks)}")
 
+        return "\n".join(lines)
+
+    def _format_gemini_news_review(self, decision: Dict[str, Any]) -> str:
+        """Render Gemini news interpretation only when it is materially useful."""
+        review = decision.get("gemini_news_review", {}) or {}
+        if not review.get("available"):
+            return ""
+
+        risk_level = str(review.get("risk_level") or "").upper()
+        posture = str(review.get("trading_posture") or "").upper()
+        summary = self._clean_ai_field(review.get("summary"))
+        zones = review.get("specific_risk_zones") or []
+
+        important_risk = risk_level in {"HIGH", "EXTREME"}
+        important_posture = posture in {"WAIT_FOR_CANDLE_CLOSE", "NO_TRADE", "CAUTION"}
+        if not (important_risk or important_posture or summary):
+            return ""
+
+        lines = ["📰 <b>GEMINI NEWS</b>"]
+        if risk_level:
+            lines.append(f"• <b>Risk:</b> {html.escape(risk_level)}")
+        if posture:
+            lines.append(f"• <b>Posture:</b> {html.escape(posture)}")
+        if summary:
+            lines.append(f"• <b>Summary:</b> {summary}")
+        clean_zones = [self._clean_ai_field(x) for x in zones[:2] if self._clean_ai_field(x)]
+        if clean_zones:
+            lines.append(f"• <b>Risk Zones:</b> {' | '.join(clean_zones)}")
         return "\n".join(lines)
 
     @staticmethod
