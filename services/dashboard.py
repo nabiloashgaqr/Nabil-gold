@@ -75,7 +75,7 @@ def summarize_trades(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         "closed": len(closed),
         "wins": len(wins),
         "losses": len(losses),
-        "win_rate": round((len(wins) / len(closed) * 100) if closed else 0, 2),
+        "win_rate": round((len(wins) / (len(wins) + len(losses)) * 100) if (len(wins) + len(losses)) else 0, 2),
         "net_points": round(net, 2),
         "profit_factor": round(gross_profit / gross_loss, 2) if gross_loss > 0 else (99.9 if gross_profit > 0 else 0),
         "buy_count": len(buy_trades),
