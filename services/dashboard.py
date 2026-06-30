@@ -14,7 +14,7 @@ from typing import Any, Dict, List
 
 OPEN_STATUSES = {"OPEN", "PARTIAL", "TP1_HIT"}
 WIN_STATUSES = {"TP2_HIT"}
-LOSS_STATUSES = {"SL_HIT"}
+LOSS_STATUSES = set()
 
 
 def _f(value: Any, default: float = 0.0) -> float:
@@ -30,6 +30,10 @@ def _status_badge(status: str) -> str:
         cls = "open"
     elif status in WIN_STATUSES:
         cls = "win"
+    elif status == "SL_HIT":
+        # SL_HIT can be SL+, breakeven, or a loss; the row PnL color carries
+        # the financial outcome, so keep the status badge neutral.
+        cls = "neutral"
     elif status in LOSS_STATUSES:
         cls = "loss"
     else:
@@ -59,7 +63,7 @@ def summarize_trades(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
     open_trades = [t for t in trades if str(t.get("status", "")).upper() in OPEN_STATUSES]
     closed = [t for t in trades if str(t.get("status", "")).upper() not in OPEN_STATUSES]
     wins = [t for t in closed if str(t.get("status", "")).upper() in WIN_STATUSES or _pnl(t) > 0]
-    losses = [t for t in closed if str(t.get("status", "")).upper() in LOSS_STATUSES or _pnl(t) < 0]
+    losses = [t for t in closed if _pnl(t) < 0]
     net = sum(_pnl(t) for t in trades)
     gross_profit = sum(_pnl(t) for t in trades if _pnl(t) > 0)
     gross_loss = abs(sum(_pnl(t) for t in trades if _pnl(t) < 0))

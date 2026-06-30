@@ -403,7 +403,9 @@ class DatabaseService:
             if status in {"OPEN", "TP1_HIT"}:
                 continue
             pnl = self._trade_pnl(trade)
-            is_loss = status == "SL_HIT" or pnl < 0
+            # SL_HIT is not automatically a loss: a trailing/breakeven stop can
+            # close profitably (SL+) or at breakeven. Use PnL sign when present.
+            is_loss = pnl < 0
             is_win_or_break = status in {"TP2_HIT", "BE_HIT", "MANUAL_CLOSE", "EXPIRED"} or pnl >= 0
             if is_loss:
                 losses += 1

@@ -55,7 +55,9 @@ class DynamicRiskManager:
         closed_today = self._closed_trades(today_trades)
         daily_pnl = sum(self._pnl(t) for t in closed_today)
         recent_closed = self._closed_trades(recent_trades)
-        recent_losses = len([t for t in recent_closed if self._pnl(t) < 0 or str(t.get("status", "")).upper() == "SL_HIT"])
+        # SL_HIT may be a profitable protected trailing-stop exit (SL+).
+        # Count recent wins/losses by PnL sign first, not by status label alone.
+        recent_losses = len([t for t in recent_closed if self._pnl(t) < 0])
         recent_wins = len([t for t in recent_closed if self._pnl(t) > 0 or str(t.get("status", "")).upper() == "TP2_HIT"])
 
         warn_after = int(self.settings.get("warn_after_losses", 2) or 2)
