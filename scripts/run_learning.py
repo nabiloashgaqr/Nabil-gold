@@ -15,6 +15,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services.database import DatabaseService
 from services.learning_service import get_learning_service
+from services.llm_review import get_gemini_review_service
 from services.telegram_bot import TelegramService
 from utils.helpers import load_config, setup_logging
 

@@ -1041,6 +1041,27 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             decision["signal"]["symbol"] = decision["symbol"]
 
         decision["dynamic_risk"] = all_results.get("dynamic_risk", {})
+
+        # ── Optional Gemini review (Phase 1 reviewer only) ──
+        try:
+            gemini = get_gemini_review_service(config)
+            gemini_review = gemini.review_signal({
+                "symbol": config.get("symbol", "XAU/USD"),
+                "decision": decision,
+                "all_results": all_results,
+            })
+            decision["gemini_review"] = gemini_review
+            if gemini_review.get("available"):
+                logger.info(
+                    "🧠 Gemini review: %s | %s",
+                    gemini_review.get("verdict"),
+                    gemini_review.get("summary"),
+                )
+            else:
+                logger.info("🧠 Gemini review unavailable: %s", gemini_review.get("summary"))
+        except Exception as gemini_exc:
+            logger.warning("Gemini signal review skipped: %s", gemini_exc)
+
         logger.info(
             "Decision: %s - Confidence: %s%% - %s | DynamicRisk=%s",
             decision.get("decision"),
