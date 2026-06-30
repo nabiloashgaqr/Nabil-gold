@@ -199,3 +199,50 @@ def test_pending_sell_limit_fills_from_candle_high_touch() -> None:
     result = manager.evaluate_trade(trade, 2352.0, candle_high=2355.1, candle_low=2350.0)
     assert result["new_status"] == "OPEN"
     assert result["events"] == ["ORDER_FILLED"]
+
+
+def test_protected_sell_tp2_has_priority_when_candle_low_hits_tp2_then_rebounds() -> None:
+    """Regression: protected SELL should not close at old trailing SL when the
+    same candle low already reached TP2, even if it later rebounds above SL.
+    """
+    manager = OpenTradesManager({"trailing_stop": {"enabled": True, "trailing_distance": 100.0, "trailing_step": 30.0}})
+    trade = base_trade(
+        type="SELL",
+        status="TP1_HIT",
+        entry_price=4015.41,
+        stop_loss=3971.15,
+        tp1=3975.41,
+        tp2=3945.41,
+        sl_moved_to_entry=True,
+        partial_close=True,
+    )
+    result = manager.evaluate_trade(trade, 3967.01, candle_high=3987.56, candle_low=3943.37)
+    assert result["new_status"] == "TP2_HIT"
+    assert "TP2_HIT" in result["events"]
+    assert "TRAILING_SL_HIT" not in result["events"]
+    assert result["updates"]["close_price"] == 3945.41
+    assert result["updates"]["final_pnl"] == 700.0
+
+
+def test_protected_sell_trailing_uses_candle_low_before_pullback_stop_hit() -> None:
+    """Regression: trailing for SELL must use candle LOW + distance, not close +
+    distance, before checking whether the rebound hit the new stop.
+    """
+    manager = OpenTradesManager({"trailing_stop": {"enabled": True, "trailing_distance": 100.0, "trailing_step": 30.0}})
+    trade = base_trade(
+        type="SELL",
+        status="TP1_HIT",
+        entry_price=4002.03,
+        stop_loss=3971.15,
+        tp1=3962.03,
+        tp2=3932.03,
+        sl_moved_to_entry=True,
+        partial_close=True,
+    )
+    result = manager.evaluate_trade(trade, 3967.01, candle_high=3987.56, candle_low=3943.37)
+    assert result["new_status"] == "SL_HIT"
+    assert "TRAILING_SL_HIT" in result["events"]
+    # low 3943.37 + 100 points ($10) = 3953.37
+    assert result["updates"]["close_price"] == 3953.37
+    assert result["updates"]["stop_loss"] == 3953.37
+    assert result["updates"]["final_pnl"] == 486.6
