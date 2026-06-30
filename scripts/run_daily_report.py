@@ -437,9 +437,11 @@ def main() -> None:
             lines.append("")
 
         if learning_section:
-            lines.append("🧠 <b>Learning Update</b>")
-            lines.append(_compact_section(learning_section, max_lines=8))
-            lines.append("")
+            compact_learning = _compact_section(learning_section, max_lines=8)
+            if compact_learning.strip():
+                lines.append("🧠 <b>Learning Update</b>")
+                lines.append(compact_learning)
+                lines.append("")
 
         closed_sample = []
         for t in sorted(closed_today, key=_pts, reverse=True)[:8]:
