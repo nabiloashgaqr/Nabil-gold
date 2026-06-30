@@ -85,11 +85,24 @@ async def main_async() -> int:
             lines = [final_report_text, "", "🧠 Gemini Weekly Review"]
             if weekly_review.get("summary"):
                 lines.append(str(weekly_review.get("summary")))
-            for key, label in (("strengths", "Strengths"), ("weaknesses", "Weaknesses"), ("patterns", "Patterns"), ("recommendations", "Recommendations")):
-                values = weekly_review.get(key) or []
-                if values:
-                    lines.append(f"{label}:")
-                    lines.extend(f"- {x}" for x in values[:4])
+            if weekly_review.get("strategy_efficiency") is not None:
+                lines.append(f"Strategy Efficiency: {weekly_review.get('strategy_efficiency')}")
+            if weekly_review.get("dominant_regime"):
+                lines.append(f"Dominant Regime: {weekly_review.get('dominant_regime')}")
+            windows = weekly_review.get("high_probability_windows") or []
+            if windows:
+                lines.append("High Probability Windows:")
+                lines.extend(f"- {x}" for x in windows[:4])
+            leaks = weekly_review.get("risk_leaks") or []
+            if leaks:
+                lines.append("Risk Leaks:")
+                lines.extend(f"- {x}" for x in leaks[:4])
+            if weekly_review.get("strategic_pivot"):
+                lines.append(f"Strategic Pivot: {weekly_review.get('strategic_pivot')}")
+            recommendations = weekly_review.get("recommendations") or []
+            if recommendations:
+                lines.append("Recommendations:")
+                lines.extend(f"- {x}" for x in recommendations[:4])
             final_report_text = "\n".join(lines)
     except Exception as gemini_exc:
         logger.warning("Gemini weekly report skipped: %s", gemini_exc)
