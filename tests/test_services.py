@@ -338,3 +338,47 @@ def test_swissquote_spot_quote_payload_for_xau(monkeypatch):
     assert payload["current_price"] == 4039.8
     candle = payload["data"][0]
     assert candle["high"] == candle["low"] == candle["close"] == 4039.8
+
+
+def test_daily_report_closed_sl_hit_profit_uses_final_pnl_not_stale_current():
+    """A trailing SL+ exit is status SL_HIT but must count as a win.
+
+    Regression: closed-trades section once preferred current_pnl_points before
+    final_pnl, so a stale floating loss could show as ❌ even when final_pnl was
+    positive and the performance block correctly counted it as a winner.
+    """
+    from agents.daily_report_agent import DailyReportAgent
+
+    trade = {
+        "id": "T_SL_PLUS",
+        "type": "SELL",
+        "symbol": "XAU/USD",
+        "status": "SL_HIT",
+        "entry_price": 4031.80,
+        "stop_loss": 4013.20,
+        "close_price": 4013.20,
+        "final_pnl": 186.0,
+        "current_pnl_points": -171.0,  # stale/bad field must not override final result
+        "sl_moved_to_entry": True,
+    }
+    agent = DailyReportAgent({})
+    stats = agent.generate([trade])["stats"]
+    assert stats["wins"] == 1
+    assert stats["losses"] == 0
+    assert stats["net_points"] == 186.0
+
+
+def test_database_consecutive_losses_ignores_profitable_sl_hit():
+    """SL_HIT with positive final_pnl is a protected winner, not a loss streak."""
+    with tempfile.TemporaryDirectory() as tmp:
+        local_path = Path(tmp) / "trades.json"
+        service = DatabaseService({"database": {"local_fallback_file": str(local_path)}})
+        tid = service.save_trade({
+            "decision": "SELL",
+            "signal": {"type": "SELL", "entry": {"price": 4031.8}, "stop_loss": 4061.8, "tp1": 3991.8, "tp2": 3961.8},
+            "confidence": 70,
+            "current_price": 4031.8,
+            "reasons": [],
+        })
+        service.update_trade(tid, {"status": "SL_HIT", "final_pnl": 186.0, "result": "WIN"})
+        assert service.get_consecutive_losses() == 0
