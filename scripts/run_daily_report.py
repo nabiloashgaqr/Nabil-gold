@@ -14,8 +14,9 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -26,6 +27,25 @@ from utils.helpers import calculate_pips, load_config, setup_logging
 
 setup_logging()
 logger = logging.getLogger(__name__)
+
+
+def _report_timezone(config: dict) -> str:
+    schedule = config.get("schedule", {}) or {}
+    trading_hours = config.get("trading_hours", {}) or {}
+    return str(schedule.get("timezone") or trading_hours.get("timezone") or "Asia/Hebron")
+
+
+def _resolve_report_date(value: str | None, timezone_name: str) -> str:
+    """Resolve REPORT_DATE input. Supports YYYY-MM-DD, today, yesterday."""
+    now_local = datetime.now(ZoneInfo(timezone_name))
+    text = str(value or "").strip().lower()
+    if not text or text == "today":
+        return now_local.date().isoformat()
+    if text in {"yesterday", "yday", "prev", "previous"}:
+        return (now_local.date() - timedelta(days=1)).isoformat()
+    # Validate ISO date early so GitHub logs show a clear error.
+    datetime.strptime(text, "%Y-%m-%d")
+    return text
 
 
 def _eod_dir():
@@ -244,16 +264,27 @@ def main() -> None:
     config = load_config()
     telegram = TelegramService(config)
     database = DatabaseService(config)
+    timezone_name = _report_timezone(config)
+    report_date = _resolve_report_date(os.environ.get("REPORT_DATE"), timezone_name)
+    current_local_date = datetime.now(ZoneInfo(timezone_name)).date().isoformat()
 
     try:
-        # 1. Get today's trades (open + closed) and compute rich stats.
-        today_trades = database.get_today_trades()
+        # 1. Get report-date trades (open + closed) and compute rich stats.
+        # REPORT_DATE allows repairing yesterday's report after a reporting fix.
+        today_trades = database.get_trades_for_date(report_date, timezone_name)
         agent = DailyReportAgent(config)
         perf_report = agent.generate(today_trades)
         stats = perf_report.get("stats", {})
 
-        # 2. Open trades (live).
-        open_trades = database.get_open_trades()
+        # 2. Open trades. For a historical repair date, do NOT mix in today's
+        # live open trades; only show trades belonging to that report date.
+        if report_date == current_local_date:
+            open_trades = database.get_open_trades()
+        else:
+            open_trades = [
+                t for t in today_trades
+                if str(t.get("status", "")).upper() in {"OPEN", "TP1_HIT", "PARTIAL", "PENDING"}
+            ]
 
         # 3. Split today's trades into CLOSED vs OPEN for clear reporting.
         # OPEN = not filled yet; CANCELLED = never traded. Neither is a live
@@ -310,7 +341,7 @@ def main() -> None:
         lines = [
             "📊 <b>SmartSignal — Daily Summary</b>",
             "━━━━━━━━━━━━━━━━━━━━━",
-            f"📅 {datetime.now(timezone.utc).strftime('%Y-%m-%d')} (Asia/Hebron)",
+            f"📅 {report_date} ({timezone_name})",
             "",
         ]
 
@@ -418,7 +449,7 @@ def main() -> None:
         telegram.send_message(message)
         save_daily_report_to_database(
             database,
-            report_date=datetime.now(timezone.utc).date().isoformat(),
+            report_date=report_date,
             stats=stats,
             report_text=message,
             closed_trades_count=len(closed_today),
