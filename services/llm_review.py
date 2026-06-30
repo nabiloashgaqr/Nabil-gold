@@ -68,20 +68,19 @@ class GeminiReviewService:
 
         compact = self._compact_market_payload(payload)
         prompt = (
-            "You are a professional discretionary market analyst reviewing XAU/USD trade context. "
-            "Your job is NOT to explain internal agents or repeat their logic. "
-            "Your job is to independently assess the market setup using only the structured data provided. "
-            "Do not invent indicators, prices, or events. "
-            "Do not mention missing data unless it prevents analysis. "
-            "Focus on market structure, directional bias, setup quality, timing risk, and tradeability. "
-            "If the setup is weak or conflicting, clearly say WAIT. "
-            "If there is elevated event/news risk, reflect it in the action and risks. "
-            "Return STRICT JSON only with keys market_bias, action, setup_quality, confidence_note, key_levels, risks, summary. "
-            "market_bias must be BULLISH, BEARISH, or NEUTRAL. "
-            "action must be BUY, SELL, or WAIT. "
-            "setup_quality must be HIGH, MEDIUM, or LOW. "
-            "key_levels and risks must be short arrays of strings. "
-            "summary must be concise and professional.\n\n"
+            "You are a Senior Institutional Market Analyst specializing in XAU/USD and Energy Markets (WTI/Brent). "
+            "Your task is to evaluate the current trade context using a confluence of Market Structure (HTF), Liquidity Pools, and Intermarket correlations (DXY, US10Y). "
+            "Independently verify the Draw on Liquidity and External vs Internal range. "
+            "Assess premium vs discount pricing of the current setup. "
+            "If XAU/USD and Oil show divergence with their USD-correlates, flag it as a strength or weakness. "
+            "Do not invent indicators, prices, correlations, or events beyond the provided data. "
+            "Return STRICT JSON only. No conversational filler. "
+            "Return JSON with keys market_bias, action, setup_quality, liquidity_targets, confluence_factors, confidence_note, risk_management, summary. "
+            "market_bias must be BULLISH, BEARISH, NEUTRAL, or TREND_EXHAUSTED. "
+            "action must be BUY, SELL, WAIT, SCALE_IN, or SCALE_OUT. "
+            "setup_quality must be HIGH (A+), MEDIUM (B), or LOW (C). "
+            "liquidity_targets, confluence_factors, and risk_management must be short arrays of strings. "
+            "confidence_note and summary must be concise and professional.\n\n"
             f"DATA:\n{json.dumps(compact, ensure_ascii=False)}"
         )
         return self._generate_json(prompt)
@@ -93,16 +92,20 @@ class GeminiReviewService:
 
         compact = self._compact_news_payload(payload)
         prompt = (
-            "You are a macro news and market-impact analyst for XAU/USD. "
-            "Your job is to interpret scheduled economic news and explain the likely trading impact on gold. "
-            "Do not invent news details beyond the provided data. "
-            "Focus on volatility risk, directional uncertainty, safe trading posture, and timing. "
-            "Return STRICT JSON only with keys risk_level, impact_bias, trading_posture, minutes_to_avoid, risks, summary. "
+            "You are a Macroeconomist and Quantitative News Analyst for Gold and Oil markets. "
+            "Your job is to analyze high-impact economic releases such as CPI, NFP, FOMC, and Inventory Data to determine Institutional Volatility Risk. "
+            "Differentiate between Directional News and Volatility News. "
+            "Evaluate Gold/Oil sensitivity to DXY shifts during this specific event when such context is present in the data. "
+            "Provide a Protective Posture based on the magnitude of deviation from consensus when available. "
+            "Do not invent event details beyond the provided data. "
+            "Output MUST be STRICT JSON. "
+            "Return JSON with keys risk_level, impact_bias, price_projection, trading_posture, specific_risk_zones, summary. "
             "risk_level must be LOW, MEDIUM, HIGH, or EXTREME. "
-            "impact_bias must be BULLISH, BEARISH, MIXED, or NEUTRAL. "
-            "trading_posture must be NORMAL, CAUTION, WAIT, or NO_TRADE. "
-            "risks must be a short array of strings. "
-            "summary must be concise and professional.\n\n"
+            "impact_bias must be HAWKISH, DOVISH, NEUTRAL, or VOLATILE_TWO_SIDED. "
+            "price_projection must be SHORT_TERM_SPIKE, SUSTAINED_TREND, or MEAN_REVERSION. "
+            "trading_posture must be AGGRESSIVE, CAUTION, WAIT_FOR_CANDLE_CLOSE, or NO_TRADE. "
+            "specific_risk_zones must be a short array of strings. "
+            "summary must be tactical and professional.\n\n"
             f"DATA:\n{json.dumps(compact, ensure_ascii=False)}"
         )
         return self._generate_json(prompt)
@@ -114,12 +117,17 @@ class GeminiReviewService:
 
         compact = self._compact_learning_payload(payload)
         prompt = (
-            "You are reviewing end-of-day trading performance for a rule-based gold trading system. "
-            "Your role is to extract practical lessons, recurring problems, and next-session cautions. "
-            "Do not invent statistics or missing data. "
-            "Return STRICT JSON only with keys lessons, warnings, strengths, summary. "
-            "lessons, warnings, and strengths must be short arrays of strings. "
-            "summary must be concise and professional.\n\n"
+            "You are a Performance Coach for Professional Futures Traders. "
+            "Your role is to audit the end-of-day execution for Gold/Oil trades against a strict rule-based framework. "
+            "Identify Alpha Leakage such as early exits, revenge trading, or missed setups. "
+            "Compare execution against Time of Day, especially London and New York session killzones, when such timing context is present. "
+            "Focus on the Execution Gap: did the trader follow the setup or trade the PnL. "
+            "Output MUST be STRICT JSON. "
+            "Return JSON with keys execution_score, psychological_flags, technical_errors, recurring_patterns, next_session_adjustment, summary. "
+            "execution_score must be a 1-10 number. "
+            "psychological_flags, technical_errors, and recurring_patterns must be short arrays of strings. "
+            "next_session_adjustment must be concise. "
+            "summary must be professional and concise.\n\n"
             f"DATA:\n{json.dumps(compact, ensure_ascii=False)}"
         )
         return self._generate_json(prompt)
@@ -148,12 +156,18 @@ class GeminiReviewService:
 
         compact = self._compact_weekly_report_payload(payload)
         prompt = (
-            "You are reviewing weekly performance of a gold trading system. "
-            "Identify recurring patterns, strong conditions, weak conditions, and risk-control lessons. "
-            "Do not invent missing trades or metrics. "
-            "Return STRICT JSON only with keys strengths, weaknesses, patterns, recommendations, summary. "
-            "All list fields must be short arrays of strings. "
-            "summary must be concise and professional.\n\n"
+            "You are a Quantitative Strategy Auditor. "
+            "Your task is to synthesize weekly trading data for XAU/USD and Oil to identify the Strategy Edge and Risk Clusters. "
+            "Identify the Environment Fit: did the system perform better in Trending, Ranging, or Volatile regimes. "
+            "Analyze Time-of-Week performance such as Monday reversals vs Friday profit taking when such context exists in the data. "
+            "Audit Risk-to-Reward efficiency across all closed positions. "
+            "Output MUST be STRICT JSON. "
+            "Return JSON with keys strategy_efficiency, dominant_regime, high_probability_windows, risk_leaks, strategic_pivot, recommendations, summary. "
+            "strategy_efficiency must be a percentage-style value or concise numeric string. "
+            "dominant_regime must be TRENDING, MEAN_REVERSION, or CHOPPY. "
+            "high_probability_windows, risk_leaks, and recommendations must be short arrays of strings. "
+            "strategic_pivot must be Scale Up, Scale Down, or Hold Strategy Constant. "
+            "summary must be a senior executive summary of the week’s edge.\n\n"
             f"DATA:\n{json.dumps(compact, ensure_ascii=False)}"
         )
         return self._generate_json(prompt)
