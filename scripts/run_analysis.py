@@ -1098,6 +1098,8 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                     )
                 else:
                     logger.info("🧠 Gemini news unavailable: %s", gemini_news.get("summary"))
+            else:
+                logger.info("🧠 Gemini news skipped: no news payload available")
         except Exception as gemini_exc:
             logger.warning("Gemini overlays skipped: %s", gemini_exc)
 
