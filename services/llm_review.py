@@ -253,6 +253,9 @@ class GeminiReviewService:
         classical = all_results.get("classical", {}) or {}
         risk = all_results.get("risk", {}) or decision.get("risk", {}) or {}
         session = all_results.get("session", {}) or {}
+        smc = all_results.get("smc", {}) or {}
+        multitimeframe = all_results.get("multitimeframe", {}) or {}
+        price_action = all_results.get("price_action", {}) or {}
         return {
             "symbol": payload.get("symbol") or decision.get("symbol"),
             "current_price": payload.get("current_price") or all_results.get("current_price") or decision.get("current_price"),
@@ -264,6 +267,7 @@ class GeminiReviewService:
                 "stop_loss": signal.get("stop_loss"),
                 "tp1": signal.get("tp1"),
                 "tp2": signal.get("tp2"),
+                "rr_ratio": signal.get("rr_ratio"),
             },
             "daily_bias": {
                 "bias": daily_bias.get("bias"),
@@ -273,11 +277,13 @@ class GeminiReviewService:
                 "name": session.get("current_session"),
                 "quality": session.get("session_quality"),
                 "allowed": session.get("trading_allowed"),
+                "reason": sanitize_prompt_text(session.get("reason") or "", 180),
             },
             "technical_context": {
                 "summary": sanitize_prompt_text(technical.get("reasoning") or technical.get("summary") or "", 220),
                 "trend": (technical.get("technical", {}) or {}).get("trend"),
                 "rsi": (technical.get("technical", {}) or {}).get("rsi"),
+                "macd": (technical.get("technical", {}) or {}).get("macd"),
                 "nearest_support": ((technical.get("technical", {}) or {}).get("key_levels") or {}).get("nearest_support"),
                 "nearest_resistance": ((technical.get("technical", {}) or {}).get("key_levels") or {}).get("nearest_resistance"),
             },
@@ -286,22 +292,44 @@ class GeminiReviewService:
                 "support_levels": list(classical.get("support_levels") or [])[:3],
                 "resistance_levels": list(classical.get("resistance_levels") or [])[:3],
             },
+            "smc_context": {
+                "summary": sanitize_prompt_text(smc.get("reasoning") or smc.get("summary") or "", 220),
+                "liquidity_sweeps": list(smc.get("liquidity_sweeps") or [])[:3],
+                "order_blocks": list(smc.get("order_blocks") or [])[:3],
+                "fvgs": list(smc.get("fair_value_gaps") or smc.get("fvgs") or [])[:3],
+            },
+            "multitimeframe_context": {
+                "summary": sanitize_prompt_text(multitimeframe.get("reasoning") or multitimeframe.get("summary") or "", 220),
+                "trend_alignment": multitimeframe.get("trend_alignment"),
+            },
+            "price_action_context": {
+                "summary": sanitize_prompt_text(price_action.get("reasoning") or price_action.get("summary") or "", 220),
+                "patterns": list(price_action.get("patterns") or [])[:4],
+            },
             "risk_summary": sanitize_prompt_text(risk.get("summary") or "", 220),
             "news_context": {
                 "market_status": news.get("market_status"),
                 "can_trade": news.get("can_trade"),
                 "summary": sanitize_prompt_text(news.get("summary") or news.get("reasoning") or "", 220),
+                "events": list(news.get("events") or [])[:5],
             },
         }
 
     def _compact_news_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        news = payload.get("news") or {}
         return {
             "symbol": payload.get("symbol"),
             "current_price": payload.get("current_price"),
             "session": payload.get("session") or {},
-            "news": payload.get("news") or {},
             "daily_bias": payload.get("daily_bias") or {},
             "technical_context": payload.get("technical_context") or {},
+            "news": {
+                "market_status": news.get("market_status"),
+                "can_trade": news.get("can_trade"),
+                "summary": sanitize_prompt_text(news.get("summary") or news.get("reasoning") or "", 240),
+                "events": list(news.get("events") or [])[:6],
+                "ai_interpretation": news.get("ai_interpretation") or {},
+            },
         }
 
     def _compact_learning_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -313,6 +341,10 @@ class GeminiReviewService:
             "top_performers": list(payload.get("top_performers") or [])[:5],
             "bottom_performers": list(payload.get("bottom_performers") or [])[:5],
             "recommendations": [sanitize_prompt_text(x, 160) for x in (payload.get("recommendations") or [])[:8]],
+            "session_breakdown": payload.get("session_breakdown") or {},
+            "rule_violations": list(payload.get("rule_violations") or [])[:8],
+            "missed_setups": list(payload.get("missed_setups") or [])[:8],
+            "alpha_leakage_notes": list(payload.get("alpha_leakage_notes") or [])[:8],
         }
 
     def _compact_daily_report_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -324,6 +356,8 @@ class GeminiReviewService:
             "closed_net_points": payload.get("closed_net_points"),
             "floating_net_points": payload.get("floating_net_points"),
             "learning_excerpt": sanitize_prompt_text(payload.get("learning_excerpt") or "", 500),
+            "closed_trades_sample": list(payload.get("closed_trades_sample") or [])[:8],
+            "open_trades_sample": list(payload.get("open_trades_sample") or [])[:6],
         }
 
     def _compact_weekly_report_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -333,6 +367,10 @@ class GeminiReviewService:
             "stats": payload.get("stats") or {},
             "recommendations": [sanitize_prompt_text(x, 180) for x in (payload.get("recommendations") or [])[:10]],
             "report_excerpt": sanitize_prompt_text(payload.get("report_excerpt") or "", 800),
+            "time_of_week_breakdown": payload.get("time_of_week_breakdown") or {},
+            "rr_distribution": payload.get("rr_distribution") or {},
+            "closed_trades_sample": list(payload.get("closed_trades_sample") or [])[:12],
+            "environment_fit": payload.get("environment_fit") or {},
         }
 
     def _unavailable(self, reason: str) -> Dict[str, Any]:
