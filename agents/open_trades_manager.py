@@ -256,12 +256,61 @@ class OpenTradesManager(BaseAgent):
         sl_touched = _stop_touched(stop_loss)
         be_touched = _breakeven_touched()
 
+        # If a trade is already protected (TP1/BE/trailing phase), use the
+        # candle's favorable extreme to advance TP2/trailing BEFORE checking the
+        # pullback stop. Example for SELL: if the 5m/15m candle first traded down
+        # to 3943 and later rebounded to 3970, the trailing stop must be based on
+        # the 3943 low (low + trailing distance), not on the closing price.
+        # This fixes missed TP2/under-trailed exits when only close was used.
+        protected_branch_handled = False
+        protected_trade = bool(sl_moved_to_entry) and old_status in {"OPEN", "PARTIAL", "TP1_HIT"}
+        if protected_trade:
+            protected_branch_handled = True
+            if tp2_touched:
+                new_status = "TP2_HIT"
+                events.append("TP2_HIT")
+                result = "WIN"
+                close_price = tp2
+                final_pnl = calculate_pips(entry, tp2, trade_type, symbol)
+            else:
+                effective_stop = stop_loss
+                if self.trailing_enabled and new_status in self.OPEN_STATUSES and "EXPIRED" not in events:
+                    trailing_candidate = self._compute_trailing_stop(
+                        trade_type,
+                        favorable_price,
+                        stop_loss,
+                        entry,
+                        symbol,
+                    )
+                    if trailing_candidate is not None:
+                        new_stop_loss = trailing_candidate
+                        effective_stop = trailing_candidate
+
+                effective_sl_touched = _stop_touched(effective_stop)
+                if self._beyond_breakeven(trade_type, effective_stop, entry) and effective_sl_touched:
+                    new_status = "SL_HIT"
+                    events.append("TRAILING_SL_HIT")
+                    trailing_exit_pnl = calculate_pips(entry, effective_stop, trade_type, symbol)
+                    result = "WIN" if trailing_exit_pnl > 0 else "BREAKEVEN"
+                    close_price = effective_stop
+                    final_pnl = round(trailing_exit_pnl, 1)
+                elif effective_sl_touched and not self._beyond_breakeven(trade_type, effective_stop, entry):
+                    new_status = "BE_HIT"
+                    events.append("BE_HIT")
+                    result = "BREAKEVEN"
+                    close_price = entry
+                    final_pnl = 0.0
+                elif new_stop_loss is not None:
+                    events.append("TRAILING_SL_UPDATED")
+
         # 1) Hard outcomes first using candle high/low when available.
         # Conservative ambiguity rule: if the same 5m candle touched both a
         # protective stop/breakeven and a target, close at the protective level.
         # OHLC data cannot prove which level was hit first, so this avoids
         # overstating paper-trading performance.
-        if (
+        if protected_branch_handled or new_status != old_status:
+            pass
+        elif (
             sl_moved_to_entry
             and self._beyond_breakeven(trade_type, stop_loss, entry)
             and sl_touched
@@ -356,7 +405,9 @@ class OpenTradesManager(BaseAgent):
                 and "EXPIRED" not in events
             ):
                 base_stop = new_stop_loss if new_stop_loss is not None else stop_loss
-                trailing_candidate = self._compute_trailing_stop(trade_type, current_price, base_stop, entry, symbol)
+                # Use the favorable candle extreme, not only the close. For SELL,
+                # trailing must follow the candle LOW; for BUY, the candle HIGH.
+                trailing_candidate = self._compute_trailing_stop(trade_type, favorable_price, base_stop, entry, symbol)
                 if trailing_candidate is not None:
                     new_stop_loss = trailing_candidate
                     if "TRAILING_SL_UPDATED" not in events:
