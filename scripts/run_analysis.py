@@ -1042,9 +1042,10 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
 
         decision["dynamic_risk"] = all_results.get("dynamic_risk", {})
 
-        # ── Optional Gemini review (Phase 1 reviewer only) ──
+        # ── Gemini overlays: review + independent analysis + news interpretation ──
         try:
             gemini = get_gemini_review_service(config)
+
             gemini_review = gemini.review_signal({
                 "symbol": config.get("symbol", "XAU/USD"),
                 "decision": decision,
@@ -1059,8 +1060,46 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 )
             else:
                 logger.info("🧠 Gemini review unavailable: %s", gemini_review.get("summary"))
+
+            gemini_analysis = gemini.analyze_market_context({
+                "symbol": config.get("symbol", "XAU/USD"),
+                "current_price": data.get("current_price"),
+                "decision": decision,
+                "all_results": all_results,
+            })
+            decision["gemini_analysis"] = gemini_analysis
+            if gemini_analysis.get("available"):
+                logger.info(
+                    "🧠 Gemini analysis: %s | %s | %s",
+                    gemini_analysis.get("market_bias"),
+                    gemini_analysis.get("action"),
+                    gemini_analysis.get("summary"),
+                )
+            else:
+                logger.info("🧠 Gemini analysis unavailable: %s", gemini_analysis.get("summary"))
+
+            news_payload = all_results.get("news", {}) or {}
+            if news_payload:
+                gemini_news = gemini.interpret_news_context({
+                    "symbol": config.get("symbol", "XAU/USD"),
+                    "current_price": data.get("current_price"),
+                    "session": all_results.get("session", {}),
+                    "news": news_payload,
+                    "daily_bias": all_results.get("daily_bias", {}),
+                    "technical_context": all_results.get("technical", {}),
+                })
+                decision["gemini_news_review"] = gemini_news
+                if gemini_news.get("available"):
+                    logger.info(
+                        "🧠 Gemini news: %s | %s | %s",
+                        gemini_news.get("risk_level"),
+                        gemini_news.get("trading_posture"),
+                        gemini_news.get("summary"),
+                    )
+                else:
+                    logger.info("🧠 Gemini news unavailable: %s", gemini_news.get("summary"))
         except Exception as gemini_exc:
-            logger.warning("Gemini signal review skipped: %s", gemini_exc)
+            logger.warning("Gemini overlays skipped: %s", gemini_exc)
 
         logger.info(
             "Decision: %s - Confidence: %s%% - %s | DynamicRisk=%s",

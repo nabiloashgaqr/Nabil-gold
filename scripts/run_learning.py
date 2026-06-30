@@ -91,6 +91,10 @@ def main() -> str | None:
                 lines = [summary, "", "🧠 Gemini Learning Review"]
                 if review.get("summary"):
                     lines.append(str(review.get("summary")))
+                strengths = review.get("strengths") or []
+                if strengths:
+                    lines.append("Strengths:")
+                    lines.extend(f"- {x}" for x in strengths[:4])
                 lessons = review.get("lessons") or []
                 if lessons:
                     lines.append("Lessons:")

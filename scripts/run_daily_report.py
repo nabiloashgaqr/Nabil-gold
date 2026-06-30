@@ -22,6 +22,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.daily_report_agent import DailyReportAgent
 from services.database import DatabaseService
+from services.llm_review import get_gemini_review_service
 from services.telegram_bot import TelegramService
 from utils.helpers import calculate_pips, load_config, setup_logging
 
@@ -439,6 +440,31 @@ def main() -> None:
             lines.append("🧠 <b>Learning Update</b>")
             lines.append(_compact_section(learning_section, max_lines=8))
             lines.append("")
+
+        # ── Optional Gemini daily report overlay ──────────────────────────
+        try:
+            gemini = get_gemini_review_service(config)
+            daily_review = gemini.summarize_daily_report({
+                "report_date": report_date,
+                "stats": stats,
+                "closed_trades_count": len(closed_today),
+                "open_trades_count": len(open_trades),
+                "closed_net_points": sum(_pts(t) for t in closed_today) if closed_today else 0.0,
+                "floating_net_points": sum(calculate_pips(float(t.get("entry_price", 0) or 0), float(t.get("current_price", t.get("entry_price", 0)) or 0), str(t.get("type") or t.get("trade_type", "BUY")).upper(), str(t.get("symbol") or "XAU/USD")) for t in open_trades) if open_trades else 0.0,
+                "learning_excerpt": _compact_section(learning_section, max_lines=6) if learning_section else "",
+            })
+            if daily_review.get("available"):
+                lines.append("🧠 <b>Gemini Daily Review</b>")
+                if daily_review.get("summary"):
+                    lines.append(f"• {daily_review.get('summary')}")
+                for key, label in (("strengths", "Strengths"), ("warnings", "Warnings"), ("tomorrow_focus", "Tomorrow")):
+                    values = daily_review.get(key) or []
+                    if values:
+                        lines.append(f"• <b>{label}:</b> " + " | ".join(str(x) for x in values[:3]))
+                lines.append("")
+        except Exception as gemini_exc:
+            logger.warning("Gemini daily report skipped: %s", gemini_exc)
+
         lines.append("⚠️ Paper-trading only • Educational")
         lines.append("━━━━━━━━━━━━━━━━━━━━━")
 

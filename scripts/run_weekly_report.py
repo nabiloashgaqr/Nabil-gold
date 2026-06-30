@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services.database import DatabaseService
+from services.llm_review import get_gemini_review_service
 from services.telegram_bot import TelegramService
 from services.weekly_report import WeeklyReportService
 from utils.helpers import load_config, setup_logging
@@ -70,8 +71,31 @@ async def main_async() -> int:
         result.get("tokens_used", "n/a"),
     )
 
+    final_report_text = result.get("report_text", "")
+    try:
+        gemini = get_gemini_review_service(config)
+        weekly_review = gemini.summarize_weekly_report({
+            "period": result.get("period") or result.get("week_range") or "weekly",
+            "headline": result.get("headline") or "Weekly performance review",
+            "stats": result.get("stats") or {},
+            "recommendations": result.get("recommendations") or [],
+            "report_excerpt": result.get("report_text", ""),
+        })
+        if weekly_review.get("available"):
+            lines = [final_report_text, "", "🧠 Gemini Weekly Review"]
+            if weekly_review.get("summary"):
+                lines.append(str(weekly_review.get("summary")))
+            for key, label in (("strengths", "Strengths"), ("weaknesses", "Weaknesses"), ("patterns", "Patterns"), ("recommendations", "Recommendations")):
+                values = weekly_review.get(key) or []
+                if values:
+                    lines.append(f"{label}:")
+                    lines.extend(f"- {x}" for x in values[:4])
+            final_report_text = "\n".join(lines)
+    except Exception as gemini_exc:
+        logger.warning("Gemini weekly report skipped: %s", gemini_exc)
+
     if wr_cfg.get("send_telegram", True):
-        service.send_to_telegram(result.get("report_text", ""))
+        service.send_to_telegram(final_report_text)
     return 0
 
 
