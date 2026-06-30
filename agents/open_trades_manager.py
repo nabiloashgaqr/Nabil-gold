@@ -397,7 +397,11 @@ class OpenTradesManager(BaseAgent):
             updates["closed_at"] = self._iso(now)
             updates["close_time"] = self._iso(now)
         if final_pnl is not None:
+            # Keep both names synchronized. Some report/dashboard code or older
+            # schemas may read one or the other; stale current_pnl_points must not
+            # override the final realized result after a trailing SL+ exit.
             updates["final_pnl"] = round(final_pnl, 1)
+            updates["final_pnl_points"] = round(final_pnl, 1)
 
         return {
             "trade_id": trade.get("id"),

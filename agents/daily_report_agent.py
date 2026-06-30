@@ -390,7 +390,14 @@ class DailyReportAgent(BaseAgent):
         return recs[:8]
 
     def _pnl(self, trade: Dict[str, Any]) -> float:
-        for key in ("final_pnl", "current_pnl", "current_pnl_points"):
+        status = str(trade.get("status", "")).upper()
+        is_closed = status not in {"OPEN", "TP1_HIT", "PARTIAL", "PENDING"}
+        keys = (
+            ("final_pnl", "final_pnl_points", "current_pnl", "current_pnl_points")
+            if is_closed
+            else ("current_pnl", "current_pnl_points", "final_pnl", "final_pnl_points")
+        )
+        for key in keys:
             value = trade.get(key)
             if value is not None:
                 try:
