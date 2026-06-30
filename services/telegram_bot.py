@@ -180,6 +180,9 @@ class TelegramService:
         # ── WHY THIS TRADE — single merged, de-duplicated rationale ────────
         why_block = self._format_why_this_trade(decision, ai)
 
+        # ── Gemini review (option 2: verdict + summary + strengths/risks) ──
+        gemini_block = self._format_gemini_review(decision)
+
         # ── RISK NOTE / INVALIDATION / counter-trend (only if meaningful) ──
         extra_lines: List[str] = []
         risk_notes = self._clean_ai_field(ai.get("risk_notes"))
@@ -250,6 +253,9 @@ class TelegramService:
             thin,
             why_block,
         ]
+        if gemini_block:
+            sections.append(thin)
+            sections.append(gemini_block)
         if risk_block:
             sections.append(thin)
             sections.append(risk_block)
@@ -373,6 +379,31 @@ class TelegramService:
             f"• <b>Management:</b> SL → entry after +{be:.0f} pts · "
             f"Trail gap {distance:.0f} pts / step {step:.0f} pts · check {interval}m"
         )
+
+    def _format_gemini_review(self, decision: Dict[str, Any]) -> str:
+        """Render a compact Gemini review block for Telegram signals."""
+        review = decision.get("gemini_review", {}) or {}
+        if not review.get("available"):
+            return ""
+
+        verdict = html.escape(str(review.get("verdict") or "UNAVAILABLE"))
+        summary = self._clean_ai_field(review.get("summary"))
+        strengths = review.get("strengths") or []
+        risks = review.get("risks") or []
+
+        lines = [f"🧠 <b>GEMINI REVIEW</b>", f"• <b>Verdict:</b> {verdict}"]
+        if summary:
+            lines.append(f"• <b>Summary:</b> {summary}")
+
+        clean_strengths = [self._clean_ai_field(x) for x in strengths[:2] if self._clean_ai_field(x)]
+        if clean_strengths:
+            lines.append(f"• <b>Strengths:</b> {' | '.join(clean_strengths)}")
+
+        clean_risks = [self._clean_ai_field(x) for x in risks[:2] if self._clean_ai_field(x)]
+        if clean_risks:
+            lines.append(f"• <b>Risks:</b> {' | '.join(clean_risks)}")
+
+        return "\n".join(lines)
 
     @staticmethod
     def _status_text(old_status: Any, new_status: Any) -> str:
