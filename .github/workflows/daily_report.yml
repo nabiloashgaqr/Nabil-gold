@@ -7,6 +7,12 @@ concurrency:
 on:
   # Scheduling is handled externally by cron-job.org
   workflow_dispatch:
+    inputs:
+      report_date:
+        description: "Optional report date to regenerate, e.g. 2026-06-29 or yesterday. Leave empty for normal daily report."
+        required: false
+        default: ""
+        type: string
 
 jobs:
   daily-report:
@@ -41,6 +47,7 @@ jobs:
       # summary to storage/eod_*.txt; the final step folds everything into ONE
       # consolidated daily message. (Same workspace is shared across steps.)
       - name: 🔄 End-of-Day Trade Update
+        if: ${{ github.event.inputs.report_date == '' }}
         run: |
           python scripts/run_trade_updates.py
         env:
@@ -53,6 +60,7 @@ jobs:
           EOD_QUIET: "true"
 
       - name: 🧠 Run Learning Update
+        if: ${{ github.event.inputs.report_date == '' }}
         run: |
           python scripts/run_learning.py
         env:
@@ -66,6 +74,7 @@ jobs:
         run: |
           python scripts/run_daily_report.py
         env:
+          REPORT_DATE: ${{ github.event.inputs.report_date }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
