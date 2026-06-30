@@ -441,6 +441,30 @@ def main() -> None:
             lines.append(_compact_section(learning_section, max_lines=8))
             lines.append("")
 
+        closed_sample = []
+        for t in sorted(closed_today, key=_pts, reverse=True)[:8]:
+            closed_sample.append({
+                "type": str(t.get("type") or t.get("trade_type", "BUY")).upper(),
+                "status": str(t.get("status") or ""),
+                "points": _pts(t),
+                "entry_price": t.get("entry_price"),
+                "close_price": t.get("close_price") or t.get("current_price"),
+            })
+
+        open_sample = []
+        for t in open_trades[:6]:
+            typ = str(t.get("type") or t.get("trade_type", "BUY")).upper()
+            entry = float(t.get("entry_price", 0) or 0)
+            curr = float(t.get("current_price", entry) or entry)
+            symbol = str(t.get("symbol") or "XAU/USD")
+            open_sample.append({
+                "type": typ,
+                "status": str(t.get("status") or "OPEN"),
+                "floating_points": calculate_pips(entry, curr, typ, symbol),
+                "entry_price": entry,
+                "current_price": curr,
+            })
+
         # ── Optional Gemini daily report overlay ──────────────────────────
         try:
             gemini = get_gemini_review_service(config)
@@ -452,6 +476,8 @@ def main() -> None:
                 "closed_net_points": sum(_pts(t) for t in closed_today) if closed_today else 0.0,
                 "floating_net_points": sum(calculate_pips(float(t.get("entry_price", 0) or 0), float(t.get("current_price", t.get("entry_price", 0)) or 0), str(t.get("type") or t.get("trade_type", "BUY")).upper(), str(t.get("symbol") or "XAU/USD")) for t in open_trades) if open_trades else 0.0,
                 "learning_excerpt": _compact_section(learning_section, max_lines=6) if learning_section else "",
+                "closed_trades_sample": closed_sample,
+                "open_trades_sample": open_sample,
             })
             if daily_review.get("available"):
                 lines.append("🧠 <b>Gemini Daily Review</b>")

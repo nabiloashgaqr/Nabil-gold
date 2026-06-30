@@ -80,6 +80,10 @@ async def main_async() -> int:
             "stats": result.get("stats") or {},
             "recommendations": result.get("recommendations") or [],
             "report_excerpt": result.get("report_text", ""),
+            "time_of_week_breakdown": result.get("time_of_week_breakdown") or {},
+            "rr_distribution": result.get("rr_distribution") or {},
+            "closed_trades_sample": result.get("closed_trades_sample") or [],
+            "environment_fit": result.get("environment_fit") or {},
         })
         if weekly_review.get("available"):
             lines = [final_report_text, "", "🧠 Gemini Weekly Review"]

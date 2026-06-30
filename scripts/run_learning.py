@@ -86,6 +86,10 @@ def main() -> str | None:
                 "top_performers": report.top_performers,
                 "bottom_performers": report.bottom_performers,
                 "recommendations": report.recommendations,
+                "session_breakdown": getattr(report, "session_breakdown", {}),
+                "rule_violations": getattr(report, "rule_violations", []),
+                "missed_setups": getattr(report, "missed_setups", []),
+                "alpha_leakage_notes": getattr(report, "alpha_leakage_notes", []),
             })
             if review.get("available"):
                 lines = [summary, "", "🧠 Gemini Learning Review"]
