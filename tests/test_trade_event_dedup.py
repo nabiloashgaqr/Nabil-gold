@@ -150,3 +150,43 @@ def test_status_shows_arrow_when_changed():
     tg.send_trade_event(_trade(), "TP1_HIT", 4074.0, 268.0,
                         {"old_status": "OPEN", "new_status": "TP1_HIT"})
     assert "OPEN → TP1_HIT" in tg.messages[0]
+
+
+def test_closing_event_shows_actual_pnl_and_exit_price_not_floating_pnl():
+    tg = _CapturingTelegram()
+    trade = {
+        "id": "TSELL", "type": "SELL", "entry_price": 4002.03,
+        "stop_loss": 3971.15, "tp1": 3962.03, "tp2": 3932.03,
+    }
+    tg.send_trade_event(
+        trade,
+        "TRAILING_SL_HIT",
+        current_price=3967.01,
+        pnl_points=350.2,  # floating at current quote; must NOT be displayed as result
+        evaluation={
+            "old_status": "TP1_HIT",
+            "new_status": "SL_HIT",
+            "updates": {"close_price": 3953.37, "stop_loss": 3953.37, "final_pnl": 486.6},
+        },
+    )
+    msg = tg.messages[0]
+    assert "Current Price:</b> 3967.01" in msg
+    assert "Exit Price:</b> 3953.37" in msg
+    assert "Actual PnL:</b> +486.6 pts" in msg
+    assert "Current PnL:</b> +350.2 pts" not in msg
+
+
+def test_non_closing_event_keeps_current_pnl_label():
+    tg = _CapturingTelegram()
+    tg.send_trade_event(
+        _trade(),
+        "TRAILING_SL_UPDATED",
+        current_price=4080.8,
+        pnl_points=440.2,
+        evaluation={"old_status": "OPEN", "new_status": "OPEN", "updates": {"stop_loss": 4090.8}},
+    )
+    msg = tg.messages[0]
+    assert "Current Price:</b> 4080.80" in msg
+    assert "Current PnL:</b> +440.2 pts" in msg
+    assert "Actual PnL" not in msg
+    assert "Exit Price" not in msg
