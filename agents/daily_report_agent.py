@@ -44,7 +44,10 @@ class DailyReportAgent(BaseAgent):
             profit_factor = round(gross_profit / gross_loss, 2)
         else:
             profit_factor = 99.9 if gross_profit > 0 else 0
-        win_rate = round((len(winners) / total) * 100, 1) if total else 0
+        decisive_total = len(winners) + len(losers)
+        # Breakeven/flat trades are neutral: they count in total volume, but not
+        # in win-rate denominator. Example: 3 wins, 2 losses, 1 BE => 60%, not 50%.
+        win_rate = round((len(winners) / decisive_total) * 100, 1) if decisive_total else 0
         best = max(pnl_values) if pnl_values else 0
         worst = min(pnl_values) if pnl_values else 0
         avg_win = round(gross_profit / len(winners), 1) if winners else 0
