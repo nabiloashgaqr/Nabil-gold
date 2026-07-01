@@ -540,6 +540,16 @@ def run_agent(agent_name: str, agent: Any, data: Dict[str, Any]) -> Dict[str, An
         return {"agent": agent_name, "signal": "WAIT", "confidence": 0, "reasoning": f"Agent failed: {exc}"}
 
 
+def _log_gemini_result(label: str, result: Dict[str, Any] | None) -> None:
+    result = result or {}
+    if result.get("available"):
+        logger.info("🧠 Gemini %s: added quality=%s", label, result.get("quality", "ok"))
+    elif result.get("suppressed"):
+        logger.info("🧠 Gemini %s: suppressed (%s)", label, result.get("suppress_reason", "generic"))
+    else:
+        logger.info("🧠 Gemini %s: unavailable/skipped (%s)", label, result.get("summary") or result.get("reason") or "unknown")
+
+
 async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
     telegram = TelegramService(config)
     try:
@@ -584,11 +594,22 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         if (decision_type in {"BUY", "SELL"}) or (decision_type == "WAIT" and send_hourly_now):
             try:
                 gemini = get_gemini_review_service(config)
-                if gemini.enabled:
+                if not gemini.enabled:
+                    logger.info("🧠 Gemini analysis skipped: API key not configured")
+                else:
                     decision["gemini_analysis"] = gemini.analyze_market_context({"symbol": symbol, "current_price": data.get("current_price"), "decision": decision, "all_results": all_results})
-                    if decision_type in {"BUY", "SELL"}: decision["gemini_review"] = gemini.review_signal({"symbol": symbol, "decision": decision, "all_results": all_results})
+                    _log_gemini_result("market context", decision.get("gemini_analysis"))
+                    if decision_type in {"BUY", "SELL"}:
+                        decision["gemini_review"] = gemini.review_signal({"symbol": symbol, "decision": decision, "all_results": all_results})
+                        _log_gemini_result("signal review", decision.get("gemini_review"))
+                    else:
+                        logger.info("🧠 Gemini signal review skipped: WAIT hourly status")
                     decision["gemini_news_review"] = gemini.interpret_news_context({"symbol": symbol, "current_price": data.get("current_price"), "session": all_results.get("session"), "news": all_results.get("news"), "daily_bias": all_results.get("daily_bias"), "technical_context": all_results.get("technical")})
-            except Exception: pass
+                    _log_gemini_result("news review", decision.get("gemini_news_review"))
+            except Exception:
+                logger.exception("🧠 Gemini analysis block failed")
+        elif decision_type == "WAIT":
+            logger.info("🧠 Gemini skipped: normal WAIT without hourly status")
         if decision_type in {"BUY", "SELL"}:
             if duplicate_signal_reason(decision, database, config): return
             trade_id = database.new_trade_id()

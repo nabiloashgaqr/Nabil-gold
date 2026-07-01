@@ -108,9 +108,14 @@ def main() -> str | None:
                         lines.append(f"• Adjustment: {review.get('adjustment')}")
                         
                     summary = "\n".join(lines)
-                    logger.info("✅ Gemini learning review added to summary")
+                    logger.info(
+                        "✅ Gemini learning review added: score=%s lessons=%d quality=%s",
+                        review.get("execution_score"), len(key_lessons), review.get("quality", "ok")
+                    )
+                elif review.get("suppressed"):
+                    logger.info("🧠 Gemini learning review suppressed: %s", review.get("suppress_reason", "generic"))
                 else:
-                    logger.warning("🧠 Gemini learning review unavailable")
+                    logger.warning("🧠 Gemini learning review unavailable: %s", review.get("summary") or review.get("reason"))
         except Exception as gemini_exc:
             logger.exception("🧠 Gemini learning review failed")
 

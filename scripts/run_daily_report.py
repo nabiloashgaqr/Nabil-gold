@@ -309,18 +309,25 @@ def main() -> None:
         # Optional Gemini
         try:
             gemini = get_gemini_review_service(config)
-            if gemini.enabled:
+            if not gemini.enabled:
+                logger.info("🧠 Gemini daily review skipped: API key not configured")
+            else:
                 daily_review = gemini.summarize_daily_report({
                     "report_date": report_date, "stats": stats, "closed_trades_count": len(closed_today),
                     "open_trades_count": len(open_trades), "closed_net_points": net_pts, "floating_net_points": open_pts,
                     "learning_excerpt": learning_section,
                 })
                 if daily_review.get("available"):
+                    logger.info("🧠 Gemini daily review added: verdict=%s quality=%s", daily_review.get("verdict"), daily_review.get("quality", "ok"))
                     lines.append("🧠 <b>Gemini Independent Daily Review</b>")
                     if daily_review.get("summary"): lines.append(f"• Summary: {daily_review.get('summary')}")
                     for p in (daily_review.get("key_points") or [])[:3]: lines.append(f"• {p}")
                     if daily_review.get("verdict"): lines.append(f"• Verdict: {daily_review.get('verdict')}")
                     lines.append("")
+                elif daily_review.get("suppressed"):
+                    logger.info("🧠 Gemini daily review suppressed: %s", daily_review.get("suppress_reason", "generic"))
+                else:
+                    logger.warning("🧠 Gemini daily review unavailable: %s", daily_review.get("summary") or daily_review.get("reason"))
         except Exception: logger.exception("Gemini daily report failed")
 
         lines.append("⚠️ Paper-trading only • Educational")

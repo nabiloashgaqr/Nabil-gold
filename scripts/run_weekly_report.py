@@ -74,34 +74,49 @@ async def main_async() -> int:
     final_report_text = result.get("report_text", "")
     try:
         gemini = get_gemini_review_service(config)
-        weekly_review = gemini.summarize_weekly_report({
-            "period": result.get("period") or result.get("week_range") or "weekly",
-            "headline": result.get("headline") or "Weekly performance review",
-            "stats": result.get("stats") or {},
-            "recommendations": result.get("recommendations") or [],
-            "report_excerpt": result.get("report_text", ""),
-            "time_of_week_breakdown": result.get("time_of_week_breakdown") or {},
-            "rr_distribution": result.get("rr_distribution") or {},
-            "closed_trades_sample": result.get("closed_trades_sample") or [],
-            "environment_fit": result.get("environment_fit") or {},
-        })
-        if weekly_review.get("available"):
-            lines = [final_report_text, "", "🧠 <b>Gemini Independent Weekly Strategic Review</b>"]
-            
-            if weekly_review.get("edge_efficiency"):
-                lines.append(f"• Edge Efficiency: {weekly_review.get('edge_efficiency')}")
-            if weekly_review.get("market_regime"):
-                lines.append(f"• Market Regime: {weekly_review.get('market_regime')}")
-            
-            # Short bullets only
-            strategic_points = weekly_review.get("strategic_points") or []
-            for p in strategic_points[:3]:
-                lines.append(f"• {p}")
+        if not gemini.enabled:
+            logger.info("🧠 Gemini weekly review skipped: API key not configured")
+        else:
+            weekly_review = gemini.summarize_weekly_report({
+                "period": result.get("period") or result.get("week_range") or "weekly",
+                "headline": result.get("headline") or "Weekly performance review",
+                "stats": result.get("stats") or {},
+                "recommendations": result.get("recommendations") or [],
+                "report_excerpt": result.get("report_text", ""),
+                "time_of_week_breakdown": result.get("time_of_week_breakdown") or {},
+                "rr_distribution": result.get("rr_distribution") or {},
+                "closed_trades_sample": result.get("closed_trades_sample") or [],
+                "environment_fit": result.get("environment_fit") or {},
+            })
+            if weekly_review.get("available"):
+                lines = [final_report_text, "", "🧠 <b>Gemini Independent Weekly Strategic Review</b>"]
                 
-            if weekly_review.get("strategic_pivot"):
-                lines.append(f"• Strategic Pivot: {weekly_review.get('strategic_pivot')}")
+                if weekly_review.get("edge_efficiency"):
+                    lines.append(f"• Edge Efficiency: {weekly_review.get('edge_efficiency')}")
+                if weekly_review.get("market_regime"):
+                    lines.append(f"• Market Regime: {weekly_review.get('market_regime')}")
                 
-            final_report_text = "\n".join(lines)
+                # Short bullets only
+                strategic_points = weekly_review.get("strategic_points") or []
+                for p in strategic_points[:3]:
+                    lines.append(f"• {p}")
+                    
+                if weekly_review.get("strategic_pivot"):
+                    lines.append(f"• Strategic Pivot: {weekly_review.get('strategic_pivot')}")
+                    
+                final_report_text = "\n".join(lines)
+                result["report_text"] = final_report_text
+                result["gemini_weekly_review"] = weekly_review
+                service._save(result)
+                service.save_to_database(result)
+                logger.info(
+                    "🧠 Gemini weekly review added and persisted: points=%d quality=%s",
+                    len(strategic_points), weekly_review.get("quality", "ok")
+                )
+            elif weekly_review.get("suppressed"):
+                logger.info("🧠 Gemini weekly review suppressed: %s", weekly_review.get("suppress_reason", "generic"))
+            else:
+                logger.warning("🧠 Gemini weekly review unavailable: %s", weekly_review.get("summary") or weekly_review.get("reason"))
     except Exception as gemini_exc:
         logger.warning("Gemini weekly report skipped: %s", gemini_exc)
 
