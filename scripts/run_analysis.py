@@ -55,39 +55,22 @@ def synthetic_timeframe_sources(data: Dict[str, Any]) -> list[str]:
 
 def _manual_status_enabled() -> bool:
     """Return True only when a human explicitly asks a workflow_dispatch run to
-    send WAIT/status messages.
-
-    External schedulers such as cron-job.org trigger workflows via
-    workflow_dispatch. Without this guard, every external trigger would look like
-    a "manual" run and would send a Market Status/WAIT message every 5 minutes.
-    The default is intentionally silent: send Telegram only when a real signal is
-    generated (or an error occurs).
-    """
+    send WAIT/status messages."""
     if os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch":
         return False
     return str(os.environ.get("SEND_STATUS_ON_MANUAL", "false")).strip().lower() in {"1", "true", "yes", "y"}
 
 
 def should_send_status(config: Dict[str, Any]) -> bool:
-    """Send blocked/no-signal messages only when configured.
-
-    Important: workflow_dispatch is used by cron-job.org. Those external runs
-    must be silent unless they generate an actual trade signal; otherwise the bot
-    would spam a status message every 5 minutes.
-    """
+    """Send blocked/no-signal messages only when configured."""
     if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
         return _manual_status_enabled()
     notif = config.get("notifications", {}) or {}
-    # Either the general no-signal flag or the dedicated blocked-signal flag.
     return bool(notif.get("send_no_signal_updates", False)) or bool(notif.get("notify_on_blocked_signal", False))
 
 
 def should_send_hourly_status(config: Dict[str, Any]) -> bool:
-    """Send a clean market status update roughly once per hour for native
-    schedule runs. workflow_dispatch runs are silent by default because they may
-    be driven by cron-job.org every 5 minutes.
-    """
-    from datetime import datetime, timezone
+    """Send a clean market status update roughly once per hour."""
     if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
         return _manual_status_enabled()
     notif = config.get("notifications", {}) or {}
@@ -100,8 +83,6 @@ def should_send_hourly_status(config: Dict[str, Any]) -> bool:
     return now.minute < 10
 
 
-
-
 def _parse_datetime(value: Any) -> datetime | None:
     """Parse common ISO timestamps safely as UTC-aware datetimes."""
     if not value:
@@ -112,7 +93,7 @@ def _parse_datetime(value: Any) -> datetime | None:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
 
 
@@ -131,10 +112,6 @@ def _trade_entry_price(trade: Dict[str, Any]) -> float | None:
     return None
 
 
-# Trade lifecycle states treated as active exposure by signal filters.
-# PENDING is included because DatabaseService.get_open_trades() returns pending
-# limit/stop orders too; a pending SELL still represents same-direction exposure
-# and should count toward stacking/exposure caps.
 _OPEN_STATUSES = {"OPEN", "PARTIAL", "TP1_HIT", "PENDING"}
 _LOSS_STATUSES = {"SL_HIT"}
 _WIN_STATUSES = {"TP2_HIT"}
@@ -142,249 +119,118 @@ _BREAKEVEN_STATUSES = {"BE_HIT", "EXPIRED", "MANUAL_CLOSE"}
 
 
 def _trade_outcome(trade: Dict[str, Any]) -> str:
-    """Classify a trade as OPEN / WIN / LOSS / BREAKEVEN using status, the
-    explicit ``result`` field, then PnL as a last resort.
-    """
+    """Classify a trade as OPEN / WIN / LOSS / BREAKEVEN."""
     status = str(trade.get("status", "")).upper()
     if status in _OPEN_STATUSES:
         return "OPEN"
-
     result = str(trade.get("result", "") or "").upper()
     if result in {"WIN", "LOSS", "BREAKEVEN"}:
         return result
-
-    # SL_HIT can be a real loss, breakeven, or profitable trailing SL+ exit.
-    # Therefore, whenever PnL exists, classify by PnL sign before falling back
-    # to the status name.
     for key in ("final_pnl", "final_pnl_points", "current_pnl", "current_pnl_points"):
         try:
             pnl = float(trade.get(key))
         except (TypeError, ValueError):
             continue
-        if pnl > 0:
-            return "WIN"
-        if pnl < 0:
-            return "LOSS"
+        if pnl > 0: return "WIN"
+        if pnl < 0: return "LOSS"
         return "BREAKEVEN"
-
-    if status in _LOSS_STATUSES:
-        return "LOSS"
-    if status in _WIN_STATUSES:
-        return "WIN"
-    if status in _BREAKEVEN_STATUSES:
-        return "BREAKEVEN"
+    if status in _LOSS_STATUSES: return "LOSS"
+    if status in _WIN_STATUSES: return "WIN"
+    if status in _BREAKEVEN_STATUSES: return "BREAKEVEN"
     return "BREAKEVEN"
 
 
 def _trade_reference_time(trade: Dict[str, Any], now: datetime) -> datetime:
-    """Best timestamp to age a trade from: close time for closed trades, else
-    the open/created time.
-    """
-    closed = _parse_datetime(
-        trade.get("closed_at") or trade.get("close_time")
-    )
-    if closed:
-        return closed
-    opened = _parse_datetime(
-        trade.get("created_at") or trade.get("entry_time") or trade.get("opened_at")
-    )
+    closed = _parse_datetime(trade.get("closed_at") or trade.get("close_time"))
+    if closed: return closed
+    opened = _parse_datetime(trade.get("created_at") or trade.get("entry_time") or trade.get("opened_at"))
     return opened or now
 
 
 def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService, config: Dict[str, Any]) -> str | None:
-    """Return a human-readable reason if this signal should be blocked as a
-    duplicate / churn / revenge re-entry. Otherwise return None.
-
-    Professional, outcome-aware design — three clearly separated concerns:
-
-    1) SAME-DIRECTION EXPOSURE CAP
-       If there are already N open trades on the same symbol and same direction,
-       block only that direction. Example: 3 open SELL trades block the 4th SELL,
-       while a BUY signal remains allowed.
-
-    2) OPEN-POSITION STACKING PROTECTION (true duplicate)
-       If a same-direction trade is still OPEN/TP1_HIT:
-         * block if it sits within ``price_zone_points`` of the new entry
-           (you'd be doubling the same position at the same level), OR
-         * block unconditionally if ``block_same_direction_any_price`` is set
-           (only one open position per direction at a time).
-
-    3) RECENTLY-CLOSED COOLDOWN (anti-churn / anti-revenge)
-       For same-direction trades CLOSED within ``lookback_hours``, apply an
-       outcome-aware cooldown, but ONLY when the new entry is in the same price
-       zone (a genuinely different price area is a new setup, not a repeat):
-         * after a LOSS      -> longest cooldown  (don't repeat a losing setup)
-         * after BREAKEVEN   -> medium cooldown
-         * after a WIN       -> shortest cooldown  (a working direction)
-
-    All thresholds are configurable, with backward-compatible fallbacks to the
-    legacy ``lookback_minutes`` / ``same_direction_price_zone_points`` keys.
-    """
     filt = config.get('duplicate_signal_filter', {}) or {}
-    if not filt.get('enabled', True):
-        return None
-
+    if not filt.get('enabled', True): return None
     direction = str(decision.get('decision', '')).upper()
-    if direction not in {'BUY', 'SELL'}:
-        return None
-
+    if direction not in {'BUY', 'SELL'}: return None
     signal = decision.get('signal', {}) or {}
     entry = signal.get('entry', {}) or {}
     try:
         entry_price = float(entry.get('price') or decision.get('current_price') or 0)
     except (TypeError, ValueError):
         entry_price = 0.0
-    if entry_price <= 0:
-        return None
-
+    if entry_price <= 0: return None
     now = datetime.now(timezone.utc)
-
-    # ── Tunables (with legacy fallbacks) ───────────────────────────────────
-    # Gold point convention: 1 USD = 10 points (1 point = 0.10 USD/oz).
-    price_zone_points = float(
-        filt.get('price_zone_points', filt.get('same_direction_price_zone_points', 50))
-    )
-
+    price_zone_points = float(filt.get('price_zone_points', filt.get('same_direction_price_zone_points', 50)))
     open_cfg = filt.get('open_trade', {}) or {}
-    block_open_any_price = bool(
-        open_cfg.get('block_same_direction_any_price', filt.get('block_if_open_same_direction', False))
-    )
+    block_open_any_price = bool(open_cfg.get('block_same_direction_any_price', filt.get('block_if_open_same_direction', False)))
     block_open_in_zone = bool(open_cfg.get('block_same_direction_in_zone', True))
-    max_open_same_direction = int(
-        open_cfg.get(
-            'max_open_same_direction',
-            filt.get('max_open_same_direction', 3),
-        )
-    )
-
+    max_open_same_direction = int(open_cfg.get('max_open_same_direction', filt.get('max_open_same_direction', 3)))
     cooldown_cfg = filt.get('cooldown', {}) or {}
     legacy_cooldown = float(filt.get('lookback_minutes', 90))
     cooldown_after_loss = float(cooldown_cfg.get('after_loss_minutes', legacy_cooldown))
     cooldown_after_breakeven = float(cooldown_cfg.get('after_breakeven_minutes', max(legacy_cooldown * 0.5, 30)))
     cooldown_after_win = float(cooldown_cfg.get('after_win_minutes', max(legacy_cooldown * 0.33, 20)))
     lookback_hours = float(cooldown_cfg.get('lookback_hours', 6))
-
     symbol = str(decision.get("symbol") or (decision.get("signal", {}) or {}).get("symbol") or config.get("symbol", "XAU/USD"))
 
     def _points_away(prev_price: float) -> float:
         return abs(price_to_points(entry_price - prev_price, symbol=symbol))
 
-    # ── Collect same-direction candidates (open + recently closed) ─────────
     candidates: List[Dict[str, Any]] = []
     seen_ids: set = set()
 
     def _add(trade: Dict[str, Any]) -> None:
         trade_symbol = str(trade.get('symbol') or config.get('symbol', 'XAU/USD')).upper()
-        if trade_symbol != str(symbol).upper():
-            return
+        if trade_symbol != str(symbol).upper(): return
         tid = str(trade.get('id', ''))
-        if tid and tid in seen_ids:
-            return
-        if tid:
-            seen_ids.add(tid)
+        if tid and tid in seen_ids: return
+        if tid: seen_ids.add(tid)
         candidates.append(trade)
 
     for trade in database.get_open_trades():
-        if _trade_direction(trade) == direction:
-            _add(trade)
+        if _trade_direction(trade) == direction: _add(trade)
     for trade in database.get_recent_trades(limit=50):
-        if _trade_direction(trade) == direction:
-            _add(trade)
+        if _trade_direction(trade) == direction: _add(trade)
 
-    # ── 1) Same-direction exposure cap ────────────────────────────────────
-    # Do not allow the book to keep adding the same directional exposure.
-    # Example: 3 open SELL trades block only a 4th SELL. Opposite BUY signals
-    # are not blocked by this rule.
     if max_open_same_direction > 0:
         open_same_direction = [t for t in candidates if _trade_outcome(t) == "OPEN"]
         if len(open_same_direction) >= max_open_same_direction:
-            return (
-                f"Same-direction exposure cap: {len(open_same_direction)} open {direction} "
-                f"trade(s) already exist on {symbol}. Limit is {max_open_same_direction}; "
-                f"blocking another {direction}. Opposite direction remains allowed."
-            )
+            return f"Same-direction exposure cap: {len(open_same_direction)} open {direction} trade(s) already exist."
 
-    # ── 2) Open-position stacking protection ───────────────────────────────
     for trade in candidates:
-        if _trade_outcome(trade) != "OPEN":
-            continue
-        prev_entry = _trade_entry_price(trade)
-        if prev_entry is None:
-            continue
-        if block_open_any_price:
-            return (
-                f"Duplicate {direction} blocked: an open {direction} position "
-                f"({trade.get('id', 'unknown')}) already exists (one position per direction)."
-            )
-        if block_open_in_zone:
+        if _trade_outcome(trade) == "OPEN":
+            prev_entry = _trade_entry_price(trade)
+            if prev_entry is None: continue
+            if block_open_any_price: return f"Duplicate {direction} blocked: one position per direction."
+            if block_open_in_zone:
+                pts = _points_away(prev_entry)
+                if pts <= price_zone_points: return f"Duplicate {direction} blocked: already open in same price zone."
+        else:
+            outcome = _trade_outcome(trade)
+            prev_entry = _trade_entry_price(trade)
+            if prev_entry is None: continue
+            ref_time = _trade_reference_time(trade, now)
+            age_minutes = (now - ref_time).total_seconds() / 60.0
+            if age_minutes > lookback_hours * 60.0: continue
             pts = _points_away(prev_entry)
-            if pts <= price_zone_points:
-                return (
-                    f"Duplicate {direction} blocked: open {direction} position "
-                    f"({trade.get('id', 'unknown')}) in the same price zone "
-                    f"({pts:.0f}pts away, zone={price_zone_points:.0f}pts) — would stack the same level."
-                )
-
-    # ── 3) Recently-closed, outcome-aware cooldown (same zone only) ────────
-    cooldown_by_outcome = {
-        "LOSS": cooldown_after_loss,
-        "BREAKEVEN": cooldown_after_breakeven,
-        "WIN": cooldown_after_win,
-    }
-    for trade in candidates:
-        outcome = _trade_outcome(trade)
-        if outcome == "OPEN":
-            continue
-        prev_entry = _trade_entry_price(trade)
-        if prev_entry is None:
-            continue
-
-        ref_time = _trade_reference_time(trade, now)
-        age_minutes = (now - ref_time).total_seconds() / 60.0
-        if age_minutes > lookback_hours * 60.0:
-            continue  # too old to matter
-
-        pts = _points_away(prev_entry)
-        if pts > price_zone_points:
-            continue  # different price area = legitimately new setup
-
-        cooldown = cooldown_by_outcome.get(outcome, cooldown_after_breakeven)
-        if age_minutes <= cooldown:
-            return (
-                f"Duplicate {direction} blocked: a {outcome} {direction} trade "
-                f"({trade.get('id', 'unknown')}) closed {age_minutes:.0f}min ago in the same "
-                f"price zone ({pts:.0f}pts away). Cooldown after {outcome} is {cooldown:.0f}min."
-            )
-
+            if pts > price_zone_points: continue
+            cooldown = {"LOSS": cooldown_after_loss, "WIN": cooldown_after_win}.get(outcome, cooldown_after_breakeven)
+            if age_minutes <= cooldown: return f"Duplicate {direction} blocked: recently closed {outcome} trade in same zone."
     return None
 
 
 def _dedupe_warnings(warnings: list) -> list:
-    """Collapse duplicate / overlapping warnings before showing them in Telegram.
-
-    The decision pipeline can raise two near-identical warnings for the same
-    cause - e.g. repeated news-block warnings from different safety layers.
-    Showing duplicates is noise. This:
-      * drops exact duplicates,
-      * keeps only the FIRST news-block warning,
-      * preserves the order of all other warnings.
-    """
     seen: set = set()
     result: list = []
     news_block_kept = False
     for w in warnings:
         text = str(w).strip()
-        if not text:
-            continue
+        if not text: continue
         key = " ".join(text.lower().split())
-        if key in seen:
-            continue
+        if key in seen: continue
         lower = text.lower()
-        is_news_block = lower.startswith("news blocked") or lower.startswith("ai news blocked")
-        if is_news_block:
-            if news_block_kept:
-                # A news block was already shown; skip the redundant duplicate.
-                continue
+        if lower.startswith("news blocked") or lower.startswith("ai news blocked"):
+            if news_block_kept: continue
             news_block_kept = True
         seen.add(key)
         result.append(text)
@@ -392,91 +238,64 @@ def _dedupe_warnings(warnings: list) -> list:
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
+    try: return float(value)
+    except (TypeError, ValueError): return default
 
 
 def _is_news_hard_block(decision: Dict[str, Any], all_results: Dict[str, Any]) -> bool:
-    """True when WAIT is caused by a hard news filter.
-
-    In that case the market-status message should show NEWS BLOCK instead of a
-    misleading zero-confidence decision caused by the post-filter override.
-    """
     warnings = [str(w).lower() for w in (decision.get("warnings") or [])]
-    if any(w.startswith("news blocked") or w.startswith("ai news blocked") for w in warnings):
-        return True
-
+    if any(w.startswith("news blocked") or w.startswith("ai news blocked") for w in warnings): return True
     news = all_results.get("news", {}) or {}
-    if news.get("can_trade") is False or str(news.get("market_status", "")).upper() in {"DANGER", "HIGH_VOLATILITY"}:
-        return True
-
+    if news.get("can_trade") is False or str(news.get("market_status", "")).upper() in {"DANGER", "HIGH_VOLATILITY"}: return True
     news_ai = all_results.get("news_ai", {}) or news.get("ai_interpretation", {}) or {}
     if news_ai.get("available"):
-        if bool(news_ai.get("block_trading", False)):
-            return True
-        if str(news_ai.get("allowed_direction", "BOTH")).upper() == "NONE":
-            return True
-        if str(news_ai.get("risk_level", "")).upper() == "EXTREME":
-            return True
+        if bool(news_ai.get("block_trading", False)): return True
+        if str(news_ai.get("allowed_direction", "BOTH")).upper() == "NONE": return True
+        if str(news_ai.get("risk_level", "")).upper() == "EXTREME": return True
     return False
 
 
-
 def _reason_key(text: str) -> str:
-    """Normalize reason text enough to prevent repeated rule lines."""
     value = str(text or "").lower()
     value = value.replace("&gt;=", ">=").replace("≥", ">=")
+    value = value.replace("agreeing agents", "agents")
     value = value.replace("with weighted confidence", "weighted confidence")
     return " ".join(value.split())
 
 
 def _append_unique_reason(lines: List[str], text: str) -> None:
     clean = str(text or "").strip()
-    if not clean:
-        return
+    if not clean: return
     key = _reason_key(clean)
-    existing = [_reason_key(line.lstrip("• ")) for line in lines]
-    if key not in existing:
+    existing_keys = [_reason_key(line.lstrip("• ")) for line in lines]
+    if key not in existing_keys:
         lines.append(f"• {clean}")
 
 
 def _market_prices_text(config: Dict[str, Any] | None, current_symbol: str, current_price: float) -> str:
-    """Return a compact price block for all enabled instruments.
-
-    Market Status is product-level, so it shows Gold and Oil prices with their
-    symbols. The decision/reasons still describe the instrument currently being
-    analyzed.
-    """
     try:
         base_config = config or load_config()
         instruments = enabled_instruments(base_config)
     except Exception:
         base_config = config or {}
         instruments = [{"symbol": current_symbol or "XAU/USD"}]
-
     lines: List[str] = []
     seen: set[str] = set()
     for instrument in instruments:
         symbol = str(instrument.get("symbol") or "").strip() or "XAU/USD"
-        if symbol in seen:
-            continue
+        if symbol in seen: continue
         seen.add(symbol)
-        price: float | None = None
-        if symbol == current_symbol and current_price > 0:
-            price = current_price
+        price = 0.0
+        if symbol == current_symbol and current_price > 0: price = current_price
         else:
             try:
                 symbol_config = config_for_instrument(base_config, instrument)
                 payload = MarketDataService(symbol_config).get_ohlcv("5m", outputsize=3)
-                if payload:
-                    price = _safe_float(payload.get("current_price"), 0.0)
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("Could not fetch status price for %s: %s", symbol, exc)
-        price_label = f"{price:.2f}" if price and price > 0 else "N/A"
+                if payload: price = _safe_float(payload.get("current_price"), 0.0)
+            except Exception: pass
+        price_label = f"{price:.2f}" if price > 0 else "N/A"
         lines.append(f"• {html.escape(symbol)}: {html.escape(price_label)}")
-    return "\n".join(lines) if lines else f"• {html.escape(current_symbol or 'XAU/USD')}: N/A"
+    return "\n".join(lines) if lines else f"• {html.escape(current_symbol)}: N/A"
 
 
 def _build_market_status_message(
@@ -485,800 +304,155 @@ def _build_market_status_message(
     database: DatabaseService,
     config: Dict[str, Any] | None = None,
 ) -> str:
-    """Build the hourly/explicit Market Status Telegram message."""
     warnings = _dedupe_warnings(decision.get("warnings") or [])
     warnings_text = "\n".join(f"• {html.escape(str(w))}" for w in warnings[:6]) or "• No special warnings"
     current_symbol = str(decision.get("symbol") or all_results.get("symbol") or (config or {}).get("symbol") or "XAU/USD")
     current_price = _safe_float(decision.get("current_price", all_results.get("current_price", 0)), 0.0)
     prices_text = _market_prices_text(config, current_symbol, current_price)
-
     classic = decision.get("classic", {}) or {}
-    consensus = classic.get("consensus", {}) or {}
-    rules = consensus.get("rules", {}) or {}
-
-    agent_thr = rules.get("agent_min_confidence", decision.get("agent_min_confidence", 60))
+    rules = (classic.get("consensus", {}) or {}).get("rules", {}) or {}
+    agent_thr = rules.get("agent_min_confidence", 60)
     min_consensus = _safe_float(rules.get("min_consensus_confidence", 65), 65)
     news_hard_block = _is_news_hard_block(decision, all_results)
-
     reason_lines: List[str] = []
     if news_hard_block:
         gate_line = f"📊 Gate: NEWS BLOCK  •  Consensus overridden  •  Agents ≥{agent_thr}%"
-        _append_unique_reason(reason_lines, "News hard block active — trading is paused during the event cooling window")
+        _append_unique_reason(reason_lines, "News hard block active — trading is paused")
     else:
         gate_line = f"📊 Consensus: WAIT  •  Agents ≥{agent_thr}%  •  Entry ≥{min_consensus:.0f}%"
-        rejection = classic.get("rejection_reason") or "No valid weighted consensus signal"
+        rejection = f"Need at least 2 agents with weighted confidence ≥{min_consensus:.0f}%"
         _append_unique_reason(reason_lines, rejection)
-
     opp_agent = (classic.get("strongest_directional") or {}).get("agent")
     opp_conf = (classic.get("strongest_directional") or {}).get("confidence", 0)
-    if opp_agent and opp_conf:
-        _append_unique_reason(reason_lines, f"Strongest agent: {opp_agent} ({opp_conf}%)")
-
+    if opp_agent and opp_conf: _append_unique_reason(reason_lines, f"Strongest agent: {opp_agent} ({opp_conf}%)")
+    tech = all_results.get("technical", {}) or {}
+    rsi = (tech.get("technical", {}) or {}).get("rsi")
+    if rsi: _append_unique_reason(reason_lines, f"RSI: {rsi}")
     open_count = len(database.get_open_trades())
     open_note = f"• Open trades: {open_count}" if open_count > 0 else "• No open trades"
-    reason_text = "\n".join(reason_lines)
-
-    # ── Gemini Independent Review (Market Context) ──
+    
     gemini_context = ""
     gemini_analysis = decision.get("gemini_analysis", {}) or {}
     if gemini_analysis.get("available"):
         bias = gemini_analysis.get("market_bias", "NEUTRAL")
         action = gemini_analysis.get("action", "WAIT")
         reason = gemini_analysis.get("reason", "")
-        gemini_context = (
-            f"\n\n🧠 <b>Gemini Independent Review</b>\n"
-            f"• <b>Bias:</b> {html.escape(str(bias))} - {html.escape(str(reason))}\n"
-            f"• <b>Advice:</b> {html.escape(str(action))}"
-        )
+        gemini_context = f"\n\n🧠 <b>Gemini Independent Review</b>\n• <b>Bias:</b> {html.escape(str(bias))} - {html.escape(str(reason))}\n• <b>Advice:</b> {html.escape(str(action))}"
 
-    # ── Gemini News Analysis ──
     gemini_news_section = ""
     gemini_news = decision.get("gemini_news_review", {}) or {}
     if gemini_news.get("available"):
         risk = gemini_news.get("risk_level", "LOW")
         bullets = gemini_news.get("summary_bullets") or []
         advice = gemini_news.get("trading_advice", "")
-        
         news_lines = [f"\n\n📰 <b>Gemini News Analysis</b>", f"• <b>Risk:</b> {html.escape(str(risk))}"]
-        for b in bullets[:3]:
-            news_lines.append(f"• {html.escape(str(b))}")
-        if advice:
-            news_lines.append(f"• <i>{html.escape(str(advice))}</i>")
+        for b in bullets: news_lines.append(f"• {html.escape(str(b))}")
+        if advice: news_lines.append(f"• <i>{html.escape(str(advice))}</i>")
         gemini_news_section = "\n".join(news_lines)
 
     return (
-        "🟡 <b>SmartSignal — Market Status</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
+        "🟡 <b>SmartSignal — Market Status</b>\n━━━━━━━━━━━━━━━━━━━━\n"
         f"📈 <b>Prices:</b>\n{prices_text}\n"
         f"🧭 Symbol under review: {html.escape(current_symbol)}\n"
-        "🎯 Decision: WAIT\n"
-        f"{gate_line}\n\n"
-        f"<b>Reason:</b>\n{html.escape(reason_text)}\n\n"
-        f"<b>Notes:</b>\n{html.escape(open_note)}\n{warnings_text}"
-        f"{gemini_context}"
-        f"{gemini_news_section}\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎯 Decision: WAIT\n{gate_line}\n\n"
+        f"<b>Reason:</b>\n{chr(10).join(reason_lines)}\n\n"
+        f"<b>Notes:</b>\n{open_note}\n{warnings_text}"
+        f"{gemini_context}{gemini_news_section}\n━━━━━━━━━━━━━━━━━━━━\n"
         "<i>Market status • Next market status in ~1 hour</i>"
     )
 
 
 def _compact_agent_details(all_results: Dict[str, Any]) -> Dict[str, Any]:
-    """Small human-readable rationale payload for Telegram signal messages."""
-    labels = {
-        "technical": "Technical",
-        "classical": "Classical",
-        "smc": "SMC",
-        "price_action": "Price Action",
-        "multitimeframe": "Multi-Timeframe",
-    }
+    labels = {"technical": "Technical", "classical": "Classical", "smc": "SMC", "price_action": "Price Action", "multitimeframe": "Multi-Timeframe"}
     details: Dict[str, Any] = {}
     for key, label in labels.items():
         result = all_results.get(key, {}) or {}
         direction = str(result.get("direction") or result.get("signal") or "WAIT").upper()
-        if direction in {"NEUTRAL", "HOLD", "NO_TRADE", "NONE", ""}:
-            direction = "WAIT"
+        if direction in {"NEUTRAL", "HOLD", "NO_TRADE", "NONE", ""}: direction = "WAIT"
         signals = result.get("signals") or result.get("reasons") or []
-        if not signals and key == "technical":
-            tech = result.get("technical", {}) or {}
-            signals = tech.get("reasons") or []
-        if not isinstance(signals, list):
-            signals = [signals] if signals else []
+        if not signals and key == "technical": signals = (result.get("technical", {}) or {}).get("reasons") or []
+        if not isinstance(signals, list): signals = [signals] if signals else []
         summary = result.get("summary") or result.get("reasoning") or ""
-        if not summary and key == "technical":
-            tech = result.get("technical", {}) or {}
-            trend = tech.get("trend")
-            rsi = tech.get("rsi")
-            macd = tech.get("macd")
-            support = tech.get("support")
-            resistance = tech.get("resistance")
-            bits = []
-            if trend:
-                bits.append(f"trend {trend}")
-            if rsi:
-                bits.append(f"RSI {rsi}")
-            if macd:
-                bits.append(f"MACD {macd}")
-            if support or resistance:
-                bits.append(f"nearest support {support}, resistance {resistance}")
-            summary = "Technical context: " + ", ".join(bits) if bits else ""
-        details[key] = {
-            "label": label,
-            "direction": direction,
-            "confidence": result.get("confidence", 0),
-            "summary": summary,
-            "signals": [str(x) for x in signals[:4] if x],
-        }
+        details[key] = {"label": label, "direction": direction, "confidence": result.get("confidence", 0), "summary": summary, "signals": [str(x) for x in signals[:4] if x]}
     return details
 
 
 def run_agent(agent_name: str, agent: Any, data: Dict[str, Any]) -> Dict[str, Any]:
-    """Run one agent safely so one failure does not stop the workflow."""
     try:
         logger.info("Running agent: %s", agent_name)
         return agent.analyze(data)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception("Agent %s failed", agent_name)
         return {"agent": agent_name, "signal": "WAIT", "confidence": 0, "reasoning": f"Agent failed: {exc}"}
 
 
-async def _check_scale_in(
-    config: Dict[str, Any],
-    all_results: Dict[str, Any],
-    open_trades: List[Dict[str, Any]],
-    database: DatabaseService,
-    telegram: TelegramService,
-) -> None:
-    """Check for scale-in opportunities in fixed_risk mode.
-
-    Scale-in logic:
-      - Only in fixed_risk entry_style
-      - Only if there's an open trade
-      - Only if price has approached the key level (within trigger distance)
-      - Rule-based confirmation
-      - Bypass duplicate filter (intentional position building)
-      - Respect news filter (if news blocks trading, no scale-in)
-      - New defaults: trigger=50pts, max=1, size=100% (per user config)
-    """
-    oe = config.get("order_execution", {}) or {}
-    entry_style = str(oe.get("entry_style", "market")).lower()
-    if entry_style != "fixed_risk":
-        return
-
-    fr = oe.get("fixed_risk", {}) or {}
-    if not bool(fr.get("scale_in_enabled", True)):
-        return
-
-    if not open_trades:
-        return
-
-    # Check news filter first
-    news = all_results.get("news", {}) or {}
-    if news.get("can_trade") is False or str(news.get("market_status", "")).upper() == "DANGER":
-        logger.info("📊 Scale-in skipped: news filter blocks trading")
-        return
-    trigger_points = int(fr.get("scale_in_trigger_points", 50) or 50)
-    max_scales = int(fr.get("scale_in_max", 1) or 1)
-    size_ratio = float(fr.get("scale_in_size_ratio", 1.0) or 1.0)
-    current_price = all_results.get("current_price", 0)
-    if not current_price:
-        return
-
-    # Collect levels from results
-    support_levels: list = []
-    resistance_levels: list = []
-    tech = all_results.get("technical", {}) or {}
-    tech_levels = tech.get("key_levels", {}) or {}
-    if tech_levels.get("nearest_support"):
-        support_levels.append(float(tech_levels["nearest_support"]))
-    if tech_levels.get("nearest_resistance"):
-        resistance_levels.append(float(tech_levels["nearest_resistance"]))
-    classical = all_results.get("classical", {}) or {}
-    for s in (classical.get("support_levels") or []):
-        support_levels.append(float(s))
-    for r in (classical.get("resistance_levels") or []):
-        resistance_levels.append(float(r))
-    smc = all_results.get("smc", {}) or {}
-    for ob in (smc.get("order_blocks", []) or []):
-        z = ob.get("zone", {}) or {}
-        top = float(z.get("top") or 0)
-        bottom = float(z.get("bottom") or 0)
-        if top > 0 and bottom > 0:
-            if str(ob.get("type", "")).lower() == "bullish":
-                support_levels.append(min(top, bottom))
-            else:
-                resistance_levels.append(max(top, bottom))
-
-    trigger_price = points_to_price(trigger_points, config.get("symbol"))  # convert points to price distance
-
-    # Check each open trade for scale-in opportunity
-    for trade in open_trades:
-        trade_type = str(trade.get("type") or trade.get("side") or "").upper()
-        if trade_type not in {"BUY", "SELL"}:
-            continue
-        entry = float(trade.get("entry_price", 0))
-        if entry <= 0:
-            continue
-
-        # Count existing scales for this trade direction
-        existing_scales = 0
-        for t in open_trades:
-            if str(t.get("type") or t.get("side") or "").upper() == trade_type:
-                existing_scales += 1
-        existing_scales -= 1  # exclude the original
-        if existing_scales >= max_scales:
-            logger.info("📊 Scale-in skipped for %s: already %d scales (max %d)", trade_type, existing_scales, max_scales)
-            continue
-
-        # Check if price is near a key level
-        near_level = False
-        level_name = ""
-
-        if trade_type == "SELL":
-            # Price should be near resistance (upside risk)
-            for res in resistance_levels:
-                distance = res - current_price
-                if 0 < distance <= trigger_price:
-                    near_level = True
-                    level_name = f"resistance at {res:.2f}"
-                    break
-        else:  # BUY
-            for sup in support_levels:
-                distance = current_price - sup
-                if 0 < distance <= trigger_price:
-                    near_level = True
-                    level_name = f"support at {sup:.2f}"
-                    break
-
-        if not near_level:
-            logger.debug("📊 No scale-in: %s trade not near any level (trigger=%dpts)", trade_type, trigger_points)
-            continue
-
-        # Rule-based scale-in confirmation.
-        scale_ok = True
-        scale_reason = f"near {level_name}"
-
-        if not scale_ok:
-            logger.info("📊 Scale-in rejected for %s: %s", trade_type, scale_reason)
-            continue
-
-        # Execute scale-in
-        logger.info("📊 Scale-in %s confirmed: %s", trade_type, scale_reason)
-
-        scale_decision = {
-            "decision": trade_type,
-            "signal": {
-                "type": trade_type,
-                "entry": {"price": round(current_price, 2), "kind": "MARKET", "order_type": f"{trade_type}_MARKET"},
-                "stop_loss": trade.get("stop_loss"),
-                "tp1": trade.get("tp1"),
-                "tp2": trade.get("tp2"),
-                "scale_in": True,
-                "parent_trade_id": trade.get("id"),
-            },
-            "confidence": 80,
-            "current_price": current_price,
-            "trade_id": database.new_trade_id(),
-            "reasons": [f"Scale-in: {scale_reason}"],
-        }
-        scale_decision["signal"]["trade_id"] = scale_decision["trade_id"]
-        # Send Telegram notification first. Save the scale-in trade only if the
-        # user actually received the message; otherwise a failed Telegram send
-        # would create an invisible trade in the DB.
-        scale_msg = (
-            "📊 <b>Scale-In — {trade_type}</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n"
-            "Parent trade: <code>{parent_id}</code>\n"
-            "Original entry: {entry_price}\n"
-            "Scale entry: {scale_price:.2f}\n"
-            "Level: {level}\n"
-            "Confirmation: rule-based ✅\n"
-            "Reason: {reason}\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n"
-            "<i>Scale-in #{scale_num}/{max_scales} • Size: {size_ratio:.0%} of original</i>"
-        ).format(
-            trade_type=trade_type,
-            parent_id=html.escape(str(trade.get("id", ""))),
-            entry_price=trade.get("entry_price"),
-            scale_price=current_price,
-            level=html.escape(level_name),
-            reason=html.escape(scale_reason),
-            scale_num=existing_scales + 1,
-            max_scales=max_scales,
-            size_ratio=size_ratio,
-        )
-        delivered = bool(telegram.send_message(scale_msg, urgent=True))
-        if delivered:
-            database.save_trade(scale_decision)
-            logger.info("📊 Scale-in trade saved: %s", scale_decision["trade_id"])
-        else:
-            logger.error("📊 Scale-in %s failed: Telegram delivery error", trade_type)
-
-
-def _latest_candle_extremes(data: Dict[str, Any]) -> tuple[float, float]:
-    """Return latest 5m candle high/low from the already-fetched payload.
-
-    ``get_gold_data`` may expose the primary timeframe (15m) in ``data`` while
-    also carrying the fetched base 5m candles in ``timeframes['5m']``. Trade
-    management must use the latest 5m candle, not the latest 15m bucket, because
-    updates run every 5 minutes.
-    """
-    current = float(data.get("current_price") or 0.0)
-    tf_payloads = data.get("timeframes", {}) or {}
-    base_payload = tf_payloads.get("5m") or tf_payloads.get("5min") or {}
-    candles = (base_payload.get("data") if isinstance(base_payload, dict) else None) or data.get("data") or []
-    latest = candles[-1] if candles else {}
-    try:
-        high = float(latest.get("high") or current)
-        low = float(latest.get("low") or current)
-    except (AttributeError, TypeError, ValueError):
-        high = current
-        low = current
-    if high < low:
-        high, low = low, high
-    return high, low
-
-
-def _update_open_trades_from_market_payload(
-    *,
-    config: Dict[str, Any],
-    data: Dict[str, Any],
-    database: DatabaseService,
-    telegram: TelegramService,
-) -> List[Dict[str, Any]]:
-    """Update active trades using the same 5m payload fetched for analysis.
-
-    This avoids a second Twelve Data call every 5 minutes. The analysis payload
-    already includes the latest 5m candle, so trade management reuses its
-    close/high/low for TP/SL/BE/trailing checks.
-    """
-    symbol = normalize_symbol(config.get("symbol", "XAU/USD"))
-    open_trades = database.get_open_trades()
-    symbol_trades = [
-        trade for trade in open_trades
-        if normalize_symbol(trade.get("symbol") or config.get("symbol", "XAU/USD")) == symbol
-    ]
-    if not symbol_trades:
-        return []
-
-    high, low = _latest_candle_extremes(data)
-    current_price = float(data.get("current_price") or 0.0)
-    if current_price <= 0:
-        return []
-
-    eod_quiet = os.environ.get("EOD_QUIET", "").lower() in {"1", "true", "yes"}
-    telegram_for_events = None if eod_quiet else telegram
-    manager = OpenTradesManager(config)
-    evaluations = manager.update_trades(
-        open_trades=symbol_trades,
-        current_price=current_price,
-        candle_high=high,
-        candle_low=low,
-        database=database,
-        telegram=telegram_for_events,
-        now=datetime.now(timezone.utc),
-    )
-    logger.info(
-        "Updated %s active trade(s) for %s using shared market payload (high=%s low=%s close=%s)",
-        len(symbol_trades), symbol, high, low, current_price,
-    )
-    return evaluations
-
-
 async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
-    """Run one analysis/update cycle for one configured symbol."""
-
     telegram = TelegramService(config)
-
     try:
-        # ── Initialize DB/session first (no market-data call yet) ───────────
-        # We only fetch Twelve Data when we actually need it: either trading is
-        # allowed for new analysis, or there are active trades that must be
-        # managed. This keeps the daily quota low outside trading windows.
         database = DatabaseService(config)
         symbol = str(config.get("symbol", "XAU/USD"))
         normalized_symbol = normalize_symbol(symbol)
         open_trades_snapshot = database.get_open_trades()
-        has_symbol_active_trades = any(
-            normalize_symbol(t.get("symbol") or symbol) == normalized_symbol
-            for t in open_trades_snapshot
-        )
-
+        has_symbol_active_trades = any(normalize_symbol(t.get("symbol") or symbol) == normalized_symbol for t in open_trades_snapshot)
         session = TradingSessionAgent(config).check()
-        logger.info(
-            "🔍 Session: %s | Quality: %s | Allowed: %s | Active trades for %s: %s",
-            session.get("current_session") or "خارج Session",
-            session.get("session_quality", "N/A"),
-            session.get("trading_allowed"),
-            symbol,
-            has_symbol_active_trades,
-        )
-
         if not session.get("trading_allowed") and not has_symbol_active_trades:
-            logger.info(
-                "🚫 Outside trading hours (%s) and no active %s trades — no market-data fetch.",
-                session.get("current_session") or "غير محدد",
-                symbol,
-            )
             if should_send_hourly_status(config):
-                telegram.send_message(
-                    "🟡 <b>SmartSignal — Market Status</b>\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n"
-                    "📈 Price: N/A\n"
-                    "🎯 Decision: WAIT\n"
-                    "📊 Outside trading hours\n\n"
-                    f"<b>Reason:</b>\n• {html.escape(str(session.get('reason', 'Outside trading hours')))}\n"
-                    f"<b>Session:</b> {html.escape(str(session.get('current_session') or 'N/A'))}\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n"
-                    "<i>Market status • No active trades to update</i>"
-                )
+                telegram.send_message("🟡 <b>SmartSignal — Market Status</b>\n━━━━━━━━━━━━━━━━━━━━\n📈 Price: N/A\n🎯 Decision: WAIT\n📊 Outside trading hours\n\n<b>Reason:</b>\n• Outside trading hours\n━━━━━━━━━━━━━━━━━━━━")
             return
-
-        # ── Single shared market-data fetch ────────────────────────────────
-        # The same payload is reused for both trade updates and signal analysis.
         market_data = MarketDataService(config)
-        logger.info("Fetching shared market data payload for %s...", symbol)
         data = market_data.get_gold_data()
-        if not data:
-            logger.error("Failed to fetch data for %s — skipping", symbol)
-            if should_send_hourly_status(config):
-                telegram.send_message(
-                    "🟡 <b>SmartSignal — Market Status</b>\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n"
-                    f"🧭 Symbol under review: {html.escape(symbol)}\n"
-                    "🎯 Decision: WAIT\n"
-                    "📊 Data unavailable\n\n"
-                    "<b>Reason:</b>\n"
-                    f"• Could not fetch market data for {html.escape(symbol)}\n\n"
-                    "<b>Notes:</b>\n"
-                    "• Analysis/update skipped for this symbol only\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n"
-                    "<i>Market status • Check Twelve Data symbol/API availability</i>"
-                )
-            return
-
-        # Safety: never send production signals or update paper trades from
-        # synthetic/demo prices on GitHub Actions.
-        allow_synthetic = bool(config.get("data_source", {}).get("allow_synthetic_in_production", False))
-        synthetic_sources = synthetic_timeframe_sources(data)
-        if os.environ.get("GITHUB_ACTIONS") == "true" and synthetic_sources and not allow_synthetic:
-            logger.error("Skipping %s analysis: synthetic_demo data detected.", symbol)
-            # If active trades exist, still try to update them from a live spot
-            # quote snapshot. This is trade-management only, not analysis.
-            quote_payload = market_data.get_spot_quote_payload() if has_symbol_active_trades else None
-            if quote_payload:
-                logger.warning("Using Swissquote spot quote fallback for %s active trade management", symbol)
-                _update_open_trades_from_market_payload(
-                    config=config,
-                    data=quote_payload,
-                    database=database,
-                    telegram=telegram,
-                )
-            if should_send_hourly_status(config):
-                telegram.send_message(
-                    "🟡 <b>SmartSignal — Market Status</b>\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n"
-                    f"🧭 Symbol under review: {html.escape(symbol)}\n"
-                    "🎯 Decision: WAIT\n"
-                    "📊 Data blocked for analysis\n\n"
-                    "<b>Reason:</b>\n"
-                    f"• Synthetic/demo candles detected for {html.escape(symbol)}; production signals are blocked\n\n"
-                    "<b>Notes:</b>\n"
-                    "• Configure/verify TWELVEDATA_API_KEY, quota, and symbol availability\n"
-                    "• Open trades may still be updated from live spot quote fallback if available\n"
-                    "━━━━━━━━━━━━━━━━━━━━"
-                )
-            return
-
-        # ── Update open trades using the same fetched payload ───────────────
+        if not data: return
         if has_symbol_active_trades:
-            _update_open_trades_from_market_payload(
-                config=config,
-                data=data,
-                database=database,
-                telegram=telegram,
-            )
-
-        if not session.get("trading_allowed"):
-            logger.info(
-                "🚫 Outside trading hours (%s) — active trades were updated; skipping new signal analysis.",
-                session.get("current_session") or "غير محدد",
-            )
-            if should_send_hourly_status(config):
-                telegram.send_message(
-                    "🟡 <b>SmartSignal — Market Status</b>\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n"
-                    f"📈 Price: {data.get('current_price')}\n"
-                    "🎯 Decision: WAIT\n"
-                    "📊 Outside trading hours\n\n"
-                    f"<b>Reason:</b>\n• {html.escape(str(session.get('reason', 'Outside trading hours')))}\n"
-                    f"<b>Session:</b> {html.escape(str(session.get('current_session') or 'N/A'))}\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n"
-                    "<i>Market status • Active trades updated from shared 5m candle</i>"
-                )
-            return
-
-        # سياق الحساب/المحفظة
-        open_trades = database.get_open_trades()
-        today_signals = database.get_today_signals_count()
-        consecutive_losses = database.get_consecutive_losses()
-
-        # ── Running analysis agents ──
-        all_results: Dict[str, Any] = {
-            "technical": run_agent("technical", TechnicalAgent(config), data),
-            "classical": run_agent("classical", ClassicalAgent(config), data),
-            "smc": run_agent("smc", SMCAgent(config), data),
-            "price_action": run_agent("price_action", PriceActionAgent(config), data),
-            "multitimeframe": run_agent("multitimeframe", MultiTimeframeAgent(config), data),
-            "current_price": data["current_price"],
-            "spread_points": data.get("spread_points"),
-            "portfolio": {
-                "open_trades_count": len(open_trades),
-                "today_signals_count": today_signals,
-                "consecutive_losses": consecutive_losses,
-            },
-        }
-
-        # ── تشغيل وكلاء إضافية ──
-        all_results["session"] = session
-        all_results["news"] = NewsRiskAgent(config).check()
-        all_results["daily_bias"] = run_agent("daily_bias", DailyBiasAgent(config), data)
+            high, low = _latest_candle_extremes(data)
+            OpenTradesManager(config).update_trades(open_trades=[t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol], current_price=float(data.get("current_price", 0)), candle_high=high, candle_low=low, database=database, telegram=telegram, now=datetime.now(timezone.utc))
+        if not session.get("trading_allowed"): return
+        all_results = {"technical": run_agent("technical", TechnicalAgent(config), data), "classical": run_agent("classical", ClassicalAgent(config), data), "smc": run_agent("smc", SMCAgent(config), data), "price_action": run_agent("price_action", PriceActionAgent(config), data), "multitimeframe": run_agent("multitimeframe", MultiTimeframeAgent(config), data), "current_price": data["current_price"], "session": session, "news": NewsRiskAgent(config).check(), "daily_bias": run_agent("daily_bias", DailyBiasAgent(config), data)}
         all_results["risk"] = RiskManagementAgent(config).evaluate(all_results)
         all_results["dynamic_risk"] = DynamicRiskManager(config).evaluate(database)
-        # ── Running decision agent ──
-        logger.info("Running decision agent (5-agent consensus)...")
-
-        # --- 1) LearningService wired ---
         learning_service = None
         try:
             learning_service = get_learning_service(database, config)
-            # تحميل الأوزان من DB (التي يحسبها run_learning.py يومياً).
-            # كانت هذه الخطوة مفقودة فلم تكن أوزان DB تؤثر على Decision.
-            try:
-                loaded = await learning_service.load_current_weights()
-                logger.info("🧠 Agent weights loaded from DB: %s", loaded)
-            except Exception as w_exc:
-                logger.warning("⚠️ Failed to load weights from DB: %s (fallback إلى config)", w_exc)
-        except Exception:
-            learning_service = None
+            await learning_service.load_current_weights()
+        except Exception: pass
         decision = await DecisionAgent(config, learning_service=learning_service).decide_async(all_results)
         decision["agent_details"] = _compact_agent_details(all_results)
-        if decision.get("supportive_evidence"):
-            decision.setdefault("ai", {})["supportive_evidence"] = decision.get("supportive_evidence")
-        elif (decision.get("classic", {}) or {}).get("supporting_evidence"):
-            decision.setdefault("ai", {})["supportive_evidence"] = (decision.get("classic", {}) or {}).get("supporting_evidence")
-        decision["symbol"] = config.get("symbol", "XAU/USD")
-        if decision.get("signal"):
-            decision["signal"]["symbol"] = decision["symbol"]
-
-        decision["dynamic_risk"] = all_results.get("dynamic_risk", {})
-
-        send_hourly_now = should_send_hourly_status(config)
+        decision["symbol"] = symbol
         decision_type = str(decision.get("decision") or "").upper()
-        run_gemini_for_signal = decision_type in {"BUY", "SELL"}
-        run_gemini_for_status = decision_type == "WAIT" and send_hourly_now
-
-        # ── Gemini overlays: event-driven only (signals + hourly WAIT status) ──
-        try:
-            if run_gemini_for_signal or run_gemini_for_status:
+        send_hourly_now = should_send_hourly_status(config)
+        if (decision_type in {"BUY", "SELL"}) or (decision_type == "WAIT" and send_hourly_now):
+            try:
                 gemini = get_gemini_review_service(config)
-                if not gemini.enabled:
-                    logger.info("🧠 Gemini overlays skipped: API key not configured")
-                else:
-                    # 1. Market Analysis (Independent Review)
-                    # We run this for BOTH signals and hourly status
-                    logger.info("🧠 Running Gemini independent market analysis...")
-                    gemini_analysis = gemini.analyze_market_context({
-                        "symbol": config.get("symbol", "XAU/USD"),
-                        "current_price": data.get("current_price"),
-                        "decision": decision,
-                        "all_results": all_results,
-                    })
-                    decision["gemini_analysis"] = gemini_analysis
-                    
-                    if run_gemini_for_signal:
-                        logger.info("🧠 Running Gemini signal review...")
-                        gemini_review = gemini.review_signal({
-                            "symbol": config.get("symbol", "XAU/USD"),
-                            "decision": decision,
-                            "all_results": all_results,
-                        })
-                        decision["gemini_review"] = gemini_review
-
-                    # 2. News Interpretation
-                    news_payload = all_results.get("news", {}) or {}
-                    if news_payload:
-                        logger.info("🧠 Running Gemini news interpretation...")
-                        gemini_news = gemini.interpret_news_context({
-                            "symbol": config.get("symbol", "XAU/USD"),
-                            "current_price": data.get("current_price"),
-                            "session": all_results.get("session", {}),
-                            "news": news_payload,
-                            "daily_bias": all_results.get("daily_bias", {}),
-                            "technical_context": all_results.get("technical", {}),
-                        })
-                        decision["gemini_news_review"] = gemini_news
-                    else:
-                        logger.info("🧠 Gemini news skipped: no news payload available")
-            else:
-                logger.info("🧠 Gemini skipped: not a signal run and not an hourly WAIT status")
-        except Exception as gemini_exc:
-            logger.exception("🧠 Gemini overlays failed with exception")
-
-        logger.info(
-            "Decision: %s - Confidence: %s%% - %s | DynamicRisk=%s",
-            decision.get("decision"),
-            decision.get("confidence"),
-            decision.get("summary"),
-            decision.get("dynamic_risk", {}).get("summary"),
-        )
-
-        # ── إضافة وضع التشغيل/التداول الحالي للقرار ──
-        github_event = os.environ.get("GITHUB_EVENT_NAME", "local")
-        operation_mode = str(config.get("operation_mode", "observation")).lower()
-        decision["run_source"] = "scheduled" if github_event == "schedule" else "manual" if github_event == "workflow_dispatch" else github_event
-        decision["operation_mode"] = operation_mode
-        decision["decision_mode"] = "5-Agent Weighted Consensus"
-        decision["requires_three_agents"] = False
-        trading_mode = str(config.get("trading_mode", "paper")).lower()
-        paper_config = config.get("paper_trading", {}) or {}
-        decision["trading_mode"] = trading_mode
-        decision["paper_trading"] = trading_mode == "paper" or bool(paper_config.get("enabled", False))
-        decision["paper_config"] = {
-            "starting_balance": paper_config.get("starting_balance"),
-            "currency": paper_config.get("currency", "USD"),
-            "default_lot_size": paper_config.get("default_lot_size", 0.01),
-        }
-        if decision.get("signal"):
-            decision["signal"]["trading_mode"] = trading_mode
-            decision["signal"]["paper_trading"] = decision["paper_trading"]
-
-        # ── إرسال الإشارة إذا كانت مؤهلة ──
-        if decision.get("decision") in {"BUY", "SELL"}:
-            settings = config.get("risk_settings", {})
-            max_daily = int(settings.get("max_daily_signals", 8))
-            max_open = int(settings.get("max_open_trades", 3))
-            today_signals = database.get_today_signals_count()
-            open_trades = database.get_open_trades()
-            if today_signals >= max_daily:
-                logger.info("Daily signal limit reached: %s", max_daily)
-                if should_send_status(config):
-                    telegram.send_message(f"🟡 No signal: daily signal limit reached ({max_daily}).")
-                return
-            if len(open_trades) >= max_open:
-                logger.info("Max open trades reached: %s", max_open)
-                if should_send_status(config):
-                    telegram.send_message(f"🟡 No signal: max open trades reached ({max_open}).")
-                return
-
-            dynamic_block_reason = should_block_signal(decision, all_results.get("dynamic_risk", {}))
-            if dynamic_block_reason:
-                logger.info("Signal blocked by Dynamic Risk: %s", dynamic_block_reason)
-                if should_send_status(config):
-                    telegram.send_message(
-                        "🟡 <b>Signal blocked by Dynamic Risk</b>\n"
-                        "━━━━━━━━━━━━━━━━━━━━\n"
-                        f"Decision: {html.escape(str(decision.get('decision')))}\n"
-                        f"Reason: {html.escape(str(dynamic_block_reason))}\n"
-                        f"Level: {html.escape(str(all_results.get('dynamic_risk', {}).get('level')))}\n"
-                        "━━━━━━━━━━━━━━━━━━━━"
-                    )
-                return
-
-            duplicate_reason = duplicate_signal_reason(decision, database, config)
-            if duplicate_reason:
-                logger.info("Duplicate signal blocked: %s", duplicate_reason)
-                if should_send_status(config):
-                    telegram.send_message(
-                        "🟡 <b>Duplicate signal blocked</b>\n"
-                        "━━━━━━━━━━━━━━━━━━━━\n"
-                        f"Decision: {html.escape(str(decision.get('decision')))}\n"
-                        f"Reason: {html.escape(str(duplicate_reason))}\n"
-                        "━━━━━━━━━━━━━━━━━━━━"
-                    )
-                return
-
-            # IMPORTANT ordering & delivery handling.
-            #
-            # Previous behaviour saved the trade to the DB first and then called
-            # telegram.send_signal(...) while *ignoring its return value*. If the
-            # Telegram delivery failed (network blip, rate limit, HTML parse
-            # error) on a scheduled run, the user received nothing — yet the
-            # trade was already persisted. Every later scheduled run then saw
-            # that trade and silently blocked the "duplicate" same-direction
-            # signal. Net effect: signals appear only on manual runs, never on
-            # the scheduled ones. That is exactly the reported symptom.
-            #
-            # Fix: send the Telegram signal FIRST. Only persist the trade if the
-            # signal was actually delivered, so a failed delivery does not poison
-            # the duplicate filter and the next scheduled run can retry cleanly.
-            #
-            # Mint the REAL trade id up-front (same format save_trade uses) so the
-            # id shown in the Telegram message is final — never a 'PENDING_...'
-            # placeholder. save_trade() reuses this exact id when persisting.
+                if gemini.enabled:
+                    decision["gemini_analysis"] = gemini.analyze_market_context({"symbol": symbol, "current_price": data.get("current_price"), "decision": decision, "all_results": all_results})
+                    if decision_type in {"BUY", "SELL"}: decision["gemini_review"] = gemini.review_signal({"symbol": symbol, "decision": decision, "all_results": all_results})
+                    decision["gemini_news_review"] = gemini.interpret_news_context({"symbol": symbol, "current_price": data.get("current_price"), "session": all_results.get("session"), "news": all_results.get("news"), "daily_bias": all_results.get("daily_bias"), "technical_context": all_results.get("technical")})
+            except Exception: pass
+        if decision_type in {"BUY", "SELL"}:
+            if duplicate_signal_reason(decision, database, config): return
             trade_id = database.new_trade_id()
             decision["trade_id"] = trade_id
-            if decision.get("signal"):
-                decision["signal"]["trade_id"] = trade_id
-
-            delivered = False
-            try:
-                delivered = bool(telegram.send_signal(decision))
-            except Exception as send_exc:  # noqa: BLE001
-                logger.exception("Failed to send Telegram signal")
-                telegram.send_error_alert(f"Signal generated but Telegram delivery raised: {send_exc}")
-                delivered = False
-
-            if not delivered:
-                # Do NOT save the trade: an unsent signal must not block future
-                # runs via the duplicate filter. Alert loudly instead of failing
-                # silently (the old code's worst failure mode).
-                logger.error(
-                    "⚠️ Signal generated %s but Telegram delivery failed — trade NOT saved to avoid duplicate filter blocking.",
-                    decision.get("decision"),
-                )
-                telegram.send_error_alert(
-                    f"Signal {decision.get('decision')} generated but Telegram delivery failed; "
-                    "trade NOT saved so the next run can retry."
-                )
-                return
-
-            # Pending order cancellation removed (market-only mode)
-
-            trade_id = database.save_trade(decision)
-            decision["trade_id"] = trade_id
-            if decision.get("signal"):
-                decision["signal"]["trade_id"] = trade_id
-            logger.info("تم إرسال الإشارة ثم حفظها: %s", trade_id)
-        else:
-            logger.info(
-                "لا توجد إشارة مؤهلة حالياً. الأسباب/التحذيرات: %s",
-                decision.get("warnings"),
-            )
-            if should_send_hourly_status(config):
-                telegram.send_message(_build_market_status_message(decision, all_results, database, config))
-
-        # ── Fixed-risk scale-in check ──
-        # After main signal handling, check if we should scale into any open trade
-        try:
-            open_trades_for_scale = database.get_open_trades()
-            if open_trades_for_scale:
-                await _check_scale_in(
-                    config=config,
-                    all_results=all_results,
-                    open_trades=open_trades_for_scale,
-                    database=database,
-                    telegram=telegram,
-                )
-        except Exception as scale_exc:
-            logger.warning("⚠️ Scale-in check failed: %s", scale_exc)
-
-        logger.info("✅ Analysis completed successfully")
-
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Analysis error")
+            if telegram.send_signal(decision): database.save_trade(decision)
+        elif send_hourly_now:
+            telegram.send_message(_build_market_status_message(decision, all_results, database, config))
+    except Exception as exc:
         telegram.send_error_alert(str(exc))
 
+def _latest_candle_extremes(data: Dict[str, Any]) -> tuple[float, float]:
+    current = float(data.get("current_price") or 0.0)
+    candles = (data.get("timeframes", {}).get("5m") or {}).get("data") or data.get("data") or []
+    latest = candles[-1] if candles else {}
+    high = float(latest.get("high") or current)
+    low = float(latest.get("low") or current)
+    return max(high, low), min(high, low)
 
 async def run_analysis_async() -> None:
-    """Run analysis for all enabled instruments."""
     base_config = load_config()
-    instruments = enabled_instruments(base_config)
-    # No separate Twelve Data pre-check here. The actual analysis/update cycle
-    # performs one shared market-data fetch per enabled symbol and handles API
-    # failure there. This avoids burning an extra API call every 5 minutes.
-
-    for instrument in instruments:
-        cfg = config_for_instrument(base_config, instrument)
-        logger.info("▶️ Running analysis for %s", cfg.get("symbol"))
-        await _run_analysis_for_config(cfg)
-
+    for instrument in enabled_instruments(base_config):
+        await _run_analysis_for_config(config_for_instrument(base_config, instrument))
 
 def main() -> None:
-    """نقطة الدخول الرئيسية."""
     import asyncio
-
     asyncio.run(run_analysis_async())
-
 
 if __name__ == "__main__":
     main()
