@@ -195,7 +195,7 @@ def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService,
     if max_open_same_direction > 0:
         open_same_direction = [t for t in candidates if _trade_outcome(t) == "OPEN"]
         if len(open_same_direction) >= max_open_same_direction:
-            return f"Same-direction exposure cap: {len(open_same_direction)} open {direction} trade(s) already exist."
+            return f"Same-direction exposure cap: {len(open_same_direction)} open {direction} trade(s) already exist, blocking another {direction}."
 
     for trade in candidates:
         if _trade_outcome(trade) == "OPEN":
@@ -593,7 +593,16 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             if duplicate_signal_reason(decision, database, config): return
             trade_id = database.new_trade_id()
             decision["trade_id"] = trade_id
-            if telegram.send_signal(decision): database.save_trade(decision)
+            delivered = False
+            try:
+                delivered = bool(telegram.send_signal(decision))
+            except Exception as exc:  # noqa: BLE001
+                telegram.send_error_alert(f"Signal delivery failed: {exc}")
+                return
+            if delivered:
+                database.save_trade(decision)
+            else:
+                telegram.send_error_alert("Signal delivery failed: Telegram returned False; trade was not saved.")
         elif send_hourly_now:
             telegram.send_message(_build_market_status_message(decision, all_results, database, config))
     except Exception as exc:
