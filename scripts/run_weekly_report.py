@@ -72,21 +72,23 @@ async def main_async() -> int:
     )
 
     final_report_text = result.get("report_text", "")
+    stats_dict = result.get("stats") or {}
     try:
         gemini = get_gemini_review_service(config)
         if not gemini.enabled:
             logger.info("🧠 Gemini weekly review skipped: API key not configured")
         else:
             weekly_review = gemini.summarize_weekly_report({
-                "period": result.get("period") or result.get("week_range") or "weekly",
+                "period": result.get("period") or result.get("week_range") or stats_dict.get("week") or "weekly",
                 "headline": result.get("headline") or "Weekly performance review",
-                "stats": result.get("stats") or {},
+                "stats": stats_dict,
                 "recommendations": result.get("recommendations") or [],
                 "report_excerpt": result.get("report_text", ""),
-                "time_of_week_breakdown": result.get("time_of_week_breakdown") or {},
-                "rr_distribution": result.get("rr_distribution") or {},
+                "time_of_week_breakdown": result.get("time_of_week_breakdown") or stats_dict.get("time_of_week") or {},
+                "rr_distribution": result.get("rr_distribution") or stats_dict.get("rr_efficiency") or {},
                 "closed_trades_sample": result.get("closed_trades_sample") or [],
-                "environment_fit": result.get("environment_fit") or {},
+                "environment_fit": result.get("environment_fit") or stats_dict.get("regime_fit") or {},
+                "news_proximity": stats_dict.get("news_proximity") or {},
             })
             if weekly_review.get("available"):
                 lines = [final_report_text, "", "🧠 <b>Gemini Independent Weekly Strategic Review</b>"]

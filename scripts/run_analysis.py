@@ -589,6 +589,23 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         decision = await DecisionAgent(config, learning_service=learning_service).decide_async(all_results)
         decision["agent_details"] = _compact_agent_details(all_results)
         decision["symbol"] = symbol
+        # Phase 5 data-enrichment: persist compact context with each trade so
+        # learning/weekly reports can reason about sessions, news proximity,
+        # volatility regime, and planned-vs-actual R:R without reconstructing
+        # the original analysis run later.
+        decision["session_info"] = session
+        decision["daily_bias"] = all_results.get("daily_bias", {})
+        decision["news_context"] = {
+            "rule_based": all_results.get("news", {}),
+            "ai": all_results.get("news_ai", {}),
+        }
+        decision["market_context"] = {
+            "technical_regime": ((all_results.get("technical", {}) or {}).get("technical", {}) or {}).get("market_regime")
+            or (all_results.get("technical", {}) or {}).get("market_regime")
+            or {},
+            "rsi": ((all_results.get("technical", {}) or {}).get("technical", {}) or {}).get("rsi"),
+            "daily_bias": all_results.get("daily_bias", {}),
+        }
         decision_type = str(decision.get("decision") or "").upper()
         send_hourly_now = should_send_hourly_status(config)
         if (decision_type in {"BUY", "SELL"}) or (decision_type == "WAIT" and send_hourly_now):
