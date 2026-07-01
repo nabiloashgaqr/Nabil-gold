@@ -269,42 +269,43 @@ def main() -> None:
     report_date = _resolve_report_date(os.environ.get("REPORT_DATE"), timezone_name)
     current_local_date = datetime.now(ZoneInfo(timezone_name)).date().isoformat()
 
-    try:
         # 1. Get trades related to this local date (created OR closed)
         today_trades = database.get_trades_for_date(report_date, timezone_name)
-        
-        # 2. Logic for historical accuracy:
-        # - A trade is CLOSED TODAY if its closed_at matches report_date.
-        # - A trade is OPEN TODAY if it was created on or before report_date 
-        #   AND (it's currently open OR it was closed AFTER report_date).
         
         closed_today = []
         open_at_that_time = []
         
         for t in today_trades:
             status = str(t.get("status", "")).upper()
-            created_at = str(t.get("created_at") or t.get("entry_time") or "")
+            created_at = str(t.get("created_at") or t.get("entry_time") or t.get("opened_at") or "")
             closed_at = str(t.get("closed_at") or t.get("close_time") or "")
             
-            # Is it closed on the report_date?
-            is_closed_today = closed_at.startswith(report_date)
+            # Historical accuracy logic:
+            # - If closed_at matches today -> It's a CLOSED trade today.
+            # - If closed_at is missing but status is a closed-status AND created_at is today -> treat as CLOSED today (for tests/legacy).
+            is_resolved = status not in {"OPEN", "TP1_HIT", "PARTIAL", "PENDING"}
             
-            # Was it open during the report_date?
-            # (Created today or before) AND (Not closed yet OR closed after today)
-            was_open_then = created_at.startswith(report_date) and (not closed_at or not is_closed_today)
+            is_closed_today = False
+            if closed_at.startswith(report_date):
+                is_closed_today = True
+            elif not closed_at and is_resolved and created_at.startswith(report_date):
+                is_closed_today = True
 
-            if is_closed_today and status not in {"CANCELLED", "PENDING"}:
+            if is_closed_today and status != "CANCELLED":
                 closed_today.append(t)
-            elif was_open_then and status in {"OPEN", "TP1_HIT", "PARTIAL", "SL_HIT", "TP2_HIT", "BE_HIT", "MANUAL_CLOSE"}:
-                # If it's currently closed but was open then, we show it as open in that day's report
-                open_at_that_time.append(t)
+            else:
+                # Was it open during this report_date?
+                # (Created today or before) AND (Not closed yet OR closed after today)
+                was_created_today_or_before = created_at.startswith(report_date) or (created_at < report_date and created_at != "")
+                is_not_closed_yet = not closed_at or closed_at > report_date
+                
+                if was_created_today_or_before and is_not_closed_yet and status != "CANCELLED":
+                    open_at_that_time.append(t)
 
         agent = DailyReportAgent(config)
-        # Generate stats based on what was actually CLOSED today
         perf_report = agent.generate(closed_today)
         stats = perf_report.get("stats", {})
         
-        # Override open trades count for the report header
         open_trades = open_at_that_time
         stats["open"] = len(open_trades)
 
