@@ -156,16 +156,20 @@ class TelegramService:
         ]
         if quality:
             lines.append(f"🏅 Quality: {html.escape(str(quality.get('grade', '')))} {html.escape(str(quality.get('score', '')))}".rstrip())
+        order_kind = str(signal.get("entry_kind") or signal.get("order_type") or entry.get("kind") or "MARKET").upper()
+        rr = signal.get("rr_ratio") or signal.get("tp2_rr") or decision.get("planned_rr")
         lines.extend([
             "──────────────────",
             "🎯 <b>TRADE PLAN</b>",
-            f"• <b>Order:</b> {html.escape(trade_type)} Market",
+            f"• <b>Order:</b> {html.escape(trade_type)} {html.escape(order_kind)}",
             f"• <b>Entry:</b> {self._money(entry.get('price') or decision.get('current_price'), symbol)}",
             f"• <b>Stop Loss:</b> {self._money(signal.get('stop_loss'), symbol)}",
             f"• <b>TP1:</b> {self._money(signal.get('tp1'), symbol)}",
             f"• <b>TP2:</b> {self._money(signal.get('tp2'), symbol)}",
-            "• <b>Management:</b> SL → entry after +100 pts · Trail gap 100 pts / step 30 pts · check 5m",
         ])
+        if rr:
+            lines.append(f"• <b>Planned RR:</b> {html.escape(str(rr))}R")
+        lines.append("• <b>Management:</b> SL → entry after +100 pts · Trail gap 100 pts / step 30 pts · check 5m")
 
         vote_lines = self._votes_lines(decision)
         if vote_lines:
@@ -186,6 +190,18 @@ class TelegramService:
             bias_conf_text = f" ({bias_conf}%)" if bias_conf is not None else ""
             context_lines.append(
                 f"• Daily bias: {html.escape(str(daily_bias.get('bias')))}{html.escape(bias_conf_text)}"
+            )
+        session_info = decision.get("session_info") or {}
+        if session_info.get("current_session"):
+            session_quality = session_info.get("session_quality") or session_info.get("quality")
+            suffix = f" · {session_quality}" if session_quality else ""
+            context_lines.append(f"• Session: {html.escape(str(session_info.get('current_session')))}{html.escape(suffix)}")
+        news_context = decision.get("news_context") or {}
+        news_rule = news_context.get("rule_based", {}) if isinstance(news_context, dict) else {}
+        if news_rule.get("market_status") or news_rule.get("risk_level"):
+            context_lines.append(
+                f"• News: {html.escape(str(news_rule.get('market_status') or 'OK'))}"
+                f" / {html.escape(str(news_rule.get('risk_level') or 'LOW'))}"
             )
         if dynamic and str(dynamic.get("level", "NORMAL")).upper() != "NORMAL":
             context_lines.append(f"• Dynamic risk: {html.escape(str(dynamic.get('level')))}")
@@ -221,8 +237,10 @@ class TelegramService:
         reasons = decision.get("reasons") or []
         lines.append("──────────────────")
         lines.append("💡 <b>WHY THIS TRADE</b>")
-        for r in reasons[:4]:
+        for r in reasons[:3]:
             lines.append(f"• {self._friendly_signal_text(r)}")
+        if len(reasons) > 3:
+            lines.append(f"• … {len(reasons) - 3} more internal confirmations")
 
         lines.extend([
             "━━━━━━━━━━━━━━━━━━━━━",

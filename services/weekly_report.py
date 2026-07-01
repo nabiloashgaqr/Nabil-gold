@@ -485,114 +485,80 @@ class WeeklyReportService:
         else:
             verdict = "❌ System needs review"
 
-        # Per-agent breakdown
+        def _best_bucket(items: Dict[str, Dict[str, Any]]) -> tuple[str, Dict[str, Any]] | None:
+            return max(items.items(), key=lambda x: x[1].get("pnl", 0)) if items else None
+
+        def _worst_bucket(items: Dict[str, Dict[str, Any]]) -> tuple[str, Dict[str, Any]] | None:
+            return min(items.items(), key=lambda x: x[1].get("pnl", 0)) if items else None
+
+        best_instrument = _best_bucket(stats.by_instrument)
+        best_agent = _best_bucket(stats.by_agent)
+        weak_agent = _worst_bucket(stats.by_agent)
+        best_session = _best_bucket(stats.by_session or stats.time_of_week)
+        weak_session = _worst_bucket(stats.by_session or stats.time_of_week)
+        best_regime = _best_bucket(stats.regime_fit)
+        weak_news = _worst_bucket({k: v for k, v in stats.news_proximity.items() if str(k).upper() != "UNKNOWN"})
+        rr = stats.rr_efficiency or {}
+
+        def _bucket_line(item: tuple[str, Dict[str, Any]] | None, empty: str = "—") -> str:
+            if not item:
+                return empty
+            label, data = item
+            return f"{label} {float(data.get('pnl', 0) or 0):+.0f} pts · WR {float(data.get('win_rate_pct', 0) or 0):.0f}% · {data.get('count', 0)} trades"
+
         agent_lines = []
-        for agent, data in sorted(stats.by_agent.items(), key=lambda x: x[1].get("pnl", 0), reverse=True):
-            icon = "[+]" if data.get("pnl", 0) > 0 else "[-]" if data.get("pnl", 0) < 0 else "[=]"
-            agent_lines.append(
-                f"  {icon} {agent}: {data.get('count', 0)} trades | "
-                f"WR {data.get('win_rate_pct', 0)}% | "
-                f"Net {data.get('pnl', 0):+.0f} pts"
-            )
-        agent_section = "\n".join(agent_lines) if agent_lines else "  No agent data"
+        for agent, data in sorted(stats.by_agent.items(), key=lambda x: x[1].get("pnl", 0), reverse=True)[:4]:
+            agent_lines.append(f"  • {agent}: {data.get('pnl', 0):+.0f} pts · WR {data.get('win_rate_pct', 0)}% · {data.get('count', 0)} trades")
+        agent_section = "\n".join(agent_lines) if agent_lines else "  • No agent data"
 
-        # Per-session breakdown in a fixed, readable order for Telegram.
-        session_order = [
-            ("Asia Morning", "🌏 Asia Morning"),
-            ("London / Europe Midday", "🇬🇧 London / Europe Midday"),
-            ("London + New York Afternoon", "🇬🇧🇺🇸 London + New York Afternoon"),
-            ("New York Evening", "🇺🇸 New York Evening"),
-            ("Late New York Night", "🌙 Late New York Night"),
-        ]
-        session_lines = []
-        for key, label in session_order:
-            data = stats.by_session.get(key, {"count": 0, "wins": 0, "pnl": 0.0, "win_rate_pct": 0.0})
-            pnl = float(data.get("pnl", 0) or 0)
-            icon = "[+]" if pnl > 0 else "[-]" if pnl < 0 else "[=]"
-            session_lines.append(
-                f"  {icon} {label}\n"
-                f"     Trades: {data.get('count', 0)} | WR: {data.get('win_rate_pct', 0)}% | Net: {pnl:+.0f} pts"
-            )
-        session_section = "\n".join(session_lines)
-
-        # Per-instrument breakdown
-        instrument_lines = []
-        for symbol, data in sorted(stats.by_instrument.items(), key=lambda x: x[1].get("pnl", 0), reverse=True):
-            icon = "[+]" if data.get("pnl", 0) > 0 else "[-]" if data.get("pnl", 0) < 0 else "[=]"
-            instrument_lines.append(
-                f"  {icon} {symbol}: {data.get('count', 0)} trades | "
-                f"WR {data.get('win_rate_pct', 0)}% | "
-                f"Net {data.get('pnl', 0):+.0f} pts"
-            )
-        if not instrument_lines:
-            instrument_lines = ["  No instrument data"]
-        # Best instrument
-        best_instrument = max(stats.by_instrument.items(), key=lambda x: x[1].get("pnl", 0)) if stats.by_instrument else None
-
-        # Daily breakdown with more detail
         daily_lines = []
-        for day, data in sorted(stats.by_day.items()):
-            icon = "[+]" if data.get("pnl", 0) > 0 else "[-]" if data.get("pnl", 0) < 0 else "[=]"
-            daily_lines.append(
-                f"  {icon} {day}: {data.get('count', 0)} trades | "
-                f"W {data.get('wins', 0)} / L {data.get('losses', 0)} | "
-                f"Net {data.get('pnl', 0):+.0f} pts"
-            )
-        if not daily_lines:
-            daily_lines = ["  No daily data"]
-        daily_section = "\n".join(daily_lines)
+        for day, data in sorted(stats.by_day.items(), key=lambda x: x[1].get("pnl", 0), reverse=True)[:5]:
+            daily_lines.append(f"  • {day}: {data.get('pnl', 0):+.0f} pts · W {data.get('wins', 0)} / L {data.get('losses', 0)} · {data.get('count', 0)} trades")
+        daily_section = "\n".join(daily_lines) if daily_lines else "  • No daily data"
 
-        # Best/Worst day
-        best_day_line = f"Best: {stats.best_day} ({stats.best_day_pnl:+.0f} pts)" if stats.best_day != "—" else "Best: —"
-        worst_day_line = f"Worst: {stats.worst_day} ({stats.worst_day_pnl:+.0f} pts)" if stats.worst_day != "—" else "Worst: —"
-
-        # Best instrument line
-        best_instrument_line = ""
-        if best_instrument:
-            best_instrument_line = f"\n🏆 Best Instrument: {best_instrument[0]} (Net {best_instrument[1].get('pnl', 0):+.0f} pts)"
+        recommendations = []
+        if stats.net_pnl_points < 0:
+            recommendations.append("Review entry filters before increasing risk next week.")
+        if rr.get("sample") and float(rr.get("rr_capture_pct", 0) or 0) < 45:
+            recommendations.append(f"Improve exit management: RR capture is only {rr.get('rr_capture_pct')}%.")
+        if weak_session and float(weak_session[1].get("pnl", 0) or 0) < 0:
+            recommendations.append(f"Reduce aggression during {weak_session[0]} until it recovers.")
+        if weak_news and float(weak_news[1].get("pnl", 0) or 0) < 0:
+            recommendations.append(f"Tighten news filter around {weak_news[0]} conditions.")
+        if not recommendations:
+            recommendations.append("Keep current risk profile; monitor for regime changes.")
 
         separator = "────────────────────"
-
         lines = [
-            "📊 SmartSignal — Weekly Report",
+            "📊 SmartSignal — Weekly Executive Report",
             f"Week: {stats.week_start} → {stats.week_end}",
             separator,
-            "",
-            "📈 SUMMARY",
-            f"  Total trades: {stats.total_trades}",
-            f"  ✅ Wins: {stats.wins}  |  ❌ Losses: {stats.losses}  |  ⚪ BE: {stats.break_even}  |  🔄 Open: {stats.open_trades}",
-            f"  🎯 Win Rate: {stats.win_rate:.1f}%{best_instrument_line}",
+            "📌 EXECUTIVE SUMMARY",
+            f"• Net: {stats.net_pnl_points:+.0f} pts (${stats.net_pnl_points / 10:+.1f}) · WR {stats.win_rate:.1f}% · PF {pf_display}",
+            f"• Total trades: {stats.total_trades} · {stats.closed_trades} closed · {stats.open_trades} open",
+            f"• Best/Worst: {stats.largest_win_points:+.0f} / {stats.largest_loss_points:+.0f} pts · Expectancy {expectancy:+.1f} pts",
+            f"• Grade: {grade} — {verdict}",
             separator,
-            "",
-            "💰 PERFORMANCE",
-            f"  💵 Net: {stats.net_pnl_points:+.1f} pts (${stats.net_pnl_points / 10:+.1f})",
-            f"  ⚖️ Profit Factor: {pf_display}  ({pf_note})",
-            f"  📊 Avg Win: +{stats.avg_win_points:.1f}  |  Avg Loss: {stats.avg_loss_points:.1f}",
-            f"  🏆 Best: {stats.largest_win_points:+.1f}  |  💔 Worst: {stats.largest_loss_points:.1f}",
-            f"  📈 Expectancy: {expectancy:+.1f} pts/trade",
+            "🧩 EDGE QUALITY",
+            f"• RR Capture: {float(rr.get('avg_actual_r', 0) or 0):+.2f}R vs planned {float(rr.get('avg_planned_rr', 0) or 0):.2f}R ({float(rr.get('rr_capture_pct', 0) or 0):.1f}%)" if rr.get("sample") else "• RR Capture: not enough enriched trades",
+            f"• Best session: {_bucket_line(best_session)}",
+            f"• Weak session: {_bucket_line(weak_session)}",
+            f"• Best regime: {_bucket_line(best_regime)}",
+            f"• News impact: {_bucket_line(weak_news)}",
             separator,
-            "",
-            "📊 BY INSTRUMENT",
-            "\n".join(instrument_lines),
-            separator,
-            "",
-            "🤖 BY AGENT",
+            "🤖 AGENT SNAPSHOT",
+            f"• Best: {_bucket_line(best_agent)}",
+            f"• Weakest: {_bucket_line(weak_agent)}",
             agent_section,
             separator,
-            "",
-            "📅 DAILY BREAKDOWN",
+            "📅 BEST/WORST DAYS",
+            f"• Best day: {stats.best_day} {stats.best_day_pnl:+.0f} pts" if stats.best_day != "—" else "• Best day: —",
+            f"• Worst day: {stats.worst_day} {stats.worst_day_pnl:+.0f} pts" if stats.worst_day != "—" else "• Worst day: —",
             daily_section,
             separator,
-            "",
-            "🌍 BY SESSION",
-            session_section,
+            "🎯 NEXT WEEK ACTIONS",
+            *[f"• {rec}" for rec in recommendations[:4]],
             separator,
-            "",
-            "🛡️ RISK GRADE",
-            f"  Grade: {grade}",
-            f"  {verdict}",
-            separator,
-            "",
             "⚠️ Paper trading only — not financial advice.",
         ]
         return "\n".join(lines)
