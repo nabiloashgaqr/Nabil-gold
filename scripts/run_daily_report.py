@@ -16,6 +16,7 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,6 +26,7 @@ from services.database import DatabaseService
 from services.llm_review import get_gemini_review_service
 from services.telegram_bot import TelegramService
 from utils.helpers import calculate_pips, load_config, setup_logging
+from utils.instruments import price_to_points
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -110,6 +112,205 @@ def _trade_value(trade: dict, *keys: str, default=None):
         if value is not None and value != "":
             return value
     return default
+
+
+def _snapshot(trade: dict[str, Any]) -> dict[str, Any]:
+    """Return signal_snapshot as dict, accepting JSON strings from Supabase."""
+    snap = trade.get("signal_snapshot") or {}
+    if isinstance(snap, str):
+        try:
+            snap = json.loads(snap)
+        except Exception:  # noqa: BLE001
+            snap = {}
+    return snap if isinstance(snap, dict) else {}
+
+
+def _trade_points(trade: dict[str, Any]) -> float:
+    """Extract realized/floating PnL in points with a price-based fallback."""
+    status = str(trade.get("status", "")).upper()
+    is_closed = status not in {"OPEN", "TP1_HIT", "PARTIAL", "PENDING"}
+    keys = (
+        ("final_pnl_points", "final_pnl", "current_pnl_points", "current_pnl")
+        if is_closed else
+        ("current_pnl_points", "current_pnl", "final_pnl_points", "final_pnl")
+    )
+    for key in keys:
+        value = trade.get(key)
+        if value is not None:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+    try:
+        typ = str(trade.get("type") or trade.get("trade_type") or "BUY").upper()
+        entry = float(trade.get("entry_price", 0) or 0)
+        px = float(trade.get("close_price") or trade.get("current_price") or entry or 0)
+        symbol = str(trade.get("symbol") or "XAU/USD")
+        return calculate_pips(entry, px, typ, symbol)
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+def _planned_risk_points(trade: dict[str, Any]) -> float:
+    try:
+        value = trade.get("planned_risk_points")
+        if value is not None:
+            return abs(float(value))
+    except (TypeError, ValueError):
+        pass
+    try:
+        entry = float(trade.get("entry_price") or 0)
+        sl = float(trade.get("initial_stop_loss") or trade.get("stop_loss") or 0)
+        if entry and sl:
+            return abs(price_to_points(entry - sl, symbol=trade.get("symbol") or "XAU/USD"))
+    except Exception:  # noqa: BLE001
+        pass
+    return 0.0
+
+
+def _planned_rr(trade: dict[str, Any]) -> float:
+    for key in ("planned_rr", "rr_ratio"):
+        try:
+            value = trade.get(key)
+            if value is not None:
+                return float(value)
+        except (TypeError, ValueError):
+            pass
+    sig = _snapshot(trade).get("signal") or {}
+    for key in ("rr_ratio", "tp2_rr"):
+        try:
+            value = sig.get(key)
+            if value is not None:
+                return float(value)
+        except (TypeError, ValueError):
+            pass
+    return 0.0
+
+
+def _bucket_metric(trades: list[dict[str, Any]], key_func: Callable[[dict[str, Any]], str]) -> dict[str, dict[str, Any]]:
+    buckets: dict[str, dict[str, Any]] = {}
+    for trade in trades:
+        key = str(key_func(trade) or "UNKNOWN")
+        pnl = _trade_points(trade)
+        bucket = buckets.setdefault(key, {"count": 0, "pnl": 0.0, "wins": 0, "losses": 0})
+        bucket["count"] += 1
+        bucket["pnl"] += pnl
+        if pnl > 0:
+            bucket["wins"] += 1
+        elif pnl < 0:
+            bucket["losses"] += 1
+    return {
+        key: {
+            **value,
+            "pnl": round(value["pnl"], 1),
+            "win_rate_pct": round(value["wins"] / value["count"] * 100, 1) if value["count"] else 0.0,
+        }
+        for key, value in buckets.items()
+    }
+
+
+def _trade_session_label(trade: dict[str, Any]) -> str:
+    session_info = _snapshot(trade).get("session_info") or {}
+    return str(
+        trade.get("session_label")
+        or session_info.get("current_session")
+        or session_info.get("session")
+        or session_info.get("session_name")
+        or "UNKNOWN"
+    )
+
+
+def _trade_news_label(trade: dict[str, Any]) -> str:
+    news_context = _snapshot(trade).get("news_context") or {}
+    rule = news_context.get("rule_based") or {}
+    return str(
+        trade.get("news_status_at_entry")
+        or rule.get("market_status")
+        or rule.get("status")
+        or "UNKNOWN"
+    ).upper()
+
+
+def _trade_regime_label(trade: dict[str, Any]) -> str:
+    market_context = _snapshot(trade).get("market_context") or {}
+    tech = market_context.get("technical_regime") or {}
+    return str(trade.get("volatility_regime") or tech.get("volatility_regime") or "UNKNOWN").upper()
+
+
+def _daily_enrichment_summary(closed_trades: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compact Phase 5 quality metrics for the daily Telegram/Gemini report."""
+    actual_r: list[float] = []
+    planned: list[float] = []
+    for trade in closed_trades:
+        risk = _planned_risk_points(trade)
+        if risk <= 0:
+            continue
+        actual_r.append(_trade_points(trade) / risk)
+        rr = _planned_rr(trade)
+        if rr > 0:
+            planned.append(rr)
+
+    rr_efficiency: dict[str, Any] = {"sample": 0}
+    if actual_r:
+        avg_actual = sum(actual_r) / len(actual_r)
+        avg_planned = sum(planned) / len(planned) if planned else 0.0
+        rr_efficiency = {
+            "sample": len(actual_r),
+            "avg_actual_r": round(avg_actual, 2),
+            "avg_planned_rr": round(avg_planned, 2),
+            "rr_capture_pct": round(avg_actual / avg_planned * 100, 1) if avg_planned else 0.0,
+        }
+
+    session_breakdown = _bucket_metric(closed_trades, _trade_session_label)
+    news_proximity = _bucket_metric(closed_trades, _trade_news_label)
+    regime_fit = _bucket_metric(closed_trades, _trade_regime_label)
+    return {
+        "rr_efficiency": rr_efficiency,
+        "session_breakdown": session_breakdown,
+        "news_proximity": news_proximity,
+        "regime_fit": regime_fit,
+    }
+
+
+def _best_bucket(buckets: dict[str, dict[str, Any]]) -> tuple[str, dict[str, Any]] | None:
+    if not buckets:
+        return None
+    return max(buckets.items(), key=lambda item: (float(item[1].get("pnl", 0) or 0), int(item[1].get("count", 0) or 0)))
+
+
+def _worst_bucket(buckets: dict[str, dict[str, Any]], skip_unknown: bool = False) -> tuple[str, dict[str, Any]] | None:
+    items = [(k, v) for k, v in buckets.items() if not (skip_unknown and str(k).upper() == "UNKNOWN")]
+    if not items:
+        return None
+    return min(items, key=lambda item: (float(item[1].get("pnl", 0) or 0), -int(item[1].get("count", 0) or 0)))
+
+
+def _quality_snapshot_lines(enrichment: dict[str, Any]) -> list[str]:
+    """Return a very short section; avoids making the daily Telegram too long."""
+    lines: list[str] = []
+    rr = enrichment.get("rr_efficiency") or {}
+    if rr.get("sample"):
+        lines.append(
+            f"• RR Capture: {float(rr.get('avg_actual_r', 0)):+.2f}R vs planned "
+            f"{float(rr.get('avg_planned_rr', 0)):.2f}R ({float(rr.get('rr_capture_pct', 0)):.1f}%)"
+        )
+    best_session = _best_bucket(enrichment.get("session_breakdown") or {})
+    worst_session = _worst_bucket(enrichment.get("session_breakdown") or {})
+    if best_session:
+        label, data = best_session
+        line = f"• Best session: {label} {float(data.get('pnl', 0)):+.0f} pts"
+        if worst_session and worst_session[0] != label and float((worst_session[1] or {}).get("pnl", 0) or 0) < 0:
+            line += f" | Worst: {worst_session[0]} {float(worst_session[1].get('pnl', 0)):+.0f}"
+        lines.append(line)
+    weak_news = _worst_bucket(enrichment.get("news_proximity") or {}, skip_unknown=True)
+    if weak_news:
+        label, data = weak_news
+        lines.append(f"• News impact: {label} {float(data.get('pnl', 0)):+.0f} pts ({data.get('count', 0)} trades)")
+    best_regime = _best_bucket(enrichment.get("regime_fit") or {})
+    if best_regime:
+        label, data = best_regime
+        lines.append(f"• Best regime: {label} {float(data.get('pnl', 0)):+.0f} pts · WR {float(data.get('win_rate_pct', 0)):.0f}%")
+    return lines[:4]
 
 
 def save_daily_report_to_database(
@@ -211,27 +412,14 @@ def main() -> None:
         agent = DailyReportAgent(config)
         perf_report = agent.generate(closed_today)
         stats = perf_report.get("stats", {})
+        daily_enrichment = _daily_enrichment_summary(closed_today)
+        stats.update(daily_enrichment)
         
         open_trades = open_at_that_time
         stats["open"] = len(open_trades)
         
         def _pts(trade) -> float:
-            status = str(trade.get("status", "")).upper()
-            is_closed = status not in {"OPEN", "TP1_HIT", "PARTIAL", "PENDING"}
-            keys = (("final_pnl", "final_pnl_points", "current_pnl", "current_pnl_points")
-                    if is_closed else ("current_pnl", "current_pnl_points", "final_pnl", "final_pnl_points"))
-            for key in keys:
-                v = trade.get(key)
-                if v is not None:
-                    try:
-                        return float(v)
-                    except (TypeError, ValueError):
-                        pass
-            typ = str(trade.get("type") or trade.get("trade_type") or "BUY").upper()
-            entry = float(trade.get("entry_price", 0) or 0)
-            px = float(trade.get("close_price") or trade.get("current_price") or entry or 0)
-            symbol = str(trade.get("symbol") or "XAU/USD")
-            return calculate_pips(entry, px, typ, symbol)
+            return _trade_points(trade)
 
         def _status_label(trade, points: float) -> str:
             status = str(trade.get("status", "")).upper()
@@ -270,6 +458,12 @@ def main() -> None:
         if stats.get("total", 0):
             lines.append(f"• Best: {float(stats.get('best_trade', 0)):+.0f} pts | Worst: {float(stats.get('worst_trade', 0)):+.0f} pts | PF: {pf_display}")
         lines.append("")
+
+        quality_lines = _quality_snapshot_lines(daily_enrichment)
+        if quality_lines:
+            lines.append("🧩 <b>Quality Snapshot</b>")
+            lines.extend(quality_lines)
+            lines.append("")
 
         if closed_today:
             lines.append(f"📕 <b>Closed Trades:</b> {len(closed_today)}  (✅ {len([t for t in closed_today if _pts(t) > 0])} · ❌ {len([t for t in closed_today if _pts(t) < 0])} · ➖ {len([t for t in closed_today if _pts(t) == 0])})")
@@ -316,6 +510,10 @@ def main() -> None:
                     "report_date": report_date, "stats": stats, "closed_trades_count": len(closed_today),
                     "open_trades_count": len(open_trades), "closed_net_points": net_pts, "floating_net_points": open_pts,
                     "learning_excerpt": learning_section,
+                    "rr_efficiency": daily_enrichment.get("rr_efficiency"),
+                    "session_breakdown": daily_enrichment.get("session_breakdown"),
+                    "news_proximity": daily_enrichment.get("news_proximity"),
+                    "regime_fit": daily_enrichment.get("regime_fit"),
                 })
                 if daily_review.get("available"):
                     logger.info("🧠 Gemini daily review added: verdict=%s quality=%s", daily_review.get("verdict"), daily_review.get("quality", "ok"))
