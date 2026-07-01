@@ -370,46 +370,33 @@ class DatabaseService:
     def get_trades_for_date(self, report_date: str | None = None, timezone_name: str = "UTC") -> List[Dict[str, Any]]:
         """Return trades for a specific local report date.
 
-        The daily report is labeled in the user's local timezone, so querying by
-        plain UTC date can pull the wrong day around midnight. Supabase is queried
-        by UTC boundaries derived from the local date. Legacy schemas fall back
-        to updated_at, and local JSON uses the best available trade timestamp.
+        Includes trades CREATED on that date OR trades CLOSED on that date.
+        This ensures a trade opened yesterday but closed today appears in today's
+        realized performance stats.
         """
         report_date = report_date or date.today().isoformat()
         start_utc, end_utc = self._date_window_utc(report_date, timezone_name)
         if self.use_supabase and self.client:
             try:
+                # Query trades created OR closed within the window.
+                # Using an 'or' filter in Supabase: (created_at >= start AND created_at < end) OR (closed_at >= start AND closed_at < end)
+                filter_str = f"and(created_at.gte.{start_utc},created_at.lt.{end_utc}),and(closed_at.gte.{start_utc},closed_at.lt.{end_utc})"
                 response = (
                     self.client.table("trades")
                     .select("*")
-                    .gte("created_at", start_utc)
-                    .lt("created_at", end_utc)
+                    .or_(filter_str)
                     .execute()
                 )
                 return list(response.data or [])
             except Exception as exc:  # noqa: BLE001
-                if self._missing_column(exc, "created_at"):
-                    try:
-                        response = (
-                            self.client.table("trades")
-                            .select("*")
-                            .gte("updated_at", start_utc)
-                            .lt("updated_at", end_utc)
-                            .execute()
-                        )
-                        return list(response.data or [])
-                    except Exception as fallback_exc:  # noqa: BLE001
-                        if self._strict_supabase():
-                            raise RuntimeError(f"Failed to fetch trades for {report_date} using legacy updated_at fallback: {fallback_exc}") from fallback_exc
-                        self.logger.error("Failed legacy date trades fallback from Supabase: %s", fallback_exc)
-                elif self._strict_supabase():
-                    raise RuntimeError(f"Failed to fetch trades for {report_date} from Supabase in production: {exc}") from exc
-                else:
-                    self.logger.error("Failed to fetch trades for %s from Supabase: %s", report_date, exc)
+                self.logger.error("Failed to fetch trades for %s from Supabase: %s", report_date, exc)
 
-        # Local/debug fallback: use the text date prefix because local files in
-        # tests are usually already written in the target date convention.
-        return [trade for trade in load_trades(self.local_path) if self._trade_time_text(trade).startswith(str(report_date))]
+        # Local/debug fallback: check created_at or closed_at prefix
+        return [
+            trade for trade in load_trades(self.local_path)
+            if self._trade_time_text(trade).startswith(str(report_date)) or
+               str(trade.get("closed_at") or "").startswith(str(report_date))
+        ]
 
     def get_today_trades(self) -> List[Dict[str, Any]]:
         """Return trades for today UTC/local-default, supporting legacy schemas."""
