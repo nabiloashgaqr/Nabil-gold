@@ -2,8 +2,8 @@
 // Reads Supabase using server-side environment variables only.
 // Required env in Vercel: SUPABASE_URL and SUPABASE_SERVICE_KEY (or SUPABASE_KEY).
 
-const OUTCOME_STATUSES = ['TP1_HIT', 'TP2_HIT', 'SL_HIT', 'BE_HIT', 'EXPIRED', 'MANUAL_CLOSE', 'CLOSED'];
-const LIVE_STATUSES = [];
+const OUTCOME_STATUSES = ['TP2_HIT', 'SL_HIT', 'BE_HIT', 'EXPIRED', 'MANUAL_CLOSE', 'CLOSED'];
+const LIVE_STATUSES = ['OPEN', 'TP1_HIT', 'PARTIAL', 'PENDING'];
 
 function json(res, status, body) {
   res.statusCode = status;
@@ -90,6 +90,8 @@ function dateOnly(value) {
   return value ? String(value).slice(0, 10) : '';
 }
 function reportTradeDate(t) {
+  // Daily realized PnL is grouped by CLOSE date.  If a trade opened yesterday
+  // and closed today, it must count in today's dashboard report/chart.
   return dateOnly(t.closed_at || t.close_time || t.created_at || t.entry_time || t.updated_at);
 }
 function buildGeneratedDailyReports(closedTrades) {
@@ -122,7 +124,7 @@ function buildGeneratedDailyReports(closedTrades) {
       'TRADE DETAILS',
       ...trades.slice(0, 20).map(t => `  [${Number(t.pnl) >= 0 ? '+' : '-'}] ${t.type || ''} ${t.symbol || ''} | Entry ${t.entry_price ?? '-'} | ${Number(t.pnl) >= 0 ? '+' : ''}${Number(t.pnl || 0).toFixed(1)} pts | ${t.status}`),
       '',
-      'Source: Generated live from closed trades grouped by open date.',
+      'Source: Generated live from closed trades grouped by close date.'
     ];
     const textEn = lines.join('\n');
     const textAr = [
@@ -140,7 +142,7 @@ function buildGeneratedDailyReports(closedTrades) {
       'تفاصيل الصفقات',
       ...trades.slice(0, 20).map(t => `  ${Number(t.pnl) >= 0 ? '[+]' : '[-]'} ${t.type || ''} ${t.symbol || ''} | دخول ${t.entry_price ?? '-'} | ${Number(t.pnl) >= 0 ? '+' : ''}${Number(t.pnl || 0).toFixed(1)} نقطة | ${t.status}`),
       '',
-      'المصدر: تقرير مولد من الصفقات المغلقة حسب تاريخ فتح الصفقة.',
+      'المصدر: تقرير مولد من الصفقات المغلقة حسب تاريخ الإغلاق.'
     ].join('\n');
     return {
       id: `generated-daily-${period}`,
@@ -215,7 +217,7 @@ function buildGeneratedWeeklyReports(closedTrades) {
       'BY SYMBOL',
       ...Object.entries(bySymbol).map(([sym, pnl]) => `  ${sym}: ${pnl >= 0 ? '+' : ''}${Number(pnl).toFixed(1)} pts`),
       '',
-      'Source: Generated live from closed trades grouped by open week.',
+      'Source: Generated live from closed trades grouped by close week.'
     ];
     const textEn = lines.join('\n');
     const textAr = [
@@ -233,7 +235,7 @@ function buildGeneratedWeeklyReports(closedTrades) {
       'حسب الرمز',
       ...Object.entries(bySymbol).map(([sym, pnl]) => `  ${sym}: ${pnl >= 0 ? '+' : ''}${Number(pnl).toFixed(1)} نقطة`),
       '',
-      'المصدر: تقرير مولد من الصفقات المغلقة حسب أسبوع فتح الصفقة.',
+      'المصدر: تقرير مولد من الصفقات المغلقة حسب أسبوع الإغلاق.'
     ].join('\n');
     return {
       id: `generated-weekly-${group.weekStart}`,
@@ -371,16 +373,21 @@ module.exports = async function handler(req, res) {
   try {
     const limit = Math.min(Math.max(parseInt(req.query.limit || '150', 10) || 150, 20), 500);
     const closedFilter = `in.(${OUTCOME_STATUSES.join(',')})`;
-    const liveFilter = `in.(OPEN)`;
+    const liveFilter = `in.(${LIVE_STATUSES.join(',')})`;
 
     const [closedRaw, liveRaw, dailyReports, weeklyReports, agentWeights] = await Promise.all([
       supabaseGet('trades', {
         select: '*',
         status: closedFilter,
-        order: 'created_at.desc',
+        order: 'closed_at.desc.nullslast,created_at.desc',
         limit,
       }),
-      Promise.resolve([]),
+      supabaseGet('trades', {
+        select: '*',
+        status: liveFilter,
+        order: 'created_at.desc',
+        limit: 50,
+      }).catch(() => []),
       supabaseGet('daily_reports', {
         select: '*',
         order: 'report_date.desc',
