@@ -182,9 +182,10 @@ class TelegramService:
                 context_lines.append(f"• Invalidation: {self._clean_text(ai.get('invalidation'))}")
         daily_bias = decision.get("daily_bias") or {}
         if daily_bias and str(daily_bias.get("bias", "NEUTRAL")).upper() != "NEUTRAL":
+            bias_conf = daily_bias.get("confidence")
+            bias_conf_text = f" ({bias_conf}%)" if bias_conf is not None else ""
             context_lines.append(
-                f"• Daily bias: {html.escape(str(daily_bias.get('bias')))}"
-                f"{f' ({daily_bias.get('confidence')}%)' if daily_bias.get('confidence') is not None else ''}"
+                f"• Daily bias: {html.escape(str(daily_bias.get('bias')))}{html.escape(bias_conf_text)}"
             )
         if dynamic and str(dynamic.get("level", "NORMAL")).upper() != "NORMAL":
             context_lines.append(f"• Dynamic risk: {html.escape(str(dynamic.get('level')))}")
