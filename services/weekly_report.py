@@ -55,6 +55,10 @@ class WeeklyStats:
     caution_activations: int = 0
     news_blocked_signals: int = 0
     duplicate_blocked_signals: int = 0
+    time_of_week: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    rr_efficiency: Dict[str, Any] = field(default_factory=dict)
+    regime_fit: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    news_proximity: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     def to_prompt_dict(self) -> Dict[str, Any]:
         pf_display = "∞" if self.profit_factor >= 99 else round(self.profit_factor, 2)
@@ -86,6 +90,10 @@ class WeeklyStats:
             "caution_activations": self.caution_activations,
             "news_blocked_signals": self.news_blocked_signals,
             "duplicate_blocked_signals": self.duplicate_blocked_signals,
+            "time_of_week": self.time_of_week,
+            "rr_efficiency": self.rr_efficiency,
+            "regime_fit": self.regime_fit,
+            "news_proximity": self.news_proximity,
         }
 
 
@@ -259,6 +267,12 @@ class WeeklyReportService:
                 "win_rate_pct": round(v["wins"] / v["count"] * 100.0, 1) if v["count"] else 0.0}
             for s, v in instrument_buckets.items()
         }
+
+        # ---- Phase 5 enrichment: timing, R:R efficiency, regime/news fit -- #
+        stats.time_of_week = self._time_of_week_breakdown(closed)
+        stats.rr_efficiency = self._rr_efficiency(closed)
+        stats.regime_fit = self._regime_fit(closed)
+        stats.news_proximity = self._news_proximity(closed)
 
         # ---- Risk / memory / news counters (best-effort) ---------------- #
         stats.halt_activations = self._safe_count("session_log",
@@ -735,6 +749,128 @@ class WeeklyReportService:
         if 19 <= h < 24:
             return "New York Evening"
         return "Late New York Night"
+
+    @staticmethod
+    def _snapshot(trade: Dict[str, Any]) -> Dict[str, Any]:
+        snap = trade.get("signal_snapshot") or {}
+        return snap if isinstance(snap, dict) else {}
+
+    @staticmethod
+    def _planned_rr(trade: Dict[str, Any]) -> float:
+        for key in ("planned_rr", "rr_ratio"):
+            try:
+                value = trade.get(key)
+                if value is not None:
+                    return float(value)
+            except (TypeError, ValueError):
+                pass
+        snap = WeeklyReportService._snapshot(trade)
+        sig = snap.get("signal") or {}
+        for key in ("rr_ratio", "tp2_rr"):
+            try:
+                value = sig.get(key)
+                if value is not None:
+                    return float(value)
+            except (TypeError, ValueError):
+                pass
+        return 0.0
+
+    @staticmethod
+    def _planned_risk_points(trade: Dict[str, Any]) -> float:
+        try:
+            value = trade.get("planned_risk_points")
+            if value is not None:
+                return abs(float(value))
+        except (TypeError, ValueError):
+            pass
+        try:
+            entry = float(trade.get("entry_price") or 0)
+            sl = float(trade.get("initial_stop_loss") or trade.get("stop_loss") or 0)
+            if entry and sl:
+                # Stored points are broker points. For the weekly enrichment a
+                # fallback price delta is enough to calculate actual/planned R.
+                return abs(entry - sl) * 10.0
+        except (TypeError, ValueError):
+            pass
+        return 0.0
+
+    @staticmethod
+    def _trade_local_dt(trade: Dict[str, Any]) -> datetime | None:
+        ts = WeeklyReportService._trade_time_text(trade)
+        if not ts:
+            return None
+        try:
+            dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(ZoneInfo("Asia/Jerusalem"))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _time_of_week_breakdown(self, trades: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        buckets: Dict[str, Dict[str, Any]] = {}
+        for trade in trades:
+            dt = self._trade_local_dt(trade)
+            label = str(trade.get("entry_day_of_week") or (dt.strftime("%A") if dt else "unknown"))
+            pnl = self._trade_pnl(trade)
+            bucket = buckets.setdefault(label, {"count": 0, "pnl": 0.0, "wins": 0})
+            bucket["count"] += 1
+            bucket["pnl"] += pnl
+            if pnl > 0:
+                bucket["wins"] += 1
+        return {k: {**v, "pnl": round(v["pnl"], 1), "win_rate_pct": round(v["wins"] / v["count"] * 100, 1) if v["count"] else 0.0} for k, v in buckets.items()}
+
+    def _rr_efficiency(self, trades: List[Dict[str, Any]]) -> Dict[str, Any]:
+        actual_r: List[float] = []
+        planned: List[float] = []
+        for trade in trades:
+            risk = self._planned_risk_points(trade)
+            if risk <= 0:
+                continue
+            actual = self._trade_pnl(trade) / risk
+            actual_r.append(actual)
+            rr = self._planned_rr(trade)
+            if rr > 0:
+                planned.append(rr)
+        if not actual_r:
+            return {"sample": 0}
+        wins = [x for x in actual_r if x > 0]
+        return {
+            "sample": len(actual_r),
+            "avg_actual_r": round(sum(actual_r) / len(actual_r), 2),
+            "avg_winner_r": round(sum(wins) / len(wins), 2) if wins else 0.0,
+            "avg_planned_rr": round(sum(planned) / len(planned), 2) if planned else 0.0,
+            "rr_capture_pct": round((sum(actual_r) / len(actual_r)) / (sum(planned) / len(planned)) * 100, 1) if planned and sum(planned) else 0.0,
+        }
+
+    def _regime_fit(self, trades: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        buckets: Dict[str, Dict[str, Any]] = {}
+        for trade in trades:
+            snap = self._snapshot(trade)
+            mc = snap.get("market_context") or {}
+            regime = str(trade.get("volatility_regime") or (mc.get("technical_regime") or {}).get("volatility_regime") or "unknown").upper()
+            pnl = self._trade_pnl(trade)
+            bucket = buckets.setdefault(regime, {"count": 0, "pnl": 0.0, "wins": 0})
+            bucket["count"] += 1
+            bucket["pnl"] += pnl
+            if pnl > 0:
+                bucket["wins"] += 1
+        return {k: {**v, "pnl": round(v["pnl"], 1), "win_rate_pct": round(v["wins"] / v["count"] * 100, 1) if v["count"] else 0.0} for k, v in buckets.items()}
+
+    def _news_proximity(self, trades: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        buckets: Dict[str, Dict[str, Any]] = {}
+        for trade in trades:
+            snap = self._snapshot(trade)
+            nc = snap.get("news_context") or {}
+            rule = nc.get("rule_based") or {}
+            status = str(trade.get("news_status_at_entry") or rule.get("market_status") or rule.get("status") or "unknown").upper()
+            pnl = self._trade_pnl(trade)
+            bucket = buckets.setdefault(status, {"count": 0, "pnl": 0.0, "wins": 0})
+            bucket["count"] += 1
+            bucket["pnl"] += pnl
+            if pnl > 0:
+                bucket["wins"] += 1
+        return {k: {**v, "pnl": round(v["pnl"], 1), "win_rate_pct": round(v["wins"] / v["count"] * 100, 1) if v["count"] else 0.0} for k, v in buckets.items()}
 
     def _safe_count(self, table: str, filters: Dict[str, Any]) -> int:
         """Best-effort count; never raises."""

@@ -149,7 +149,15 @@ class GeminiReviewService:
         return {"date": p.get("report_date"), "stats": p.get("stats"), "net": p.get("closed_net_points")}
 
     def _compact_weekly_report_payload(self, p: Dict[str, Any]) -> Dict[str, Any]:
-        return {"period": p.get("period"), "stats": p.get("stats")}
+        stats = p.get("stats") or {}
+        return {
+            "period": p.get("period"),
+            "stats": stats,
+            "time_of_week_breakdown": p.get("time_of_week_breakdown") or stats.get("time_of_week"),
+            "rr_distribution": p.get("rr_distribution") or stats.get("rr_efficiency"),
+            "environment_fit": p.get("environment_fit") or stats.get("regime_fit"),
+            "news_proximity": p.get("news_proximity") or stats.get("news_proximity"),
+        }
 
     def _quality_texts(self, payload: Dict[str, Any]) -> List[str]:
         values: List[str] = []

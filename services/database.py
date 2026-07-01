@@ -12,13 +12,9 @@ import os
 import re
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any, Dict, List
-
-try:
-    from zoneinfo import ZoneInfo
-except Exception:  # pragma: no cover
-    ZoneInfo = None  # type: ignore[assignment]
 
 try:  # Supabase is optional during local tests.
     from supabase import Client, create_client
@@ -27,7 +23,7 @@ except Exception:  # pragma: no cover - dependency may be absent in local Python
     create_client = None  # type: ignore[assignment]
 
 from utils.helpers import load_config, load_trades, save_trades
-from utils.instruments import price_decimals
+from utils.instruments import price_decimals, price_to_points
 
 
 class DatabaseService:
@@ -158,6 +154,7 @@ class DatabaseService:
 
         # Backwards-compatible: set 'side' alongside 'type' for clearer naming
         trade_data["side"] = trade_data.get("type")
+        trade_data.update(self._entry_enrichment(decision, signal, symbol, entry_price, stop_loss))
 
         if self.use_supabase and self.client:
             try:
@@ -172,6 +169,58 @@ class DatabaseService:
         trades.append(trade_data)
         save_trades(trades, self.local_path)
         return trade_id
+
+    def _entry_enrichment(
+        self,
+        decision: Dict[str, Any],
+        signal: Dict[str, Any],
+        symbol: str,
+        entry_price: float,
+        stop_loss: float,
+    ) -> Dict[str, Any]:
+        """Best-effort Phase 5 metadata persisted with each trade.
+
+        Older Supabase schemas may not have all columns; insert retry logic drops
+        unknown columns while keeping this data in signal_snapshot. When columns
+        exist, reports can query directly without parsing JSON snapshots.
+        """
+        now = datetime.now(timezone.utc)
+        try:
+            local = now.astimezone(ZoneInfo(str(self.config.get("schedule", {}).get("timezone") or self.config.get("trading_hours", {}).get("timezone") or "Asia/Hebron")))
+        except Exception:  # noqa: BLE001
+            local = now
+        side = str(decision.get("decision") or signal.get("type") or "").upper()
+        tp2 = signal.get("tp2")
+        try:
+            planned_risk_points = abs(price_to_points(float(entry_price) - float(stop_loss), symbol=symbol))
+        except Exception:  # noqa: BLE001
+            planned_risk_points = 0.0
+        try:
+            planned_tp2_points = abs(price_to_points(float(tp2) - float(entry_price), symbol=symbol)) if tp2 is not None else 0.0
+        except Exception:  # noqa: BLE001
+            planned_tp2_points = 0.0
+        planned_rr = float(signal.get("rr_ratio") or signal.get("tp2_rr") or 0) or (planned_tp2_points / planned_risk_points if planned_risk_points else 0.0)
+        session_info = decision.get("session_info") or {}
+        news_context = decision.get("news_context") or {}
+        market_context = decision.get("market_context") or {}
+        news_rule = news_context.get("rule_based", {}) if isinstance(news_context, dict) else {}
+        tech_regime = market_context.get("technical_regime", {}) if isinstance(market_context, dict) else {}
+        if not isinstance(tech_regime, dict):
+            tech_regime = {}
+        return {
+            "planned_risk_points": round(planned_risk_points, 1),
+            "planned_tp2_points": round(planned_tp2_points, 1),
+            "planned_rr": round(planned_rr, 2),
+            "session_label": session_info.get("current_session") or session_info.get("session") or session_info.get("session_name"),
+            "session_quality": session_info.get("session_quality") or session_info.get("quality"),
+            "entry_day_of_week": local.strftime("%A"),
+            "entry_hour_local": int(local.hour),
+            "news_status_at_entry": news_rule.get("market_status") or news_rule.get("status"),
+            "news_risk_at_entry": news_rule.get("risk_level") or news_rule.get("risk"),
+            "volatility_regime": tech_regime.get("volatility_regime"),
+            "trend_strength": tech_regime.get("trend_strength"),
+            "daily_bias_at_entry": (decision.get("daily_bias") or {}).get("bias") if isinstance(decision.get("daily_bias"), dict) else None,
+        }
 
     # Statuses the trade manager must still evaluate each cycle. PENDING is
     # included so a not-yet-filled LIMIT/STOP order can be activated on touch
@@ -560,6 +609,18 @@ class DatabaseService:
             "close_time",
             "close_price",
             "final_pnl",
+            "planned_risk_points",
+            "planned_tp2_points",
+            "planned_rr",
+            "session_label",
+            "session_quality",
+            "entry_day_of_week",
+            "entry_hour_local",
+            "news_status_at_entry",
+            "news_risk_at_entry",
+            "volatility_regime",
+            "trend_strength",
+            "daily_bias_at_entry",
             "reasons",
             "last_updated",
         }
