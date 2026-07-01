@@ -490,28 +490,35 @@ def main() -> None:
         # ── Optional Gemini daily report overlay ──────────────────────────
         try:
             gemini = get_gemini_review_service(config)
-            daily_review = gemini.summarize_daily_report({
-                "report_date": report_date,
-                "stats": stats,
-                "closed_trades_count": len(closed_today),
-                "open_trades_count": len(open_trades),
-                "closed_net_points": sum(_pts(t) for t in closed_today) if closed_today else 0.0,
-                "floating_net_points": sum(calculate_pips(float(t.get("entry_price", 0) or 0), float(t.get("current_price", t.get("entry_price", 0)) or 0), str(t.get("type") or t.get("trade_type", "BUY")).upper(), str(t.get("symbol") or "XAU/USD")) for t in open_trades) if open_trades else 0.0,
-                "learning_excerpt": _compact_section(learning_section, max_lines=6) if learning_section else "",
-                "closed_trades_sample": closed_sample,
-                "open_trades_sample": open_sample,
-            })
-            if daily_review.get("available"):
-                lines.append("🧠 <b>Gemini Daily Review</b>")
-                if daily_review.get("summary"):
-                    lines.append(f"• Summary: {daily_review.get('summary')}")
-                for key, label in (("strengths", "Strengths"), ("warnings", "Warnings"), ("tomorrow_focus", "Tomorrow")):
-                    values = [str(x) for x in (daily_review.get(key) or []) if str(x).strip() and str(x).strip() != "…"]
-                    if values:
-                        lines.append(f"• <b>{label}:</b> " + " | ".join(values[:2]))
-                lines.append("")
+            if not gemini.enabled:
+                logger.info("🧠 Gemini Daily Review skipped: API key not configured")
+            else:
+                daily_review = gemini.summarize_daily_report({
+                    "report_date": report_date,
+                    "stats": stats,
+                    "closed_trades_count": len(closed_today),
+                    "open_trades_count": len(open_trades),
+                    "closed_net_points": sum(_pts(t) for t in closed_today) if closed_today else 0.0,
+                    "floating_net_points": sum(calculate_pips(float(t.get("entry_price", 0) or 0), float(t.get("current_price", t.get("entry_price", 0)) or 0), str(t.get("type") or t.get("trade_type", "BUY")).upper(), str(t.get("symbol") or "XAU/USD")) for t in open_trades) if open_trades else 0.0,
+                    "learning_excerpt": _compact_section(learning_section, max_lines=6) if learning_section else "",
+                    "closed_trades_sample": closed_sample,
+                    "open_trades_sample": open_sample,
+                })
+                
+                if daily_review.get("available"):
+                    lines.append("🧠 <b>Gemini Daily Review</b>")
+                    if daily_review.get("summary"):
+                        lines.append(f"• Summary: {daily_review.get('summary')}")
+                    for key, label in (("strengths", "Strengths"), ("warnings", "Warnings"), ("tomorrow_focus", "Tomorrow")):
+                        values = [str(x) for x in (daily_review.get(key) or []) if str(x).strip() and str(x).strip() != "…"]
+                        if values:
+                            lines.append(f"• <b>{label}:</b> " + " | ".join(values[:2]))
+                    lines.append("")
+                    logger.info("✅ Gemini Daily Review added to report")
+                else:
+                    logger.warning("🧠 Gemini Daily Review unavailable: %s", daily_review.get("summary"))
         except Exception as gemini_exc:
-            logger.warning("Gemini daily report skipped: %s", gemini_exc)
+            logger.exception("🧠 Gemini daily report failed with exception")
 
         lines.append("⚠️ Paper-trading only • Educational")
         lines.append("━━━━━━━━━━━━━━━━━━━━━")
