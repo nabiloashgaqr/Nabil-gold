@@ -48,7 +48,6 @@ jobs:
       # summary to storage/eod_*.txt; the final step folds everything into ONE
       # consolidated daily message. (Same workspace is shared across steps.)
       - name: 🔄 End-of-Day Trade Update
-        if: ${{ github.event.inputs.report_date == '' }}
         run: |
           python scripts/run_trade_updates.py
         env:
@@ -61,7 +60,6 @@ jobs:
           EOD_QUIET: "true"
 
       - name: 🧠 Run Learning Update
-        if: ${{ github.event.inputs.report_date == '' }}
         run: |
           python scripts/run_learning.py
         env:
