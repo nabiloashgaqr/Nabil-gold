@@ -65,6 +65,14 @@
           <div class="kpi-card compact"><p data-en="Expectancy" data-ar="التوقع">Expectancy</p><strong id="expectancy">--</strong></div>
         </div>
 
+        <!-- Phase 6 Edge Snapshot -->
+        <div class="edge-grid">
+          <div class="edge-card"><span>🎯</span><p data-en="RR Capture" data-ar="التقاط RR">RR Capture</p><strong id="rrCapture">--</strong><small id="rrCaptureSub">--</small></div>
+          <div class="edge-card"><span>🌍</span><p data-en="Best Session" data-ar="أفضل جلسة">Best Session</p><strong id="bestSession">--</strong><small id="bestSessionSub">--</small></div>
+          <div class="edge-card"><span>📰</span><p data-en="News Impact" data-ar="تأثير الأخبار">News Impact</p><strong id="newsImpact">--</strong><small id="newsImpactSub">--</small></div>
+          <div class="edge-card"><span>🧭</span><p data-en="Best Regime" data-ar="أفضل نظام سوقي">Best Regime</p><strong id="bestRegime">--</strong><small id="bestRegimeSub">--</small></div>
+        </div>
+
         <!-- Toolbar -->
         <div class="toolbar-card">
           <div class="filter-group"><label data-en="Symbol" data-ar="الرمز">Symbol</label><select id="filterSymbol" onchange="applyFilters()"><option value="" data-en="All" data-ar="الكل">All</option><option value="XAU/USD">XAU/USD</option><option value="WTI/USD">WTI/USD</option></select></div>
@@ -95,6 +103,14 @@
           <div class="chart-card">
             <div class="chart-header"><h3 data-en="By Symbol" data-ar="حسب الرمز">By Symbol</h3></div>
             <div class="chart-area"><canvas id="instrumentChart"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header"><h3 data-en="By Regime" data-ar="حسب نظام السوق">By Regime</h3></div>
+            <div class="chart-area"><canvas id="regimeChart"></canvas><div id="regimeEmpty" class="chart-empty">No regime data</div></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header"><h3 data-en="By News Risk" data-ar="حسب مخاطر الأخبار">By News Risk</h3></div>
+            <div class="chart-area"><canvas id="newsChart"></canvas><div id="newsEmpty" class="chart-empty">No news data</div></div>
           </div>
         </div>
 

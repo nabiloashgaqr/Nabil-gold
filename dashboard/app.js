@@ -11,7 +11,7 @@ let closedTrades = [];
 let liveTrades = [];
 let filteredTrades = [];
 let dashboardPayload = null;
-let charts = { daily: null, cumulative: null, session: null, instrument: null };
+let charts = { daily: null, cumulative: null, session: null, instrument: null, regime: null, news: null };
 let autoRefreshInterval = null;
 
 const I18N = {
@@ -108,7 +108,60 @@ function timeText(value) { return value ? String(value).replace('T', ' ').substr
 function pnlOf(t) {
     // SL_HIT can be a real loss, breakeven, or positive trailing stop.
     // Never force SL_HIT negative; use the realized PnL sign stored/calculated by trade management.
-    return num(t.pnl ?? t.final_pnl ?? t.current_pnl_points ?? t.current_pnl ?? 0);
+    return num(t.pnl ?? t.final_pnl_points ?? t.final_pnl ?? t.current_pnl_points ?? t.current_pnl ?? 0);
+}
+function snapshotOf(t) {
+    const snap = t.signal_snapshot || {};
+    if (typeof snap === 'string') { try { return JSON.parse(snap); } catch { return {}; } }
+    return snap && typeof snap === 'object' ? snap : {};
+}
+function plannedRiskOf(t) {
+    const direct = num(t.planned_risk_points, NaN);
+    if (Number.isFinite(direct) && direct > 0) return Math.abs(direct);
+    const entry = num(t.entry_price, 0), sl = num(t.initial_stop_loss ?? t.stop_loss, 0);
+    return entry && sl ? Math.abs(entry - sl) * 10 : 0;
+}
+function plannedRrOf(t) {
+    const direct = num(t.planned_rr, NaN);
+    if (Number.isFinite(direct) && direct > 0) return direct;
+    const sig = snapshotOf(t).signal || {};
+    return num(sig.rr_ratio ?? sig.tp2_rr, 0);
+}
+function bucketMetric(trades, keyFunc) {
+    const buckets = {};
+    trades.forEach(t => {
+        const key = String(keyFunc(t) || 'UNKNOWN');
+        const b = buckets[key] || { count: 0, pnl: 0, wins: 0, losses: 0 };
+        const pnl = pnlOf(t);
+        b.count += 1; b.pnl += pnl;
+        if (pnl > 0) b.wins += 1; else if (pnl < 0) b.losses += 1;
+        buckets[key] = b;
+    });
+    Object.values(buckets).forEach(b => { b.winRate = b.count ? (b.wins / b.count) * 100 : 0; });
+    return buckets;
+}
+function bestBucket(buckets) {
+    const items = Object.entries(buckets || {});
+    return items.length ? items.sort((a,b) => num(b[1].pnl) - num(a[1].pnl))[0] : null;
+}
+function worstBucket(buckets, skipUnknown = false) {
+    const items = Object.entries(buckets || {}).filter(([k]) => !(skipUnknown && k.toUpperCase() === 'UNKNOWN'));
+    return items.length ? items.sort((a,b) => num(a[1].pnl) - num(b[1].pnl))[0] : null;
+}
+function sessionLabelOf(t) {
+    const snap = snapshotOf(t);
+    const si = snap.session_info || {};
+    return t.session_label || si.current_session || sessionBucket(t);
+}
+function newsLabelOf(t) {
+    const snap = snapshotOf(t);
+    const rule = (snap.news_context || {}).rule_based || {};
+    return String(t.news_status_at_entry || rule.market_status || rule.status || 'UNKNOWN').toUpperCase();
+}
+function regimeLabelOf(t) {
+    const snap = snapshotOf(t);
+    const tech = (snap.market_context || {}).technical_regime || {};
+    return String(t.volatility_regime || tech.volatility_regime || 'UNKNOWN').toUpperCase();
 }
 function stopOutcomeOf(t) {
     if (String(t.status || '').toUpperCase() !== 'SL_HIT') return null;
@@ -269,6 +322,7 @@ function updateStats(trades, live) {
     setText('avgTrade', total ? signed(avg) : '--');
     setText('expectancy', total ? signed(avg) : '--');
     setText('tradesCount', total > CLOSED_TRADES_TABLE_LIMIT ? `(${CLOSED_TRADES_TABLE_LIMIT}/${total})` : `(${total})`);
+    updateEdgeSnapshot(trades);
 
     const netEl = $('netPoints');
     if (netEl) netEl.style.color = netPnl >= 0 ? '#2b8a3e' : '#c92a2a';
@@ -276,11 +330,46 @@ function updateStats(trades, live) {
     if (bar) bar.style.width = `${Math.min(winRate, 100)}%`;
 }
 
+function updateEdgeSnapshot(trades) {
+    const actualR = [], planned = [];
+    trades.forEach(t => {
+        const risk = plannedRiskOf(t);
+        if (risk > 0) {
+            actualR.push(pnlOf(t) / risk);
+            const rr = plannedRrOf(t);
+            if (rr > 0) planned.push(rr);
+        }
+    });
+    if (actualR.length) {
+        const avgActual = actualR.reduce((a,b)=>a+b,0) / actualR.length;
+        const avgPlanned = planned.length ? planned.reduce((a,b)=>a+b,0) / planned.length : 0;
+        const capture = avgPlanned ? (avgActual / avgPlanned) * 100 : 0;
+        setText('rrCapture', `${capture.toFixed(1)}%`);
+        setText('rrCaptureSub', `${avgActual >= 0 ? '+' : ''}${avgActual.toFixed(2)}R / ${avgPlanned.toFixed(2)}R`);
+    } else {
+        setText('rrCapture', '--'); setText('rrCaptureSub', currentLang === 'ar' ? 'لا توجد بيانات' : 'No enriched data');
+    }
+    const sessions = bucketMetric(trades, sessionLabelOf);
+    const news = bucketMetric(trades, newsLabelOf);
+    const regimes = bucketMetric(trades, regimeLabelOf);
+    const bestSession = bestBucket(sessions);
+    const weakNews = worstBucket(news, true);
+    const bestRegime = bestBucket(regimes);
+    setText('bestSession', bestSession ? bestSession[0] : '--');
+    setText('bestSessionSub', bestSession ? `${signed(bestSession[1].pnl)} pts · WR ${bestSession[1].winRate.toFixed(0)}%` : '--');
+    setText('newsImpact', weakNews ? weakNews[0] : '--');
+    setText('newsImpactSub', weakNews ? `${signed(weakNews[1].pnl)} pts · ${weakNews[1].count} ${currentLang === 'ar' ? 'صفقات' : 'trades'}` : '--');
+    setText('bestRegime', bestRegime ? bestRegime[0] : '--');
+    setText('bestRegimeSub', bestRegime ? `${signed(bestRegime[1].pnl)} pts · WR ${bestRegime[1].winRate.toFixed(0)}%` : '--');
+}
+
 function updateCharts(trades) {
     updateDailyPnlChart(trades);
     updateCumulativePnlChart(trades);
     updateSessionChart(trades);
     updateInstrumentChart(trades);
+    updateRegimeChart(trades);
+    updateNewsChart(trades);
 }
 
 function chartOptions(extra = {}) {
@@ -418,6 +507,39 @@ function updateSessionChart(trades) {
                 y: { grid: { display: false }, ticks: { color: document.body.classList.contains('dark') ? '#94a3b8' : '#64748b' } }
             }
         }),
+    });
+}
+
+
+function updateRegimeChart(trades) {
+    const grouped = bucketMetric(trades, regimeLabelOf);
+    const labels = Object.keys(grouped).filter(k => k !== 'UNKNOWN' || grouped[k].count);
+    const data = labels.map(k => grouped[k].pnl);
+    const ctx = $('regimeChart');
+    setChartEmpty('regimeEmpty', !data.length);
+    if (!ctx || typeof Chart === 'undefined') return;
+    safeDestroyChart('regime');
+    if (!data.length) return;
+    charts.regime = new Chart(ctx.getContext('2d'), {
+        type: 'bar',
+        data: { labels: labels.map(k => `${k} (${grouped[k].count})`), datasets: [{ data, backgroundColor: data.map(v => v >= 0 ? 'rgba(22,163,74,.72)' : 'rgba(220,38,38,.72)'), borderRadius: 8, maxBarThickness: 38 }] },
+        options: chartOptions(),
+    });
+}
+
+function updateNewsChart(trades) {
+    const grouped = bucketMetric(trades, newsLabelOf);
+    const labels = Object.keys(grouped).filter(k => k !== 'UNKNOWN' || grouped[k].count);
+    const data = labels.map(k => grouped[k].pnl);
+    const ctx = $('newsChart');
+    setChartEmpty('newsEmpty', !data.length);
+    if (!ctx || typeof Chart === 'undefined') return;
+    safeDestroyChart('news');
+    if (!data.length) return;
+    charts.news = new Chart(ctx.getContext('2d'), {
+        type: 'bar',
+        data: { labels: labels.map(k => `${k} (${grouped[k].count})`), datasets: [{ data, backgroundColor: data.map(v => v >= 0 ? 'rgba(22,163,74,.72)' : 'rgba(220,38,38,.72)'), borderRadius: 8, maxBarThickness: 38 }] },
+        options: chartOptions(),
     });
 }
 
