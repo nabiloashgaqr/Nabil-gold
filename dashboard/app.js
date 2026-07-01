@@ -2,8 +2,8 @@
 // Secure version: no Supabase keys in frontend. Data comes from /api/dashboard.
 
 const API_URL = (window.SMARTSIGNAL_API_URL || '/api/dashboard');
-const OUTCOME_STATUSES = new Set(['TP1_HIT', 'TP2_HIT', 'SL_HIT', 'BE_HIT', 'EXPIRED', 'MANUAL_CLOSE', 'CLOSED']);
-const LIVE_STATUSES = new Set([]);
+const OUTCOME_STATUSES = new Set(['TP2_HIT', 'SL_HIT', 'BE_HIT', 'EXPIRED', 'MANUAL_CLOSE', 'CLOSED']);
+const LIVE_STATUSES = new Set(['OPEN', 'TP1_HIT', 'PARTIAL', 'PENDING']);
 const CLOSED_TRADES_TABLE_LIMIT = 50;
 
 let currentLang = 'ar';
@@ -136,7 +136,13 @@ function statusClassOf(t) {
 function tradeTime(t) { return t.created_at || t.entry_time || t.opened_at || t.updated_at || ''; }
 function closeTime(t) { return t.closed_at || t.close_time || ''; }
 function openTime(t) { return t.entry_time || t.created_at || t.opened_at || t.updated_at || ''; }
-function reportDate(t) { return dateText(openTime(t)); }
+function tradeReportTime(t) {
+    // Realized performance belongs to the day the trade CLOSED, not the day it
+    // was opened.  A trade opened yesterday and closed today must therefore
+    // appear in today's table filters and daily PnL chart.
+    return closeTime(t) || openTime(t);
+}
+function reportDate(t) { return dateText(tradeReportTime(t)); }
 function localHourJerusalem(value) {
     const d = value ? new Date(value) : new Date();
     const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Jerusalem', hour: '2-digit', hour12: false }).formatToParts(d);
@@ -150,7 +156,7 @@ function sessionBucket(t) {
     if (h >= 19 && h < 24) return currentLang === 'ar' ? 'أمريكا مساءً' : 'New York Evening';
     return currentLang === 'ar' ? 'أمريكا متأخرة ليلاً' : 'Late New York Night';
 }
-function isLiveStatus(status) { return false; }
+function isLiveStatus(status) { return LIVE_STATUSES.has(String(status || '').toUpperCase()); }
 function isClosedStatus(status) { return OUTCOME_STATUSES.has(String(status || '').toUpperCase()); }
 
 function normalizeTrade(t) {
@@ -195,7 +201,7 @@ async function loadDashboardData() {
 
         dashboardPayload = payload;
         closedTrades = (payload.closedTrades || []).map(normalizeTrade).filter(t => isClosedStatus(t.status));
-        liveTrades = [];
+        liveTrades = (payload.liveTrades || []).map(normalizeTrade).filter(t => isLiveStatus(t.status));
         filteredTrades = [...closedTrades];
 
         updateStats(filteredTrades, liveTrades);
@@ -241,7 +247,7 @@ function safeDestroyChart(name) {
 function updateStats(trades, live) {
     const total = trades.length;
     const wins = trades.filter(t => pnlOf(t) > 0 || ['TP2_HIT'].includes(t.status));
-    const losses = trades.filter(t => pnlOf(t) < 0 || t.status === 'SL_HIT');
+    const losses = trades.filter(t => pnlOf(t) < 0);
     const netPnl = trades.reduce((sum, t) => sum + pnlOf(t), 0);
     const winRate = total ? (wins.length / total) * 100 : 0;
     const grossProfit = trades.filter(t => pnlOf(t) > 0).reduce((sum, t) => sum + pnlOf(t), 0);
@@ -251,14 +257,13 @@ function updateStats(trades, live) {
     const best = pnls.length ? Math.max(...pnls) : 0;
     const worst = pnls.length ? Math.min(...pnls) : 0;
     const avg = total ? netPnl / total : 0;
-    const tp1Live = trades.filter(t => t.status === 'TP1_HIT').length;
 
     setText('totalTrades', total);
     setText('winRate', `${winRate.toFixed(1)}%`);
     setText('netPoints', signed(netPnl));
     setText('profitFactor', profitFactor);
-    setText('liveCount', trades.length);
-    setText('tp1Count', tp1Live);
+    setText('liveCount', live.length);
+    setText('tp1Count', live.filter(t => t.status === 'TP1_HIT').length);
     setText('bestTrade', pnls.length ? signed(best) : '--');
     setText('worstTrade', pnls.length ? signed(worst) : '--');
     setText('avgTrade', total ? signed(avg) : '--');
@@ -350,7 +355,7 @@ function updateDailyPnlChart(trades) {
 }
 
 function updateCumulativePnlChart(trades) {
-    const sorted = [...trades].sort((a, b) => String(openTime(a)).localeCompare(String(openTime(b))));
+    const sorted = [...trades].sort((a, b) => String(tradeReportTime(a)).localeCompare(String(tradeReportTime(b))));
     let cumulative = 0;
     const data = sorted.map(t => { cumulative += pnlOf(t); return cumulative; });
     const labels = sorted.map(t => reportDate(t).substring(5));
