@@ -53,47 +53,47 @@
 
         <!-- KPI Grid (Original) -->
         <div class="kpi-grid">
-          <div class="kpi-card"><span class="kpi-icon green">✓</span><div><p>Outcome Trades</p><strong id="totalTrades">--</strong></div></div>
-          <div class="kpi-card"><span class="kpi-icon blue">◎</span><div><p>Win Rate</p><strong id="winRate">--%</strong><div class="progress-bar"><div id="winRateBar" class="progress-fill"></div></div></div></div>
-          <div class="kpi-card"><span class="kpi-icon gold">$</span><div><p>Net Points</p><strong id="netPoints">--</strong></div></div>
-          <div class="kpi-card"><span class="kpi-icon purple">×</span><div><p>Profit Factor</p><strong id="profitFactor">--</strong></div></div>
-          <div class="kpi-card compact"><p>Closed</p><strong id="liveCount">--</strong></div>
-          <div class="kpi-card compact"><p>TP1 Trades</p><strong id="tp1Count">--</strong></div>
-          <div class="kpi-card compact"><p>Best Trade</p><strong id="bestTrade">--</strong></div>
-          <div class="kpi-card compact"><p>Worst Trade</p><strong id="worstTrade">--</strong></div>
-          <div class="kpi-card compact"><p>Average Trade</p><strong id="avgTrade">--</strong></div>
-          <div class="kpi-card compact"><p>Expectancy</p><strong id="expectancy">--</strong></div>
+          <div class="kpi-card"><span class="kpi-icon green">✓</span><div><p data-en="Outcome Trades" data-ar="صفقات مغلقة">Outcome Trades</p><strong id="totalTrades">--</strong></div></div>
+          <div class="kpi-card"><span class="kpi-icon blue">◎</span><div><p data-en="Win Rate" data-ar="نسبة الربح">Win Rate</p><strong id="winRate">--%</strong><div class="progress-bar"><div id="winRateBar" class="progress-fill"></div></div></div></div>
+          <div class="kpi-card"><span class="kpi-icon gold">$</span><div><p data-en="Net Points" data-ar="صافي النقاط">Net Points</p><strong id="netPoints">--</strong></div></div>
+          <div class="kpi-card"><span class="kpi-icon purple">×</span><div><p data-en="Profit Factor" data-ar="عامل الربح">Profit Factor</p><strong id="profitFactor">--</strong></div></div>
+          <div class="kpi-card compact"><p data-en="Closed" data-ar="المغلقة">Closed</p><strong id="liveCount">--</strong></div>
+          <div class="kpi-card compact"><p data-en="TP1 Trades" data-ar="أهداف محققة">TP1 Trades</p><strong id="tp1Count">--</strong></div>
+          <div class="kpi-card compact"><p data-en="Best Trade" data-ar="أفضل صفقة">Best Trade</p><strong id="bestTrade">--</strong></div>
+          <div class="kpi-card compact"><p data-en="Worst Trade" data-ar="أسوأ صفقة">Worst Trade</p><strong id="worstTrade">--</strong></div>
+          <div class="kpi-card compact"><p data-en="Average Trade" data-ar="متوسط الربح">Average Trade</p><strong id="avgTrade">--</strong></div>
+          <div class="kpi-card compact"><p data-en="Expectancy" data-ar="التوقع">Expectancy</p><strong id="expectancy">--</strong></div>
         </div>
 
         <!-- Toolbar -->
         <div class="toolbar-card">
-          <div class="filter-group"><label>Symbol</label><select id="filterSymbol" onchange="applyFilters()"><option value="">All</option><option value="XAU/USD">XAU/USD</option><option value="WTI/USD">WTI/USD</option></select></div>
-          <div class="filter-group"><label>Result</label><select id="filterResult" onchange="applyFilters()"><option value="">All</option><option value="win">Win</option><option value="loss">Loss</option></select></div>
-          <div class="filter-group"><label>From</label><input type="date" id="filterDateFrom" onchange="applyFilters()"></div>
-          <div class="filter-group"><label>To</label><input type="date" id="filterDateTo" onchange="applyFilters()"></div>
-          <div class="filter-group search-group"><label>Search</label><input id="searchInput" placeholder="Search..." oninput="applyFilters()"></div>
+          <div class="filter-group"><label data-en="Symbol" data-ar="الرمز">Symbol</label><select id="filterSymbol" onchange="applyFilters()"><option value="" data-en="All" data-ar="الكل">All</option><option value="XAU/USD">XAU/USD</option><option value="WTI/USD">WTI/USD</option></select></div>
+          <div class="filter-group"><label data-en="Result" data-ar="النتيجة">Result</label><select id="filterResult" onchange="applyFilters()"><option value="" data-en="All" data-ar="الكل">All</option><option value="win" data-en="Win" data-ar="ربح">Win</option><option value="loss" data-en="Loss" data-ar="خسارة">Loss</option></select></div>
+          <div class="filter-group"><label data-en="From" data-ar="من">From</label><input type="date" id="filterDateFrom" onchange="applyFilters()"></div>
+          <div class="filter-group"><label data-en="To" data-ar="إلى">To</label><input type="date" id="filterDateTo" onchange="applyFilters()"></div>
+          <div class="filter-group search-group"><label data-en="Search" data-ar="بحث">Search</label><input id="searchInput" placeholder="Search..." oninput="applyFilters()"></div>
           <div class="toolbar-actions">
-            <button onclick="clearFilters()" class="btn btn-ghost">Clear</button>
-            <button onclick="exportToCSV()" class="btn btn-primary">Export CSV</button>
+            <button onclick="clearFilters()" class="btn btn-ghost" data-en="Clear" data-ar="مسح">Clear</button>
+            <button onclick="exportToCSV()" class="btn btn-primary" data-en="Export CSV" data-ar="تصدير CSV">Export CSV</button>
           </div>
         </div>
 
         <!-- Charts -->
         <div class="charts-grid">
           <div class="chart-card primary-chart">
-            <div class="chart-header"><div><h3>Daily PnL</h3></div><strong id="dailyChartTotal">--</strong></div>
+            <div class="chart-header"><div><h3 data-en="Daily PnL" data-ar="الربح اليومي">Daily PnL</h3></div><strong id="dailyChartTotal">--</strong></div>
             <div class="chart-area"><canvas id="dailyPnlChart"></canvas></div>
           </div>
           <div class="chart-card">
-            <div class="chart-header"><h3>Cumulative PnL</h3></div>
+            <div class="chart-header"><h3 data-en="Cumulative PnL" data-ar="الربح التراكمي">Cumulative PnL</h3></div>
             <div class="chart-area"><canvas id="cumulativePnlChart"></canvas></div>
           </div>
           <div class="chart-card">
-            <div class="chart-header"><h3>By Session</h3></div>
+            <div class="chart-header"><h3 data-en="By Session" data-ar="حسب الجلسة">By Session</h3></div>
             <div class="chart-area"><canvas id="sessionChart"></canvas></div>
           </div>
           <div class="chart-card">
-            <div class="chart-header"><h3>By Symbol</h3></div>
+            <div class="chart-header"><h3 data-en="By Symbol" data-ar="حسب الرمز">By Symbol</h3></div>
             <div class="chart-area"><canvas id="instrumentChart"></canvas></div>
           </div>
         </div>
@@ -109,7 +109,20 @@
           </div>
           <div class="table-container">
             <table id="tradesTable">
-              <thead><tr><th>Opened</th><th>Closed</th><th>Symbol</th><th>Type</th><th>Entry</th><th>Close</th><th>PnL</th><th>Status</th><th>Confidence</th><th>Details</th></tr></thead>
+              <thead>
+                <tr>
+                  <th data-en="Opened" data-ar="فتح">Opened</th>
+                  <th data-en="Closed" data-ar="إغلاق">Closed</th>
+                  <th data-en="Symbol" data-ar="الرمز">Symbol</th>
+                  <th data-en="Type" data-ar="النوع">Type</th>
+                  <th data-en="Entry" data-ar="دخول">Entry</th>
+                  <th data-en="Close" data-ar="إغلاق">Close</th>
+                  <th data-en="PnL" data-ar="النقاط">PnL</th>
+                  <th data-en="Status" data-ar="الحالة">Status</th>
+                  <th data-en="Confidence" data-ar="الثقة">Confidence</th>
+                  <th data-en="Details" data-ar="تفاصيل">Details</th>
+                </tr>
+              </thead>
               <tbody id="tradesBody"><tr><td colspan="10" class="loading">Loading...</td></tr></tbody>
             </table>
           </div>

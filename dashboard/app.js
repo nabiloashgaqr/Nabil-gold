@@ -25,6 +25,21 @@ const I18N = {
         noReports: 'لا توجد تقارير محفوظة',
         loading: 'جاري التحميل...',
         details: 'تفاصيل',
+        status: 'الحالة',
+        entryDate: 'تاريخ الدخول',
+        closeDate: 'تاريخ الإغلاق',
+        symbol: 'الرمز',
+        type: 'النوع',
+        entryPrice: 'سعر الدخول',
+        currentClose: 'السعر الحالي/الإغلاق',
+        sl: 'وقف الخسارة',
+        tp1: 'الهدف 1',
+        tp2: 'الهدف 2',
+        pnl: 'الربح/الخسارة',
+        confidence: 'الثقة',
+        mode: 'الوضع',
+        id: 'المعرف',
+        noReportText: 'لا يوجد نص للتقرير',
     },
     en: {
         api404: 'Dashboard API is not deployed: /api/dashboard returns 404. If Vercel Root Directory is dashboard, upload dashboard/api/dashboard.js and redeploy.',
@@ -36,6 +51,21 @@ const I18N = {
         noReports: 'No saved reports',
         loading: 'Loading...',
         details: 'Details',
+        status: 'Status',
+        entryDate: 'Entry Date',
+        closeDate: 'Close Date',
+        symbol: 'Symbol',
+        type: 'Type',
+        entryPrice: 'Entry Price',
+        currentClose: 'Current/Close',
+        sl: 'SL',
+        tp1: 'TP1',
+        tp2: 'TP2',
+        pnl: 'PnL',
+        confidence: 'Confidence',
+        mode: 'Mode',
+        id: 'ID',
+        noReportText: 'No report text',
     }
 };
 function tr(key) { return (I18N[currentLang] && I18N[currentLang][key]) || I18N.ar[key] || key; }
@@ -531,7 +561,7 @@ function renderReportArchive(containerId, reports, type) {
                     <span class="file-title">${esc(period)}</span>
                     <span class="file-meta">${wordTrades(trades)} · ${currentLang === 'ar' ? 'نسبة الربح' : 'WR'} ${wr.toFixed(1)}% · <b class="${net >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(net, 1)}</b></span>
                 </button>
-                <pre id="${rid}" class="report-file-body">${esc(reportText(r) || (currentLang === 'ar' ? 'لا يوجد نص للتقرير' : 'No report text'))}</pre>
+                <pre id="${rid}" class="report-file-body">${reportText(r) || tr('noReportText')}</pre>
             </div>`;
         }).join('');
         return `<div class="report-month-folder">
@@ -550,8 +580,8 @@ function renderReports(payload) {
     const weekly = payload.weeklyReports || [];
     const latestDaily = daily[0];
     const latestWeekly = weekly[0];
-    setText('dailyReport', latestDaily ? (reportText(latestDaily) || (currentLang === 'ar' ? 'التقرير اليومي بدون نص' : 'Daily report has no text')) : tr('noDaily'));
-    setText('weeklyReport', latestWeekly ? (reportText(latestWeekly) || JSON.stringify(latestWeekly.stats_json || {}, null, 2)) : tr('noWeekly'));
+    setHTML('dailyReport', latestDaily ? (reportText(latestDaily) || tr('noReportText')) : tr('noDaily'));
+    setHTML('weeklyReport', latestWeekly ? (reportText(latestWeekly) || tr('noWeekly')) : tr('noWeekly'));
     renderReportArchive('dailyReportsArchive', daily, 'daily');
     renderReportArchive('weeklyReportsArchive', weekly, 'weekly');
     setText('dailyReportsCount', daily.length ? wordReports(daily.length) : '');
@@ -614,20 +644,20 @@ function showTradeModal(trade) {
     const live = isLiveStatus(trade.status);
     title.textContent = `${trade.type} ${trade.symbol} — ${displayStatus(trade)}`;
     body.innerHTML = `<div class="trade-detail-grid">
-        <div><strong>ID:</strong> <code>${esc(trade.id)}</code></div>
-        <div><strong>الحالة:</strong> <span class="badge ${statusClassOf(trade)}">${esc(displayStatus(trade))}</span></div>
-        <div><strong>تاريخ الدخول:</strong> ${esc(timeText(tradeTime(trade)))}</div>
-        <div><strong>تاريخ الإغلاق:</strong> ${esc(timeText(closeTime(trade)))}</div>
-        <div><strong>الرمز:</strong> ${esc(trade.symbol)}</div>
-        <div><strong>النوع:</strong> <span class="badge ${trade.type === 'BUY' ? 'buy' : 'sell'}">${esc(trade.type)}</span></div>
-        <div><strong>Entry:</strong> ${num(trade.entry_price).toFixed(2)}</div>
-        <div><strong>Current/Close:</strong> ${trade.close_price ?? trade.current_price ?? '-'}</div>
-        <div><strong>SL:</strong> ${trade.stop_loss ?? '-'}</div>
-        <div><strong>TP1:</strong> ${trade.tp1 ?? '-'}</div>
-        <div><strong>TP2:</strong> ${trade.tp2 ?? '-'}</div>
-        <div><strong>PnL:</strong> <span class="${pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(pnl)}</span></div>
-        <div><strong>Confidence:</strong> ${esc(trade.confidence ?? '--')}%</div>
-        <div><strong>Mode:</strong> ${esc(trade.trading_mode || 'paper')}</div>
+        <div><strong>${tr('id')}:</strong> <code>${esc(trade.id)}</code></div>
+        <div><strong>${tr('status')}:</strong> <span class="badge ${statusClassOf(trade)}">${esc(displayStatus(trade))}</span></div>
+        <div><strong>${tr('entryDate')}:</strong> ${esc(timeText(tradeTime(trade)))}</div>
+        <div><strong>${tr('closeDate')}:</strong> ${esc(timeText(closeTime(trade)))}</div>
+        <div><strong>${tr('symbol')}:</strong> ${esc(trade.symbol)}</div>
+        <div><strong>${tr('type')}:</strong> <span class="badge ${trade.type === 'BUY' ? 'buy' : 'sell'}">${esc(trade.type)}</span></div>
+        <div><strong>${tr('entryPrice')}:</strong> ${num(trade.entry_price).toFixed(2)}</div>
+        <div><strong>${tr('currentClose')}:</strong> ${trade.close_price ?? trade.current_price ?? '-'}</div>
+        <div><strong>${tr('sl')}:</strong> ${trade.stop_loss ?? '-'}</div>
+        <div><strong>${tr('tp1')}:</strong> ${trade.tp1 ?? '-'}</div>
+        <div><strong>${tr('tp2')}:</strong> ${trade.tp2 ?? '-'}</div>
+        <div><strong>${tr('pnl')}:</strong> <span class="${pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(pnl)}</span></div>
+        <div><strong>${tr('confidence')}:</strong> ${esc(trade.confidence ?? '--')}%</div>
+        <div><strong>${tr('mode')}:</strong> ${esc(trade.trading_mode || 'paper')}</div>
     </div>`;
     modal.style.display = 'flex';
 }
