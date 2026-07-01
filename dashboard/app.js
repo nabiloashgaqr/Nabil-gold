@@ -69,6 +69,7 @@ const I18N = {
     }
 };
 function tr(key) { return (I18N[currentLang] && I18N[currentLang][key]) || I18N.ar[key] || key; }
+function collectingText() { return currentLang === 'ar' ? 'قيد تجميع البيانات' : 'Collecting data'; }
 function localeCode() { return currentLang === 'ar' ? 'ar-SA' : 'en-US'; }
 function formatDateTime(value) {
     const d = value ? new Date(value) : new Date();
@@ -354,13 +355,14 @@ function updateEdgeSnapshot(trades) {
     const regimes = bucketMetric(trades, regimeLabelOf);
     const bestSession = bestBucket(sessions);
     const weakNews = worstBucket(news, true);
-    const bestRegime = bestBucket(regimes);
+    const knownRegimes = Object.fromEntries(Object.entries(regimes).filter(([k]) => k.toUpperCase() !== 'UNKNOWN'));
+    const bestRegime = bestBucket(knownRegimes);
     setText('bestSession', bestSession ? bestSession[0] : '--');
     setText('bestSessionSub', bestSession ? `${signed(bestSession[1].pnl)} pts · WR ${bestSession[1].winRate.toFixed(0)}%` : '--');
-    setText('newsImpact', weakNews ? weakNews[0] : '--');
-    setText('newsImpactSub', weakNews ? `${signed(weakNews[1].pnl)} pts · ${weakNews[1].count} ${currentLang === 'ar' ? 'صفقات' : 'trades'}` : '--');
-    setText('bestRegime', bestRegime ? bestRegime[0] : '--');
-    setText('bestRegimeSub', bestRegime ? `${signed(bestRegime[1].pnl)} pts · WR ${bestRegime[1].winRate.toFixed(0)}%` : '--');
+    setText('newsImpact', weakNews ? weakNews[0] : collectingText());
+    setText('newsImpactSub', weakNews ? `${signed(weakNews[1].pnl)} pts · ${weakNews[1].count} ${currentLang === 'ar' ? 'صفقات' : 'trades'}` : (currentLang === 'ar' ? 'تظهر بعد توفر سياق الأخبار' : 'Shown when news context is available'));
+    setText('bestRegime', bestRegime ? bestRegime[0] : collectingText());
+    setText('bestRegimeSub', bestRegime ? `${signed(bestRegime[1].pnl)} pts · WR ${bestRegime[1].winRate.toFixed(0)}%` : (currentLang === 'ar' ? 'تظهر بعد توفر بيانات السوق' : 'Shown when regime data is available'));
 }
 
 function updateCharts(trades) {
@@ -513,7 +515,7 @@ function updateSessionChart(trades) {
 
 function updateRegimeChart(trades) {
     const grouped = bucketMetric(trades, regimeLabelOf);
-    const labels = Object.keys(grouped).filter(k => k !== 'UNKNOWN' || grouped[k].count);
+    const labels = Object.keys(grouped).filter(k => k.toUpperCase() !== 'UNKNOWN');
     const data = labels.map(k => grouped[k].pnl);
     const ctx = $('regimeChart');
     setChartEmpty('regimeEmpty', !data.length);
@@ -529,7 +531,7 @@ function updateRegimeChart(trades) {
 
 function updateNewsChart(trades) {
     const grouped = bucketMetric(trades, newsLabelOf);
-    const labels = Object.keys(grouped).filter(k => k !== 'UNKNOWN' || grouped[k].count);
+    const labels = Object.keys(grouped).filter(k => k.toUpperCase() !== 'UNKNOWN');
     const data = labels.map(k => grouped[k].pnl);
     const ctx = $('newsChart');
     setChartEmpty('newsEmpty', !data.length);
