@@ -30,14 +30,18 @@ class DailyReportAgent(BaseAgent):
         return {"agent": self.name, "date": date.today().isoformat(), "stats": stats, "text": self._format_report(stats, trades, title="Weekly Report")}
 
     def _stats(self, trades: List[Dict[str, Any]]) -> Dict[str, Any]:
-        total = len(trades)
-        # SL_HIT can be SL loss, breakeven, or SL+ after trailing/breakeven move.
-        # Classify resolved trades by actual PnL sign, not by status name alone.
-        winners = [t for t in trades if self._pnl(t) > 0]
-        losers = [t for t in trades if self._pnl(t) < 0]
-        breakeven = [t for t in trades if t.get("status") == "BE_HIT" or self._pnl(t) == 0 and t.get("status") not in {"OPEN", "TP1_HIT"}]
+        total_count = len(trades)
+        
+        # نركز الإحصائيات (الربح، الخسارة، نسبة النجاح) على الصفقات المغلقة فقط
+        resolved_trades = [t for t in trades if t.get("status") not in {"OPEN", "TP1_HIT", "PARTIAL", "PENDING"}]
+        
+        winners = [t for t in resolved_trades if self._pnl(t) > 0]
+        losers = [t for t in resolved_trades if self._pnl(t) < 0]
+        breakeven = [t for t in resolved_trades if t.get("status") == "BE_HIT" or self._pnl(t) == 0]
+        
         open_trades = [t for t in trades if t.get("status") in {"OPEN", "TP1_HIT", "PARTIAL"}]
-        pnl_values = [self._pnl(t) for t in trades]
+        
+        pnl_values = [self._pnl(t) for t in resolved_trades]
         gross_profit = sum(x for x in pnl_values if x > 0)
         gross_loss = abs(sum(x for x in pnl_values if x < 0))
         if gross_loss > 0:
@@ -57,9 +61,9 @@ class DailyReportAgent(BaseAgent):
         by_agent = self._by_agent(trades)
         by_session = self._by_session(trades)
         by_instrument = self._by_instrument(trades)
-        recommendations = self._recommendations(total, win_rate, net, profit_factor, by_agent, by_direction)
+        recommendations = self._recommendations(total_count, win_rate, net, profit_factor, by_agent, by_direction)
         return {
-            "total": total,
+            "total": total_count,
             "wins": len(winners),
             "losses": len(losers),
             "breakeven": len(breakeven),
