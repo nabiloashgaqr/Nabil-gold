@@ -242,6 +242,160 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
     except (TypeError, ValueError): return default
 
 
+def _levels_from_results(all_results: Dict[str, Any], side: str) -> List[float]:
+    """Extract support/resistance levels relevant for a fixed-risk scale-in.
+
+    BUY scale-ins are considered near support below/around price; SELL scale-ins
+    are considered near resistance above/around price.  The project has used a
+    few different key names over time, so this helper accepts the common shapes
+    without raising when an agent omits a section.
+    """
+    side = str(side or "").upper()
+    wanted_keys = (
+        ("support_levels", "supports", "support")
+        if side == "BUY"
+        else ("resistance_levels", "resistances", "resistance")
+    )
+    levels: List[float] = []
+    for section_name in ("classical", "smc", "price_action", "technical"):
+        section = all_results.get(section_name, {}) or {}
+        for key in wanted_keys:
+            raw = section.get(key)
+            if raw is None:
+                continue
+            if not isinstance(raw, list):
+                raw = [raw]
+            for item in raw:
+                value = item.get("price") if isinstance(item, dict) else item
+                price = _safe_float(value, 0.0)
+                if price > 0:
+                    levels.append(price)
+    return levels
+
+
+def _scale_in_count_for_parent(open_trades: List[Dict[str, Any]], parent_id: str) -> int:
+    """Count already-open scale-ins for a parent trade from known schema shapes."""
+    count = 0
+    for trade in open_trades:
+        signal = trade.get("signal") or (trade.get("signal_snapshot", {}) or {}).get("signal", {}) or {}
+        if not isinstance(signal, dict):
+            signal = {}
+        if bool(signal.get("scale_in") or trade.get("scale_in")) and str(
+            signal.get("parent_trade_id") or trade.get("parent_trade_id") or ""
+        ) == str(parent_id):
+            count += 1
+    return count
+
+
+async def _check_scale_in(
+    config: Dict[str, Any],
+    all_results: Dict[str, Any],
+    open_trades: List[Dict[str, Any]],
+    database: DatabaseService,
+    telegram: TelegramService,
+) -> None:
+    """Send and persist fixed-risk scale-in trades when price retests a level.
+
+    The send-before-save order is intentional: a scale-in must not be stored as
+    active unless the Telegram instruction was actually delivered.  This also
+    fixes the previous regression where the message was built but never sent and
+    an undefined ``delivered`` variable was checked afterwards.
+    """
+    oe = config.get("order_execution", {}) or {}
+    fr = oe.get("fixed_risk", {}) or {}
+    if str(oe.get("entry_style", "")).lower() != "fixed_risk":
+        return
+    if not bool(fr.get("scale_in_enabled", False)):
+        return
+    if _is_news_hard_block({}, all_results):
+        return
+
+    current_price = _safe_float(all_results.get("current_price"), 0.0)
+    if current_price <= 0:
+        return
+    symbol = str(all_results.get("symbol") or config.get("symbol") or "XAU/USD")
+    trigger_points = float(fr.get("scale_in_trigger_points", 50) or 50)
+    max_scale_ins = int(fr.get("scale_in_max", 1) or 1)
+    if max_scale_ins <= 0:
+        return
+
+    for parent in open_trades:
+        parent_id = str(parent.get("id") or parent.get("trade_id") or "")
+        side = _trade_direction(parent)
+        if not parent_id or side not in {"BUY", "SELL"}:
+            continue
+        if str(parent.get("status", "OPEN")).upper() not in {"OPEN", "PARTIAL", "TP1_HIT"}:
+            continue
+        if _scale_in_count_for_parent(open_trades, parent_id) >= max_scale_ins:
+            continue
+
+        levels = _levels_from_results(all_results, side)
+        if not levels:
+            continue
+        if side == "BUY":
+            directional_levels = [level for level in levels if level <= current_price]
+        else:
+            directional_levels = [level for level in levels if level >= current_price]
+        if not directional_levels:
+            directional_levels = levels
+        nearest_level = min(directional_levels, key=lambda level: abs(level - current_price))
+        distance_points = abs(price_to_points(current_price - nearest_level, symbol=symbol))
+        if distance_points > trigger_points:
+            continue
+
+        entry_price = current_price
+        stop_loss = _safe_float(parent.get("stop_loss"), 0.0)
+        tp1 = _safe_float(parent.get("tp1"), 0.0)
+        tp2 = _safe_float(parent.get("tp2"), 0.0)
+        trade_id = database.new_trade_id()
+        reason = f"Price within {distance_points:.0f} points of {'support' if side == 'BUY' else 'resistance'} level {nearest_level:.2f}"
+        decision: Dict[str, Any] = {
+            "trade_id": trade_id,
+            "decision": side,
+            "symbol": symbol,
+            "current_price": entry_price,
+            "confidence": int(_safe_float(all_results.get("confidence"), 75)),
+            "trading_mode": oe.get("mode", "paper"),
+            "paper_trading": True,
+            "reasons": [reason, f"Fixed-risk scale-in for parent trade {parent_id}"],
+            "signal": {
+                "symbol": symbol,
+                "type": side,
+                "scale_in": True,
+                "parent_trade_id": parent_id,
+                "scale_in_size_ratio": float(fr.get("scale_in_size_ratio", 1.0) or 1.0),
+                "entry": {"price": entry_price, "kind": "MARKET"},
+                "entry_kind": "MARKET",
+                "stop_loss": stop_loss,
+                "tp1": tp1,
+                "tp2": tp2,
+            },
+        }
+        message = (
+            f"➕ <b>Scale-In {html.escape(symbol)} — {html.escape(side)}</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            f"• <b>Parent:</b> {html.escape(parent_id)}\n"
+            f"• <b>Entry:</b> {entry_price:.2f}\n"
+            f"• <b>Level:</b> {nearest_level:.2f} ({distance_points:.0f} pts away)\n"
+            f"• <b>Stop Loss:</b> {stop_loss:.2f}\n"
+            f"• <b>TP1:</b> {tp1:.2f}\n"
+            f"• <b>TP2:</b> {tp2:.2f}\n"
+            f"• <b>Size ratio:</b> {decision['signal']['scale_in_size_ratio']}\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            f"<i>ID: {html.escape(trade_id)}</i>"
+        )
+        delivered = False
+        try:
+            delivered = bool(telegram.send_message(message, urgent=True))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Failed to send scale-in Telegram message for %s: %s", parent_id, exc)
+        if delivered:
+            database.save_trade(decision)
+        else:
+            logger.error("Scale-in for %s was not saved because Telegram delivery failed", parent_id)
+        return
+
+
 def _is_news_hard_block(decision: Dict[str, Any], all_results: Dict[str, Any]) -> bool:
     warnings = [str(w).lower() for w in (decision.get("warnings") or [])]
     if any(w.startswith("news blocked") or w.startswith("ai news blocked") for w in warnings): return True
@@ -406,7 +560,15 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             high, low = _latest_candle_extremes(data)
             OpenTradesManager(config).update_trades(open_trades=[t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol], current_price=float(data.get("current_price", 0)), candle_high=high, candle_low=low, database=database, telegram=telegram, now=datetime.now(timezone.utc))
         if not session.get("trading_allowed"): return
-        all_results = {"technical": run_agent("technical", TechnicalAgent(config), data), "classical": run_agent("classical", ClassicalAgent(config), data), "smc": run_agent("smc", SMCAgent(config), data), "price_action": run_agent("price_action", PriceActionAgent(config), data), "multitimeframe": run_agent("multitimeframe", MultiTimeframeAgent(config), data), "current_price": data["current_price"], "session": session, "news": NewsRiskAgent(config).check(), "daily_bias": run_agent("daily_bias", DailyBiasAgent(config), data)}
+        all_results = {"technical": run_agent("technical", TechnicalAgent(config), data), "classical": run_agent("classical", ClassicalAgent(config), data), "smc": run_agent("smc", SMCAgent(config), data), "price_action": run_agent("price_action", PriceActionAgent(config), data), "multitimeframe": run_agent("multitimeframe", MultiTimeframeAgent(config), data), "current_price": data["current_price"], "symbol": symbol, "session": session, "news": NewsRiskAgent(config).check(), "daily_bias": run_agent("daily_bias", DailyBiasAgent(config), data)}
+        if has_symbol_active_trades:
+            await _check_scale_in(
+                config,
+                all_results,
+                [t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol],
+                database,
+                telegram,
+            )
         all_results["risk"] = RiskManagementAgent(config).evaluate(all_results)
         all_results["dynamic_risk"] = DynamicRiskManager(config).evaluate(database)
         learning_service = None
