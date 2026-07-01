@@ -504,59 +504,47 @@ def _build_market_status_message(
     if news_hard_block:
         gate_line = f"📊 Gate: NEWS BLOCK  •  Consensus overridden  •  Agents ≥{agent_thr}%"
         _append_unique_reason(reason_lines, "News hard block active — trading is paused during the event cooling window")
-        _append_unique_reason(reason_lines, "Agent consensus is ignored until the news filter clears")
     else:
         gate_line = f"📊 Consensus: WAIT  •  Agents ≥{agent_thr}%  •  Entry ≥{min_consensus:.0f}%"
         rejection = classic.get("rejection_reason") or "No valid weighted consensus signal"
-        rejection_key = _reason_key(rejection)
-        # Keep only one consensus-rule line, but normalize its wording so it is
-        # clean, non-duplicated, and uses the ≥ symbol expected by tests/users.
-        if "at least" in rejection_key and "weighted confidence" in rejection_key:
-            rejection = f"Need at least 2 agents with weighted confidence ≥{min_consensus:.0f}%"
-            _append_unique_reason(reason_lines, rejection)
-        else:
-            _append_unique_reason(reason_lines, rejection)
-            _append_unique_reason(reason_lines, f"Rules: at least 2 agents with weighted confidence ≥{min_consensus:.0f}%")
+        _append_unique_reason(reason_lines, rejection)
 
     opp_agent = (classic.get("strongest_directional") or {}).get("agent")
     opp_conf = (classic.get("strongest_directional") or {}).get("confidence", 0)
     if opp_agent and opp_conf:
         _append_unique_reason(reason_lines, f"Strongest agent: {opp_agent} ({opp_conf}%)")
 
-    tech = all_results.get("technical", {}) or {}
-    t = tech.get("technical", {}) or {}
-    if t.get("rsi"):
-        _append_unique_reason(reason_lines, f"RSI: {t['rsi']}")
-    levels = t.get("key_levels") or {}
-    if isinstance(levels, dict):
-        sup = levels.get("nearest_support")
-        res = levels.get("nearest_resistance")
-        if sup or res:
-            _append_unique_reason(reason_lines, f"Levels: Support {sup}  •  Resistance {res}")
-
     open_count = len(database.get_open_trades())
     open_note = f"• Open trades: {open_count}" if open_count > 0 else "• No open trades"
     reason_text = "\n".join(reason_lines)
 
-    news_block = ""
+    # ── Gemini Independent Review (Market Context) ──
+    gemini_context = ""
+    gemini_analysis = decision.get("gemini_analysis", {}) or {}
+    if gemini_analysis.get("available"):
+        bias = gemini_analysis.get("market_bias", "NEUTRAL")
+        action = gemini_analysis.get("action", "WAIT")
+        reason = gemini_analysis.get("reason", "")
+        gemini_context = (
+            f"\n\n🧠 <b>Gemini Independent Review</b>\n"
+            f"• <b>Bias:</b> {html.escape(str(bias))} - {html.escape(str(reason))}\n"
+            f"• <b>Advice:</b> {html.escape(str(action))}"
+        )
+
+    # ── Gemini News Analysis ──
+    gemini_news_section = ""
     gemini_news = decision.get("gemini_news_review", {}) or {}
     if gemini_news.get("available"):
-        risk_level = str(gemini_news.get("risk_level") or "").upper()
-        posture = str(gemini_news.get("trading_posture") or "").upper()
-        summary = str(gemini_news.get("summary") or "").strip()
-        zones = [str(x).strip() for x in (gemini_news.get("specific_risk_zones") or []) if str(x).strip() and str(x).strip() != "…"]
-        if risk_level in {"HIGH", "EXTREME"} or posture in {"CAUTION", "WAIT_FOR_CANDLE_CLOSE", "NO_TRADE"} or summary:
-            news_lines = ["📰 <b>Gemini News</b>"]
-            if risk_level:
-                news_lines.append(f"• Risk: {html.escape(risk_level)}")
-            if posture:
-                news_lines.append(f"• Posture: {html.escape(posture)}")
-            if summary and "insufficient data" not in summary.lower():
-                news_lines.append(f"• Summary: {html.escape(summary)}")
-            if zones:
-                news_lines.append(f"• Risk Zones: {html.escape(' | '.join(zones[:2]))}")
-            if len(news_lines) > 1:
-                news_block = "\n\n" + "\n".join(news_lines)
+        risk = gemini_news.get("risk_level", "LOW")
+        bullets = gemini_news.get("summary_bullets") or []
+        advice = gemini_news.get("trading_advice", "")
+        
+        news_lines = [f"\n\n📰 <b>Gemini News Analysis</b>", f"• <b>Risk:</b> {html.escape(str(risk))}"]
+        for b in bullets[:3]:
+            news_lines.append(f"• {html.escape(str(b))}")
+        if advice:
+            news_lines.append(f"• <i>{html.escape(str(advice))}</i>")
+        gemini_news_section = "\n".join(news_lines)
 
     return (
         "🟡 <b>SmartSignal — Market Status</b>\n"
@@ -567,7 +555,8 @@ def _build_market_status_message(
         f"{gate_line}\n\n"
         f"<b>Reason:</b>\n{html.escape(reason_text)}\n\n"
         f"<b>Notes:</b>\n{html.escape(open_note)}\n{warnings_text}"
-        f"{news_block}\n"
+        f"{gemini_context}"
+        f"{gemini_news_section}\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "<i>Market status • Next market status in ~1 hour</i>"
     )
@@ -1075,21 +1064,27 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 if not gemini.enabled:
                     logger.info("🧠 Gemini overlays skipped: API key not configured")
                 else:
+                    # 1. Market Analysis (Independent Review)
+                    # We run this for BOTH signals and hourly status
+                    logger.info("🧠 Running Gemini independent market analysis...")
+                    gemini_analysis = gemini.analyze_market_context({
+                        "symbol": config.get("symbol", "XAU/USD"),
+                        "current_price": data.get("current_price"),
+                        "decision": decision,
+                        "all_results": all_results,
+                    })
+                    decision["gemini_analysis"] = gemini_analysis
+                    
                     if run_gemini_for_signal:
-                        logger.info("🧠 Running Gemini independent review...")
+                        logger.info("🧠 Running Gemini signal review...")
                         gemini_review = gemini.review_signal({
                             "symbol": config.get("symbol", "XAU/USD"),
                             "decision": decision,
                             "all_results": all_results,
                         })
                         decision["gemini_review"] = gemini_review
-                        
-                        # Use the new concise independent structure
-                        if gemini_review.get("available"):
-                            verdict = gemini_review.get("verdict", "WAIT")
-                            reason = gemini_review.get("reason", "No reason provided")
-                            logger.info("🧠 Gemini Independent Opinion: %s - %s", verdict, reason)
 
+                    # 2. News Interpretation
                     news_payload = all_results.get("news", {}) or {}
                     if news_payload:
                         logger.info("🧠 Running Gemini news interpretation...")
@@ -1102,10 +1097,6 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                             "technical_context": all_results.get("technical", {}),
                         })
                         decision["gemini_news_review"] = gemini_news
-                        if gemini_news.get("available"):
-                            logger.info("🧠 Gemini news interpretation received")
-                        else:
-                            logger.info("🧠 Gemini news unavailable")
                     else:
                         logger.info("🧠 Gemini news skipped: no news payload available")
             else:
