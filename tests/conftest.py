@@ -13,6 +13,9 @@ verify the ForexFactory path explicitly still override it with their own
 
 from __future__ import annotations
 
+import asyncio
+import inspect
+
 import pytest
 
 
@@ -24,3 +27,23 @@ def _stub_forexfactory_feed(monkeypatch):
     except Exception:  # noqa: BLE001 - module may not import in some envs
         return
     monkeypatch.setattr(ff, "fetch_forexfactory_events", lambda *a, **k: [], raising=False)
+
+
+def pytest_pyfunc_call(pyfuncitem):
+    """Run ``async def`` tests even when pytest-asyncio is not installed.
+
+    The project declares ``pytest-asyncio`` as a test dependency and uses
+    ``@pytest.mark.asyncio``/``async def`` tests.  Some lightweight CI or review
+    environments install only pytest itself, which otherwise fails with
+    "async def functions are not natively supported" before the application code
+    is exercised.  This minimal hook keeps the suite runnable in those
+    environments while remaining compatible with pytest-asyncio: if the real
+    plugin is present it can still provide its richer fixture support.
+    """
+    test_func = pyfuncitem.obj
+    if not inspect.iscoroutinefunction(test_func):
+        return None
+    fixture_names = pyfuncitem._fixtureinfo.argnames
+    kwargs = {name: pyfuncitem.funcargs[name] for name in fixture_names}
+    asyncio.run(test_func(**kwargs))
+    return True
