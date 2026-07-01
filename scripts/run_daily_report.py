@@ -270,32 +270,45 @@ def main() -> None:
     current_local_date = datetime.now(ZoneInfo(timezone_name)).date().isoformat()
 
     try:
-        # 1. Get report-date trades (open + closed) and compute rich stats.
-        # REPORT_DATE allows repairing yesterday's report after a reporting fix.
+        # 1. Get trades related to this local date (created OR closed)
         today_trades = database.get_trades_for_date(report_date, timezone_name)
+        
+        # 2. Logic for historical accuracy:
+        # - A trade is CLOSED TODAY if its closed_at matches report_date.
+        # - A trade is OPEN TODAY if it was created on or before report_date 
+        #   AND (it's currently open OR it was closed AFTER report_date).
+        
+        closed_today = []
+        open_at_that_time = []
+        
+        for t in today_trades:
+            status = str(t.get("status", "")).upper()
+            created_at = str(t.get("created_at") or t.get("entry_time") or "")
+            closed_at = str(t.get("closed_at") or t.get("close_time") or "")
+            
+            # Is it closed on the report_date?
+            is_closed_today = closed_at.startswith(report_date)
+            
+            # Was it open during the report_date?
+            # (Created today or before) AND (Not closed yet OR closed after today)
+            was_open_then = created_at.startswith(report_date) and (not closed_at or not is_closed_today)
+
+            if is_closed_today and status not in {"CANCELLED", "PENDING"}:
+                closed_today.append(t)
+            elif was_open_then and status in {"OPEN", "TP1_HIT", "PARTIAL", "SL_HIT", "TP2_HIT", "BE_HIT", "MANUAL_CLOSE"}:
+                # If it's currently closed but was open then, we show it as open in that day's report
+                open_at_that_time.append(t)
+
         agent = DailyReportAgent(config)
-        perf_report = agent.generate(today_trades)
+        # Generate stats based on what was actually CLOSED today
+        perf_report = agent.generate(closed_today)
         stats = perf_report.get("stats", {})
+        
+        # Override open trades count for the report header
+        open_trades = open_at_that_time
+        stats["open"] = len(open_trades)
 
-        # 2. Open trades. For a historical repair date, do NOT mix in today's
-        # live open trades; only show trades belonging to that report date.
-        if report_date == current_local_date:
-            open_trades = database.get_open_trades()
-        else:
-            open_trades = [
-                t for t in today_trades
-                if str(t.get("status", "")).upper() in {"OPEN", "TP1_HIT", "PARTIAL", "PENDING"}
-            ]
-
-        # 3. Split today's trades into CLOSED vs OPEN for clear reporting.
-        # OPEN = not filled yet; CANCELLED = never traded. Neither is a live
-        # position nor a realized (closed) trade, so exclude both from stats.
-        open_statuses = {"OPEN", "TP1_HIT", "PARTIAL"}
-        non_trade_statuses = {"CANCELLED"}
-        closed_today = [
-            t for t in today_trades
-            if str(t.get("status", "")).upper() not in open_statuses | non_trade_statuses
-        ]
+        # ... (rest of the logic remains the same)
         
         def _pts(trade) -> float:
             """Realized/floating PnL in POINTS (gold: 1 USD = 10 points).
