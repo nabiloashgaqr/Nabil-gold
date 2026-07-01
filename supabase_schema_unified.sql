@@ -113,6 +113,21 @@ CREATE TABLE IF NOT EXISTS trades (
     current_pnl DECIMAL(18, 6) DEFAULT 0,
     current_pnl_points DECIMAL(18, 6) DEFAULT 0,
     final_pnl DECIMAL(18, 6),
+    final_pnl_points DECIMAL(18, 6),
+
+    -- Phase 5 trade-enrichment metadata for learning/report quality
+    planned_risk_points DECIMAL(18, 6),
+    planned_tp2_points DECIMAL(18, 6),
+    planned_rr DECIMAL(10, 4),
+    session_label TEXT,
+    session_quality TEXT,
+    entry_day_of_week TEXT,
+    entry_hour_local INTEGER,
+    news_status_at_entry TEXT,
+    news_risk_at_entry TEXT,
+    volatility_regime TEXT,
+    trend_strength TEXT,
+    daily_bias_at_entry TEXT,
 
     sl_moved_to_entry BOOLEAN DEFAULT FALSE,
     partial_close BOOLEAN DEFAULT FALSE,
@@ -155,6 +170,19 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS current_price       DECIMAL(18, 6);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS current_pnl         DECIMAL(18, 6) DEFAULT 0;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS current_pnl_points  DECIMAL(18, 6) DEFAULT 0;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS final_pnl           DECIMAL(18, 6);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS final_pnl_points    DECIMAL(18, 6);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS planned_risk_points DECIMAL(18, 6);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS planned_tp2_points  DECIMAL(18, 6);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS planned_rr          DECIMAL(10, 4);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS session_label       TEXT;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS session_quality     TEXT;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_day_of_week   TEXT;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_hour_local    INTEGER;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS news_status_at_entry TEXT;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS news_risk_at_entry  TEXT;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS volatility_regime   TEXT;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS trend_strength      TEXT;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS daily_bias_at_entry TEXT;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS sl_moved_to_entry   BOOLEAN DEFAULT FALSE;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS partial_close       BOOLEAN DEFAULT FALSE;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS updates_sent        JSONB DEFAULT '[]'::jsonb;
@@ -176,6 +204,9 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS updated_at          TIMESTAMPTZ DEFA
 CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_created ON trades(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trades_closed ON trades(closed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trades_enrichment_dow ON trades(entry_day_of_week);
+CREATE INDEX IF NOT EXISTS idx_trades_enrichment_session ON trades(session_label);
 CREATE INDEX IF NOT EXISTS idx_trades_open ON trades(status) WHERE status IN ('OPEN', 'PARTIAL', 'TP1_HIT');
 
 -- =====================================================
