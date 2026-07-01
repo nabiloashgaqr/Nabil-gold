@@ -179,6 +179,7 @@ class GeminiReviewService:
     def _generate_json(self, prompt: str) -> Dict[str, Any]:
         try:
             url = self.API_URL.format(model=self.model)
+            logger.info("🧠 Requesting Gemini (%s)...", self.model)
             response = self.session.post(
                 url,
                 params={"key": self.api_key},
@@ -191,17 +192,25 @@ class GeminiReviewService:
                 },
                 timeout=self.timeout,
             )
-            response.raise_for_status()
+            
+            if response.status_code != 200:
+                error_msg = f"HTTP {response.status_code}: {response.text}"
+                logger.warning("🧠 Gemini API error: %s", error_msg)
+                return self._unavailable(error_msg)
+
             data = response.json()
             text = self._extract_text(data)
             if not text:
-                return self._unavailable("Gemini returned empty content")
+                logger.warning("🧠 Gemini returned empty content")
+                return self._unavailable("Empty content from API")
+            
             parsed = json.loads(text)
             parsed["available"] = True
             parsed["model"] = self.model
+            logger.info("🧠 Gemini response received and parsed successfully")
             return parsed
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Gemini review unavailable: %s", exc)
+            logger.error("🧠 Gemini generation failed: %s", exc)
             return self._unavailable(str(exc))
 
     def _extract_text(self, data: Dict[str, Any]) -> str:
@@ -210,8 +219,17 @@ class GeminiReviewService:
             content = candidate.get("content") or {}
             for part in content.get("parts") or []:
                 text = part.get("text")
-                if text:
-                    return str(text)
+                if not text:
+                    continue
+                
+                # Guardrail: Check for generic "insufficient data" responses
+                lower_text = str(text).lower()
+                if "insufficient data" in lower_text or "not enough data" in lower_text or "no trades recorded" in lower_text:
+                    if len(lower_text) < 150: # If it's short AND generic
+                        logger.info("🧠 Gemini returned generic/insufficient data response, suppressing.")
+                        return ""
+                
+                return str(text)
         return ""
 
     def _compact_signal_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
