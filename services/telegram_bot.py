@@ -251,8 +251,6 @@ class TelegramService:
             ),
             thin,
             votes_block,
-            thin,
-            why_block,
         ]
         if gemini_block:
             sections.append(thin)
@@ -260,6 +258,10 @@ class TelegramService:
         if gemini_news_block:
             sections.append(thin)
             sections.append(gemini_news_block)
+        
+        sections.append(thin)
+        sections.append(why_block)
+
         if risk_block:
             sections.append(thin)
             sections.append(risk_block)
@@ -385,56 +387,36 @@ class TelegramService:
         )
 
     def _format_gemini_review(self, decision: Dict[str, Any]) -> str:
-        """Render a compact Gemini review block for Telegram signals."""
+        """Render a compact Gemini independent review for Telegram signals."""
         review = decision.get("gemini_review", {}) or {}
         if not review.get("available"):
             return ""
 
-        verdict = html.escape(str(review.get("verdict") or "UNAVAILABLE"))
-        summary = self._clean_ai_field(review.get("summary"))
-        strengths = review.get("strengths") or []
-        risks = review.get("risks") or []
+        verdict = html.escape(str(review.get("verdict") or "WAIT"))
+        reason = self._clean_ai_field(review.get("reason"))
 
-        lines = [f"🧠 <b>GEMINI REVIEW</b>", f"• <b>Verdict:</b> {verdict}"]
-        if summary:
-            lines.append(f"• <b>Summary:</b> {summary}")
-
-        clean_strengths = [self._clean_ai_field(x) for x in strengths[:2] if self._clean_ai_field(x)]
-        if clean_strengths:
-            lines.append(f"• <b>Strengths:</b> {' | '.join(clean_strengths)}")
-
-        clean_risks = [self._clean_ai_field(x) for x in risks[:2] if self._clean_ai_field(x)]
-        if clean_risks:
-            lines.append(f"• <b>Risks:</b> {' | '.join(clean_risks)}")
-
+        lines = [f"🧠 <b>GEMINI INDEPENDENT REVIEW</b>"]
+        lines.append(f"• <b>Opinion:</b> {verdict} - {reason}")
         return "\n".join(lines)
 
     def _format_gemini_news_review(self, decision: Dict[str, Any]) -> str:
-        """Render Gemini news interpretation only when it is materially useful."""
+        """Render Gemini news interpretation in bullets."""
         review = decision.get("gemini_news_review", {}) or {}
         if not review.get("available"):
             return ""
 
-        risk_level = str(review.get("risk_level") or "").upper()
-        posture = str(review.get("trading_posture") or "").upper()
-        summary = self._clean_ai_field(review.get("summary"))
-        zones = review.get("specific_risk_zones") or []
+        risk = html.escape(str(review.get("risk_level") or "LOW"))
+        bullets = review.get("summary_bullets") or []
+        advice = self._clean_ai_field(review.get("trading_advice"))
 
-        important_risk = risk_level in {"HIGH", "EXTREME"}
-        important_posture = posture in {"WAIT_FOR_CANDLE_CLOSE", "NO_TRADE", "CAUTION"}
-        if not (important_risk or important_posture or summary):
+        if not (bullets or advice):
             return ""
 
-        lines = ["📰 <b>GEMINI NEWS</b>"]
-        if risk_level:
-            lines.append(f"• <b>Risk:</b> {html.escape(risk_level)}")
-        if posture:
-            lines.append(f"• <b>Posture:</b> {html.escape(posture)}")
-        if summary:
-            lines.append(f"• <b>Summary:</b> {summary}")
-        clean_zones = [self._clean_ai_field(x) for x in zones[:2] if self._clean_ai_field(x)]
-        if clean_zones:
-            lines.append(f"• <b>Risk Zones:</b> {' | '.join(clean_zones)}")
+        lines = ["📰 <b>GEMINI NEWS ANALYSIS</b>", f"• <b>Risk:</b> {risk}"]
+        for b in bullets[:3]:
+            lines.append(f"• {html.escape(str(b))}")
+        if advice:
+            lines.append(f"• <i>{advice}</i>")
         return "\n".join(lines)
 
     @staticmethod
@@ -548,13 +530,7 @@ class TelegramService:
         return "\n".join(lines)
 
     def _format_why_this_trade(self, decision: Dict[str, Any], ai: Dict[str, Any]) -> str:
-        """Merge the multiple overlapping rationale sources into one section.
-
-        Previously the message repeated essentially the same idea up to three
-        times (classical reasoning + risk summary + supporting evidence). Here we collect candidate bullet points from the
-        strongest sources, normalise them, drop near-duplicates, and cap the
-        list so the section stays short.
-        """
+        """Merge the multiple overlapping rationale sources into one section."""
         candidates: List[str] = []
 
         # 1) Primary entry rationale.
