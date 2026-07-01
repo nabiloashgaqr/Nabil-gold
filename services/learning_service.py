@@ -64,6 +64,11 @@ class LearningReport:
     changes_summary: str
     top_performers: List[str] = field(default_factory=list)
     bottom_performers: List[str] = field(default_factory=list)
+    session_breakdown: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    day_of_week_breakdown: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    rr_efficiency: Dict[str, Any] = field(default_factory=dict)
+    news_proximity: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    regime_fit: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
 class LearningService:
     """
@@ -165,8 +170,13 @@ class LearningService:
         try:
             query = f"""
                 SELECT 
-                    id, signal_id, type, trade_type,
-                    entry_price, close_price, final_pnl, current_pnl, current_pnl_points,
+                    id, signal_id, type, trade_type, symbol,
+                    entry_price, stop_loss, initial_stop_loss, close_price,
+                    final_pnl, final_pnl_points, current_pnl, current_pnl_points,
+                    planned_risk_points, planned_tp2_points, planned_rr,
+                    session_label, session_quality, entry_day_of_week, entry_hour_local,
+                    news_status_at_entry, news_risk_at_entry,
+                    volatility_regime, trend_strength, daily_bias_at_entry,
                     status, entry_time, opened_at, closed_at, created_at, signal_snapshot
                 FROM trades
                 WHERE closed_at >= NOW() - INTERVAL '{days} days'
@@ -279,6 +289,112 @@ class LearningService:
             return "SL_hit_small_loss"
         else:
             return "mixed_signals"
+
+    def _snapshot(self, trade: Dict[str, Any]) -> Dict[str, Any]:
+        snap = trade.get("signal_snapshot") or {}
+        return snap if isinstance(snap, dict) else {}
+
+    def _planned_risk_points(self, trade: Dict[str, Any]) -> float:
+        try:
+            value = trade.get("planned_risk_points")
+            if value is not None:
+                return abs(float(value))
+        except (TypeError, ValueError):
+            pass
+        try:
+            entry = float(trade.get("entry_price") or 0)
+            sl = float(trade.get("initial_stop_loss") or trade.get("stop_loss") or 0)
+            if entry and sl:
+                return abs(entry - sl) * 10.0
+        except (TypeError, ValueError):
+            pass
+        return 0.0
+
+    def _planned_rr(self, trade: Dict[str, Any]) -> float:
+        try:
+            value = trade.get("planned_rr")
+            if value is not None:
+                return float(value)
+        except (TypeError, ValueError):
+            pass
+        sig = self._snapshot(trade).get("signal") or {}
+        for key in ("rr_ratio", "tp2_rr"):
+            try:
+                value = sig.get(key)
+                if value is not None:
+                    return float(value)
+            except (TypeError, ValueError):
+                pass
+        return 0.0
+
+    def _bucket_metric(self, trades: List[Dict[str, Any]], key_func) -> Dict[str, Dict[str, Any]]:
+        buckets: Dict[str, Dict[str, Any]] = {}
+        for trade in trades:
+            key = str(key_func(trade) or "unknown")
+            pnl = self._trade_pnl(trade)
+            bucket = buckets.setdefault(key, {"count": 0, "pnl": 0.0, "wins": 0, "losses": 0})
+            bucket["count"] += 1
+            bucket["pnl"] += pnl
+            if pnl > 0:
+                bucket["wins"] += 1
+            elif pnl < 0:
+                bucket["losses"] += 1
+        return {
+            k: {
+                **v,
+                "pnl": round(v["pnl"], 1),
+                "win_rate_pct": round(v["wins"] / v["count"] * 100, 1) if v["count"] else 0.0,
+            }
+            for k, v in buckets.items()
+        }
+
+    def _trade_session_label(self, trade: Dict[str, Any]) -> str:
+        snap = self._snapshot(trade)
+        session_info = snap.get("session_info") or {}
+        return str(trade.get("session_label") or session_info.get("current_session") or "unknown")
+
+    def _trade_regime_label(self, trade: Dict[str, Any]) -> str:
+        snap = self._snapshot(trade)
+        mc = snap.get("market_context") or {}
+        tech = mc.get("technical_regime") or {}
+        return str(trade.get("volatility_regime") or tech.get("volatility_regime") or "unknown").upper()
+
+    def _trade_news_label(self, trade: Dict[str, Any]) -> str:
+        snap = self._snapshot(trade)
+        nc = snap.get("news_context") or {}
+        rule = nc.get("rule_based") or {}
+        return str(trade.get("news_status_at_entry") or rule.get("market_status") or rule.get("status") or "unknown").upper()
+
+    def _rr_efficiency(self, trades: List[Dict[str, Any]]) -> Dict[str, Any]:
+        actual_r: List[float] = []
+        planned: List[float] = []
+        for trade in trades:
+            risk = self._planned_risk_points(trade)
+            if risk <= 0:
+                continue
+            actual_r.append(self._trade_pnl(trade) / risk)
+            rr = self._planned_rr(trade)
+            if rr > 0:
+                planned.append(rr)
+        if not actual_r:
+            return {"sample": 0}
+        wins = [x for x in actual_r if x > 0]
+        return {
+            "sample": len(actual_r),
+            "avg_actual_r": round(sum(actual_r) / len(actual_r), 2),
+            "avg_winner_r": round(sum(wins) / len(wins), 2) if wins else 0.0,
+            "avg_planned_rr": round(sum(planned) / len(planned), 2) if planned else 0.0,
+            "rr_capture_pct": round((sum(actual_r) / len(actual_r)) / (sum(planned) / len(planned)) * 100, 1) if planned and sum(planned) else 0.0,
+        }
+
+    def _enrichment_breakdowns(self, trades: List[Dict[str, Any]]) -> Dict[str, Any]:
+        return {
+            "session_breakdown": self._bucket_metric(trades, self._trade_session_label),
+            "day_of_week_breakdown": self._bucket_metric(trades, lambda t: t.get("entry_day_of_week") or str(t.get("entry_time") or t.get("created_at") or "unknown")[:10]),
+            "rr_efficiency": self._rr_efficiency(trades),
+            "news_proximity": self._bucket_metric(trades, self._trade_news_label),
+            "regime_fit": self._bucket_metric(trades, self._trade_regime_label),
+        }
     
     def _calculate_trend(self, record: AgentPerformanceRecord) -> str:
         """حساب اتجاه الوكيل"""
@@ -427,6 +543,7 @@ class LearningService:
         top_performers = [a[0] for a in sorted_agents[:2]]
         bottom_performers = [a[0] for a in sorted_agents[-2:] if a[1].trend == "DECLINING"]
         
+        enrichment = self._enrichment_breakdowns(closed_trades)
         # توصيات
         recommendations = []
         for name, record in agent_stats.items():
@@ -436,6 +553,12 @@ class LearningService:
                 recommendations.append(f"⚠️ {name}: declining (-{record.win_rate:.0f}%)")
             if record.consecutive_wins >= 3:
                 recommendations.append(f"🔥 {name}: {record.consecutive_wins} consecutive wins!")
+        rr = enrichment.get("rr_efficiency", {})
+        if rr.get("sample") and rr.get("rr_capture_pct", 0) < 45:
+            recommendations.append(f"⚠️ RR capture low ({rr.get('rr_capture_pct')}%): review exits/trailing efficiency")
+        weak_news = [k for k, v in enrichment.get("news_proximity", {}).items() if k not in {"SAFE", "UNKNOWN"} and v.get("pnl", 0) < 0]
+        if weak_news:
+            recommendations.append(f"📰 News filter: negative PnL under {', '.join(weak_news[:2])}")
         
         # ملخص التغييرات
         changes = []
@@ -456,7 +579,12 @@ class LearningService:
             previous_weights=self.current_weights.copy(),
             changes_summary=", ".join(changes) if changes else "No major changes",
             top_performers=top_performers,
-            bottom_performers=bottom_performers
+            bottom_performers=bottom_performers,
+            session_breakdown=enrichment.get("session_breakdown", {}),
+            day_of_week_breakdown=enrichment.get("day_of_week_breakdown", {}),
+            rr_efficiency=enrichment.get("rr_efficiency", {}),
+            news_proximity=enrichment.get("news_proximity", {}),
+            regime_fit=enrichment.get("regime_fit", {}),
         )
     
     def _log_weight_changes(self, new_weights: Dict[str, float]):
@@ -478,7 +606,12 @@ class LearningService:
             overall_win_rate=0,
             recommendations=["Not enough data"],
             previous_weights=self.default_weights.copy(),
-            changes_summary="No changes"
+            changes_summary="No changes",
+            session_breakdown={},
+            day_of_week_breakdown={},
+            rr_efficiency={"sample": 0},
+            news_proximity={},
+            regime_fit={},
         )
     
     def get_learning_summary(self) -> str:
@@ -522,6 +655,21 @@ class LearningService:
                 f"({record.current_weight*100:.0f}%→{record.adjusted_weight*100:.0f}%){streak}"
             )
         
+        rr = last_report.rr_efficiency or {}
+        if rr.get("sample"):
+            lines.append("")
+            lines.append(
+                f"🎯 RR efficiency: actual {rr.get('avg_actual_r', 0):+.2f}R "
+                f"vs planned {rr.get('avg_planned_rr', 0):.2f}R "
+                f"({rr.get('rr_capture_pct', 0):.1f}% capture)"
+            )
+        if last_report.session_breakdown:
+            best_session = max(last_report.session_breakdown.items(), key=lambda kv: kv[1].get("pnl", 0))
+            lines.append(f"🌍 Best session: {html.escape(str(best_session[0]), quote=False)} {best_session[1].get('pnl', 0):+.0f} pts")
+        if last_report.news_proximity:
+            weak_news = [f"{k} {v.get('pnl', 0):+.0f}" for k, v in last_report.news_proximity.items() if v.get("pnl", 0) < 0]
+            if weak_news:
+                lines.append(f"📰 Weak news bucket: {html.escape(', '.join(weak_news[:2]), quote=False)} pts")
         lines.extend([
             "",
             f"📝 Changes: {html.escape(str(last_report.changes_summary), quote=False)}",

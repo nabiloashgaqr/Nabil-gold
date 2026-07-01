@@ -143,7 +143,16 @@ class GeminiReviewService:
         return {"symbol": p.get("symbol"), "news": p.get("news", {})}
 
     def _compact_learning_payload(self, p: Dict[str, Any]) -> Dict[str, Any]:
-        return {"date": p.get("report_date"), "wr": p.get("overall_win_rate"), "total": p.get("total_trades_analyzed")}
+        return {
+            "date": p.get("report_date"),
+            "wr": p.get("overall_win_rate"),
+            "total": p.get("total_trades_analyzed"),
+            "rr_efficiency": p.get("rr_efficiency"),
+            "session_breakdown": p.get("session_breakdown"),
+            "day_of_week_breakdown": p.get("day_of_week_breakdown"),
+            "news_proximity": p.get("news_proximity"),
+            "regime_fit": p.get("regime_fit"),
+        }
 
     def _compact_daily_report_payload(self, p: Dict[str, Any]) -> Dict[str, Any]:
         return {"date": p.get("report_date"), "stats": p.get("stats"), "net": p.get("closed_net_points")}
