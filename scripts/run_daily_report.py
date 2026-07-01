@@ -348,6 +348,9 @@ def main() -> None:
 
         # ── Performance snapshot (today) ────────────────────────────────────
         net_pts = float(stats.get("net_points", 0) or 0)
+        open_pts = sum(calculate_pips(float(t.get("entry_price", 0) or 0), float(t.get("current_price", t.get("entry_price", 0)) or 0), str(t.get("type") or t.get("trade_type", "BUY")).upper(), str(t.get("symbol") or "XAU/USD")) for t in open_trades) if open_trades else 0.0
+        combined_net = net_pts + open_pts
+
         lines.append("📊 <b>Performance (today)</b>")
         lines.append(
             f"• Trades: {stats.get('total', 0)} "
@@ -355,7 +358,11 @@ def main() -> None:
             f"➖ {stats.get('breakeven', 0)} · 🔄 {stats.get('open', 0)})"
         )
         lines.append(f"• Win rate: {stats.get('win_rate', 0)}%")
-        lines.append(f"• Net: {net_pts:+.0f} pts ({_usd(net_pts):+.1f}$)")
+        lines.append(f"• Closed Net: {net_pts:+.0f} pts ({_usd(net_pts):+.1f}$)")
+        if open_trades:
+            lines.append(f"• Floating Net: {open_pts:+.0f} pts ({_usd(open_pts):+.1f}$)")
+            lines.append(f"• Combined Net: {combined_net:+.0f} pts ({_usd(combined_net):+.1f}$)")
+        
         pf = stats.get("profit_factor", 0)
         pf_display = "∞" if pf >= 99 or (pf in (0, 99.9) and stats.get("losses", 0) == 0 and stats.get("wins", 0) > 0) else pf
         if stats.get("total", 0):
