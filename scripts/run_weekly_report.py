@@ -86,27 +86,21 @@ async def main_async() -> int:
             "environment_fit": result.get("environment_fit") or {},
         })
         if weekly_review.get("available"):
-            lines = [final_report_text, "", "🧠 Gemini Weekly Review"]
-            if weekly_review.get("summary"):
-                lines.append(str(weekly_review.get("summary")))
-            if weekly_review.get("strategy_efficiency") is not None:
-                lines.append(f"Strategy Efficiency: {weekly_review.get('strategy_efficiency')}")
-            if weekly_review.get("dominant_regime"):
-                lines.append(f"Dominant Regime: {weekly_review.get('dominant_regime')}")
-            windows = weekly_review.get("high_probability_windows") or []
-            if windows:
-                lines.append("High Probability Windows:")
-                lines.extend(f"- {x}" for x in windows[:4])
-            leaks = weekly_review.get("risk_leaks") or []
-            if leaks:
-                lines.append("Risk Leaks:")
-                lines.extend(f"- {x}" for x in leaks[:4])
+            lines = [final_report_text, "", "🧠 <b>Gemini Independent Weekly Strategic Review</b>"]
+            
+            if weekly_review.get("edge_efficiency"):
+                lines.append(f"• Edge Efficiency: {weekly_review.get('edge_efficiency')}")
+            if weekly_review.get("market_regime"):
+                lines.append(f"• Market Regime: {weekly_review.get('market_regime')}")
+            
+            # Short bullets only
+            strategic_points = weekly_review.get("strategic_points") or []
+            for p in strategic_points[:3]:
+                lines.append(f"• {p}")
+                
             if weekly_review.get("strategic_pivot"):
-                lines.append(f"Strategic Pivot: {weekly_review.get('strategic_pivot')}")
-            recommendations = weekly_review.get("recommendations") or []
-            if recommendations:
-                lines.append("Recommendations:")
-                lines.extend(f"- {x}" for x in recommendations[:4])
+                lines.append(f"• Strategic Pivot: {weekly_review.get('strategic_pivot')}")
+                
             final_report_text = "\n".join(lines)
     except Exception as gemini_exc:
         logger.warning("Gemini weekly report skipped: %s", gemini_exc)
