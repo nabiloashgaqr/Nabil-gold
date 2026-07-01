@@ -204,6 +204,20 @@ class TelegramService:
             lines.append("🧠 <b>GEMINI INDEPENDENT REVIEW</b>")
             lines.append(f"• <b>Opinion:</b> {self._clean_text(gemini.get('verdict'))} - {self._clean_text(gemini.get('reason'))}")
 
+        gemini_news = decision.get("gemini_news_review", {}) or {}
+        if gemini_news.get("available"):
+            risk_level = str(gemini_news.get("risk_level") or "LOW").upper()
+            bullets = [str(x) for x in (gemini_news.get("summary_bullets") or []) if str(x).strip()]
+            advice = str(gemini_news.get("trading_advice") or "").strip()
+            if risk_level in {"MEDIUM", "HIGH", "EXTREME"} or bullets or advice:
+                lines.append("──────────────────")
+                lines.append("📰 <b>GEMINI NEWS CHECK</b>")
+                lines.append(f"• <b>Risk:</b> {html.escape(risk_level)}")
+                for bullet in bullets[:2]:
+                    lines.append(f"• {self._clean_text(bullet)}")
+                if advice:
+                    lines.append(f"• Advice: {self._clean_text(advice)}")
+
         reasons = decision.get("reasons") or []
         lines.append("──────────────────")
         lines.append("💡 <b>WHY THIS TRADE</b>")
