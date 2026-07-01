@@ -506,19 +506,23 @@ def main() -> None:
                 })
                 
                 if daily_review.get("available"):
-                    lines.append("🧠 <b>Gemini Daily Review</b>")
+                    lines.append("🧠 <b>Gemini Independent Daily Review</b>")
                     if daily_review.get("summary"):
                         lines.append(f"• Summary: {daily_review.get('summary')}")
-                    for key, label in (("strengths", "Strengths"), ("warnings", "Warnings"), ("tomorrow_focus", "Tomorrow")):
-                        values = [str(x) for x in (daily_review.get(key) or []) if str(x).strip() and str(x).strip() != "…"]
-                        if values:
-                            lines.append(f"• <b>{label}:</b> " + " | ".join(values[:2]))
+                    
+                    # Short bullets only
+                    key_points = daily_review.get("key_points") or []
+                    for point in key_points[:3]:
+                        lines.append(f"• {point}")
+                    
+                    if daily_review.get("verdict"):
+                        lines.append(f"• Verdict: {daily_review.get('verdict')}")
                     lines.append("")
                     logger.info("✅ Gemini Daily Review added to report")
                 else:
-                    logger.warning("🧠 Gemini Daily Review unavailable: %s", daily_review.get("summary"))
+                    logger.warning("🧠 Gemini Daily Review unavailable")
         except Exception as gemini_exc:
-            logger.exception("🧠 Gemini daily report failed with exception")
+            logger.exception("🧠 Gemini daily report failed")
 
         lines.append("⚠️ Paper-trading only • Educational")
         lines.append("━━━━━━━━━━━━━━━━━━━━━")

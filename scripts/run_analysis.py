@@ -1076,39 +1076,19 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                     logger.info("🧠 Gemini overlays skipped: API key not configured")
                 else:
                     if run_gemini_for_signal:
-                        logger.info("🧠 Running Gemini review for signal...")
+                        logger.info("🧠 Running Gemini independent review...")
                         gemini_review = gemini.review_signal({
                             "symbol": config.get("symbol", "XAU/USD"),
                             "decision": decision,
                             "all_results": all_results,
                         })
                         decision["gemini_review"] = gemini_review
+                        
+                        # Use the new concise independent structure
                         if gemini_review.get("available"):
-                            logger.info(
-                                "🧠 Gemini review: %s | %s",
-                                gemini_review.get("verdict"),
-                                gemini_review.get("summary"),
-                            )
-                        else:
-                            logger.info("🧠 Gemini review unavailable: %s", gemini_review.get("summary"))
-
-                        logger.info("🧠 Running Gemini market context analysis...")
-                        gemini_analysis = gemini.analyze_market_context({
-                            "symbol": config.get("symbol", "XAU/USD"),
-                            "current_price": data.get("current_price"),
-                            "decision": decision,
-                            "all_results": all_results,
-                        })
-                        decision["gemini_analysis"] = gemini_analysis
-                        if gemini_analysis.get("available"):
-                            logger.info(
-                                "🧠 Gemini analysis: %s | %s | %s",
-                                gemini_analysis.get("market_bias"),
-                                gemini_analysis.get("action"),
-                                gemini_analysis.get("summary"),
-                            )
-                        else:
-                            logger.info("🧠 Gemini analysis unavailable: %s", gemini_analysis.get("summary"))
+                            verdict = gemini_review.get("verdict", "WAIT")
+                            reason = gemini_review.get("reason", "No reason provided")
+                            logger.info("🧠 Gemini Independent Opinion: %s - %s", verdict, reason)
 
                     news_payload = all_results.get("news", {}) or {}
                     if news_payload:
@@ -1123,14 +1103,9 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                         })
                         decision["gemini_news_review"] = gemini_news
                         if gemini_news.get("available"):
-                            logger.info(
-                                "🧠 Gemini news: %s | %s | %s",
-                                gemini_news.get("risk_level"),
-                                gemini_news.get("trading_posture"),
-                                gemini_news.get("summary"),
-                            )
+                            logger.info("🧠 Gemini news interpretation received")
                         else:
-                            logger.info("🧠 Gemini news unavailable: %s", gemini_news.get("summary"))
+                            logger.info("🧠 Gemini news unavailable")
                     else:
                         logger.info("🧠 Gemini news skipped: no news payload available")
             else:
