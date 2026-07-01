@@ -34,144 +34,89 @@ class GeminiReviewService:
         self.session = requests.Session()
 
     def review_signal(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Review a candidate signal and return a short structured summary.
-
-        Expected output keys:
-        - verdict: APPROVE / CAUTION / REJECT / UNAVAILABLE
-        - confidence_note: short text
-        - strengths: list[str]
-        - risks: list[str]
-        - summary: short paragraph
-        """
+        """Independent expert review of a trade setup."""
         if not self.enabled:
             return self._unavailable("Gemini API key not configured")
 
         compact = self._compact_signal_payload(payload)
         prompt = (
-            "You are reviewing a trading signal produced by a rule-based multi-agent system. "
-            "Do not invent prices or indicators. Use only the provided data. "
-            "Return STRICT JSON with keys verdict, confidence_note, strengths, risks, summary. "
-            "verdict must be one of APPROVE, CAUTION, REJECT. strengths and risks must be short arrays of strings. "
-            "summary must be concise and factual.\n\n"
+            "You are an Independent Senior Hedge Fund Trader. "
+            "Evaluate the provided market data and give your OWN independent opinion (BUY, SELL, or WAIT). "
+            "CRITICAL: Do NOT mention, review, or explain the internal agents or indicators. "
+            "Provide your verdict and ONE concise sentence explaining your primary reasoning. "
+            "Return STRICT JSON with keys verdict, reason, and confidence_note. "
+            "verdict must be one of BUY, SELL, WAIT. reason must be ONE short sentence.\n\n"
             f"DATA:\n{json.dumps(compact, ensure_ascii=False)}"
         )
         return self._generate_json(prompt)
 
     def analyze_market_context(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Independent market analysis overlay.
-
-        This does NOT explain internal agents. It forms a compact discretionary
-        opinion from the supplied structured market context only.
-        """
+        """Form an independent discretionary opinion from market context."""
         if not self.enabled:
             return self._unavailable("Gemini API key not configured")
 
         compact = self._compact_market_payload(payload)
         prompt = (
-            "You are a Senior Institutional Market Analyst specializing in XAU/USD and Energy Markets (WTI/Brent). "
-            "Your task is to evaluate the current trade context using a confluence of Market Structure (HTF), Liquidity Pools, and Intermarket correlations (DXY, US10Y). "
-            "Independently verify the Draw on Liquidity and External vs Internal range. "
-            "Assess premium vs discount pricing of the current setup. "
-            "If XAU/USD and Oil show divergence with their USD-correlates, flag it as a strength or weakness. "
-            "Do not invent indicators, prices, correlations, or events beyond the provided data. "
-            "Return STRICT JSON only. No conversational filler. Keep it concise, tactical, and desk-ready. "
-            "Return JSON with keys market_bias, action, setup_quality, liquidity_targets, confluence_factors, confidence_note, risk_management, summary. "
-            "market_bias must be BULLISH, BEARISH, NEUTRAL, or TREND_EXHAUSTED. "
-            "action must be BUY, SELL, WAIT, SCALE_IN, or SCALE_OUT. "
-            "setup_quality must be HIGH (A+), MEDIUM (B), or LOW (C). "
-            "liquidity_targets, confluence_factors, and risk_management must be short arrays of strings with a maximum of 3 items each. "
-            "confidence_note must be one professional logic line. "
-            "summary must be concise and no more than 20 words.\n\n"
+            "You are a Professional Institutional Analyst. Analyze the context independently. "
+            "DO NOT mention internal system logic or agents. "
+            "Return STRICT JSON with keys market_bias (BULLISH/BEARISH/NEUTRAL), action (BUY/SELL/WAIT), reason (ONE short sentence). "
+            "Keep it short, tactical, and direct.\n\n"
             f"DATA:\n{json.dumps(compact, ensure_ascii=False)}"
         )
         return self._generate_json(prompt)
 
     def interpret_news_context(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Interpret scheduled economic/news risk for trading posture."""
+        """Interpret news risk in concise bullet points."""
         if not self.enabled:
             return self._unavailable("Gemini API key not configured")
 
         compact = self._compact_news_payload(payload)
         prompt = (
-            "You are a Macroeconomist and Quantitative News Analyst for Gold and Oil markets. "
-            "Your job is to analyze high-impact economic releases such as CPI, NFP, FOMC, and Inventory Data to determine Institutional Volatility Risk. "
-            "Differentiate between Directional News and Volatility News. "
-            "Evaluate Gold/Oil sensitivity to DXY shifts during this specific event when such context is present in the data. "
-            "Provide a Protective Posture based on the magnitude of deviation from consensus when available. "
-            "Do not invent event details beyond the provided data. "
-            "Output MUST be STRICT JSON. Keep it tactical, short, and execution-ready. "
-            "Return JSON with keys risk_level, impact_bias, price_projection, trading_posture, specific_risk_zones, summary. "
-            "risk_level must be LOW, MEDIUM, HIGH, or EXTREME. "
-            "impact_bias must be HAWKISH, DOVISH, NEUTRAL, or VOLATILE_TWO_SIDED. "
-            "price_projection must be SHORT_TERM_SPIKE, SUSTAINED_TREND, or MEAN_REVERSION. "
-            "trading_posture must be AGGRESSIVE, CAUTION, WAIT_FOR_CANDLE_CLOSE, or NO_TRADE. "
-            "specific_risk_zones must be a short array of strings with a maximum of 3 items. "
-            "summary must be tactical and no more than 18 words.\n\n"
+            "Analyze the news events and market context. "
+            "Return STRICT JSON with keys risk_level (LOW/MEDIUM/HIGH/EXTREME), posture (points), summary_bullets (list of 3 short points), trading_advice (one sentence). "
+            "summary_bullets must be concise and comprehensive.\n\n"
             f"DATA:\n{json.dumps(compact, ensure_ascii=False)}"
         )
         return self._generate_json(prompt)
 
     def summarize_learning(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Summarize learning / post-trade insights in a short structured form."""
+        """Independent learning summary in points."""
         if not self.enabled:
             return self._unavailable("Gemini API key not configured")
 
         compact = self._compact_learning_payload(payload)
         prompt = (
-            "You are a Performance Coach for Professional Futures Traders. "
-            "Your role is to audit the end-of-day execution for Gold/Oil trades against a strict rule-based framework. "
-            "Identify Alpha Leakage such as early exits, revenge trading, or missed setups. "
-            "Compare execution against Time of Day, especially London and New York session killzones, when such timing context is present. "
-            "Focus on the Execution Gap: did the trader follow the setup or trade the PnL. "
-            "Output MUST be STRICT JSON. "
-            "Keep every field concise and operational: each array item should be short, and summary must be one tight sentence only. "
-            "Return JSON with keys execution_score, psychological_flags, technical_errors, recurring_patterns, next_session_adjustment, summary. "
-            "execution_score must be a 1-10 number. "
-            "psychological_flags, technical_errors, and recurring_patterns must be short arrays of strings with a maximum of 3 items each. "
-            "next_session_adjustment must be one concise actionable sentence. "
-            "summary must be professional, concise, and no more than 18 words.\n\n"
+            "Summarize the trading performance and learning points. "
+            "Return STRICT JSON with keys execution_score (1-10), key_lessons (list of 3 bullet points), adjustment (one sentence). "
+            "Keep it very concise and tactical.\n\n"
             f"DATA:\n{json.dumps(compact, ensure_ascii=False)}"
         )
         return self._generate_json(prompt)
 
     def summarize_daily_report(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate a compact daily review for the consolidated report."""
+        """Independent daily summary in points."""
         if not self.enabled:
             return self._unavailable("Gemini API key not configured")
 
         compact = self._compact_daily_report_payload(payload)
         prompt = (
-            "You are reviewing end-of-day performance of a gold trading system. "
-            "Summarize what mattered today, what was done well, what should be watched tomorrow, and whether the day was clean or fragile. "
-            "Do not invent missing trades or metrics. "
-            "Return STRICT JSON only with keys strengths, warnings, tomorrow_focus, summary. "
-            "strengths, warnings, and tomorrow_focus must be short arrays of strings with a maximum of 3 items each. "
-            "Each array item should be brief and executive-friendly. "
-            "summary must be concise, professional, and no more than 22 words.\n\n"
+            "Summarize the day's performance. "
+            "Return STRICT JSON with keys verdict (CLEAN/FRAGILE/NEUTRAL), key_points (list of 3 points), summary (one sentence). "
+            "Focus only on the result and logic.\n\n"
             f"DATA:\n{json.dumps(compact, ensure_ascii=False)}"
         )
         return self._generate_json(prompt)
 
     def summarize_weekly_report(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate a weekly review overlay."""
+        """Independent weekly summary in points."""
         if not self.enabled:
             return self._unavailable("Gemini API key not configured")
 
         compact = self._compact_weekly_report_payload(payload)
         prompt = (
-            "You are a Quantitative Strategy Auditor. "
-            "Your task is to synthesize weekly trading data for XAU/USD and Oil to identify the Strategy Edge and Risk Clusters. "
-            "Identify the Environment Fit: did the system perform better in Trending, Ranging, or Volatile regimes. "
-            "Analyze Time-of-Week performance such as Monday reversals vs Friday profit taking when such context exists in the data. "
-            "Audit Risk-to-Reward efficiency across all closed positions. "
-            "Output MUST be STRICT JSON. "
-            "Keep the response boardroom-ready: short bullets, no filler, no repetition. "
-            "Return JSON with keys strategy_efficiency, dominant_regime, high_probability_windows, risk_leaks, strategic_pivot, recommendations, summary. "
-            "strategy_efficiency must be a percentage-style value or concise numeric string. "
-            "dominant_regime must be TRENDING, MEAN_REVERSION, or CHOPPY. "
-            "high_probability_windows, risk_leaks, and recommendations must be short arrays of strings with a maximum of 3 items each. "
-            "strategic_pivot must be Scale Up, Scale Down, or Hold Strategy Constant. "
-            "summary must be a senior executive summary no longer than 24 words.\n\n"
+            "Summarize the week's trading logic and environment. "
+            "Return STRICT JSON with keys edge_efficiency, market_regime, strategic_points (list of 3 points), strategic_pivot (one sentence). "
+            "Provide independent tactical advice.\n\n"
             f"DATA:\n{json.dumps(compact, ensure_ascii=False)}"
         )
         return self._generate_json(prompt)
