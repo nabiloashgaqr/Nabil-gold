@@ -155,7 +155,16 @@ class GeminiReviewService:
         }
 
     def _compact_daily_report_payload(self, p: Dict[str, Any]) -> Dict[str, Any]:
-        return {"date": p.get("report_date"), "stats": p.get("stats"), "net": p.get("closed_net_points")}
+        stats = p.get("stats") or {}
+        return {
+            "date": p.get("report_date"),
+            "stats": stats,
+            "net": p.get("closed_net_points"),
+            "rr_efficiency": p.get("rr_efficiency") or stats.get("rr_efficiency"),
+            "session_breakdown": p.get("session_breakdown") or stats.get("session_breakdown"),
+            "news_proximity": p.get("news_proximity") or stats.get("news_proximity"),
+            "regime_fit": p.get("regime_fit") or stats.get("regime_fit"),
+        }
 
     def _compact_weekly_report_payload(self, p: Dict[str, Any]) -> Dict[str, Any]:
         stats = p.get("stats") or {}
