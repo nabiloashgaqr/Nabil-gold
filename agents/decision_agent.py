@@ -98,6 +98,7 @@ class DecisionAgent(BaseAgent):
             "classic": classic,
             "learning": self._get_learning_info(),
             "risk_assessment": self._assess_risk(final_signal, indicators),
+            "entry_attribution": self._entry_attribution(final_signal, classic, agents_results),
             "agent_structured": self._agent_structured_payload(agents_results),
             "reason_codes": self._merged_reason_codes(agents_results),
             "timestamp": self.now_iso(),
@@ -253,6 +254,77 @@ class DecisionAgent(BaseAgent):
             if code not in seen:
                 seen.append(code)
         return seen[:20]
+
+    def _entry_attribution(self, signal: str, classic: Dict[str, Any], agents_results: Dict[str, Any]) -> Dict[str, Any]:
+        """Explain why the setup was entered or why WAIT was selected.
+
+        Stored inside signal_snapshot for post-trade review; no schema change is
+        required.  It separates entry drivers, blockers and regime context so a
+        later closed trade can be attributed without re-running old agents.
+        """
+        signal = str(signal or "WAIT").upper()
+        selected = ((classic.get("consensus") or {}).get("selected") or {}) if isinstance(classic, dict) else {}
+        supporters = list(selected.get("supporters") or []) if signal in {"BUY", "SELL"} else []
+        opponents = list(selected.get("opponents") or []) if signal in {"BUY", "SELL"} else []
+        structured = self._agent_structured_payload(agents_results)
+
+        def agent_score(name: str) -> float:
+            result = agents_results.get(name) or {}
+            try:
+                confidence = float(result.get("confidence", 0) or 0)
+            except (TypeError, ValueError):
+                confidence = 0.0
+            weight = float(self.current_weights.get(name, self.default_weights.get(name, 0.15)) or 0.15)
+            return confidence * weight
+
+        ranked = sorted(supporters, key=agent_score, reverse=True)
+        primary = ranked[0] if ranked else (((classic.get("strongest_directional") or {}).get("agent")) if isinstance(classic, dict) else None)
+        mtf = agents_results.get("multitimeframe", {}) or {}
+        classical = agents_results.get("classical", {}) or {}
+        technical = agents_results.get("technical", {}) or {}
+        news = agents_results.get("news", {}) or {}
+        daily = agents_results.get("daily_bias", {}) or {}
+
+        blockers: list[str] = []
+        if news and (news.get("can_trade") is False or str(news.get("market_status", "")).upper() == "DANGER"):
+            blockers.append("news_event_risk")
+        if str(mtf.get("entry_permission", "")).upper() in {"BLOCKED", "NOT_RECOMMENDED"}:
+            blockers.append("mtf_entry_permission")
+        bias = str(daily.get("bias", "NEUTRAL")).upper()
+        if signal == "BUY" and bias == "BEARISH":
+            blockers.append("daily_bias_against_buy")
+        elif signal == "SELL" and bias == "BULLISH":
+            blockers.append("daily_bias_against_sell")
+
+        timing_state = mtf.get("timing_state") or "UNKNOWN"
+        failure_mode = "NONE"
+        if signal == "WAIT":
+            failure_mode = "NO_VALID_CONSENSUS"
+        elif blockers:
+            failure_mode = str(blockers[0]).upper()
+        elif str(timing_state).upper() in {"LATE", "EXHAUSTED", "EARLY"}:
+            failure_mode = f"TIMING_{str(timing_state).upper()}"
+
+        macro = news.get("macro_direction") if isinstance(news, dict) else {}
+        return {
+            "mode": "post_trade_ready",
+            "signal": signal,
+            "primary_entry_driver": primary,
+            "supporting_agents": ranked,
+            "opposing_agents": opponents,
+            "blockers": blockers,
+            "failure_mode": failure_mode,
+            "timing_state": timing_state,
+            "mtf_failure_mode": mtf.get("mtf_failure_mode"),
+            "entry_permission": mtf.get("entry_permission"),
+            "pattern_quality": classical.get("pattern_quality", {}),
+            "breakout_quality": classical.get("breakout_quality", {}),
+            "technical_regime": technical.get("market_regime") or (technical.get("technical") or {}).get("market_regime", {}),
+            "event_risk": news.get("event_risk", {}) if isinstance(news, dict) else {},
+            "macro_direction": macro if isinstance(macro, dict) else {},
+            "daily_bias": {"bias": daily.get("bias"), "confidence": daily.get("confidence"), "strength_band": daily.get("strength_band")},
+            "agent_reason_codes": {name: structured.get(name, {}).get("reason_codes", []) for name in structured},
+        }
 
     def _supporting_evidence(self, decision: str, selected_metrics: Dict[str, Any] | None, votes: Dict[str, list]) -> list[str]:
         """Build concise human-readable consensus evidence for the signal message."""
@@ -528,6 +600,7 @@ class DecisionAgent(BaseAgent):
             "weights": analysis.get("weights", {}),
             "classic": analysis.get("classic", {}),
             "supportive_evidence": (analysis.get("classic", {}) or {}).get("supporting_evidence", []),
+            "entry_attribution": analysis.get("entry_attribution", {}),
             "agent_structured": analysis.get("agent_structured", {}),
             "reason_codes": analysis.get("reason_codes", []),
             "agent_context": (analysis.get("classic", {}) or {}).get("strongest_directional"),

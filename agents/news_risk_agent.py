@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from agents.base_agent import BaseAgent
+from agents.macro_fundamental_agent import MacroFundamentalAgent
 from utils.helpers import get_current_session, load_config, sanitize_prompt_text
 
 
@@ -182,7 +183,9 @@ class NewsRiskAgent(BaseAgent):
 
             upcoming.sort(key=lambda item: item.get("minutes_until", 999999))
             session = get_current_session(now)
+            macro_direction = MacroFundamentalAgent(self.config).macro_direction(self._macro_context())
             reason_codes = self._reason_codes(market_status, can_trade, upcoming, high_risk_day)
+            reason_codes.extend(macro_direction.get("reason_codes", []) or [])
             evidence = [
                 {"name": "market_status", "value": market_status, "bias": "RISK" if market_status != "SAFE" else "SAFE"},
                 {"name": "tier1_events_24h", "value": tier1_events_24h, "bias": "RISK" if tier1_events_24h else "NEUTRAL"},
@@ -204,13 +207,13 @@ class NewsRiskAgent(BaseAgent):
                 "tier_summary": {"tier1_24h": tier1_events_24h, "tier2_24h": tier2_events_24h, "high_risk_day": high_risk_day},
                 "event_tiers": event_tiers,
                 "risk_score": min(100, int(risk_score)),
-                "event_risk": {"status": market_status, "can_trade": can_trade, "score": min(100, int(risk_score)), "tier_summary": {"tier1_24h": tier1_events_24h, "tier2_24h": tier2_events_24h}},
-                "macro_direction": {"bias": "NEUTRAL", "confidence": 0, "summary": "Macro directional inputs not connected yet"},
-                "reason_codes": reason_codes,
-                "evidence": evidence,
+                "event_risk": {"status": market_status, "can_trade": can_trade, "score": min(100, int(risk_score)), "tier_summary": {"tier1_24h": tier1_events_24h, "tier2_24h": tier2_events_24h, "high_risk_day": high_risk_day}},
+                "macro_direction": macro_direction,
+                "reason_codes": self._dedupe(reason_codes),
+                "evidence": evidence + list(macro_direction.get("evidence", []) or [])[:5],
                 "invalidations": invalidations,
-                "data_quality": {"source": "news_events", "freshness": "OK", "missing_fields": []},
-                "confidence_breakdown": {"event_risk": min(100, int(risk_score)), "macro_direction": 0, "penalties": -20 if not can_trade else 0},
+                "data_quality": {"source": "news_events", "freshness": "OK", "missing_fields": [], "macro": macro_direction.get("data_quality", {})},
+                "confidence_breakdown": {"event_risk": min(100, int(risk_score)), "macro_direction": macro_direction.get("confidence", 0), "penalties": -20 if not can_trade else 0},
                 "warnings": warnings[:6],
                 "summary": self._summary(market_status, can_trade, upcoming, active_restrictions),
             }
@@ -235,6 +238,38 @@ class NewsRiskAgent(BaseAgent):
                 "warnings": [f"News check failed: {exc}"],
                 "summary": "News check failed - proceed with caution",
             }
+
+    def _macro_context(self) -> Dict[str, Any]:
+        """Load operator-supplied macro context without mixing it with event risk."""
+        for source in (self.config.get("macro_context"),):
+            if isinstance(source, dict) and source:
+                return dict(source)
+        env_context = os.environ.get("MACRO_CONTEXT_JSON")
+        if env_context:
+            try:
+                parsed = json.loads(env_context)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError as exc:
+                self.logger.warning("Invalid MACRO_CONTEXT_JSON: %s", exc)
+        macro_path = Path(__file__).resolve().parents[1] / "storage" / "macro_context.json"
+        if macro_path.exists():
+            try:
+                with macro_path.open("r", encoding="utf-8") as file:
+                    parsed = json.load(file)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError as exc:
+                self.logger.warning("Invalid macro context file: %s", exc)
+        return {}
+
+    @staticmethod
+    def _dedupe(items: List[str]) -> List[str]:
+        seen: List[str] = []
+        for item in items:
+            if item and item not in seen:
+                seen.append(item)
+        return seen[:16]
 
     def _reason_codes(self, market_status: str, can_trade: bool, upcoming: List[Dict[str, Any]], high_risk_day: bool) -> List[str]:
         codes: List[str] = []
