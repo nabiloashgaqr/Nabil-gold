@@ -15,6 +15,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
 
+from utils.sessions import session_label_from_trade
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -376,9 +378,12 @@ class LearningService:
         }
 
     def _trade_session_label(self, trade: Dict[str, Any]) -> str:
-        snap = self._snapshot(trade)
-        session_info = snap.get("session_info") or {}
-        return str(trade.get("session_label") or session_info.get("current_session") or "unknown")
+        """Return a standardised session label for a trade.
+
+        Uses the unified session classifier from utils.sessions so that
+        all learning data shows consistent names.
+        """
+        return session_label_from_trade(trade)
 
     def _trade_regime_label(self, trade: Dict[str, Any]) -> str:
         snap = self._snapshot(trade)

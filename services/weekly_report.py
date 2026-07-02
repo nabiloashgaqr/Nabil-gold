@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
+from utils.sessions import session_label_from_trade
+
 logger = logging.getLogger(__name__)
 
 # Telegram hard limit (https://core.telegram.org/bots/api#sendmessage)
@@ -672,49 +674,12 @@ class WeeklyReportService:
 
     @staticmethod
     def _trade_session(trade: Dict[str, Any]) -> str:
-        """Return an ordered, human-friendly trading session by open time.
+        """Return a standardised trading session label for a trade.
 
-        Labels are based on Asia/Jerusalem local time so the weekly Telegram
-        report matches the dashboard:
-        - Asia Morning
-        - London / Europe Midday
-        - London + New York Afternoon
-        - New York Evening
-        - Late New York Night
+        Uses the unified session classifier from utils.sessions so that
+        weekly reports show consistent names across all outputs.
         """
-        ts = WeeklyReportService._trade_time_text(trade)
-        try:
-            text = str(ts).replace("Z", "+00:00")
-            dt = datetime.fromisoformat(text)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            local = dt.astimezone(ZoneInfo("Asia/Jerusalem"))
-            h = local.hour
-        except Exception:  # noqa: BLE001
-            # Fallback to stored session label if timestamp parsing fails.
-            snapshot = trade.get("signal_snapshot") or {}
-            session_info = snapshot.get("session_info") or {}
-            raw = str(trade.get("session") or trade.get("current_session") or session_info.get("current_session") or "unknown")
-            raw_l = raw.lower()
-            if "asian" in raw_l:
-                return "Asia Morning"
-            if "london-ny" in raw_l or "overlap" in raw_l:
-                return "London + New York Afternoon"
-            if "london" in raw_l:
-                return "London / Europe Midday"
-            if "new york" in raw_l or "ny" in raw_l:
-                return "New York Evening"
-            return "Late New York Night"
-
-        if 3 <= h < 10:
-            return "Asia Morning"
-        if 10 <= h < 15:
-            return "London / Europe Midday"
-        if 15 <= h < 19:
-            return "London + New York Afternoon"
-        if 19 <= h < 24:
-            return "New York Evening"
-        return "Late New York Night"
+        return session_label_from_trade(trade)
 
     @staticmethod
     def _snapshot(trade: Dict[str, Any]) -> Dict[str, Any]:

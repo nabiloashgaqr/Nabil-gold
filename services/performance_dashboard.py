@@ -9,6 +9,8 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 
+from utils.sessions import session_label_from_trade
+
 logger = logging.getLogger(__name__)
 
 class AlertLevel(Enum):
@@ -140,7 +142,7 @@ class PerformanceDashboard:
         for trade in trades:
             snap = self._snapshot(trade)
             info = snap.get("session_info", {}) or {}
-            name = str(info.get("current_session") or "Unknown")
+            name = session_label_from_trade(trade)
             quality = str(info.get("session_quality") or info.get("quality") or "UNKNOWN")
             session = sessions.setdefault(name, SessionPerformance(session_name=name, quality=quality))
             session.total_signals += 1

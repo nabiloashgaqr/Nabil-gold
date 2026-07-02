@@ -24,6 +24,7 @@ except Exception:  # pragma: no cover - dependency may be absent in local Python
 
 from utils.helpers import load_config, load_trades, save_trades
 from utils.instruments import price_decimals, price_to_points
+from utils.sessions import session_label_from_utc, SESSION_ORDER
 
 
 class DatabaseService:
@@ -207,11 +208,24 @@ class DatabaseService:
         tech_regime = market_context.get("technical_regime", {}) if isinstance(market_context, dict) else {}
         if not isinstance(tech_regime, dict):
             tech_regime = {}
+        # Session label: prefer the already-classified name from
+        # TradingSessionAgent (which now uses classify_session), fall back to
+        # computing from the current UTC timestamp so we never store a raw
+        # config name like "Main Trading Session".
+        stored_session = (
+            session_info.get("current_session")
+            or session_info.get("session")
+            or session_info.get("session_name")
+        )
+        session_label = (
+            stored_session if stored_session in SESSION_ORDER
+            else session_label_from_utc(now)
+        )
         return {
             "planned_risk_points": round(planned_risk_points, 1),
             "planned_tp2_points": round(planned_tp2_points, 1),
             "planned_rr": round(planned_rr, 2),
-            "session_label": session_info.get("current_session") or session_info.get("session") or session_info.get("session_name"),
+            "session_label": session_label,
             "session_quality": session_info.get("session_quality") or session_info.get("quality"),
             "entry_day_of_week": local.strftime("%A"),
             "entry_hour_local": int(local.hour),

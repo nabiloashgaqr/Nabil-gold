@@ -328,6 +328,8 @@ class TelegramService:
         if session_info.get("current_session"):
             session_quality = session_info.get("session_quality") or session_info.get("quality")
             suffix = f" · {session_quality}" if session_quality else ""
+            # current_session is now classified (e.g. "Asia Morning")
+            # instead of the raw config name (e.g. "Main Trading Session")
             context_lines.append(f"• Session: {html.escape(str(session_info.get('current_session')))}{html.escape(suffix)}")
         news_context = decision.get("news_context") or {}
         news_rule = news_context.get("rule_based", {}) if isinstance(news_context, dict) else {}
