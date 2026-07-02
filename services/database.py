@@ -243,6 +243,49 @@ class DatabaseService:
                 self.logger.error("Failed to fetch open trades from Supabase: %s", exc)
         return [trade for trade in load_trades(self.local_path) if trade.get("status") in set(self.ACTIVE_STATUSES)]
 
+    def save_macro_context(self, context: Dict[str, Any]) -> bool:
+        """Persist latest hourly macro context in Supabase when schema exists.
+
+        The analysis workflow can read this snapshot without spending Twelve
+        Data quota every 5 minutes. Missing table/columns are treated as a safe
+        no-op because local storage remains available for manual runs.
+        """
+        if not (self.use_supabase and self.client):
+            return False
+        payload = {
+            "id": "latest",
+            "context": context,
+            "source": context.get("source"),
+            "generated_at": context.get("generated_at"),
+            "updated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        }
+        try:
+            self.client.table("macro_context").upsert(payload).execute()
+            return True
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("Could not save macro_context snapshot: %s", exc)
+            return False
+
+    def get_macro_context(self) -> Dict[str, Any]:
+        """Load latest persisted macro context from Supabase or local file."""
+        if self.use_supabase and self.client:
+            try:
+                response = self.client.table("macro_context").select("context").eq("id", "latest").limit(1).execute()
+                rows = list(response.data or [])
+                if rows and isinstance(rows[0].get("context"), dict):
+                    return dict(rows[0]["context"])
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning("Could not read macro_context snapshot: %s", exc)
+        local = Path(__file__).resolve().parents[1] / "storage" / "macro_context.json"
+        if local.exists():
+            try:
+                import json
+                data = json.loads(local.read_text(encoding="utf-8"))
+                return data if isinstance(data, dict) else {}
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning("Could not read local macro_context.json: %s", exc)
+        return {}
+
 
     async def execute_query(self, query: str, params: List[Any] | None = None) -> List[Dict[str, Any]]:
         """Small compatibility layer for older services that used raw SQL.
