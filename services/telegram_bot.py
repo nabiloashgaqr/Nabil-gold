@@ -110,32 +110,130 @@ class TelegramService:
             return []
         lines = ["🗳️ <b>AGENT VOTES</b>"]
         marker = {"BUY": "🟢", "SELL": "🔴", "WAIT": "⚪", "NEUTRAL": "⚪"}
-        for direction in ("BUY", "SELL", "WAIT"):
+        qualified_agents: set[str] = set()
+        rendered_any_vote = False
+        for direction in ("BUY", "SELL"):
             entries = votes.get(direction) or []
             if not entries:
                 continue
+            rendered_any_vote = True
             parts = []
             for item in entries:
                 if isinstance(item, dict):
-                    agent = item.get("agent", "agent")
+                    agent = str(item.get("agent", "agent"))
+                    qualified_agents.add(agent)
                     conf = item.get("confidence")
                     parts.append(f"{agent}{f' {conf}%' if conf is not None else ''}")
                 else:
                     parts.append(str(item))
-            lines.append(f"{marker.get(direction, '⚪')} <b>{direction}:</b> {html.escape(', '.join(parts))}")
-        for detail in agent_details.values():
+            lines.append(f"{marker.get(direction, '⚪')} <b>{direction} qualified:</b> {html.escape(', '.join(parts))}")
+        if not rendered_any_vote:
+            lines.append("⚪ <b>Qualified:</b> none")
+        wait_entries = votes.get("WAIT") or []
+        wait_parts = []
+        for item in wait_entries:
+            if isinstance(item, dict):
+                agent = str(item.get("agent", "agent"))
+                qualified_agents.add(agent)
+                conf = item.get("confidence")
+                wait_parts.append(f"{agent}{f' {conf}%' if conf is not None else ''}")
+            else:
+                wait_parts.append(str(item))
+        if wait_parts:
+            lines.append(f"⚪ <b>WAIT / not directional:</b> {html.escape(', '.join(wait_parts))}")
+
+        not_qualified = []
+        for key, detail in agent_details.items():
+            if not isinstance(detail, dict):
+                continue
+            if str(key) not in qualified_agents and str(detail.get("label") or key) not in qualified_agents:
+                direction = str(detail.get("direction") or "WAIT").upper()
+                if direction in {"WAIT", "NEUTRAL", "HOLD", "NO_TRADE", ""}:
+                    not_qualified.append(str(detail.get("label") or key))
+        if not_qualified:
+            lines.append(f"⚪ <b>Not qualified:</b> {html.escape(', '.join(not_qualified[:5]))}")
+
+        if agent_details:
+            lines.append("📎 <b>Market notes:</b>")
+        for key, detail in agent_details.items():
             if not isinstance(detail, dict):
                 continue
             signals = detail.get("signals") or []
             if not signals:
                 continue
-            label = detail.get("label") or "Agent"
+            label = detail.get("label") or key or "Agent"
             direction = str(detail.get("direction") or "WAIT").upper()
             prefix = marker.get(direction, "⚪")
-            lines.append(f"{prefix} <b>{html.escape(str(label))} notes:</b>")
+            lines.append(f"{prefix} <b>{html.escape(str(label))}:</b>")
             for sig in signals[:3]:
-                lines.append(f"  • {self._friendly_signal_text(sig)}")
+                text = self._friendly_signal_text(sig)
+                # Avoid repeating the exact entry price in pattern/rejection notes.
+                lines.append(f"  • {text}")
         return lines
+
+    def _signal_strength_line(self, decision: Dict[str, Any]) -> str | None:
+        classic = decision.get("classic") or {}
+        signal = str(decision.get("decision") or "").upper()
+        selected = ((classic.get("consensus") or {}).get("selected") or {}) if isinstance(classic, dict) else {}
+        support = int(selected.get("support_count") or classic.get("buy_count" if signal == "BUY" else "sell_count", 0) or 0)
+        opposition = int(selected.get("opposition_count") or 0)
+        total_core = 5
+        if support <= 0:
+            return None
+        label = "Excellent" if support >= 4 and opposition == 0 else "Strong" if support >= 3 else "Good" if opposition == 0 else "Cautious"
+        opp_text = "no opposition" if opposition == 0 else f"{opposition} opposing"
+        return f"💪 Strength: {label} — {support}/{total_core} qualified agents, {opp_text}"
+
+    def _macro_line(self, decision: Dict[str, Any]) -> str:
+        attr = decision.get("entry_attribution") or {}
+        market_context = decision.get("market_context") or {}
+        news_context = decision.get("news_context") or {}
+        macro_agent = news_context.get("macro", {}) if isinstance(news_context, dict) else {}
+        macro = {}
+        for candidate in (
+            attr.get("macro_direction") if isinstance(attr, dict) else None,
+            market_context.get("macro_direction") if isinstance(market_context, dict) else None,
+            (macro_agent.get("macro_direction") if isinstance(macro_agent, dict) else None),
+        ):
+            if isinstance(candidate, dict) and candidate:
+                macro = candidate
+                break
+        bias = str(macro.get("bias") or "NEUTRAL").replace("_", " ").title()
+        conf = macro.get("confidence")
+        if not macro or str(macro.get("bias", "NEUTRAL")).upper() == "NEUTRAL" and not conf:
+            return "• Macro: Collecting hourly data"
+        conf_text = f" ({conf}%)" if conf not in {None, ""} else ""
+        return f"• Macro: {html.escape(bias)}{html.escape(conf_text)}"
+
+    def _attribution_lines(self, decision: Dict[str, Any]) -> List[str]:
+        attr = decision.get("entry_attribution") or {}
+        if not isinstance(attr, dict) or not attr:
+            return []
+        lines: List[str] = []
+        primary = attr.get("primary_entry_driver")
+        timing = attr.get("timing_state")
+        permission = attr.get("entry_permission")
+        if primary:
+            lines.append(f"• Primary driver: {html.escape(str(primary).replace('_', ' ').title())}")
+        compact = []
+        if timing:
+            compact.append(f"Timing {timing}")
+        if permission:
+            compact.append(f"Permission {permission}")
+        if compact:
+            lines.append(f"• {' · '.join(html.escape(str(x)) for x in compact)}")
+        return lines[:2]
+
+    def _technical_caution_lines(self, decision: Dict[str, Any]) -> List[str]:
+        details = decision.get("agent_details") or {}
+        tech = details.get("technical") if isinstance(details, dict) else {}
+        signals = (tech or {}).get("signals") if isinstance(tech, dict) else []
+        cautions = []
+        for sig in signals or []:
+            lower = str(sig).lower()
+            if any(word in lower for word in ("bearish", "weakening", "divergence", "overbought", "oversold")):
+                cautions.append(f"• Technical caution: {self._friendly_signal_text(sig)}")
+        return cautions[:1]
 
     def send_signal(self, decision: Dict[str, Any]) -> bool:
         symbol = str(decision.get("symbol", "XAU/USD"))
@@ -156,6 +254,9 @@ class TelegramService:
         ]
         if quality:
             lines.append(f"🏅 Quality: {html.escape(str(quality.get('grade', '')))} {html.escape(str(quality.get('score', '')))}".rstrip())
+        strength_line = self._signal_strength_line(decision)
+        if strength_line:
+            lines.append(strength_line)
         order_kind = str(signal.get("entry_kind") or signal.get("order_type") or entry.get("kind") or "MARKET").upper()
         rr = signal.get("rr_ratio") or signal.get("tp2_rr") or decision.get("planned_rr")
         lines.extend([
@@ -169,7 +270,8 @@ class TelegramService:
         ])
         if rr:
             lines.append(f"• <b>Planned RR:</b> {html.escape(str(rr))}R")
-        lines.append("• <b>Management:</b> SL → entry after +100 pts · Trail gap 100 pts / step 30 pts · check 5m")
+        lines.append("• <b>Protection:</b> SL → entry after +100 pts before TP1")
+        lines.append("• <b>Management:</b> Trail gap 100 pts / step 30 pts · check 5m")
 
         vote_lines = self._votes_lines(decision)
         if vote_lines:
@@ -185,12 +287,13 @@ class TelegramService:
             if self._should_show_invalidation(ai.get("invalidation"), signal.get("stop_loss")):
                 context_lines.append(f"• Invalidation: {self._clean_text(ai.get('invalidation'))}")
         daily_bias = decision.get("daily_bias") or {}
-        if daily_bias and str(daily_bias.get("bias", "NEUTRAL")).upper() != "NEUTRAL":
+        if daily_bias:
             bias_conf = daily_bias.get("confidence")
             bias_conf_text = f" ({bias_conf}%)" if bias_conf is not None else ""
             context_lines.append(
-                f"• Daily bias: {html.escape(str(daily_bias.get('bias')))}{html.escape(bias_conf_text)}"
+                f"• Daily bias: {html.escape(str(daily_bias.get('bias', 'NEUTRAL')))}{html.escape(bias_conf_text)}"
             )
+        context_lines.append(self._macro_line(decision))
         session_info = decision.get("session_info") or {}
         if session_info.get("current_session"):
             session_quality = session_info.get("session_quality") or session_info.get("quality")
@@ -199,9 +302,10 @@ class TelegramService:
         news_context = decision.get("news_context") or {}
         news_rule = news_context.get("rule_based", {}) if isinstance(news_context, dict) else {}
         if news_rule.get("market_status") or news_rule.get("risk_level"):
+            no_block = " — no hard block" if news_rule.get("can_trade", True) is not False else " — blocked"
             context_lines.append(
                 f"• News: {html.escape(str(news_rule.get('market_status') or 'OK'))}"
-                f" / {html.escape(str(news_rule.get('risk_level') or 'LOW'))}"
+                f" / {html.escape(str(news_rule.get('risk_level') or 'LOW'))}{html.escape(no_block)}"
             )
         if dynamic and str(dynamic.get("level", "NORMAL")).upper() != "NORMAL":
             context_lines.append(f"• Dynamic risk: {html.escape(str(dynamic.get('level')))}")
@@ -237,6 +341,12 @@ class TelegramService:
         reasons = decision.get("reasons") or []
         lines.append("──────────────────")
         lines.append("💡 <b>WHY THIS TRADE</b>")
+        attribution = self._attribution_lines(decision)
+        if attribution:
+            lines.extend(attribution)
+        technical_cautions = self._technical_caution_lines(decision)
+        if technical_cautions:
+            lines.extend(technical_cautions)
         for r in reasons[:3]:
             lines.append(f"• {self._friendly_signal_text(r)}")
         if len(reasons) > 3:
