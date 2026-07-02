@@ -235,6 +235,36 @@ class TelegramService:
                 cautions.append(f"• Technical caution: {self._friendly_signal_text(sig)}")
         return cautions[:1]
 
+    def _independent_review_lines(self, decision: Dict[str, Any]) -> List[str]:
+        """Render Gemini state every time without exposing technical secrets."""
+        review = decision.get("gemini_review")
+        lines = ["🧠 <b>GEMINI INDEPENDENT REVIEW</b>"]
+        if isinstance(review, dict) and review.get("available"):
+            verdict = review.get("verdict") or review.get("signal") or review.get("opinion") or "REVIEWED"
+            reason = review.get("reason") or review.get("summary") or "Independent check completed."
+            lines.append(f"• <b>Opinion:</b> {self._clean_text(verdict)} - {self._clean_text(reason)}")
+            confidence = review.get("confidence")
+            if confidence not in {None, ""}:
+                lines.append(f"• <b>Review confidence:</b> {html.escape(str(confidence))}%")
+            return lines
+
+        if isinstance(review, dict) and review.get("suppressed"):
+            lines.append("• <b>Status:</b> Skipped — no useful extra insight")
+            return lines
+
+        if isinstance(review, dict):
+            # Keep the subscriber-facing text non-technical even if the internal
+            # reason is an API-key/timeout/provider detail.
+            summary = str(review.get("summary") or review.get("reason") or "").lower()
+            if any(token in summary for token in ("api key", "not configured", "disabled", "credential")):
+                lines.append("• <b>Status:</b> Offline this run")
+            else:
+                lines.append("• <b>Status:</b> Not available this run")
+            return lines
+
+        lines.append("• <b>Status:</b> Offline this run")
+        return lines
+
     def send_signal(self, decision: Dict[str, Any]) -> bool:
         symbol = str(decision.get("symbol", "XAU/USD"))
         signal = decision.get("signal", {}) or {}
@@ -318,11 +348,10 @@ class TelegramService:
             lines.append("⚠️ <b>RISK / CONTEXT</b>")
             lines.extend(context_lines)
 
-        gemini = decision.get("gemini_review", {}) or {}
-        if gemini.get("available"):
+        independent_review = self._independent_review_lines(decision)
+        if independent_review:
             lines.append("──────────────────")
-            lines.append("🧠 <b>GEMINI INDEPENDENT REVIEW</b>")
-            lines.append(f"• <b>Opinion:</b> {self._clean_text(gemini.get('verdict'))} - {self._clean_text(gemini.get('reason'))}")
+            lines.extend(independent_review)
 
         gemini_news = decision.get("gemini_news_review", {}) or {}
         if gemini_news.get("available"):
