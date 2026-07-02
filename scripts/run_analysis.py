@@ -25,6 +25,7 @@ from agents.price_action_agent import PriceActionAgent
 from agents.risk_management_agent import RiskManagementAgent
 from agents.smc_agent import SMCAgent
 from agents.technical_agent import TechnicalAgent
+from services.market_snapshot import build_market_snapshot
 from agents.trading_session_agent import TradingSessionAgent
 from agents.open_trades_manager import OpenTradesManager
 from services.database import DatabaseService
@@ -570,7 +571,9 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             high, low = _latest_candle_extremes(data)
             OpenTradesManager(config).update_trades(open_trades=[t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol], current_price=float(data.get("current_price", 0)), candle_high=high, candle_low=low, database=database, telegram=telegram, now=datetime.now(timezone.utc))
         if not session.get("trading_allowed"): return
-        all_results = {"technical": run_agent("technical", TechnicalAgent(config), data), "classical": run_agent("classical", ClassicalAgent(config), data), "smc": run_agent("smc", SMCAgent(config), data), "price_action": run_agent("price_action", PriceActionAgent(config), data), "multitimeframe": run_agent("multitimeframe", MultiTimeframeAgent(config), data), "current_price": data["current_price"], "symbol": symbol, "session": session, "news": NewsRiskAgent(config).check(), "daily_bias": run_agent("daily_bias", DailyBiasAgent(config), data)}
+        verified_snapshot = build_market_snapshot(data, config)
+        data["verified_snapshot"] = verified_snapshot
+        all_results = {"technical": run_agent("technical", TechnicalAgent(config), data), "classical": run_agent("classical", ClassicalAgent(config), data), "smc": run_agent("smc", SMCAgent(config), data), "price_action": run_agent("price_action", PriceActionAgent(config), data), "multitimeframe": run_agent("multitimeframe", MultiTimeframeAgent(config), data), "current_price": data["current_price"], "symbol": symbol, "session": session, "verified_snapshot": verified_snapshot, "news": NewsRiskAgent(config).check(), "daily_bias": run_agent("daily_bias", DailyBiasAgent(config), data)}
         if has_symbol_active_trades:
             await _check_scale_in(
                 config,
