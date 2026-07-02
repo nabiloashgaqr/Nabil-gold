@@ -36,6 +36,7 @@ class AgentPerformanceRecord:
     consecutive_wins: int = 0
     consecutive_losses: int = 0
     accuracy_trend: List[float] = field(default_factory=list)  # آخر 10 نسبة
+    regime_breakdown: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
 @dataclass
 class LearningConfig:
@@ -177,6 +178,7 @@ class LearningService:
                     session_label, session_quality, entry_day_of_week, entry_hour_local,
                     news_status_at_entry, news_risk_at_entry,
                     volatility_regime, trend_strength, daily_bias_at_entry,
+                    primary_entry_driver, entry_failure_mode, macro_bias_at_entry,
                     status, entry_time, opened_at, closed_at, created_at, signal_snapshot
                 FROM trades
                 WHERE closed_at >= NOW() - INTERVAL '{days} days'
@@ -216,14 +218,8 @@ class LearningService:
             pnl = self._trade_pnl(trade)
             is_win = pnl > 0
             
-            # توزيع الأداء على الوكلاء (محاكاة بناءً على win rate)
-            agent_configs = [
-                {'name': 'technical', 'base_rate': 0.55},
-                {'name': 'classical', 'base_rate': 0.52},
-                {'name': 'smc', 'base_rate': 0.58},
-                {'name': 'price_action', 'base_rate': 0.50},
-                {'name': 'multitimeframe', 'base_rate': 0.54}
-            ]
+            agent_configs = self._trade_agent_configs(trade)
+            regime_label = self._trade_regime_label(trade)
             
             for config in agent_configs:
                 name = config['name']
@@ -253,6 +249,11 @@ class LearningService:
                 record.win_rate = (record.correct_predictions / record.total_predictions) * 100
                 record.avg_confidence = 70 + (record.win_rate / 5)
                 record.total_pnl += pnl * self.current_weights.get(name, 0.15)
+                bucket = record.regime_breakdown.setdefault(regime_label, {"count": 0, "pnl": 0.0, "wins": 0})
+                bucket["count"] += 1
+                bucket["pnl"] += pnl
+                if is_win:
+                    bucket["wins"] += 1
                 
                 # تحديث الاتجاه
                 record.trend = self._calculate_trend(record)
@@ -264,6 +265,32 @@ class LearningService:
         
         return agent_records
     
+    def _trade_agent_configs(self, trade: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Use stored attribution first, then fall back to all legacy agents."""
+        snap = self._snapshot(trade)
+        attr = snap.get("entry_attribution") or {}
+        base_rates = {
+            "technical": 0.55,
+            "classical": 0.52,
+            "smc": 0.58,
+            "price_action": 0.50,
+            "multitimeframe": 0.54,
+        }
+        agents = list(attr.get("supporting_agents") or [])
+        agents += list(attr.get("opposing_agents") or [])
+        primary = trade.get("primary_entry_driver") or attr.get("primary_entry_driver")
+        if primary:
+            agents.insert(0, str(primary))
+        cleaned: List[str] = []
+        for name in agents:
+            name = str(name)
+            if name in base_rates and name not in cleaned:
+                cleaned.append(name)
+        if not cleaned:
+            structured = snap.get("agent_structured") or {}
+            cleaned = [name for name in base_rates if name in structured] or list(base_rates)
+        return [{"name": name, "base_rate": base_rates.get(name, 0.52)} for name in cleaned]
+
     def _add_to_failed_memory(self, trade: Dict, agent_name: str):
         """🚀 حفظ الصفقة الفاشلة للتعلم منها"""
         self.failed_signals_memory.append({
@@ -365,6 +392,17 @@ class LearningService:
         rule = nc.get("rule_based") or {}
         return str(trade.get("news_status_at_entry") or rule.get("market_status") or rule.get("status") or "unknown").upper()
 
+    def _trade_macro_label(self, trade: Dict[str, Any]) -> str:
+        snap = self._snapshot(trade)
+        attr = snap.get("entry_attribution") or {}
+        macro = attr.get("macro_direction") or (snap.get("market_context") or {}).get("macro_direction") or {}
+        return str(trade.get("macro_bias_at_entry") or macro.get("bias") or "unknown").upper()
+
+    def _trade_primary_driver(self, trade: Dict[str, Any]) -> str:
+        snap = self._snapshot(trade)
+        attr = snap.get("entry_attribution") or {}
+        return str(trade.get("primary_entry_driver") or attr.get("primary_entry_driver") or "unknown")
+
     def _rr_efficiency(self, trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         actual_r: List[float] = []
         planned: List[float] = []
@@ -394,6 +432,8 @@ class LearningService:
             "rr_efficiency": self._rr_efficiency(trades),
             "news_proximity": self._bucket_metric(trades, self._trade_news_label),
             "regime_fit": self._bucket_metric(trades, self._trade_regime_label),
+            "macro_bias": self._bucket_metric(trades, self._trade_macro_label),
+            "entry_driver": self._bucket_metric(trades, self._trade_primary_driver),
         }
     
     def _calculate_trend(self, record: AgentPerformanceRecord) -> str:

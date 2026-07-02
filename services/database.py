@@ -220,6 +220,9 @@ class DatabaseService:
             "volatility_regime": tech_regime.get("volatility_regime"),
             "trend_strength": tech_regime.get("trend_strength"),
             "daily_bias_at_entry": (decision.get("daily_bias") or {}).get("bias") if isinstance(decision.get("daily_bias"), dict) else None,
+            "primary_entry_driver": (decision.get("entry_attribution") or {}).get("primary_entry_driver") if isinstance(decision.get("entry_attribution"), dict) else None,
+            "entry_failure_mode": (decision.get("entry_attribution") or {}).get("failure_mode") if isinstance(decision.get("entry_attribution"), dict) else None,
+            "macro_bias_at_entry": ((decision.get("market_context") or {}).get("macro_direction") or {}).get("bias") if isinstance((decision.get("market_context") or {}).get("macro_direction"), dict) else None,
         }
 
     # Statuses the trade manager must still evaluate each cycle. PENDING is
