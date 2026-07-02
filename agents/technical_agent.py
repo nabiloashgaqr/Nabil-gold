@@ -192,6 +192,22 @@ class TechnicalAgent(BaseAgent):
         elif volatility_regime == 'HIGH':
             reasons.append('high ATR regime - wider stops required')
 
+        market_phase = 'SQUEEZE' if bollinger_squeeze else 'TRENDING' if adx_value >= 25 else 'RANGING'
+        base_score = score
+        regime_scoring = self._regime_aware_score(
+            score=score,
+            market_phase=market_phase,
+            ema_ribbon=ema_ribbon,
+            macd_hist=macd_hist,
+            macd_slope=macd_slope,
+            rsi=rsi,
+            bollinger_percent_b=bollinger_percent_b,
+            adx_value=adx_value,
+        )
+        score = float(regime_scoring.get('adjusted_score', score))
+        if regime_scoring.get('notes'):
+            reasons.extend(regime_scoring.get('notes', [])[:3])
+
         if score >= 2.5:
             classic_signal = 'BUY'
         elif score <= -2.5:
@@ -224,7 +240,7 @@ class TechnicalAgent(BaseAgent):
                 'trend_direction': ema_trend,
                 'trend_strength': 'STRONG' if adx_value >= 25 else 'WEAK' if adx_value < 15 else 'MODERATE',
                 'volatility_regime': volatility_regime,
-                'market_phase': 'SQUEEZE' if bollinger_squeeze else 'TRENDING' if adx_value >= 25 else 'RANGING',
+                'market_phase': market_phase,
                 'adx_value': round(adx_value, 2),
                 'atr_percentile': round(atr_percentile, 1),
             },
@@ -243,6 +259,8 @@ class TechnicalAgent(BaseAgent):
             'resistance': round(resistance, 2) if resistance else 0,
             'classic_signal': classic_signal,
             'classic_score': round(score, 2),
+            'base_score': round(base_score, 2),
+            'regime_scoring': regime_scoring,
             'current_price': current_price,
             'reasons': reasons[:10],
             'reason_codes': reason_codes,
@@ -252,6 +270,45 @@ class TechnicalAgent(BaseAgent):
             'indicators_raw': {'atr': atr, 'rsi': rsi, 'macd_histogram': macd_hist},
             'key_levels': {'nearest_support': round(support, 2) if support else 0, 'nearest_resistance': round(resistance, 2) if resistance else 0},
         }
+
+    def _regime_aware_score(self, score: float, market_phase: str, ema_ribbon: Dict[str, Any], macd_hist: float, macd_slope: float, rsi: float, bollinger_percent_b: float, adx_value: float) -> Dict[str, Any]:
+        """Adjust technical score by market regime without changing orchestration.
+
+        Trending markets reward trend/momentum evidence. Ranges reward mean-
+        reversion near Bollinger extremes. Squeeze regimes reduce directional
+        conviction until breakout confirmation appears.
+        """
+        adjusted = float(score)
+        notes: List[str] = []
+        weights: Dict[str, float] = {}
+        if market_phase == 'TRENDING':
+            trend_bonus = 0.0
+            if ema_ribbon.get('state') in {'BULLISH_ALIGNMENT', 'BEARISH_ALIGNMENT'}:
+                trend_bonus += 0.35 if adjusted >= 0 else -0.35
+            if (macd_hist > 0 and macd_slope > 0 and adjusted > 0) or (macd_hist < 0 and macd_slope < 0 and adjusted < 0):
+                trend_bonus += 0.25 if adjusted >= 0 else -0.25
+            adjusted += trend_bonus
+            weights = {'trend_following': 1.25, 'momentum': 1.15, 'mean_reversion': 0.75}
+            if trend_bonus:
+                notes.append('regime-aware: trend evidence boosted')
+        elif market_phase == 'RANGING':
+            # In ranges, overextended trend-following scores should be damped;
+            # Bollinger extremes in the same direction get a small mean-reversion boost.
+            adjusted *= 0.88
+            if bollinger_percent_b < 0.15 and adjusted > 0:
+                adjusted += 0.35; notes.append('regime-aware: range lower-band bounce support')
+            elif bollinger_percent_b > 0.85 and adjusted < 0:
+                adjusted -= 0.35; notes.append('regime-aware: range upper-band rejection support')
+            else:
+                notes.append('regime-aware: range dampens trend conviction')
+            weights = {'trend_following': 0.75, 'momentum': 0.85, 'mean_reversion': 1.25}
+        elif market_phase == 'SQUEEZE':
+            adjusted *= 0.72
+            if abs(macd_slope) > 0 and adx_value >= 18:
+                adjusted += 0.15 if adjusted > 0 else -0.15 if adjusted < 0 else 0
+            notes.append('regime-aware: squeeze requires breakout confirmation')
+            weights = {'trend_following': 0.85, 'momentum': 1.05, 'breakout_readiness': 1.30}
+        return {'market_phase': market_phase, 'base_score': round(float(score), 2), 'adjusted_score': round(adjusted, 2), 'adjustment': round(adjusted - float(score), 2), 'weights': weights, 'notes': notes}
 
     def _technical_reason_codes(self, ema_ribbon: Dict[str, Any], ema_50: float, ema_200: float, rsi: float, macd_hist: float, macd_slope: float, squeeze: bool, volatility: str, signal: str) -> List[str]:
         codes: List[str] = []

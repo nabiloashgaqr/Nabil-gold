@@ -65,6 +65,9 @@ class MultiTimeframeAgent(BaseAgent):
             if direction in {"BUY", "SELL"}:
                 invalidations.append("HTF flips against the trade")
                 invalidations.append("Lower timeframe becomes late/exhausted")
+            entry_permission = self._entry_permission(direction, alignment, alignment_score, conflicts, counter_trend, setup_type)
+            mtf_failure_mode = self._failure_mode(direction, alignment, conflicts, counter_trend, setup_type)
+            timing_state = self._timing_state(timeframe_analysis, direction, setup_type)
 
             return {
                 "agent": self.name,
@@ -77,6 +80,9 @@ class MultiTimeframeAgent(BaseAgent):
                 "setup_type": setup_type,
                 "counter_trend": counter_trend,
                 "recommended_entry_tf": entry_tf,
+                "entry_permission": entry_permission,
+                "mtf_failure_mode": mtf_failure_mode,
+                "timing_state": timing_state,
                 "trend_direction_from_htf": htf.get("trend", "SIDEWAYS"),
                 "weighted_bias": weighted_bias,
                 "conflict_matrix": conflict_matrix,
@@ -87,7 +93,7 @@ class MultiTimeframeAgent(BaseAgent):
                 "invalidations": invalidations,
                 "data_quality": snapshot.get("data_quality", {}),
                 "verified_snapshot": snapshot,
-                "confidence_breakdown": {"alignment": alignment_score, "htf": 0 if counter_trend else 15, "setup": 10 if setup_type != "UNKNOWN" else 0, "penalties": -10 if conflicts else 0},
+                "confidence_breakdown": {"alignment": alignment_score, "htf": 0 if counter_trend else 15, "setup": 10 if setup_type != "UNKNOWN" else 0, "timing": 10 if timing_state == "VALID" else 4 if timing_state == "EARLY" else -6, "penalties": -10 if conflicts else 0},
                 "summary": f"Timeframe alignment {alignment} at {alignment_score}%, setup={setup_type}, HTF trend {htf.get('trend')}, decision {direction}",
             }
         except Exception as exc:  # noqa: BLE001
@@ -303,6 +309,46 @@ class MultiTimeframeAgent(BaseAgent):
         if one_h.get("bias") == direction and entry_bias == direction:
             return "INTRADAY_ALIGNMENT"
         return "MIXED_ALIGNMENT"
+
+    def _entry_permission(self, direction: str, alignment: str, alignment_score: int, conflicts: List[str], counter_trend: bool, setup_type: str) -> str:
+        if direction == "NEUTRAL":
+            return "NOT_RECOMMENDED"
+        if conflicts or alignment == "CONFLICT":
+            return "BLOCKED"
+        if counter_trend or setup_type == "REVERSAL_ATTEMPT":
+            return "ALLOWED_WITH_CAUTION" if alignment_score >= 70 else "NOT_RECOMMENDED"
+        if alignment in {"FULL", "PARTIAL"} and alignment_score >= 65:
+            return "ALLOWED"
+        return "ALLOWED_WITH_CAUTION"
+
+    def _failure_mode(self, direction: str, alignment: str, conflicts: List[str], counter_trend: bool, setup_type: str) -> str:
+        if direction == "NEUTRAL":
+            return "NO_DIRECTIONAL_EDGE"
+        if counter_trend:
+            return "HTF_CONFLICT"
+        if conflicts or alignment == "CONFLICT":
+            return "TIMEFRAME_DISAGREEMENT"
+        if setup_type == "REVERSAL_ATTEMPT":
+            return "REVERSAL_WITHOUT_FULL_CONFIRMATION"
+        if setup_type == "MIXED_ALIGNMENT":
+            return "MIXED_LOWER_TIMEFRAME"
+        return "NONE"
+
+    def _timing_state(self, analysis: Dict[str, Dict[str, Any]], direction: str, setup_type: str) -> str:
+        if direction not in {"BUY", "SELL"}:
+            return "NO_TRADE"
+        entry = analysis.get("15m") or analysis.get("5m") or {}
+        pullback = entry.get("pullback_state")
+        strength = entry.get("strength")
+        if setup_type == "PULLBACK_ENTRY" or pullback in {"PULLBACK_TO_EMA20", "PULLBACK_TO_EMA50"}:
+            return "VALID"
+        if setup_type == "TREND_CONTINUATION" and strength in {"STRONG", "MODERATE"}:
+            return "VALID"
+        if setup_type == "REVERSAL_ATTEMPT":
+            return "EARLY"
+        if setup_type == "MIXED_ALIGNMENT":
+            return "LATE"
+        return "VALID"
 
     def _recommended_entry_tf(self, analysis: Dict[str, Dict[str, Any]], setup_type: str) -> str:
         if setup_type in {"TREND_CONTINUATION", "PULLBACK_ENTRY"} and "15m" in analysis:

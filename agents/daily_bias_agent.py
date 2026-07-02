@@ -13,6 +13,7 @@ from typing import Any, Dict, List
 from agents.base_agent import BaseAgent
 from utils.helpers import load_config
 from utils.indicators import calculate_ema, calculate_rsi
+from services.market_snapshot import build_market_snapshot
 
 
 class DailyBiasAgent(BaseAgent):
@@ -38,6 +39,7 @@ class DailyBiasAgent(BaseAgent):
         closes = [self._f(c.get("close")) for c in candles if self._f(c.get("close")) > 0]
         if len(closes) < 50:
             return {"agent": self.name, "enabled": True, "bias": "NEUTRAL", "confidence": 0, "summary": "Invalid candles for daily bias"}
+        snapshot = build_market_snapshot({**payload, "symbol": data.get("symbol"), "timeframe": preferred}, self.config)
 
         ema_fast_series = calculate_ema(closes, int(self.settings.get("ema_fast", 20)))
         ema_slow_series = calculate_ema(closes, int(self.settings.get("ema_slow", 50)))
@@ -53,6 +55,9 @@ class DailyBiasAgent(BaseAgent):
         lookback = int(self.settings.get("slope_lookback", 12))
         old = closes[-lookback] if len(closes) > lookback else closes[0]
         slope = last - old
+        prev_fast = self._last_valid(ema_fast_series[:-lookback]) if len(ema_fast_series) > lookback else ema_fast
+        prev_slow = self._last_valid(ema_slow_series[:-lookback]) if len(ema_slow_series) > lookback else ema_slow
+        previous_bias = self._raw_bias(last=old, ema_fast=prev_fast or ema_fast, ema_slow=prev_slow or ema_slow, rsi=self._last_valid(rsi_series[:-lookback]) or rsi, slope=slope)
 
         score = 0.0
         reasons: List[str] = []
@@ -88,7 +93,19 @@ class DailyBiasAgent(BaseAgent):
             bias = "BEARISH"
         else:
             bias = "NEUTRAL"
+        persistence = self._bias_persistence(previous_bias, bias, score, threshold)
+        if persistence.get("smoothed_bias") != bias:
+            reasons.append(persistence.get("reason", "bias persistence smoothing"))
+            bias = persistence.get("smoothed_bias", bias)
+        strength_band = self._strength_band(bias, score)
         confidence = min(95, round(abs(score) / 3.25 * 100, 1)) if bias != "NEUTRAL" else round(max(0, 50 - abs(score) * 10), 1)
+        reason_codes = self._reason_codes(bias, strength_band, last, ema_fast, ema_slow, rsi, slope, persistence)
+        evidence = [
+            {"name": "price_vs_ema_slow", "value": round(last - ema_slow, 2), "bias": "BULLISH" if last > ema_slow else "BEARISH"},
+            {"name": "ema_fast_vs_slow", "value": round(ema_fast - ema_slow, 2), "bias": "BULLISH" if ema_fast > ema_slow else "BEARISH"},
+            {"name": "HTF slope", "value": round(slope, 2), "bias": "BULLISH" if slope > 0 else "BEARISH" if slope < 0 else "NEUTRAL"},
+            {"name": "RSI", "value": round(rsi, 2), "bias": "BULLISH" if rsi > 55 else "BEARISH" if rsi < 45 else "NEUTRAL"},
+        ]
         return {
             "agent": self.name,
             "enabled": True,
@@ -101,9 +118,59 @@ class DailyBiasAgent(BaseAgent):
             "ema_slow": round(ema_slow, 2),
             "rsi": round(rsi, 2),
             "slope": round(slope, 2),
+            "strength_band": strength_band,
+            "bias_persistence": persistence,
+            "previous_bias_estimate": previous_bias,
             "reasons": reasons,
+            "reason_codes": reason_codes,
+            "evidence": evidence,
+            "invalidations": ["Structure break against bias", "EMA fast/slow flip with RSI confirmation"] if bias != "NEUTRAL" else [],
+            "data_quality": snapshot.get("data_quality", {}),
+            "verified_snapshot": snapshot,
+            "confidence_breakdown": {"price_location": 20 if last > ema_slow and bias == "BULLISH" or last < ema_slow and bias == "BEARISH" else 5, "ema_alignment": 20 if (ema_fast > ema_slow and bias == "BULLISH") or (ema_fast < ema_slow and bias == "BEARISH") else 5, "slope": 15 if (slope > 0 and bias == "BULLISH") or (slope < 0 and bias == "BEARISH") else 4, "rsi": 10 if (rsi > 55 and bias == "BULLISH") or (rsi < 45 and bias == "BEARISH") else 3, "penalties": -8 if persistence.get("smoothed") else 0},
+            "warnings": [persistence.get("reason")] if persistence.get("smoothed") else [],
             "summary": f"Daily bias {bias} ({confidence}%) on {preferred}: " + ", ".join(reasons[:3]),
         }
+
+    def _raw_bias(self, last: float, ema_fast: float, ema_slow: float, rsi: float, slope: float) -> str:
+        score = 0.0
+        score += 1 if last > ema_slow else -1
+        score += 1 if ema_fast > ema_slow else -1
+        score += 0.75 if slope > 0 else -0.75 if slope < 0 else 0
+        score += 0.5 if rsi > 55 else -0.5 if rsi < 45 else 0
+        threshold = float(self.settings.get("score_threshold", 1.25))
+        return "BULLISH" if score >= threshold else "BEARISH" if score <= -threshold else "NEUTRAL"
+
+    def _bias_persistence(self, previous_bias: str, new_bias: str, score: float, threshold: float) -> Dict[str, Any]:
+        if previous_bias in {"BULLISH", "BEARISH"} and new_bias in {"BULLISH", "BEARISH"} and previous_bias != new_bias:
+            flip_threshold = float(self.settings.get("flip_score_threshold", max(threshold + 0.75, 2.0)))
+            if abs(score) < flip_threshold:
+                return {"smoothed": True, "previous_bias": previous_bias, "raw_bias": new_bias, "smoothed_bias": "NEUTRAL", "reason": f"Bias flip {previous_bias}->{new_bias} requires stronger confirmation"}
+        return {"smoothed": False, "previous_bias": previous_bias, "raw_bias": new_bias, "smoothed_bias": new_bias}
+
+    def _strength_band(self, bias: str, score: float) -> str:
+        if bias == "NEUTRAL":
+            return "neutral"
+        side = "bullish" if bias == "BULLISH" else "bearish"
+        mag = abs(score)
+        level = "strong" if mag >= 2.75 else "moderate" if mag >= 2.0 else "weak"
+        return f"{level}_{side}"
+
+    def _reason_codes(self, bias: str, strength: str, last: float, ema_fast: float, ema_slow: float, rsi: float, slope: float, persistence: Dict[str, Any]) -> List[str]:
+        codes: List[str] = [f"DAILY_BIAS_{bias}", f"DAILY_STRENGTH_{strength.upper()}"]
+        codes.append("DAILY_PRICE_ABOVE_EMA_SLOW" if last > ema_slow else "DAILY_PRICE_BELOW_EMA_SLOW")
+        codes.append("DAILY_EMA_FAST_ABOVE_SLOW" if ema_fast > ema_slow else "DAILY_EMA_FAST_BELOW_SLOW")
+        if rsi > 55:
+            codes.append("DAILY_RSI_BULL")
+        elif rsi < 45:
+            codes.append("DAILY_RSI_BEAR")
+        if slope > 0:
+            codes.append("DAILY_SLOPE_POSITIVE")
+        elif slope < 0:
+            codes.append("DAILY_SLOPE_NEGATIVE")
+        if persistence.get("smoothed"):
+            codes.append("DAILY_BIAS_FLIP_SMOOTHED")
+        return codes[:10]
 
     @staticmethod
     def _last_valid(series: List[Any] | None) -> float | None:

@@ -79,6 +79,9 @@ class ClassicalAgent(BaseAgent):
             # Classical pattern hints with completion and validation.
             patterns = self._detect_classical_patterns(recent, swings, current_price, nearest_support, nearest_resistance, range_size)
             clear_patterns = [p for p in patterns if p.get("pattern") != "NO_CLEAR_PATTERN"]
+            pattern_quality = self._pattern_quality(clear_patterns, current_price, nearest_support, nearest_resistance, range_size)
+            breakout_quality = self._breakout_quality(candles, current_price, nearest_support, nearest_resistance, range_size)
+            retest_state = self._retest_state(current_price, nearest_support, nearest_resistance, range_size)
             for pattern in clear_patterns:
                 completion = float(pattern.get("completion", 0))
                 if completion < 75:
@@ -88,6 +91,11 @@ class ClassicalAgent(BaseAgent):
                     score += weight
                 elif pattern.get("type") == "bearish":
                     score -= weight
+            quality_score = float(pattern_quality.get("score", 0) or 0)
+            if clear_patterns and quality_score >= 75:
+                score += 0.4 if pattern_quality.get("bias") == "bullish" else -0.4 if pattern_quality.get("bias") == "bearish" else 0
+            elif clear_patterns and quality_score < 45:
+                score *= 0.9
 
             if not clear_patterns:
                 reasons.append("NO_CLEAR_PATTERN - no forced classical setup")
@@ -122,6 +130,9 @@ class ClassicalAgent(BaseAgent):
                 "trendline": trendline,
                 "level_strength": level_strength,
                 "patterns_detected": patterns,
+                "pattern_quality": pattern_quality,
+                "breakout_quality": breakout_quality,
+                "retest_state": retest_state,
                 "no_clear_pattern": not any(p.get("pattern") != "NO_CLEAR_PATTERN" for p in patterns),
                 "scenarios": {
                     "bullish": {
@@ -143,7 +154,7 @@ class ClassicalAgent(BaseAgent):
                 "key_levels": {"nearest_support": round(nearest_support, 2), "nearest_resistance": round(nearest_resistance, 2), "pivot": round(pivot_points["pivot"], 2)},
                 "data_quality": snapshot.get("data_quality", {}),
                 "verified_snapshot": snapshot,
-                "confidence_breakdown": {"structure": round(abs(score) * 8, 1), "levels": round(min(20, (1 - min(distance_to_support, distance_to_resistance) / range_size) * 20), 1), "patterns": round(len(clear_patterns) * 8, 1), "penalties": 0},
+                "confidence_breakdown": {"structure": round(abs(score) * 8, 1), "levels": round(min(20, (1 - min(distance_to_support, distance_to_resistance) / range_size) * 20), 1), "patterns": round(float(pattern_quality.get("score", 0)) / 5, 1), "breakout": round(float(breakout_quality.get("score", 0)) / 5, 1), "penalties": -5 if pattern_quality.get("score", 0) < 45 and clear_patterns else 0},
                 "warnings": [] if clear_patterns else ["No high-quality classical pattern; level context only"],
                 "summary": f"Nearest support {nearest_support:.2f}, nearest resistance {nearest_resistance:.2f}. Classical decision: {direction}",
             }
@@ -168,6 +179,57 @@ class ClassicalAgent(BaseAgent):
         if direction == "NEUTRAL":
             codes.append("CLASSIC_WAIT_NO_PATTERN_EDGE")
         return codes[:10]
+
+    def _pattern_quality(self, patterns: List[Dict[str, Any]], current_price: float, support: float, resistance: float, range_size: float) -> Dict[str, Any]:
+        if not patterns:
+            return {"score": 0, "grade": "NONE", "bias": "neutral", "drivers": ["no clear tradable pattern"]}
+        best = max(patterns, key=lambda p: (float(p.get("completion", 0) or 0), int(p.get("touches", 0) or 0)))
+        completion = float(best.get("completion", 0) or 0)
+        touches = int(best.get("touches", 0) or 0)
+        confidence = {"high": 18, "medium": 12, "low": 6}.get(str(best.get("confidence", "low")).lower(), 4)
+        breakout = float(best.get("breakout_level") or (resistance if best.get("type") == "bullish" else support) or current_price)
+        proximity = max(0.0, 20.0 - min(abs(current_price - breakout) / max(range_size, 0.01) * 100.0, 20.0))
+        rr_proxy = 10.0 if best.get("target") else 0.0
+        score = min(100.0, completion * 0.45 + min(touches, 6) * 4 + confidence + proximity + rr_proxy)
+        grade = "A" if score >= 80 else "B" if score >= 65 else "C" if score >= 45 else "D"
+        return {"score": round(score, 1), "grade": grade, "best_pattern": best.get("pattern"), "bias": best.get("type", "neutral"), "touches": touches, "completion": completion, "drivers": [f"completion {completion:.0f}%", f"touches {touches}", f"breakout proximity {proximity:.1f}"]}
+
+    def _breakout_quality(self, candles: List[Dict[str, Any]], current_price: float, support: float, resistance: float, range_size: float) -> Dict[str, Any]:
+        if not candles:
+            return {"score": 0, "state": "UNKNOWN"}
+        last = candles[-1]
+        close = float(last.get("close", current_price) or current_price)
+        high = float(last.get("high", close) or close)
+        low = float(last.get("low", close) or close)
+        body = abs(close - float(last.get("open", close) or close))
+        candle_range = max(high - low, 0.01)
+        expansion = candle_range / max(range_size / 20.0, 0.01)
+        if close > resistance:
+            state = "BULLISH_BREAKOUT"
+            score = 45 + min(25, expansion * 8) + min(20, body / candle_range * 20)
+        elif close < support:
+            state = "BEARISH_BREAKDOWN"
+            score = 45 + min(25, expansion * 8) + min(20, body / candle_range * 20)
+        elif high > resistance and close <= resistance:
+            state = "BULLISH_FAKEOUT_WICK"
+            score = 35
+        elif low < support and close >= support:
+            state = "BEARISH_FAKEOUT_WICK"
+            score = 35
+        else:
+            state = "NO_CONFIRMED_BREAKOUT"
+            score = 20
+        return {"score": round(min(score, 100), 1), "state": state, "atr_expansion_proxy": round(expansion, 2)}
+
+    def _retest_state(self, current_price: float, support: float, resistance: float, range_size: float) -> str:
+        tolerance = max(range_size * 0.025, 1.0)
+        if abs(current_price - resistance) <= tolerance:
+            return "ACTIVE_RESISTANCE_RETEST"
+        if abs(current_price - support) <= tolerance:
+            return "ACTIVE_SUPPORT_RETEST"
+        if support < current_price < resistance:
+            return "INSIDE_RANGE"
+        return "POST_BREAKOUT_UNTESTED"
 
     def _build_trendline(self, swings: Dict[str, List[Dict[str, Any]]], current_price: float) -> Dict[str, Any]:
         lows = swings.get("lows", [])[-3:]
@@ -323,6 +385,9 @@ class ClassicalAgent(BaseAgent):
             "trendline": {"direction": "SIDEWAYS", "respected": True, "current_level": 0.0},
             "level_strength": {"supports": [], "resistances": []},
             "patterns_detected": [],
+            "pattern_quality": {"score": 0, "grade": "NONE", "bias": "neutral"},
+            "breakout_quality": {"score": 0, "state": "UNKNOWN"},
+            "retest_state": "UNKNOWN",
             "no_clear_pattern": True,
             "scenarios": {},
             "signals": [],
