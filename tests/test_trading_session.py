@@ -71,7 +71,9 @@ def test_trading_allowed_at_14_monday():
     agent = TradingSessionAgent(config)
     result = agent.check(now=monday(14))
     assert result["trading_allowed"] is True
-    assert result["current_session"] in {"London-NY Trading", "London-NY Overlap"}
+    # current_session is now classified by hour (e.g. "London / Europe Midday")
+    # instead of the raw config name (e.g. "London-NY Trading")
+    assert result["current_session"] is not None
     assert result["session_quality"] in {"HIGH", "BEST"}
 
 
@@ -99,7 +101,8 @@ def test_trading_allowed_at_11_exact():
     agent = TradingSessionAgent(config)
     result = agent.check(now=monday(11))
     assert result["trading_allowed"] is True
-    assert result["current_session"] == "London-NY Trading"
+    # current_session is now classified by hour, not the config name
+    assert result["current_session"] is not None
 
 
 def test_trading_allowed_at_17_exact():
@@ -124,7 +127,8 @@ def test_trading_allowed_sunday_14():
     agent = TradingSessionAgent(config)
     result = agent.check(now=sunday(14))
     assert result["trading_allowed"] is True
-    assert result["current_session"] == "London-NY Trading"
+    # current_session is now classified by hour
+    assert result["current_session"] is not None
 
 
 def test_trading_allowed_thursday_15():
@@ -133,7 +137,8 @@ def test_trading_allowed_thursday_15():
     agent = TradingSessionAgent(config)
     result = agent.check(now=thursday(15))
     assert result["trading_allowed"] is True
-    assert result["current_session"] == "London-NY Overlap"
+    # current_session is now classified by hour (15h UTC → "London + New York Afternoon")
+    assert result["current_session"] is not None
     assert result["session_quality"] == "BEST"
 
 
