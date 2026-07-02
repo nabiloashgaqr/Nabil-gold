@@ -128,6 +128,9 @@ CREATE TABLE IF NOT EXISTS trades (
     volatility_regime TEXT,
     trend_strength TEXT,
     daily_bias_at_entry TEXT,
+    primary_entry_driver TEXT,
+    entry_failure_mode TEXT,
+    macro_bias_at_entry TEXT,
 
     sl_moved_to_entry BOOLEAN DEFAULT FALSE,
     partial_close BOOLEAN DEFAULT FALSE,
@@ -183,6 +186,9 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS news_risk_at_entry  TEXT;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS volatility_regime   TEXT;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS trend_strength      TEXT;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS daily_bias_at_entry TEXT;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS primary_entry_driver TEXT;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_failure_mode TEXT;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS macro_bias_at_entry TEXT;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS sl_moved_to_entry   BOOLEAN DEFAULT FALSE;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS partial_close       BOOLEAN DEFAULT FALSE;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS updates_sent        JSONB DEFAULT '[]'::jsonb;
@@ -207,6 +213,8 @@ CREATE INDEX IF NOT EXISTS idx_trades_created ON trades(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_trades_closed ON trades(closed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_trades_enrichment_dow ON trades(entry_day_of_week);
 CREATE INDEX IF NOT EXISTS idx_trades_enrichment_session ON trades(session_label);
+CREATE INDEX IF NOT EXISTS idx_trades_entry_driver ON trades(primary_entry_driver);
+CREATE INDEX IF NOT EXISTS idx_trades_macro_bias ON trades(macro_bias_at_entry);
 CREATE INDEX IF NOT EXISTS idx_trades_open ON trades(status) WHERE status IN ('OPEN', 'PARTIAL', 'TP1_HIT');
 
 -- =====================================================
