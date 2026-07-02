@@ -20,6 +20,7 @@ from agents.classical_agent import ClassicalAgent
 from agents.decision_agent import DecisionAgent
 from agents.daily_bias_agent import DailyBiasAgent
 from agents.multitimeframe_agent import MultiTimeframeAgent
+from agents.macro_fundamental_agent import MacroFundamentalAgent
 from agents.news_risk_agent import NewsRiskAgent
 from agents.price_action_agent import PriceActionAgent
 from agents.risk_management_agent import RiskManagementAgent
@@ -518,7 +519,7 @@ def _build_market_status_message(
 
 
 def _compact_agent_details(all_results: Dict[str, Any]) -> Dict[str, Any]:
-    labels = {"technical": "Technical", "classical": "Classical", "smc": "SMC", "price_action": "Price Action", "multitimeframe": "Multi-Timeframe"}
+    labels = {"technical": "Technical", "classical": "Classical", "smc": "SMC", "price_action": "Price Action", "multitimeframe": "Multi-Timeframe", "macro_fundamental": "Macro / Fundamental"}
     details: Dict[str, Any] = {}
     for key, label in labels.items():
         result = all_results.get(key, {}) or {}
@@ -573,7 +574,12 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         if not session.get("trading_allowed"): return
         verified_snapshot = build_market_snapshot(data, config)
         data["verified_snapshot"] = verified_snapshot
-        all_results = {"technical": run_agent("technical", TechnicalAgent(config), data), "classical": run_agent("classical", ClassicalAgent(config), data), "smc": run_agent("smc", SMCAgent(config), data), "price_action": run_agent("price_action", PriceActionAgent(config), data), "multitimeframe": run_agent("multitimeframe", MultiTimeframeAgent(config), data), "current_price": data["current_price"], "symbol": symbol, "session": session, "verified_snapshot": verified_snapshot, "news": NewsRiskAgent(config).check(), "daily_bias": run_agent("daily_bias", DailyBiasAgent(config), data)}
+        macro = run_agent("macro_fundamental", MacroFundamentalAgent(config), data)
+        news = NewsRiskAgent(config).check()
+        if isinstance(news, dict) and isinstance(macro, dict) and macro.get("macro_direction"):
+            news["macro_direction"] = macro.get("macro_direction")
+            news["macro_agent"] = macro
+        all_results = {"technical": run_agent("technical", TechnicalAgent(config), data), "classical": run_agent("classical", ClassicalAgent(config), data), "smc": run_agent("smc", SMCAgent(config), data), "price_action": run_agent("price_action", PriceActionAgent(config), data), "multitimeframe": run_agent("multitimeframe", MultiTimeframeAgent(config), data), "macro_fundamental": macro, "current_price": data["current_price"], "symbol": symbol, "session": session, "verified_snapshot": verified_snapshot, "news": news, "daily_bias": run_agent("daily_bias", DailyBiasAgent(config), data)}
         if has_symbol_active_trades:
             await _check_scale_in(
                 config,
@@ -600,6 +606,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         decision["daily_bias"] = all_results.get("daily_bias", {})
         decision["news_context"] = {
             "rule_based": all_results.get("news", {}),
+            "macro": all_results.get("macro_fundamental", {}),
             "ai": all_results.get("news_ai", {}),
         }
         decision["market_context"] = {
@@ -608,6 +615,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             or {},
             "rsi": ((all_results.get("technical", {}) or {}).get("technical", {}) or {}).get("rsi"),
             "daily_bias": all_results.get("daily_bias", {}),
+            "macro_direction": (all_results.get("news", {}) or {}).get("macro_direction") or (all_results.get("macro_fundamental", {}) or {}).get("macro_direction", {}),
         }
         decision_type = str(decision.get("decision") or "").upper()
         send_hourly_now = should_send_hourly_status(config)
