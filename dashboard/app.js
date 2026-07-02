@@ -150,9 +150,15 @@ function worstBucket(buckets, skipUnknown = false) {
     return items.length ? items.sort((a,b) => num(a[1].pnl) - num(b[1].pnl))[0] : null;
 }
 function sessionLabelOf(t) {
+    // Prefer hour-based bucket which always returns a standardised
+    // session name (e.g. "Asia Morning") over the raw stored label
+    // which may be a config name like "Main Trading Session".
+    const bucket = sessionBucket(t);
+    if (bucket) return bucket;
+    // Fallback to stored label if bucket somehow fails
     const snap = snapshotOf(t);
     const si = snap.session_info || {};
-    return t.session_label || si.current_session || sessionBucket(t);
+    return t.session_label || si.current_session || 'Unknown';
 }
 function newsLabelOf(t) {
     const snap = snapshotOf(t);
