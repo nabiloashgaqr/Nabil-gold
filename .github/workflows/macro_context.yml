@@ -5,9 +5,9 @@ concurrency:
   cancel-in-progress: true
 
 on:
-  schedule:
-    # Hourly. Uses ~5 Twelve Data credits/run with default symbols ≈120/day.
-    - cron: '7 * * * *'
+  # Internal schedule disabled — triggered via external cron-job.org (workflow_dispatch)
+  # schedule:
+  #   - cron: '7 * * * *'
   workflow_dispatch:
 
 jobs:
