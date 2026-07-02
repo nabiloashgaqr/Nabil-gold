@@ -574,8 +574,11 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         if not session.get("trading_allowed"): return
         verified_snapshot = build_market_snapshot(data, config)
         data["verified_snapshot"] = verified_snapshot
-        macro = run_agent("macro_fundamental", MacroFundamentalAgent(config), data)
-        news = NewsRiskAgent(config).check()
+        persisted_macro_context = database.get_macro_context()
+        macro_input = {**data, "macro_context": persisted_macro_context} if persisted_macro_context else data
+        macro = run_agent("macro_fundamental", MacroFundamentalAgent(config), macro_input)
+        news_config = {**config, "macro_context": persisted_macro_context} if persisted_macro_context else config
+        news = NewsRiskAgent(news_config).check()
         if isinstance(news, dict) and isinstance(macro, dict) and macro.get("macro_direction"):
             news["macro_direction"] = macro.get("macro_direction")
             news["macro_agent"] = macro
