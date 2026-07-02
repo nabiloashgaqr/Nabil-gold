@@ -1,0 +1,43 @@
+name: 🧭 Hourly Macro Context
+
+concurrency:
+  group: macro-context-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  schedule:
+    # Hourly. Uses ~5 Twelve Data credits/run with default symbols ≈120/day.
+    - cron: '7 * * * *'
+  workflow_dispatch:
+
+jobs:
+  macro-context:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 📦 Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: 🧭 Update macro context
+        run: |
+          python scripts/update_macro_context.py
+        env:
+          TWELVEDATA_API_KEY: ${{ secrets.TWELVEDATA_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+      - name: ✅ Success Log
+        if: always()
+        run: |
+          echo "Macro context workflow completed at $(date)"
