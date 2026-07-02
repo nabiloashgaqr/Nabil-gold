@@ -27,6 +27,7 @@ from services.llm_review import get_gemini_review_service
 from services.telegram_bot import TelegramService
 from utils.helpers import calculate_pips, load_config, setup_logging
 from utils.instruments import price_to_points
+from utils.sessions import session_label_from_trade
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -210,14 +211,13 @@ def _bucket_metric(trades: list[dict[str, Any]], key_func: Callable[[dict[str, A
 
 
 def _trade_session_label(trade: dict[str, Any]) -> str:
-    session_info = _snapshot(trade).get("session_info") or {}
-    return str(
-        trade.get("session_label")
-        or session_info.get("current_session")
-        or session_info.get("session")
-        or session_info.get("session_name")
-        or "UNKNOWN"
-    )
+    """Return a standardised session label for a trade.
+
+    Uses the unified session classifier from utils.sessions so that
+    all reports show consistent names (e.g. "Asia Morning") instead
+    of the raw config name (e.g. "Main Trading Session").
+    """
+    return session_label_from_trade(trade)
 
 
 def _trade_news_label(trade: dict[str, Any]) -> str:
