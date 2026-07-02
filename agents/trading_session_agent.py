@@ -18,6 +18,7 @@ from typing import Any, Dict, List
 
 from agents.base_agent import BaseAgent
 from utils.helpers import load_config
+from utils.sessions import classify_session
 
 
 class TradingSessionAgent(BaseAgent):
@@ -87,8 +88,14 @@ class TradingSessionAgent(BaseAgent):
                     next_session=self._next_session_info(local_now),
                 )
 
-            session_name = active_session.get("name", "Unknown")
+            session_config_name = active_session.get("name", "Unknown")
             session_quality = active_session.get("quality", "UNKNOWN")
+            
+            # 🚀 Classify the session by the current local hour so that
+            # current_session always returns a standardised label like
+            # "Asia Morning" or "London + New York Afternoon" instead of the
+            # raw config name ("Main Trading Session").
+            session_classified = classify_session(local_now.hour)
             
             # 🚀 الحصول على allow_signals و allow_reports
             allow_signals = active_session.get("allow_signals", True)
@@ -99,21 +106,22 @@ class TradingSessionAgent(BaseAgent):
             if self._quality_order(session_quality) > self._quality_order(min_quality):
                 return self._blocked(
                     reason=f"Session quality ({session_quality}) below minimum ({min_quality})",
-                    current_session=session_name,
+                    current_session=session_classified,
                     session_quality=session_quality,
                     allow_signals=allow_signals,
                     allow_reports=allow_reports,
                 )
 
             return self._allowed(
-                reason=f"Active session: {session_name} ({session_quality} quality)",
-                current_session=session_name,
+                reason=f"Active session: {session_classified} ({session_quality} quality)",
+                current_session=session_classified,
                 session_quality=session_quality,
                 trading_allowed=True,
                 allow_signals=allow_signals,
                 allow_reports=allow_reports,
                 session_details={
-                    "name": session_name,
+                    "name": session_config_name,
+                    "session_classified": session_classified,
                     "quality": session_quality,
                     "allow_signals": allow_signals,
                     "allow_reports": allow_reports,
