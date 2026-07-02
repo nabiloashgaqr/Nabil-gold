@@ -149,8 +149,36 @@
       <section id="reports" class="section">
         <div class="page-title">
           <h1 data-en="Daily & Weekly Reports" data-ar="التقارير اليومية والأسبوعية">Daily & Weekly Reports</h1>
-          <p data-en="Closed trade history beyond the latest 50 trades is organized here by report folders." data-ar="تاريخ الصفقات المغلقة بعد آخر 50 صفقة يتم تنظيمه هنا داخل مجلدات التقارير.">Closed trade history beyond the latest 50 trades is organized here by report folders.</p>
+          <p data-en="All reports are preserved and organized by month. Click any daily report to see its trades." data-ar="كل التقارير محفوظة ومرتبة شهرياً. اضغط على أي تقرير يومي لعرض صفقاته.">All reports are preserved and organized by month. Click any daily report to see its trades.</p>
         </div>
+
+        <!-- Report Date Search -->
+        <div class="report-search-bar">
+          <div class="filter-group">
+            <label data-en="Search by date" data-ar="ابحث بتاريخ محدد">Search by date</label>
+            <input type="date" id="reportDateSearch" onchange="searchReportsByDate()">
+          </div>
+          <div class="filter-group search-group">
+            <label data-en="Or search keyword" data-ar="أو ابحث بكلمة">Or search keyword</label>
+            <input id="reportKeywordSearch" placeholder="e.g. 2026-06-15 or June" oninput="searchReportsByKeyword()">
+          </div>
+          <div class="toolbar-actions">
+            <button onclick="clearReportSearch()" class="btn btn-ghost" data-en="Clear" data-ar="مسح">Clear</button>
+          </div>
+        </div>
+
+        <!-- Day Trades Detail Panel (hidden until a day is clicked) -->
+        <div id="dayTradesPanel" class="day-trades-panel" style="display:none">
+          <div class="day-trades-header">
+            <div>
+              <h3 id="dayTradesTitle">Trades for --</h3>
+              <span id="dayTradesSubtitle" class="day-trades-subtitle"></span>
+            </div>
+            <button onclick="closeDayTrades()" class="btn btn-ghost btn-sm" data-en="Close" data-ar="إغلاق">Close</button>
+          </div>
+          <div id="dayTradesBody" class="day-trades-body"></div>
+        </div>
+
         <div class="reports-grid">
           <div class="report-card"><h3 data-en="Latest Daily Report" data-ar="آخر تقرير يومي">Latest Daily Report</h3><pre id="dailyReport" class="report-content">Loading...</pre></div>
           <div class="report-card"><h3 data-en="Latest Weekly Report" data-ar="آخر تقرير أسبوعي">Latest Weekly Report</h3><pre id="weeklyReport" class="report-content">Loading...</pre></div>

@@ -160,6 +160,130 @@ function sessionLabelOf(t) {
     const si = snap.session_info || {};
     return t.session_label || si.current_session || 'Unknown';
 }
+
+// ─── Report Search & Day Trades ───────────────────────────────────────────
+
+function searchReportsByDate() {
+    const dateVal = $('reportDateSearch')?.value || '';
+    if (!dateVal) { clearReportSearch(); return; }
+    // Filter both archive sections to show only matching date
+    _filterReportArchive('dailyReportsArchive', item => {
+        const period = item.querySelector('.file-title')?.textContent || '';
+        return period.includes(dateVal);
+    });
+    _filterReportArchive('weeklyReportsArchive', item => {
+        const period = item.querySelector('.file-title')?.textContent || '';
+        return period.includes(dateVal);
+    });
+    // Also try to show day trades for the exact date
+    showDayTrades(dateVal);
+}
+
+function searchReportsByKeyword() {
+    const keyword = ($('reportKeywordSearch')?.value || '').toLowerCase().trim();
+    if (!keyword) { clearReportSearch(); return; }
+    _filterReportArchive('dailyReportsArchive', item => {
+        const text = item.textContent.toLowerCase();
+        return text.includes(keyword);
+    });
+    _filterReportArchive('weeklyReportsArchive', item => {
+        const text = item.textContent.toLowerCase();
+        return text.includes(keyword);
+    });
+}
+
+function clearReportSearch() {
+    if ($('reportDateSearch')) $('reportDateSearch').value = '';
+    if ($('reportKeywordSearch')) $('reportKeywordSearch').value = '';
+    _filterReportArchive('dailyReportsArchive', () => true);
+    _filterReportArchive('weeklyReportsArchive', () => true);
+    closeDayTrades();
+}
+
+function _filterReportArchive(containerId, predicate) {
+    const container = $(containerId);
+    if (!container) return;
+    // Show/hide report-file items
+    container.querySelectorAll('.report-file').forEach(item => {
+        item.style.display = predicate(item) ? '' : 'none';
+    });
+    // Show/hide month folders based on whether they have visible children
+    container.querySelectorAll('.report-month-folder').forEach(folder => {
+        const visibleFiles = folder.querySelectorAll('.report-file:not([style*="display: none"])');
+        folder.style.display = visibleFiles.length > 0 ? '' : 'none';
+    });
+}
+
+function showDayTrades(dateStr) {
+    if (!dateStr || !closedTrades.length) return;
+    const panel = $('dayTradesPanel');
+    if (!panel) return;
+
+    // Find trades for this date (by close date or open date)
+    const dayTrades = closedTrades.filter(t => {
+        const tDate = reportDate(t);
+        const oDate = dateText(tradeTime(t));
+        return tDate === dateStr || oDate === dateStr;
+    });
+
+    const ar = currentLang === 'ar';
+    const title = ar ? `صفقات يوم ${dateStr}` : `Trades for ${dateStr}`;
+    $('dayTradesTitle').textContent = title;
+
+    // Summary
+    const wins = dayTrades.filter(t => pnlOf(t) > 0).length;
+    const losses = dayTrades.filter(t => pnlOf(t) < 0).length;
+    const net = dayTrades.reduce((s, t) => s + pnlOf(t), 0);
+    const wr = dayTrades.length ? ((wins / dayTrades.length) * 100).toFixed(1) : 0;
+    $('dayTradesSubtitle').textContent = ar
+        ? `${dayTrades.length} صفقة · ✅ ${wins} ❌ ${losses} · صافي ${signed(net)} نقطة · ربح ${wr}%`
+        : `${dayTrades.length} trades · ✅ ${wins} ❌ ${losses} · Net ${signed(net)} pts · WR ${wr}%`;
+
+    // Build trades table
+    const body = $('dayTradesBody');
+    if (!dayTrades.length) {
+        body.innerHTML = `<div class="empty">${ar ? 'لا توجد صفقات لهذا اليوم' : 'No trades found for this day'}</div>`;
+    } else {
+        body.innerHTML = `<div class="table-container"><table>
+            <thead><tr>
+                <th>${ar ? 'النوع' : 'Type'}</th>
+                <th>${ar ? 'الرمز' : 'Symbol'}</th>
+                <th>${ar ? 'دخول' : 'Entry'}</th>
+                <th>${ar ? 'إغلاق' : 'Close'}</th>
+                <th>${ar ? 'SL' : 'SL'}</th>
+                <th>${ar ? 'TP1' : 'TP1'}</th>
+                <th>${ar ? 'النقاط' : 'PnL'}</th>
+                <th>${ar ? 'الحالة' : 'Status'}</th>
+                <th>${ar ? 'الثقة' : 'Conf'}</th>
+            </tr></thead>
+            <tbody>${dayTrades.map(t => {
+                const pnl = pnlOf(t);
+                const cls = pnl > 0 ? 'pnl-positive' : pnl < 0 ? 'pnl-negative' : '';
+                return `<tr>
+                    <td><span class="badge ${t.type === 'BUY' ? 'buy' : 'sell'}">${esc(t.type)}</span></td>
+                    <td>${esc(t.symbol)}</td>
+                    <td>${num(t.entry_price).toFixed(2)}</td>
+                    <td>${t.close_price != null ? num(t.close_price).toFixed(2) : '-'}</td>
+                    <td>${t.stop_loss ?? '-'}</td>
+                    <td>${t.tp1 ?? '-'}</td>
+                    <td class="${cls}"><strong>${signed(pnl)}</strong></td>
+                    <td><span class="badge ${statusClassOf(t)}">${esc(displayStatus(t))}</span></td>
+                    <td>${esc(t.confidence ?? '--')}%</td>
+                </tr>`;
+            }).join('')}</tbody>
+        </table></div>`;
+    }
+    panel.style.display = 'block';
+    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closeDayTrades() {
+    const panel = $('dayTradesPanel');
+    if (panel) panel.style.display = 'none';
+}
+
+// Extend renderReportArchive to add "Show Trades" button for daily reports
+const _origRenderReportArchive = typeof renderReportArchive === 'function' ? renderReportArchive : null;
 function newsLabelOf(t) {
     const snap = snapshotOf(t);
     const rule = (snap.news_context || {}).rule_based || {};
@@ -690,12 +814,17 @@ function renderReportArchive(containerId, reports, type) {
             const trades = num(r.closed_trades ?? r.stats_json?.closed_trades ?? r.stats_json?.total_trades ?? r.stats_json?.total ?? 0);
             const wr = num(r.win_rate ?? r.stats_json?.win_rate_pct ?? r.stats_json?.win_rate ?? 0);
             const rid = `${containerId}-${month}-${idx}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const isDaily = type === 'daily';
+            const showTradesBtn = isDaily
+                ? `<button class="btn btn-sm btn-show-trades" onclick="event.stopPropagation(); showDayTrades('${esc(period.substring(0, 10))}')" data-en="Show Trades" data-ar="عرض الصفقات">${currentLang === 'ar' ? '📋 عرض الصفقات' : '📋 Show Trades'}</button>`
+                : '';
             return `<div class="report-file">
                 <button class="report-file-head" onclick="toggleReportFile('${rid}')">
                     <span class="file-icon">${type === 'weekly' ? '🗓️' : '📄'}</span>
                     <span class="file-title">${esc(period)}</span>
                     <span class="file-meta">${wordTrades(trades)} · ${currentLang === 'ar' ? 'نسبة الربح' : 'WR'} ${wr.toFixed(1)}% · <b class="${net >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(net, 1)}</b></span>
                 </button>
+                <div class="report-file-actions">${showTradesBtn}</div>
                 <pre id="${rid}" class="report-file-body">${reportText(r) || tr('noReportText')}</pre>
             </div>`;
         }).join('');
