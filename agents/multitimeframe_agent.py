@@ -10,6 +10,7 @@ from collections import Counter
 from typing import Any, Dict, List, Tuple
 
 from agents.base_agent import BaseAgent
+from services.market_snapshot import build_market_snapshot
 from utils.indicators import calculate_ema, calculate_sma, detect_support_resistance, detect_swing_points
 
 Candle = Dict[str, Any]
@@ -52,6 +53,18 @@ class MultiTimeframeAgent(BaseAgent):
             if counter_trend:
                 warnings.append(f"Counter-trend vs HTF: {direction} against {htf_bias}")
             confidence = self._confidence(timeframe_analysis, direction, alignment_score, conflicts, counter_trend, setup_type)
+            snapshot = build_market_snapshot(market_data, self.config)
+            reason_codes = self._reason_codes(direction, alignment, conflicts, counter_trend, setup_type)
+            evidence = [
+                {"name": "weighted_bias", "value": weighted_bias.get("score"), "bias": direction},
+                {"name": "alignment", "value": alignment_score, "bias": alignment},
+                {"name": "HTF bias", "value": htf_bias, "bias": htf_bias},
+                {"name": "setup_type", "value": setup_type, "bias": direction},
+            ]
+            invalidations = []
+            if direction in {"BUY", "SELL"}:
+                invalidations.append("HTF flips against the trade")
+                invalidations.append("Lower timeframe becomes late/exhausted")
 
             return {
                 "agent": self.name,
@@ -69,11 +82,29 @@ class MultiTimeframeAgent(BaseAgent):
                 "conflict_matrix": conflict_matrix,
                 "conflicts": conflicts,
                 "warnings": warnings,
+                "reason_codes": reason_codes,
+                "evidence": evidence,
+                "invalidations": invalidations,
+                "data_quality": snapshot.get("data_quality", {}),
+                "verified_snapshot": snapshot,
+                "confidence_breakdown": {"alignment": alignment_score, "htf": 0 if counter_trend else 15, "setup": 10 if setup_type != "UNKNOWN" else 0, "penalties": -10 if conflicts else 0},
                 "summary": f"Timeframe alignment {alignment} at {alignment_score}%, setup={setup_type}, HTF trend {htf.get('trend')}, decision {direction}",
             }
         except Exception as exc:  # noqa: BLE001
             self.logger.exception("MTF analysis failed")
             return self._empty(f"Multi-timeframe analysis failed: {exc}")
+
+    def _reason_codes(self, direction: str, alignment: str, conflicts: List[str], counter_trend: bool, setup_type: str) -> List[str]:
+        codes = [f"MTF_{alignment}", f"MTF_SETUP_{str(setup_type).upper()}"]
+        if direction in {"BUY", "SELL"}:
+            codes.append(f"MTF_{direction}_BIAS")
+        if counter_trend:
+            codes.append("MTF_HTF_CONFLICT")
+        if conflicts:
+            codes.append("MTF_TIMEFRAME_DISAGREEMENT")
+        if direction == "NEUTRAL":
+            codes.append("MTF_WAIT_NO_ALIGNMENT")
+        return codes[:10]
 
     def _analyze_timeframe(self, timeframe: str, candles: List[Candle]) -> Dict[str, Any]:
         """Analyze one timeframe bias using EMA, SMA and swing structure."""

@@ -182,6 +182,14 @@ class NewsRiskAgent(BaseAgent):
 
             upcoming.sort(key=lambda item: item.get("minutes_until", 999999))
             session = get_current_session(now)
+            reason_codes = self._reason_codes(market_status, can_trade, upcoming, high_risk_day)
+            evidence = [
+                {"name": "market_status", "value": market_status, "bias": "RISK" if market_status != "SAFE" else "SAFE"},
+                {"name": "tier1_events_24h", "value": tier1_events_24h, "bias": "RISK" if tier1_events_24h else "NEUTRAL"},
+                {"name": "tier2_events_24h", "value": tier2_events_24h, "bias": "CAUTION" if tier2_events_24h else "NEUTRAL"},
+                {"name": "risk_score", "value": min(100, int(risk_score)), "bias": "HIGH" if risk_score >= 75 else "MEDIUM" if risk_score >= 50 else "LOW"},
+            ]
+            invalidations = ["Trade only after active news restriction expires"] if not can_trade else []
             return {
                 "agent": self.name,
                 "market_status": market_status,
@@ -196,6 +204,14 @@ class NewsRiskAgent(BaseAgent):
                 "tier_summary": {"tier1_24h": tier1_events_24h, "tier2_24h": tier2_events_24h, "high_risk_day": high_risk_day},
                 "event_tiers": event_tiers,
                 "risk_score": min(100, int(risk_score)),
+                "event_risk": {"status": market_status, "can_trade": can_trade, "score": min(100, int(risk_score)), "tier_summary": {"tier1_24h": tier1_events_24h, "tier2_24h": tier2_events_24h}},
+                "macro_direction": {"bias": "NEUTRAL", "confidence": 0, "summary": "Macro directional inputs not connected yet"},
+                "reason_codes": reason_codes,
+                "evidence": evidence,
+                "invalidations": invalidations,
+                "data_quality": {"source": "news_events", "freshness": "OK", "missing_fields": []},
+                "confidence_breakdown": {"event_risk": min(100, int(risk_score)), "macro_direction": 0, "penalties": -20 if not can_trade else 0},
+                "warnings": warnings[:6],
                 "summary": self._summary(market_status, can_trade, upcoming, active_restrictions),
             }
         except Exception as exc:  # noqa: BLE001
@@ -209,8 +225,33 @@ class NewsRiskAgent(BaseAgent):
                 "session_info": {"current_session": get_current_session(), "volatility_expected": "UNKNOWN", "best_for_gold": False},
                 "tier_summary": {"tier1_24h": 0, "tier2_24h": 0, "high_risk_day": False},
                 "risk_score": 50,
+                "event_risk": {"status": "CAUTION", "can_trade": True, "score": 50},
+                "macro_direction": {"bias": "NEUTRAL", "confidence": 0, "summary": "Unavailable"},
+                "reason_codes": ["NEWS_CHECK_FAILED"],
+                "evidence": [],
+                "invalidations": [],
+                "data_quality": {"source": "news_events", "freshness": "UNKNOWN", "missing_fields": ["news_check"]},
+                "confidence_breakdown": {"event_risk": 50, "macro_direction": 0, "penalties": -10},
+                "warnings": [f"News check failed: {exc}"],
                 "summary": "News check failed - proceed with caution",
             }
+
+    def _reason_codes(self, market_status: str, can_trade: bool, upcoming: List[Dict[str, Any]], high_risk_day: bool) -> List[str]:
+        codes: List[str] = []
+        status = str(market_status or "SAFE").upper()
+        if not can_trade or status == "DANGER":
+            codes.append("NEWS_HARD_BLOCK")
+        elif status in {"CAUTION", "HIGH_VOLATILITY"}:
+            codes.append(f"NEWS_{status}")
+        else:
+            codes.append("NEWS_SAFE")
+        if high_risk_day:
+            codes.append("NEWS_HIGH_RISK_DAY")
+        if upcoming:
+            tier = str(upcoming[0].get("tier") or "").upper()
+            if tier:
+                codes.append(f"NEWS_NEXT_{tier}")
+        return codes[:8]
 
     def _load_events(self) -> List[Dict[str, Any]]:
         """Load manual events from env/config/file."""

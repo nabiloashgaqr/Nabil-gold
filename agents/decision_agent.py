@@ -98,6 +98,8 @@ class DecisionAgent(BaseAgent):
             "classic": classic,
             "learning": self._get_learning_info(),
             "risk_assessment": self._assess_risk(final_signal, indicators),
+            "agent_structured": self._agent_structured_payload(agents_results),
+            "reason_codes": self._merged_reason_codes(agents_results),
             "timestamp": self.now_iso(),
         }
         return self._apply_safety_filters(result, agents_results)
@@ -139,6 +141,9 @@ class DecisionAgent(BaseAgent):
                 "weight": weight,
                 "score": score,
                 "learning_adjusted": confidence != adjusted,
+                "reason_codes": list(result.get("reason_codes", []) or [])[:8],
+                "evidence": list(result.get("evidence", []) or [])[:5],
+                "confidence_breakdown": result.get("confidence_breakdown", {}) or {},
             })
         return votes
 
@@ -186,6 +191,8 @@ class DecisionAgent(BaseAgent):
                 "weight": strongest.get("weight"),
                 "score": round(float(strongest.get("score", 0)), 3),
                 "mode": "classic_consensus",
+                "reason_codes": strongest.get("reason_codes", []),
+                "evidence": strongest.get("evidence", []),
             }
 
         selected_metrics = buy if decision == "BUY" else sell if decision == "SELL" else None
@@ -218,6 +225,34 @@ class DecisionAgent(BaseAgent):
                 },
             },
         }
+
+    def _agent_structured_payload(self, agents_results: Dict[str, Any]) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {}
+        for name in self.voting_agents:
+            result = agents_results.get(name) or {}
+            if not isinstance(result, dict):
+                continue
+            payload[name] = {
+                "signal": result.get("signal") or result.get("direction") or "WAIT",
+                "confidence": result.get("confidence", 0),
+                "reason_codes": list(result.get("reason_codes", []) or [])[:10],
+                "evidence": list(result.get("evidence", []) or [])[:6],
+                "invalidations": list(result.get("invalidations", []) or [])[:5],
+                "confidence_breakdown": result.get("confidence_breakdown", {}) or {},
+                "data_quality": result.get("data_quality", {}) or {},
+            }
+        return payload
+
+    def _merged_reason_codes(self, agents_results: Dict[str, Any]) -> list[str]:
+        codes: list[str] = []
+        for result in agents_results.values():
+            if isinstance(result, dict):
+                codes.extend(str(c) for c in (result.get("reason_codes", []) or []) if c)
+        seen = []
+        for code in codes:
+            if code not in seen:
+                seen.append(code)
+        return seen[:20]
 
     def _supporting_evidence(self, decision: str, selected_metrics: Dict[str, Any] | None, votes: Dict[str, list]) -> list[str]:
         """Build concise human-readable consensus evidence for the signal message."""
@@ -493,6 +528,8 @@ class DecisionAgent(BaseAgent):
             "weights": analysis.get("weights", {}),
             "classic": analysis.get("classic", {}),
             "supportive_evidence": (analysis.get("classic", {}) or {}).get("supporting_evidence", []),
+            "agent_structured": analysis.get("agent_structured", {}),
+            "reason_codes": analysis.get("reason_codes", []),
             "agent_context": (analysis.get("classic", {}) or {}).get("strongest_directional"),
             "consensus_mode": True,
             "learning": analysis.get("learning", {}),

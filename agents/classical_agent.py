@@ -10,6 +10,7 @@ from statistics import mean
 from typing import Any, Dict, List
 
 from agents.base_agent import BaseAgent
+from services.market_snapshot import build_market_snapshot
 from utils.indicators import calculate_fibonacci_levels, calculate_pivot_points, detect_support_resistance, detect_swing_points
 
 class ClassicalAgent(BaseAgent):
@@ -24,6 +25,7 @@ class ClassicalAgent(BaseAgent):
                 return self._empty_result("Not enough data for classical analysis")
 
             current_price = float(candles[-1]["close"])
+            snapshot = build_market_snapshot(market_data, self.config)
             recent = candles[-80:] if len(candles) >= 80 else candles
             levels = detect_support_resistance(recent, lookback=len(recent))
             supports = sorted(set(round(level, 2) for level in levels.get("supports", [])))
@@ -94,6 +96,20 @@ class ClassicalAgent(BaseAgent):
             confidence = min(82, int(45 + abs(score) * 10)) if direction != "NEUTRAL" else int(25 + abs(score) * 5)
             bullish_probability = max(10, min(90, int(50 + score * 8)))
             bearish_probability = 100 - bullish_probability
+            reason_codes = self._reason_codes(direction, trendline, current_price, nearest_support, nearest_resistance, pivot_points, clear_patterns)
+            evidence = [
+                {"name": "nearest_support", "value": round(nearest_support, 2), "bias": "BULLISH" if distance_to_support < distance_to_resistance else "NEUTRAL"},
+                {"name": "nearest_resistance", "value": round(nearest_resistance, 2), "bias": "BEARISH" if distance_to_resistance < distance_to_support else "NEUTRAL"},
+                {"name": "pivot", "value": round(pivot_points["pivot"], 2), "bias": "BULLISH" if current_price > pivot_points["pivot"] else "BEARISH"},
+                {"name": "trendline", "value": trendline.get("direction"), "bias": "BULLISH" if trendline.get("direction") == "ASCENDING" else "BEARISH" if trendline.get("direction") == "DESCENDING" else "NEUTRAL"},
+            ]
+            invalidations = []
+            if direction == "BUY":
+                invalidations.append(f"Close back below support {nearest_support:.2f}")
+                invalidations.append(f"Failed breakout above resistance {nearest_resistance:.2f}")
+            elif direction == "SELL":
+                invalidations.append(f"Close back above resistance {nearest_resistance:.2f}")
+                invalidations.append(f"Failed breakdown below support {nearest_support:.2f}")
 
             return {
                 "agent": self.name,
@@ -120,11 +136,38 @@ class ClassicalAgent(BaseAgent):
                     },
                 },
                 "signals": reasons,
+                "reasons": reasons[:6],
+                "reason_codes": reason_codes,
+                "evidence": evidence,
+                "invalidations": invalidations,
+                "key_levels": {"nearest_support": round(nearest_support, 2), "nearest_resistance": round(nearest_resistance, 2), "pivot": round(pivot_points["pivot"], 2)},
+                "data_quality": snapshot.get("data_quality", {}),
+                "verified_snapshot": snapshot,
+                "confidence_breakdown": {"structure": round(abs(score) * 8, 1), "levels": round(min(20, (1 - min(distance_to_support, distance_to_resistance) / range_size) * 20), 1), "patterns": round(len(clear_patterns) * 8, 1), "penalties": 0},
+                "warnings": [] if clear_patterns else ["No high-quality classical pattern; level context only"],
                 "summary": f"Nearest support {nearest_support:.2f}, nearest resistance {nearest_resistance:.2f}. Classical decision: {direction}",
             }
         except Exception as exc:  # noqa: BLE001
             self.logger.exception("Classical analysis failed")
             return self._empty_result(f"Classical analysis failed: {exc}")
+
+    def _reason_codes(self, direction: str, trendline: Dict[str, Any], current_price: float, support: float, resistance: float, pivots: Dict[str, float], patterns: List[Dict[str, Any]]) -> List[str]:
+        codes: List[str] = []
+        if trendline.get("direction") == "ASCENDING" and trendline.get("respected"):
+            codes.append("CLASSIC_ASC_TRENDLINE_RESPECT")
+        elif trendline.get("direction") == "DESCENDING" and trendline.get("respected"):
+            codes.append("CLASSIC_DESC_TRENDLINE_RESPECT")
+        if abs(current_price - support) < abs(resistance - current_price):
+            codes.append("PRICE_NEAR_SUPPORT")
+        else:
+            codes.append("PRICE_NEAR_RESISTANCE")
+        codes.append("PRICE_ABOVE_PIVOT" if current_price > pivots.get("pivot", current_price) else "PRICE_BELOW_PIVOT")
+        for pattern in patterns[:3]:
+            name = str(pattern.get("pattern", "PATTERN")).upper().replace(" ", "_")
+            codes.append(f"PATTERN_{name}")
+        if direction == "NEUTRAL":
+            codes.append("CLASSIC_WAIT_NO_PATTERN_EDGE")
+        return codes[:10]
 
     def _build_trendline(self, swings: Dict[str, List[Dict[str, Any]]], current_price: float) -> Dict[str, Any]:
         lows = swings.get("lows", [])[-3:]

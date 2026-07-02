@@ -4,6 +4,7 @@ import logging
 from typing import Dict, Any, List, Tuple
 from .base_agent import BaseAgent
 from utils.indicators import calculate_ema, calculate_rsi, calculate_macd, calculate_atr, calculate_bollinger_bands, detect_support_resistance, detect_swing_points
+from services.market_snapshot import build_market_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -43,17 +44,31 @@ class TechnicalAgent(BaseAgent):
         
         candles = data.get('data', data.get('candles', []))
         indicators = data.get('indicators', {})
+        snapshot = build_market_snapshot(data, self.config)
         
         # التحليل الفني الكلاسيكي فقط
         technical_analysis = self._technical_analysis(candles, indicators)
-        
+        confidence_breakdown = self._confidence_breakdown(technical_analysis)
+        confidence = self._calculate_classic_confidence(technical_analysis)
+        signal = technical_analysis.get('classic_signal', 'WAIT')
         return {
             'agent': 'technical',
-            'signal': technical_analysis.get('classic_signal', 'WAIT'),
-            'confidence': self._calculate_classic_confidence(technical_analysis),
+            'signal': signal,
+            'confidence': confidence,
             'weight': self.weight,
             'technical': technical_analysis,
+            'summary': self._structured_summary(technical_analysis, signal),
             'reasoning': technical_analysis.get('trend', 'N/A'),
+            'reasons': technical_analysis.get('reasons', [])[:6],
+            'evidence': technical_analysis.get('evidence', []),
+            'invalidations': technical_analysis.get('invalidations', []),
+            'key_levels': technical_analysis.get('key_levels', {}),
+            'market_regime': technical_analysis.get('market_regime', {}),
+            'data_quality': snapshot.get('data_quality', {}),
+            'verified_snapshot': snapshot,
+            'reason_codes': technical_analysis.get('reason_codes', []),
+            'confidence_breakdown': confidence_breakdown,
+            'warnings': technical_analysis.get('warnings', []),
             'timestamp': self.now_iso()
         }
     
@@ -187,6 +202,21 @@ class TechnicalAgent(BaseAgent):
         ema_trend = 'UP' if ema_50 > ema_200 else 'DOWN' if ema_50 < ema_200 else 'SIDEWAYS'
         rsi_signal = 'OVERBOUGHT' if rsi > 70 else 'OVERSOLD' if rsi < 30 else 'NEUTRAL'
         macd_signal = 'BULLISH' if macd_hist > 0 else 'BEARISH' if macd_hist < 0 else 'NEUTRAL'
+        reason_codes = self._technical_reason_codes(ema_ribbon, ema_50, ema_200, rsi, macd_hist, macd_slope, bollinger_squeeze, volatility_regime, classic_signal)
+        evidence = [
+            {'name': 'EMA ribbon', 'value': ema_ribbon.get('state'), 'bias': 'BULLISH' if ema_ribbon.get('state') == 'BULLISH_ALIGNMENT' else 'BEARISH' if ema_ribbon.get('state') == 'BEARISH_ALIGNMENT' else 'NEUTRAL'},
+            {'name': 'RSI', 'value': round(rsi, 2), 'bias': 'BULLISH' if rsi >= 55 else 'BEARISH' if rsi <= 45 else 'NEUTRAL'},
+            {'name': 'MACD histogram', 'value': round(macd_hist, 4), 'bias': macd_signal},
+            {'name': 'ADX proxy', 'value': round(adx_value, 2), 'bias': 'TRENDING' if adx_value >= 25 else 'RANGING' if adx_value < 15 else 'MODERATE'},
+            {'name': 'ATR regime', 'value': volatility_regime, 'bias': volatility_regime},
+        ]
+        invalidations = []
+        if classic_signal == 'BUY':
+            if support: invalidations.append(f'Close below nearest support {support:.2f}')
+            if ema_50: invalidations.append(f'Return below EMA50 {ema_50:.2f}')
+        elif classic_signal == 'SELL':
+            if resistance: invalidations.append(f'Close above nearest resistance {resistance:.2f}')
+            if ema_50: invalidations.append(f'Return above EMA50 {ema_50:.2f}')
 
         return {
             'trend': ema_trend,
@@ -215,9 +245,61 @@ class TechnicalAgent(BaseAgent):
             'classic_score': round(score, 2),
             'current_price': current_price,
             'reasons': reasons[:10],
+            'reason_codes': reason_codes,
+            'evidence': evidence,
+            'invalidations': invalidations,
+            'warnings': ['Bollinger squeeze needs breakout confirmation'] if bollinger_squeeze else [],
             'indicators_raw': {'atr': atr, 'rsi': rsi, 'macd_histogram': macd_hist},
             'key_levels': {'nearest_support': round(support, 2) if support else 0, 'nearest_resistance': round(resistance, 2) if resistance else 0},
         }
+
+    def _technical_reason_codes(self, ema_ribbon: Dict[str, Any], ema_50: float, ema_200: float, rsi: float, macd_hist: float, macd_slope: float, squeeze: bool, volatility: str, signal: str) -> List[str]:
+        codes: List[str] = []
+        state = ema_ribbon.get('state')
+        if state == 'BULLISH_ALIGNMENT' or ema_50 > ema_200:
+            codes.append('EMA_BULL_ALIGN')
+        if state == 'BEARISH_ALIGNMENT' or ema_50 < ema_200:
+            codes.append('EMA_BEAR_ALIGN')
+        if rsi >= 55:
+            codes.append('RSI_BULL_RANGE')
+        elif rsi <= 45:
+            codes.append('RSI_BEAR_RANGE')
+        if macd_hist > 0 and macd_slope >= 0:
+            codes.append('MACD_POS_SLOPE')
+        elif macd_hist < 0 and macd_slope <= 0:
+            codes.append('MACD_NEG_SLOPE')
+        if squeeze:
+            codes.append('BB_SQUEEZE')
+        if volatility == 'HIGH':
+            codes.append('ATR_HIGH_VOL')
+        elif volatility == 'LOW':
+            codes.append('ATR_LOW_VOL')
+        if signal == 'WAIT':
+            codes.append('TECH_WAIT_NO_EDGE')
+        return codes[:10]
+
+    def _confidence_breakdown(self, technical: Dict[str, Any]) -> Dict[str, float]:
+        score = float(technical.get('classic_score', 0) or 0)
+        regime = technical.get('market_regime', {}) or {}
+        trend = min(25.0, abs(score) * 5.0)
+        momentum = 10.0 if technical.get('macd') in {'BULLISH', 'BEARISH'} else 0.0
+        structure = 8.0 if technical.get('support') or technical.get('resistance') else 0.0
+        volatility_fit = 8.0 if regime.get('volatility_regime') == 'NORMAL' else 4.0 if regime.get('volatility_regime') == 'HIGH' else 3.0
+        penalties = 0.0
+        if regime.get('market_phase') == 'SQUEEZE':
+            penalties -= 8.0
+        if technical.get('classic_signal') == 'WAIT':
+            penalties -= 5.0
+        return {'trend': round(trend, 1), 'momentum': round(momentum, 1), 'structure': round(structure, 1), 'volatility_fit': round(volatility_fit, 1), 'penalties': round(penalties, 1)}
+
+    def _structured_summary(self, technical: Dict[str, Any], signal: str) -> str:
+        regime = technical.get('market_regime', {}) or {}
+        return (
+            f"Structure: {technical.get('trend', 'N/A')}; "
+            f"Momentum: RSI {technical.get('rsi', 'N/A')}, MACD {technical.get('macd', 'N/A')}; "
+            f"Regime: {regime.get('market_phase', 'UNKNOWN')} / {regime.get('volatility_regime', 'UNKNOWN')}; "
+            f"Decision: {signal}"
+        )
 
     def _ema_pack(self, closes: List[float]) -> Dict[int, float]:
         return {period: self._last(calculate_ema(closes, period), closes[-1] if closes else 0) for period in [8, 21, 50, 100, 200]}
