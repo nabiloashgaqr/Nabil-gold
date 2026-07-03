@@ -460,61 +460,73 @@ def _build_market_status_message(
     database: DatabaseService,
     config: Dict[str, Any] | None = None,
 ) -> str:
-    warnings = _dedupe_warnings(decision.get("warnings") or [])
-    warnings_text = "\n".join(f"• {html.escape(str(w))}" for w in warnings[:6]) or "• No special warnings"
     current_symbol = str(decision.get("symbol") or all_results.get("symbol") or (config or {}).get("symbol") or "XAU/USD")
     current_price = _safe_float(decision.get("current_price", all_results.get("current_price", 0)), 0.0)
     prices_text = _market_prices_text(config, current_symbol, current_price)
-    classic = decision.get("classic", {}) or {}
-    rules = (classic.get("consensus", {}) or {}).get("rules", {}) or {}
-    agent_thr = rules.get("agent_min_confidence", 60)
-    min_consensus = _safe_float(rules.get("min_consensus_confidence", 65), 65)
-    news_hard_block = _is_news_hard_block(decision, all_results)
-    reason_lines: List[str] = []
-    if news_hard_block:
-        gate_line = f"📊 Gate: NEWS BLOCK  •  Consensus overridden  •  Agents ≥{agent_thr}%"
-        _append_unique_reason(reason_lines, "News hard block active — trading is paused")
-    else:
-        gate_line = f"📊 Consensus: WAIT  •  Agents ≥{agent_thr}%  •  Entry ≥{min_consensus:.0f}%"
-        rejection = f"Need at least 2 agents with weighted confidence ≥{min_consensus:.0f}%"
-        _append_unique_reason(reason_lines, rejection)
-    opp_agent = (classic.get("strongest_directional") or {}).get("agent")
-    opp_conf = (classic.get("strongest_directional") or {}).get("confidence", 0)
-    if opp_agent and opp_conf: _append_unique_reason(reason_lines, f"Strongest agent: {opp_agent} ({opp_conf}%)")
-    tech = all_results.get("technical", {}) or {}
-    rsi = (tech.get("technical", {}) or {}).get("rsi")
-    if rsi: _append_unique_reason(reason_lines, f"RSI: {rsi}")
-    open_count = len(database.get_open_trades())
-    open_note = f"• Open trades: {open_count}" if open_count > 0 else "• No open trades"
-    
+
+    # ── Open trades summary ──────────────────────────────────────────────
+    open_trades = database.get_open_trades()
+    trades_section = ""
+    if open_trades:
+        from utils.instruments import price_to_points
+        trade_lines: List[str] = []
+        net_pts = 0.0
+        for t in open_trades[:20]:
+            tid = str(t.get("id", ""))
+            short = tid.split("_")[-1] if "_" in tid else (tid[-8:] if len(tid) >= 8 else tid)
+            direction = str(t.get("type") or t.get("side") or "BUY").upper()
+            entry = _safe_float(t.get("entry_price"), 0.0)
+            tp1 = _safe_float(t.get("tp1"), 0.0)
+            pnl_pts = _safe_float(t.get("current_pnl_points"), 0.0)
+            if pnl_pts == 0 and entry > 0 and current_price > 0:
+                raw = (current_price - entry) if direction == "BUY" else (entry - current_price)
+                pnl_pts = price_to_points(raw, symbol=str(t.get("symbol") or current_symbol))
+            net_pts += pnl_pts
+            usd = pnl_pts / 10.0
+            status = str(t.get("status") or "OPEN").upper()
+            marker = "🟢" if pnl_pts > 0 else "🔴" if pnl_pts < 0 else "➖"
+            # TP1 progress
+            prog_txt = ""
+            tp1_dist = abs(price_to_points(tp1 - entry, symbol=str(t.get("symbol") or current_symbol))) if tp1 and entry else 0
+            if tp1_dist > 0 and pnl_pts > 0:
+                pct = min(pnl_pts / tp1_dist * 100, 100)
+                prog_txt = f" · {pct:.0f}%➜TP1"
+            elif tp1 and entry and ((direction == "BUY" and current_price >= tp1) or (direction == "SELL" and current_price <= tp1)):
+                prog_txt = " · ✅TP1"
+            status_txt = "" if status == "OPEN" else f" [{html.escape(status)}]"
+            trade_lines.append(
+                f"{marker} {direction} <code>#{html.escape(short)}</code>  "
+                f"{pnl_pts:+.0f}pts ({usd:+.1f}$){prog_txt}{status_txt}"
+            )
+        if len(open_trades) > 20:
+            trade_lines.append(f"… and {len(open_trades) - 20} more")
+        net_usd = net_pts / 10.0
+        net_marker = "🟢" if net_pts > 0 else "🔴" if net_pts < 0 else "➖"
+        trades_section = (
+            f"──────────────────\n"
+            f"📊 <b>Open Trades ({len(open_trades)})</b>\n"
+            + "\n".join(trade_lines) + "\n"
+            f"{net_marker} <b>Net:</b> {net_pts:+.0f}pts ({net_usd:+.1f}$)\n"
+        )
+
+    # ── Gemini review (keep concise) ─────────────────────────────────────
     gemini_context = ""
     gemini_analysis = decision.get("gemini_analysis", {}) or {}
     if gemini_analysis.get("available"):
         bias = gemini_analysis.get("market_bias", "NEUTRAL")
-        action = gemini_analysis.get("action", "WAIT")
         reason = gemini_analysis.get("reason", "")
-        gemini_context = f"\n\n🧠 <b>Gemini Independent Review</b>\n• <b>Bias:</b> {html.escape(str(bias))} - {html.escape(str(reason))}\n• <b>Advice:</b> {html.escape(str(action))}"
-
-    gemini_news_section = ""
-    gemini_news = decision.get("gemini_news_review", {}) or {}
-    if gemini_news.get("available"):
-        risk = gemini_news.get("risk_level", "LOW")
-        bullets = gemini_news.get("summary_bullets") or []
-        advice = gemini_news.get("trading_advice", "")
-        news_lines = [f"\n\n📰 <b>Gemini News Analysis</b>", f"• <b>Risk:</b> {html.escape(str(risk))}"]
-        for b in bullets: news_lines.append(f"• {html.escape(str(b))}")
-        if advice: news_lines.append(f"• <i>{html.escape(str(advice))}</i>")
-        gemini_news_section = "\n".join(news_lines)
+        gemini_context = (
+            f"🧠 <b>Gemini:</b> {html.escape(str(bias))} — {html.escape(str(reason))}\n"
+        )
 
     return (
         "🟡 <b>SmartSignal — Market Status</b>\n━━━━━━━━━━━━━━━━━━━━\n"
         f"📈 <b>Prices:</b>\n{prices_text}\n"
-        f"🧭 Symbol under review: {html.escape(current_symbol)}\n"
-        f"🎯 Decision: WAIT\n{gate_line}\n\n"
-        f"<b>Reason:</b>\n{chr(10).join(reason_lines)}\n\n"
-        f"<b>Notes:</b>\n{open_note}\n{warnings_text}"
-        f"{gemini_context}{gemini_news_section}\n━━━━━━━━━━━━━━━━━━━━\n"
-        "<i>Market status • Next market status in ~1 hour</i>"
+        f"🎯 Decision: WAIT\n"
+        f"{trades_section}"
+        f"{gemini_context}"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "<i>Market status • Next update in ~1 hour</i>"
     )
 
 
