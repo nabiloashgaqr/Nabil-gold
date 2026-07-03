@@ -179,16 +179,18 @@
     },
     "learning": {
         "enabled": true,
+        "auto_apply_weights": false,
         "update_frequency_days": 1,
         "min_predictions_for_adjustment": 3,
         "max_weight_change": 0.25,
         "momentum_weight": 0.4,
         "decay_factor": 0.9,
         "performance_threshold": 0.6,
-        "auto_adjust_confidence": true,
-        "aggressive_mode": true,
+        "auto_adjust_confidence": false,
+        "aggressive_mode": false,
         "streak_bonus": 0.1,
-        "description": "نظام التعلم الذكي لتحديث أوزان الوكلاء"
+        "recent_trades_weight": 0.6,
+        "description": "نظام التعلم الذكي – وضع توصيات يدوي فقط – لا تطبيق تلقائي للأوزان"
     },
     "notifications": {
         "send_no_signal_updates": false,
