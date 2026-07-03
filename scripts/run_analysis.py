@@ -400,7 +400,8 @@ async def _check_scale_in(
             f"• <b>Stop Loss:</b> {stop_loss:.2f}\n"
             f"• <b>TP1:</b> {tp1:.2f}\n"
             f"• <b>TP2:</b> {tp2:.2f}\n"
-            f"• <b>Size ratio:</b> {decision['signal']['scale_in_size_ratio']}\n"
+            f"• <b>Size:</b> {decision['signal']['scale_in_size_ratio']}x (half position)\n"
+            f"• <b>RR:</b> {abs(tp2 - entry_price) / max(abs(stop_loss - entry_price), 0.01):.2f}R\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
             f"<i>ID: {html.escape(trade_id)}</i>"
         )
