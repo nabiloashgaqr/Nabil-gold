@@ -17,8 +17,8 @@ DEFAULT_INSTRUMENTS: Dict[str, Dict[str, Any]] = {
     "XAU/USD": {
         "symbol": "XAU/USD", "name": "Gold", "category": "metal",
         "point_size": 0.10, "price_decimals": 2,
-        "min_sl_distance_points": 300, "trailing_distance": 100, "trailing_step": 30,
-        "early_breakeven_points": 100, "duplicate_zone_points": 50,
+        "min_sl_distance_points": 400, "trailing_distance": 150, "trailing_step": 40,
+        "early_breakeven_points": 200, "duplicate_zone_points": 50,
     },
     "WTI/USD": {
         "symbol": "WTI/USD", "name": "WTI Crude Oil", "category": "oil",
@@ -122,16 +122,16 @@ def config_for_instrument(base_config: Dict[str, Any], instrument: Dict[str, Any
     cfg["instrument"] = spec
 
     cfg.setdefault("risk_settings", {})["min_sl_distance_points"] = spec.get(
-        "min_sl_distance_points", cfg.get("risk_settings", {}).get("min_sl_distance_points", 300)
+        "min_sl_distance_points", cfg.get("risk_settings", {}).get("min_sl_distance_points", 400)
     )
     cfg.setdefault("trailing_stop", {})["trailing_distance"] = spec.get(
-        "trailing_distance", cfg.get("trailing_stop", {}).get("trailing_distance", 100)
+        "trailing_distance", cfg.get("trailing_stop", {}).get("trailing_distance", 150)
     )
     cfg["trailing_stop"]["trailing_step"] = spec.get(
-        "trailing_step", cfg.get("trailing_stop", {}).get("trailing_step", 30)
+        "trailing_step", cfg.get("trailing_stop", {}).get("trailing_step", 40)
     )
     cfg["trailing_stop"]["early_breakeven_points"] = spec.get(
-        "early_breakeven_points", cfg.get("trailing_stop", {}).get("early_breakeven_points", 100)
+        "early_breakeven_points", cfg.get("trailing_stop", {}).get("early_breakeven_points", 200)
     )
     cfg.setdefault("duplicate_signal_filter", {})["price_zone_points"] = spec.get(
         "duplicate_zone_points", cfg.get("duplicate_signal_filter", {}).get("price_zone_points", 50)
