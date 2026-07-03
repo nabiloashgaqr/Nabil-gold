@@ -298,10 +298,15 @@ async def _check_scale_in(
 ) -> None:
     """Send and persist fixed-risk scale-in trades when price retests a level.
 
-    The send-before-save order is intentional: a scale-in must not be stored as
-    active unless the Telegram instruction was actually delivered.  This also
-    fixes the previous regression where the message was built but never sent and
-    an undefined ``delivered`` variable was checked afterwards.
+    Scale-in is treated as a NEW signal decision, requiring:
+    1. Pullback of ≥ trigger_points (200) from parent entry (better price only)
+    2. Full agent consensus: ≥ min_agents_agree (3) qualified agents agree
+    3. Net weighted confidence ≥ min_consensus_confidence (72%)
+    4. No opposition (agents opposing the direction reduce confidence)
+    5. All risk filters pass (news, trading hours, etc.)
+
+    This prevents adding to a losing position blindly — scale-in must confirm
+    the market still supports the original direction with fresh agent votes.
     """
     oe = config.get("order_execution", {}) or {}
     fr = oe.get("fixed_risk", {}) or {}
@@ -367,6 +372,63 @@ async def _check_scale_in(
                     "below" if side == "BUY" else "above",
                 )
                 continue
+
+        # ── Agent consensus check: scale-in is a NEW signal ──
+        # Must have fresh agent agreement, not just price proximity.
+        sr = config.get("signal_requirements", {}) or {}
+        min_agents = int(sr.get("min_agents_agree", 3) or 3)
+        min_agent_conf = int(sr.get("agent_min_confidence", 70) or 70)
+        min_net_conf = float(sr.get("min_consensus_confidence", 72) or 72)
+
+        agent_names = ["technical", "classical", "smc", "price_action", "multitimeframe"]
+        weights = config.get("agent_weights", {}) or {}
+        agree_count = 0
+        oppose_count = 0
+        net_weighted = 0.0
+        total_weight = 0.0
+        for name in agent_names:
+            result = all_results.get(name, {}) or {}
+            agent_signal = str(result.get("signal", "WAIT")).upper()
+            agent_conf = float(result.get("confidence", 0) or 0)
+            weight = float(weights.get(name, 0.2))
+            if agent_conf < min_agent_conf:
+                continue  # Agent not qualified
+            total_weight += weight
+            if agent_signal == side:
+                agree_count += 1
+                net_weighted += weight * (agent_conf / 100.0)
+            elif agent_signal in {"BUY", "SELL"} and agent_signal != side:
+                oppose_count += 1
+                net_weighted -= weight * (agent_conf / 100.0)
+
+        # Net weighted confidence (after opposition penalty)
+        consensus_conf = (net_weighted / total_weight * 100.0) if total_weight > 0 else 0.0
+
+        if agree_count < min_agents:
+            logger.info(
+                "Scale-in blocked for %s %s: only %d/%d qualified agents agree (need ≥%d)",
+                side, symbol, agree_count, len(agent_names), min_agents,
+            )
+            continue
+
+        if consensus_conf < min_net_conf:
+            logger.info(
+                "Scale-in blocked for %s %s: net confidence %.0f%% below %.0f%% (%d agree, %d oppose)",
+                side, symbol, consensus_conf, min_net_conf, agree_count, oppose_count,
+            )
+            continue
+
+        # Check risk filters
+        risk = all_results.get("risk", {}) or {}
+        risk_checks = risk.get("checks", risk.get("risk_checks", {})) or {}
+        risk_approved = risk.get("approved", True)
+        if not risk_approved or any(
+            not v for k, v in risk_checks.items()
+            if k in {"max_open_trades_filter", "max_daily_signals_filter", "atr_filter", "spread_filter", "consecutive_losses_filter"}
+        ):
+            failed = [k for k, v in risk_checks.items() if not v and k in {"max_open_trades_filter", "max_daily_signals_filter", "atr_filter", "spread_filter", "consecutive_losses_filter"}]
+            logger.info("Scale-in blocked for %s %s: risk filters failed: %s", side, symbol, failed or "not approved")
+            continue
 
         levels = _levels_from_results(all_results, side)
         if not levels:
@@ -648,14 +710,6 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             news["macro_direction"] = macro.get("macro_direction")
             news["macro_agent"] = macro
         all_results = {"technical": run_agent("technical", TechnicalAgent(config), data), "classical": run_agent("classical", ClassicalAgent(config), data), "smc": run_agent("smc", SMCAgent(config), data), "price_action": run_agent("price_action", PriceActionAgent(config), data), "multitimeframe": run_agent("multitimeframe", MultiTimeframeAgent(config), data), "macro_fundamental": macro, "current_price": data["current_price"], "symbol": symbol, "session": session, "verified_snapshot": verified_snapshot, "news": news, "daily_bias": run_agent("daily_bias", DailyBiasAgent(config), data)}
-        if has_symbol_active_trades:
-            await _check_scale_in(
-                config,
-                all_results,
-                [t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol],
-                database,
-                telegram,
-            )
         # Inject portfolio info so RiskManagementAgent can enforce max_open_trades
         # and max_daily_signals filters. Without this, those filters see 0 and
         # never block — which caused 15 simultaneous BUY trades.
@@ -669,6 +723,15 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             "today_signals_count": _today_signals_count,
         }
         all_results["risk"] = RiskManagementAgent(config).evaluate(all_results)
+        # Scale-in AFTER risk evaluation so it can check risk filters
+        if has_symbol_active_trades:
+            await _check_scale_in(
+                config,
+                all_results,
+                [t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol],
+                database,
+                telegram,
+            )
         all_results["dynamic_risk"] = DynamicRiskManager(config).evaluate(database)
         learning_service = None
         try:
