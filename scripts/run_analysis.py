@@ -464,7 +464,7 @@ async def _check_scale_in(
         else:
             tp2 = parent_tp2
         trade_id = database.new_trade_id()
-        reason = f"Price within {distance_points:.0f} points of {'support' if side == 'BUY' else 'resistance'} level {nearest_level:.2f}"
+        reason = f"Pullback {pullback_pts:.0f} pts from entry + {agree_count} agents agree ({consensus_conf:.0f}% confidence)"
         decision: Dict[str, Any] = {
             "trade_id": trade_id,
             "decision": side,
@@ -487,12 +487,33 @@ async def _check_scale_in(
                 "tp2": tp2,
             },
         }
+        # Build agent votes line for Telegram
+        vote_emojis = {"BUY": "🟢", "SELL": "🔴", "WAIT": "🟡"}
+        agent_lines = []
+        for name in agent_names:
+            result = all_results.get(name, {}) or {}
+            agent_signal = str(result.get("signal", "WAIT")).upper()
+            agent_conf = float(result.get("confidence", 0) or 0)
+            if agent_conf < min_agent_conf:
+                emoji = "⚪"
+                label = "skip"
+            else:
+                emoji = vote_emojis.get(agent_signal, "⚪")
+                label = f"{agent_signal} {agent_conf:.0f}%"
+            agent_lines.append(f"{emoji} {name.title()} {label}")
+        votes_block = "\n".join(agent_lines)
         message = (
             f"➕ <b>Scale-In {html.escape(symbol)} — {html.escape(side)}</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
             f"• <b>Parent:</b> {html.escape(parent_id)}\n"
+            f"• <b>Pullback:</b> {pullback_pts:.0f} pts from entry ({parent_entry:.2f} → {entry_price:.2f})\n"
+            f"• <b>Consensus:</b> {agree_count}/{len(agent_names)} agents · {consensus_conf:.0f}% confidence\n"
+            "──────────────────\n"
+            "🗳️ AGENT VOTES\n"
+            f"{votes_block}\n"
+            "──────────────────\n"
+            "🎯 TRADE PLAN\n"
             f"• <b>Entry:</b> {entry_price:.2f}\n"
-            f"• <b>Level:</b> {nearest_level:.2f} ({distance_points:.0f} pts away)\n"
             f"• <b>Stop Loss:</b> {stop_loss:.2f}\n"
             f"• <b>TP1:</b> {tp1:.2f}\n"
             f"• <b>TP2:</b> {tp2:.2f}\n"
