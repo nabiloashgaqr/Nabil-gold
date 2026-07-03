@@ -858,9 +858,8 @@ function updateAgentPerformance() {
     const grid = $('agentsGrid');
     if (!grid) return;
     if (!agents.length) {
-        grid.innerHTML = ['technical', 'smc', 'classical', 'price_action', 'multitimeframe'].map(name => `
-            <div class="agent-card"><div class="agent-header"><span class="agent-icon">🤖</span><span class="agent-name">${name}</span></div><div class="muted">No performance data yet</div></div>
-        `).join('');
+        const fallbackWeights = {multitimeframe: 0.15, classical: 0.25, smc: 0.20, price_action: 0.20, technical: 0.20};
+        grid.innerHTML = Object.keys(fallbackWeights).map(name => `<div class="agent-card"><div class="agent-header"><span class="agent-icon">🤖</span><span class="agent-name">${name}</span></div><div class="agent-stats"><div class="agent-metric"><span>${currentLang === 'ar' ? 'الوزن' : 'Weight'}</span><strong>${(fallbackWeights[name]*100).toFixed(1)}%</strong></div></div><div class="muted">No performance data yet</div></div>`).join('');
         setText('consensusStrength', '--');
         return;
     }
@@ -878,12 +877,12 @@ function updateAgentPerformance() {
         return `<div class="agent-card">
             <div class="agent-header"><span class="agent-icon">🤖</span><span class="agent-name">${esc(a.agent_name)}</span></div>
             <div class="agent-stats">
-                <div class="agent-metric"><span>Weight</span><strong>${weight.toFixed(1)}%</strong></div>
-                <div class="agent-metric"><span>Win Rate</span><strong>${hasComputed ? `${wr.toFixed(1)}%` : 'N/A'}</strong></div>
+                <div class="agent-metric"><span>${currentLang === 'ar' ? 'الوزن' : 'Weight'}</span><strong>${weight.toFixed(1)}%</strong></div>
+                <div class="agent-metric"><span>${currentLang === 'ar' ? 'نسبة الربح' : 'Win Rate'}</span><strong>${hasComputed ? `${wr.toFixed(1)}%` : 'N/A'}</strong></div>
                 <div class="agent-metric"><span>Predictions</span><strong>${predictions}</strong></div>
                 <div class="agent-metric"><span>W / L</span><strong>${wins} / ${losses}</strong></div>
                 <div class="agent-metric"><span>Net PnL</span><strong class="${net >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(net, 1)}</strong></div>
-                <div class="agent-metric"><span>Trend</span><strong>${esc(a.trend || 'N/A')}</strong></div>
+                <div class="agent-metric"><span>${currentLang === 'ar' ? 'انتقائية' : 'Selectivity'}</span><strong>${predictions > 0 ? (predictions < 20 ? '⭐' + (currentLang === 'ar' ? ' انتقائي' : ' Selective') : predictions < 35 ? '✅' + (currentLang === 'ar' ? ' متوازن' : ' Balanced') : '⚠️' + (currentLang === 'ar' ? ' نشط' : ' Active')) : 'N/A'}</strong></div>
             </div>
             <div class="agent-bar"><div class="agent-bar-fill" style="width:${hasComputed ? Math.min(wr,100) : 0}%"></div></div>
             <div class="agent-source">${sourceLabel}</div>
