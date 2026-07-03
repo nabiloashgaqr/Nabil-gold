@@ -44,17 +44,17 @@ class AgentPerformanceRecord:
 class LearningConfig:
     """إعدادات التعلم المحسّنة"""
     enabled: bool = True
-    auto_apply_weights: bool = False  # توصيات فقط – لا تطبيق تلقائي
+    auto_apply_weights: bool = True  # default True for backward compat – override in config to False for manual mode
     update_frequency_days: int = 1
     min_predictions_for_adjustment: int = 3  # تقليل من 5 إلى 3
     max_weight_change: float = 0.25  # زيادة من 0.15
     momentum_weight: float = 0.4  # زيادة من 0.3
     decay_factor: float = 0.90  # أسرع في نسيان القديم
     performance_threshold: float = 0.6  # 60% win rate
-    aggressive_mode: bool = False  # وضع يدوي محافظ
+    aggressive_mode: bool = True  # وضع عدواني – غيّره في config
     streak_bonus: float = 0.10  # مكافأة التتابع
     recent_trades_weight: float = 0.6  # 60% للصفقات الأخيرة
-    auto_adjust_confidence: bool = False  # لا تعديل confidence تلقائي
+    auto_adjust_confidence: bool = True  # default True – عطّله في config للوضع اليدوي
 
 @dataclass
 class LearningReport:
@@ -115,17 +115,17 @@ class LearningService:
         learning = self.config.get('learning', {})
         return LearningConfig(
             enabled=learning.get('enabled', True),
-            auto_apply_weights=learning.get('auto_apply_weights', False),
+            auto_apply_weights=learning.get('auto_apply_weights', True),
             update_frequency_days=learning.get('update_frequency_days', 1),
             min_predictions_for_adjustment=learning.get('min_predictions_for_adjustment', 3),  # ↓ من 5
             max_weight_change=learning.get('max_weight_change', 0.25),  # ↑ من 0.15
             momentum_weight=learning.get('momentum_weight', 0.4),  # ↑ من 0.3
             decay_factor=learning.get('decay_factor', 0.90),  # ↓ من 0.95
             performance_threshold=learning.get('performance_threshold', 0.6),
-            aggressive_mode=learning.get('aggressive_mode', False),
+            aggressive_mode=learning.get('aggressive_mode', True),
             streak_bonus=learning.get('streak_bonus', 0.10),
             recent_trades_weight=learning.get('recent_trades_weight', 0.6),
-            auto_adjust_confidence=learning.get('auto_adjust_confidence', False)
+            auto_adjust_confidence=learning.get('auto_adjust_confidence', True)
         )
     
     async def analyze_and_update_weights(self) -> LearningReport:
