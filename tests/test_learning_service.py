@@ -117,7 +117,10 @@ class TestLearningService:
         weights = learning_service.default_weights
         
         assert weights['technical'] == 0.20
-        assert weights['smc'] == 0.25
+        assert weights['classical'] == 0.25
+        assert weights['smc'] == 0.20
+        assert weights['price_action'] == 0.20
+        assert weights['multitimeframe'] == 0.15
         # مجموع الأوزان يجب أن يكون قريب من 1.0
         total = sum(weights.values())
         assert 0.99 <= total <= 1.01
