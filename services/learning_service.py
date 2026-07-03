@@ -44,15 +44,17 @@ class AgentPerformanceRecord:
 class LearningConfig:
     """إعدادات التعلم المحسّنة"""
     enabled: bool = True
+    auto_apply_weights: bool = False  # توصيات فقط – لا تطبيق تلقائي
     update_frequency_days: int = 1
     min_predictions_for_adjustment: int = 3  # تقليل من 5 إلى 3
     max_weight_change: float = 0.25  # زيادة من 0.15
     momentum_weight: float = 0.4  # زيادة من 0.3
     decay_factor: float = 0.90  # أسرع في نسيان القديم
     performance_threshold: float = 0.6  # 60% win rate
-    aggressive_mode: bool = True  # وضع عدواني
+    aggressive_mode: bool = False  # وضع يدوي محافظ
     streak_bonus: float = 0.10  # مكافأة التتابع
     recent_trades_weight: float = 0.6  # 60% للصفقات الأخيرة
+    auto_adjust_confidence: bool = False  # لا تعديل confidence تلقائي
 
 @dataclass
 class LearningReport:
@@ -113,15 +115,17 @@ class LearningService:
         learning = self.config.get('learning', {})
         return LearningConfig(
             enabled=learning.get('enabled', True),
+            auto_apply_weights=learning.get('auto_apply_weights', False),
             update_frequency_days=learning.get('update_frequency_days', 1),
             min_predictions_for_adjustment=learning.get('min_predictions_for_adjustment', 3),  # ↓ من 5
             max_weight_change=learning.get('max_weight_change', 0.25),  # ↑ من 0.15
             momentum_weight=learning.get('momentum_weight', 0.4),  # ↑ من 0.3
             decay_factor=learning.get('decay_factor', 0.90),  # ↓ من 0.95
             performance_threshold=learning.get('performance_threshold', 0.6),
-            aggressive_mode=learning.get('aggressive_mode', True),
+            aggressive_mode=learning.get('aggressive_mode', False),
             streak_bonus=learning.get('streak_bonus', 0.10),
-            recent_trades_weight=learning.get('recent_trades_weight', 0.6)
+            recent_trades_weight=learning.get('recent_trades_weight', 0.6),
+            auto_adjust_confidence=learning.get('auto_adjust_confidence', False)
         )
     
     async def analyze_and_update_weights(self) -> LearningReport:
@@ -148,8 +152,16 @@ class LearningService:
             # 3️⃣ حساب الأوزان الجديدة (محسّن)
             adjusted_weights = self._calculate_adjusted_weights_v2(agent_stats)
             
-            # 4️⃣ حفظ الأوزان الجديدة
-            await self._save_adjusted_weights(adjusted_weights)
+            # 4️⃣ حفظ الأوزان الجديدة – وضع يدوي فقط
+            if self.learning_config.auto_apply_weights:
+                await self._save_adjusted_weights(adjusted_weights)
+                self.current_weights = adjusted_weights
+                logger.info("✅ تم تحديث الأوزان بنجاح (auto)")
+                self._log_weight_changes(adjusted_weights)
+            else:
+                logger.info("📋 Learning calculated new weights – MANUAL APPROVAL required – weights NOT applied")
+                # لا نحفظ في DB ولا نغير current_weights
+                # الأوزان المقترحة موجودة في التقرير فقط
             
             # 5️⃣ توليد التقرير
             report = self._generate_report_v2(
@@ -157,10 +169,9 @@ class LearningService:
             )
             
             self.learning_history.append(report)
-            self.current_weights = adjusted_weights
-            
-            logger.info("✅ تم تحديث الأوزان بنجاح")
-            self._log_weight_changes(adjusted_weights)
+            # في الوضع اليدوي لا نغير current_weights
+            if self.learning_config.auto_apply_weights:
+                self.current_weights = adjusted_weights
             
             return report
             
@@ -725,6 +736,10 @@ class LearningService:
     
     def get_agent_recommendation(self, agent_name: str) -> str:
         """توصية لوكيل معين"""
+        
+        # وضع يدوي: لا تعديل تلقائي للثقة
+        if not getattr(self.learning_config, 'auto_adjust_confidence', False):
+            return "NEUTRAL"
         
         if not self.learning_history:
             return "NEUTRAL"
