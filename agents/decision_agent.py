@@ -56,7 +56,11 @@ class DecisionAgent(BaseAgent):
         self.voting_agents = set(self.default_weights)
 
     def _load_weights(self) -> Dict[str, float]:
-        if self.learning_service is not None:
+        # Manual mode: config weights are the source of truth.
+        # Ignore learning_service DB weights unless explicitly allowed in config.
+        learning_cfg = self.config.get("learning", {}) or {}
+        allow_learned_weights = bool(learning_cfg.get("auto_apply_weights", False))
+        if allow_learned_weights and self.learning_service is not None:
             db_weights = getattr(self.learning_service, "current_weights", None)
             if db_weights:
                 return {k: float(v) for k, v in dict(db_weights).items()}
@@ -107,7 +111,9 @@ class DecisionAgent(BaseAgent):
 
     async def analyze_async(self, data: Dict[str, Any]) -> Dict[str, Any]:
         agents_results = data.get("all_agents_results", data)
-        if self.learning_service is not None:
+        learning_cfg = self.config.get("learning", {}) or {}
+        allow_learned_weights = bool(learning_cfg.get("auto_apply_weights", False))
+        if allow_learned_weights and self.learning_service is not None:
             try:
                 learned = await self.learning_service.load_current_weights()
                 if learned:
