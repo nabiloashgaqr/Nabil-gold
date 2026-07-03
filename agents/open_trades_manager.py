@@ -52,28 +52,23 @@ class OpenTradesManager(BaseAgent):
         self.keep_protected_winners_open = bool(self.management.get("keep_protected_winners_open", True))
         self.auto_be = bool(self.management.get("auto_move_sl_to_entry_after_tp1", True))
 
-        # Genuine progressive trailing stop (beyond the initial breakeven lock).
-        # Note: services/trailing_stop.py (TrailingStopManager) was written against
-        # fields that don't exist in the actual trades schema (take_profit,
-        # quantity, trailing_active) and re-triggers on every run with no
-        # persisted activation guard, so it's not used here. This implements
-        # the same trailing_distance/trailing_step config correctly against the
-        # real schema (tp1/tp2, status, sl_moved_to_entry) instead.
-        ts_config = self.config.get("trailing_stop", {})
-        self.trailing_enabled = bool(ts_config.get("enabled", False))
-        # Required production behaviour:
-        #   1) at +100 points -> move SL to entry immediately;
-        #   2) after that, keep a 100-point trailing gap;
-        #   3) move the SL only in 30-point steps.
-        # Values remain configurable, but the defaults now match the live rule.
-        self.trailing_distance = float(ts_config.get("trailing_distance", 100.0))
-        self.trailing_step = float(ts_config.get("trailing_step", 30.0))
-        self.trailing_min_profit_lock = float(ts_config.get("min_profit_lock", 0.0))
+        # Trailing stop + breakeven: read from trade_management first,
+        # then instruments (per-symbol override), then trailing_stop (legacy).
+        # Priority: trade_management > instruments > trailing_stop > defaults.
+        tm = self.management  # trade_management
+        ts_config = self.config.get("trailing_stop", {})  # legacy section
 
-        # Early breakeven: move SL to entry once the trade is +N points in
-        # profit, WITHOUT waiting for TP1. Production default is 100 points.
-        # Points convention: 10 pts = $1.
-        self.early_breakeven_points = float(ts_config.get("early_breakeven_points", 100.0))
+        self.trailing_enabled = bool(tm.get("trailing_stop_enabled", ts_config.get("enabled", False)))
+        self.trailing_distance = float(
+            tm.get("trailing_distance_points", ts_config.get("trailing_distance", 150.0))
+        )
+        self.trailing_step = float(
+            tm.get("trailing_step_points", ts_config.get("trailing_step", 40.0))
+        )
+        self.trailing_min_profit_lock = float(ts_config.get("min_profit_lock", 0.0))
+        self.early_breakeven_points = float(
+            tm.get("early_breakeven_points", ts_config.get("early_breakeven_points", 200.0))
+        )
 
         # Fixed-risk mode: track scale-in info
         oe = self.config.get("order_execution", {}) or {}
