@@ -34,11 +34,11 @@
         "local_fallback_file": "storage/trades.json"
     },
     "agent_weights": {
-        "technical": 0.2,
-        "classical": 0.2,
-        "smc": 0.25,
-        "price_action": 0.15,
-        "multitimeframe": 0.2
+        "multitimeframe": 0.15,
+        "classical": 0.25,
+        "smc": 0.2,
+        "price_action": 0.2,
+        "technical": 0.2
     },
     "risk_settings": {
         "min_confidence": 65,
@@ -57,14 +57,14 @@
         "description_max_rr_ratio": "سقف R:R لتجنب أهداف TP2 غير واقعية في الإشارات التجريبية/الحية"
     },
     "signal_requirements": {
-        "min_agents_agree": 2,
+        "min_agents_agree": 3,
         "min_agreement_percentage": 1,
         "allow_all_signals": false,
-        "description": "Classic consensus mode: enter only when at least two qualified agents agree and their net weighted confidence after opposition penalty is >=65%.",
-        "min_consensus_confidence": 65,
+        "description": "Strict consensus mode: enter only when at least 3 qualified agents agree and their net weighted confidence after opposition penalty is ≥72%. Agent must have ≥70% confidence to participate in voting. This reduces reckless entries from over-active agents like MTF.",
+        "min_consensus_confidence": 72,
         "strong_single_agent_confidence": 0,
         "strong_single_agent_enabled": false,
-        "agent_min_confidence": 60
+        "agent_min_confidence": 70
     },
     "schedule": {
         "analysis_interval_minutes": 5,
