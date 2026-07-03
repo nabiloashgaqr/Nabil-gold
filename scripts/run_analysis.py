@@ -346,9 +346,27 @@ async def _check_scale_in(
             continue
 
         entry_price = current_price
-        stop_loss = _safe_float(parent.get("stop_loss"), 0.0)
-        tp1 = _safe_float(parent.get("tp1"), 0.0)
-        tp2 = _safe_float(parent.get("tp2"), 0.0)
+        parent_entry = _safe_float(parent.get("entry_price"), 0.0)
+        parent_sl = _safe_float(parent.get("stop_loss"), 0.0)
+        parent_tp1 = _safe_float(parent.get("tp1"), 0.0)
+        parent_tp2 = _safe_float(parent.get("tp2"), 0.0)
+        # Recalculate SL/TP for scale-in based on its own entry price,
+        # preserving the same distance ratios as the parent trade.
+        if parent_entry > 0 and parent_sl > 0:
+            sl_distance = abs(parent_entry - parent_sl)
+            stop_loss = entry_price - sl_distance if side == "BUY" else entry_price + sl_distance
+        else:
+            stop_loss = parent_sl
+        if parent_entry > 0 and parent_tp1 > 0:
+            tp1_distance = abs(parent_tp1 - parent_entry)
+            tp1 = entry_price + tp1_distance if side == "BUY" else entry_price - tp1_distance
+        else:
+            tp1 = parent_tp1
+        if parent_entry > 0 and parent_tp2 > 0:
+            tp2_distance = abs(parent_tp2 - parent_entry)
+            tp2 = entry_price + tp2_distance if side == "BUY" else entry_price - tp2_distance
+        else:
+            tp2 = parent_tp2
         trade_id = database.new_trade_id()
         reason = f"Price within {distance_points:.0f} points of {'support' if side == 'BUY' else 'resistance'} level {nearest_level:.2f}"
         decision: Dict[str, Any] = {
