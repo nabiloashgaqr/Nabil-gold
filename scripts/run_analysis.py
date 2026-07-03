@@ -321,6 +321,14 @@ async def _check_scale_in(
     if max_scale_ins <= 0:
         return
 
+    # Respect the same-direction cap: count all open trades in this direction
+    # (parents + scale-ins). If already at the limit, no more scale-ins.
+    max_open_same_dir = int(
+        (config.get("duplicate_signal_filter", {}) or {})
+        .get("open_trade", {})
+        .get("max_open_same_direction", 3)
+    )
+
     for parent in open_trades:
         parent_id = str(parent.get("id") or parent.get("trade_id") or "")
         side = _trade_direction(parent)
@@ -330,6 +338,16 @@ async def _check_scale_in(
             continue
         if _scale_in_count_for_parent(open_trades, parent_id) >= max_scale_ins:
             continue
+
+        # Block scale-in if total open trades in same direction already at cap
+        if max_open_same_dir > 0:
+            open_same_dir = len([t for t in open_trades if _trade_direction(t) == side and str(t.get("status", "OPEN")).upper() in {"OPEN", "PARTIAL", "TP1_HIT"}])
+            if open_same_dir >= max_open_same_dir:
+                logger.info(
+                    "Scale-in blocked for %s %s: %d open same-direction trades already at cap %d",
+                    side, symbol, open_same_dir, max_open_same_dir,
+                )
+                continue
 
         levels = _levels_from_results(all_results, side)
         if not levels:
@@ -622,6 +640,18 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 database,
                 telegram,
             )
+        # Inject portfolio info so RiskManagementAgent can enforce max_open_trades
+        # and max_daily_signals filters. Without this, those filters see 0 and
+        # never block — which caused 15 simultaneous BUY trades.
+        from datetime import date as _date
+        _today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        _open_trades_count = len([t for t in open_trades_snapshot if str(t.get("status", "OPEN")).upper() in {"OPEN", "PARTIAL", "TP1_HIT"}])
+        _today_signals = database.get_recent_trades(limit=100)
+        _today_signals_count = len([t for t in _today_signals if (t.get("created_at") or t.get("entry_time") or "").startswith(_today_str)])
+        all_results["portfolio"] = {
+            "open_trades_count": _open_trades_count,
+            "today_signals_count": _today_signals_count,
+        }
         all_results["risk"] = RiskManagementAgent(config).evaluate(all_results)
         all_results["dynamic_risk"] = DynamicRiskManager(config).evaluate(database)
         learning_service = None
