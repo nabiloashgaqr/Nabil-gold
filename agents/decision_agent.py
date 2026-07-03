@@ -478,15 +478,25 @@ class DecisionAgent(BaseAgent):
             db = self.config.get("daily_bias_filter", {}) or {}
             required_agents = int(db.get("contrarian_min_agents_for_lower_confidence", 2) or 2)
             required_conf = float(db.get("contrarian_min_confidence", 75) or 75)
+            block_below = float(db.get("block_strong_contrarian_below", 0) or 0)
             is_contrarian = (bias == "BULLISH" and signal == "SELL") or (bias == "BEARISH" and signal == "BUY")
             same_count = self._same_direction_vote_count(result, signal)
-            if is_contrarian and (same_count < required_agents or float(result.get("confidence") or 0) < required_conf):
-                warnings.append(
-                    f"Daily Bias (4H) blocks counter-trend: bias={bias} ({bias_conf}%), signal={signal}. "
-                    f"Counter-trend requires ≥{required_agents} qualified agents and confidence ≥{required_conf}% "
-                    f"({same_count} qualified agent(s) support {signal})."
-                )
-                signal = "WAIT"
+            signal_conf = float(result.get("confidence") or 0)
+            if is_contrarian:
+                # Block counter-trend when daily bias itself is very strong
+                if block_below > 0 and bias_conf >= block_below:
+                    warnings.append(
+                        f"Daily Bias (4H) blocks counter-trend: bias={bias} ({bias_conf}% ≥ {block_below}% threshold). "
+                        f"No counter-trend allowed when daily bias is this strong."
+                    )
+                    signal = "WAIT"
+                elif same_count < required_agents or signal_conf < required_conf:
+                    warnings.append(
+                        f"Daily Bias (4H) blocks counter-trend: bias={bias} ({bias_conf}%), signal={signal}. "
+                        f"Counter-trend requires ≥{required_agents} qualified agents and confidence ≥{required_conf}% "
+                        f"({same_count} qualified agent(s), confidence {signal_conf:.0f}%)."
+                    )
+                    signal = "WAIT"
 
         risk = agents_results.get("risk", {}) or {}
         if signal in {"BUY", "SELL"} and risk and not risk.get("approved", False):
