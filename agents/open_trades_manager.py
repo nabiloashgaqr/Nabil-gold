@@ -293,6 +293,13 @@ class OpenTradesManager(BaseAgent):
                 result = "WIN"
                 close_price = tp2
                 final_pnl = calculate_pips(entry, tp2, trade_type, symbol)
+            elif tp1_touched and old_status == "OPEN" and not partial_close:
+                # TP1 can still be hit while in early-BE phase (BE done via
+                # early_breakeven, not TP1). Must record partial close.
+                new_status = "TP1_HIT"
+                events.append("TP1_HIT")
+                partial_close = True
+                # SL is already at entry from early BE — no need to move again.
             else:
                 effective_stop = stop_loss
                 if self.trailing_enabled and new_status in self.OPEN_STATUSES and "EXPIRED" not in events:
