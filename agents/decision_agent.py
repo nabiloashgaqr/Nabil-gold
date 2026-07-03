@@ -47,10 +47,10 @@ class DecisionAgent(BaseAgent):
 
         self.default_weights = {
             "technical": 0.20,
-            "classical": 0.20,
-            "smc": 0.25,
-            "price_action": 0.15,
-            "multitimeframe": 0.20,
+            "classical": 0.25,
+            "smc": 0.20,
+            "price_action": 0.20,
+            "multitimeframe": 0.15,
         }
         self.current_weights = self._load_weights()
         self.voting_agents = set(self.default_weights)
