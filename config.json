@@ -179,18 +179,16 @@
     },
     "learning": {
         "enabled": true,
-        "auto_apply_weights": false,
         "update_frequency_days": 1,
         "min_predictions_for_adjustment": 3,
         "max_weight_change": 0.25,
         "momentum_weight": 0.4,
         "decay_factor": 0.9,
         "performance_threshold": 0.6,
-        "auto_adjust_confidence": false,
-        "aggressive_mode": false,
+        "auto_adjust_confidence": true,
+        "aggressive_mode": true,
         "streak_bonus": 0.1,
-        "recent_trades_weight": 0.6,
-        "description": "نظام التعلم الذكي – وضع توصيات يدوي فقط – لا تطبيق تلقائي للأوزان"
+        "description": "نظام التعلم الذكي لتحديث أوزان الوكلاء"
     },
     "notifications": {
         "send_no_signal_updates": false,
@@ -298,7 +296,7 @@
             "scale_in_max": 2,
             "description_scale_in_max": "أقصى عدد من صفقات التعزيز (بالإضافة للأصلية). 2 = يمكن الدخول 3 صفقات في نفس الاتجاه: الأصلية + تعزيز 1 + تعزيز 2. المسافة بين كل تعزيز ≥ 200pts.",
             "scale_in_trigger_points": 200,
-            "description_scale_in_trigger_points": "عندما يبقى بين السعر والمستوى ≤ 200pts (20$)، نعزز باتجاه الصفقة. تم رفعه من 50 لأن ضوضا الذهب تصل 100-150pts كويك — 50pts أقل من نصف ويك عادي وليس تعزيز حقيقي. 200pts ≈ 1 ATR(15min) يضمن تراجع حقيقي.",
+            "description_scale_in_trigger_points": "مسافة التعزيز: لا يُسمح بالتعزيز إلا بعد أن يبتعد السعر ≥ 200 نقطة (20$) عن دخول الصفقة الأصلية. 200pts ≈ 1 ATR(15min) يضمن تراجع حقيقي وليس ضوضا. التعزيز يعمل عند اقتراب السعر من مستوى دعم/مقاومة بعد هذه المسافة.",
             "scale_in_size_ratio": 0.5,
             "description_scale_in_size_ratio": "نسبة حجم التعزيز مقارنة بالصفقة الأصلية. 0.5 = نصف الحجم. بناء هرمي: التعزيز أصغر حجماً من الأصلية يقلل الخطر التراكمي. 3 صفقات (1.0 + 0.5 + 0.5) = خطر 2.0x وليس 3.0x.",
             "description": "fixed_risk zone logic kept for entry levels, but always MARKET execution.",
