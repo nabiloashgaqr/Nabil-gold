@@ -248,11 +248,11 @@
         "rsi_period": 14,
         "slope_lookback": 12,
         "score_threshold": 1.25,
-        "contrarian_min_confidence": 75,
-        "block_strong_contrarian_below": 75,
-        "description": "فلتر اتجاه أعلى (Daily Bias): الصفقات المعاكسة للاتجاه 4H تحتاج موافقة وكيلين مؤهلين على نفس الاتجاه وثقة إشارة ≥75%. الوكلاء المعارضون يخصمون من قوة الإشارة.",
-        "contrarian_min_confidence_two_agents": 75,
-        "contrarian_min_agents_for_lower_confidence": 2
+        "contrarian_min_confidence": 80,
+        "block_strong_contrarian_below": 80,
+        "description": "فلتر اتجاه أعلى (Daily Bias): الصفقات المعاكسة للاتجاه 4H تحتاج موافقة 3 وكلاء مؤهلين على نفس الاتجاه وثقة إشارة ≥80%. الوكلاء المعارضون يخصمون من قوة الإشارة.",
+        "contrarian_min_confidence_two_agents": 80,
+        "contrarian_min_agents_for_lower_confidence": 3
     },
     "dynamic_risk_management": {
         "enabled": false,
@@ -351,7 +351,8 @@
             "trailing_distance": 150,
             "trailing_step": 40,
             "early_breakeven_points": 200,
-            "duplicate_zone_points": 50
+            "duplicate_zone_points": 50,
+            "description_early_breakeven": "early_breakeven_points=200: عند وصول الصفقة إلى +200 نقطة (20$) يُنقل الستوب إلى الدخول فوراً. متناسب مع SL=400pts و trailing gap=150pts."
         },
         {
             "symbol": "WTI/USD",
