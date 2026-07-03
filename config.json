@@ -52,8 +52,8 @@
         "account_capital": 10000,
         "max_rr_ratio": 4.0,
         "max_open_trades": 3,
-        "max_daily_signals": 8,
-        "description_max_open_trades_daily_signals": "حد أقصى 3 صفقات مفتوحة (الأصلية + تعزيزين) و8 إشارات يومياً. تم تشديده من مرحلة التعلم (50/50) لأن النظام أصبح مستقراً.",
+        "max_daily_signals": 50,
+        "description_max_open_trades_daily_signals": "حد أقصى 3 صفقات مفتوحة (الأصلية + تعزيزين). max_daily_signals=50 بدون حد يومي صارم.",
         "description_max_rr_ratio": "سقف R:R لتجنب أهداف TP2 غير واقعية في الإشارات التجريبية/الحية"
     },
     "signal_requirements": {
@@ -149,13 +149,14 @@
         "enabled": true,
         "tp1_trigger_pct": 50.0,
         "partial_close_pct": 50.0,
-        "trailing_distance": 100.0,
-        "trailing_step": 30.0,
+        "trailing_distance": 150.0,
+        "trailing_step": 40.0,
         "tp2_trigger_pct": 100.0,
         "tp2_distance": 15.0,
         "min_profit_lock": 0.0,
-        "early_breakeven_points": 100.0,
-        "description_early_breakeven": "early_breakeven_points=100: عند وصول الصفقة إلى +100 نقطة (10$) يُنقل الستوب إلى الدخول فوراً دون انتظار TP1. بعدها يبدأ Trailing مباشرة بمسافة trailing_distance=100 نقطة خلف السعر، ولا يتحرك إلا كل trailing_step=30 نقطة لصالح الصفقة؛ أي يبقى الفرق بين السعر والستوب حوالي 100 نقطة، وكل تحرك جديد للستوب يرسل تحديث Telegram إجباري. نقاط الذهب: 10 نقاط = 1$."
+        "early_breakeven_points": 200.0,
+        "description_early_breakeven": "early_breakeven_points=200: عند وصول الصفقة إلى +200 نقطة (20$) يُنقل الستوب إلى الدخول فوراً. متناسب مع SL=400pts و trailing gap=150pts.",
+        "description_trailing_stop": "Trailing gap 150pts متناسب مع SL=400pts. خطوة 40pts تقلل التحديثات غير الضرورية بالضوضا."
     },
     "news_feed": {
         "enabled": false,
