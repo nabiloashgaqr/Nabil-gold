@@ -10,7 +10,7 @@ five analysis agents only:
 - Multi-Timeframe
 
 Rules:
-- Ignore agents below ``agent_min_confidence`` (default 60%).
+- Ignore agents below ``agent_min_confidence`` (default 70%).
 - A normal entry needs at least 2 qualified agents in the same direction.
 - Their net weighted confidence after subtracting opposition must be >=72%.
 - Counter-trend trades against Daily Bias need at least 2 qualified agents and
@@ -39,11 +39,11 @@ class DecisionAgent(BaseAgent):
         self.min_rr_ratio = float(config.get("risk_settings", {}).get("min_rr_ratio", 1.5) or 1.5)
 
         signal_req = config.get("signal_requirements", {}) or {}
-        self.min_agents_agree = int(signal_req.get("min_agents_agree", 2) or 2)
+        self.min_agents_agree = int(signal_req.get("min_agents_agree", 3) or 3)
         self.min_agreement_pct = float(signal_req.get("min_agreement_percentage", 1) or 1)
         self.allow_all_signals = bool(signal_req.get("allow_all_signals", False))
-        self.agent_min_confidence = int(signal_req.get("agent_min_confidence", 60) or 60)
-        self.min_consensus_confidence = float(signal_req.get("min_consensus_confidence", self.min_confidence) or self.min_confidence)
+        self.agent_min_confidence = int(signal_req.get("agent_min_confidence", 70) or 70)
+        self.min_consensus_confidence = float(signal_req.get("min_consensus_confidence", 72) or 72)
 
         self.default_weights = {
             "technical": 0.20,
@@ -476,9 +476,9 @@ class DecisionAgent(BaseAgent):
             bias = str(daily_bias.get("bias", "NEUTRAL")).upper()
             bias_conf = float(daily_bias.get("confidence") or 0)
             db = self.config.get("daily_bias_filter", {}) or {}
-            required_agents = int(db.get("contrarian_min_agents_for_lower_confidence", 2) or 2)
-            required_conf = float(db.get("contrarian_min_confidence", 75) or 75)
-            block_below = float(db.get("block_strong_contrarian_below", 0) or 0)
+            required_agents = int(db.get("contrarian_min_agents_for_lower_confidence", 3) or 3)
+            required_conf = float(db.get("contrarian_min_confidence", 80) or 80)
+            block_below = float(db.get("block_strong_contrarian_below", 80) or 80)
             is_contrarian = (bias == "BULLISH" and signal == "SELL") or (bias == "BEARISH" and signal == "BUY")
             same_count = self._same_direction_vote_count(result, signal)
             signal_conf = float(result.get("confidence") or 0)

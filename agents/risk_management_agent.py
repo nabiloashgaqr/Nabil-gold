@@ -22,7 +22,7 @@ class RiskManagementAgent(BaseAgent):
         super().__init__(config or load_config())
         self.settings = self.config.get("risk_settings", {})
         self.filters = self.config.get("filters", {})
-        self.weights = self.config.get("agent_weights", {"technical": 0.20, "classical": 0.20, "smc": 0.25, "price_action": 0.15, "multitimeframe": 0.15})
+        self.weights = self.config.get("agent_weights", {"technical": 0.20, "classical": 0.25, "smc": 0.20, "price_action": 0.20, "multitimeframe": 0.15})
         self.symbol = self.config.get("symbol", "XAU/USD")
 
     def evaluate(self, results: Dict[str, Any]) -> Dict[str, Any]:
@@ -69,9 +69,9 @@ class RiskManagementAgent(BaseAgent):
             # would start rejecting trades purely because SL got floored.
             min_sl_distance = points_to_price(self._f(self.settings.get("min_sl_distance_points"), 0.0), self.symbol)
             if min_sl_distance > 0 and abs(entry_price - stop_loss) < min_sl_distance:
-                sl_mult = self._f(self.settings.get("atr_multiplier_sl"), 1.5) or 1.5
-                tp1_ratio = self._f(self.settings.get("atr_multiplier_tp1"), 2.0) / sl_mult
-                tp2_ratio = self._f(self.settings.get("atr_multiplier_tp2"), 3.5) / sl_mult
+                sl_mult = self._f(self.settings.get("atr_multiplier_sl"), 2.0) or 2.0
+                tp1_ratio = self._f(self.settings.get("atr_multiplier_tp1"), 2.5) / sl_mult
+                tp2_ratio = self._f(self.settings.get("atr_multiplier_tp2"), 4.5) / sl_mult
                 tp3_ratio = max(tp2_ratio + 1.0, tp2_ratio * 1.2)
                 if direction == "BUY":
                     stop_loss = entry_price - min_sl_distance
@@ -585,7 +585,7 @@ class RiskManagementAgent(BaseAgent):
         smc_suggestion: Dict[str, Any],
         results: Dict[str, Any],
     ) -> Tuple[float, str, float]:
-        sl_mult = self._f(self.settings.get("atr_multiplier_sl"), 1.5)
+        sl_mult = self._f(self.settings.get("atr_multiplier_sl"), 2.0)
         buffer = max(0.30, atr * 0.12)
         min_distance = max(atr * 0.60, 0.50)
         candidates: List[Tuple[float, str]] = []
@@ -624,8 +624,8 @@ class RiskManagementAgent(BaseAgent):
         return selected_price, selected_method, buffer
 
     def _take_profits(self, direction: str, entry: float, atr: float, supports: List[float], resistances: List[float]) -> Tuple[float, float, float, str]:
-        tp1_mult = self._f(self.settings.get("atr_multiplier_tp1"), 2.0)
-        tp2_mult = self._f(self.settings.get("atr_multiplier_tp2"), 3.5)
+        tp1_mult = self._f(self.settings.get("atr_multiplier_tp1"), 2.5)
+        tp2_mult = self._f(self.settings.get("atr_multiplier_tp2"), 4.5)
         tp3_mult = 5.0
         min_tp1_distance = max(atr, 0.80)
         method = "atr_targets"
@@ -668,7 +668,7 @@ class RiskManagementAgent(BaseAgent):
         max_spread = self._f(self.filters.get("max_spread_points"), 5.0)
         min_rr = self._f(self.settings.get("min_rr_ratio"), 1.5)
         max_open_trades = int(self.settings.get("max_open_trades", 3))
-        max_daily_signals = int(self.settings.get("max_daily_signals", 8))
+        max_daily_signals = int(self.settings.get("max_daily_signals", 50))
         max_losses = int(self.filters.get("max_consecutive_losses", 3))
         open_trades_count = int(portfolio.get("open_trades_count", 0) or 0)
         today_signals_count = int(portfolio.get("today_signals_count", 0) or 0)
