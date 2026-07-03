@@ -27,13 +27,19 @@ def test_single_strong_agent_is_not_enough_in_production_config() -> None:
     result = agent._classic_decision(votes)
 
     assert result["decision"] == "WAIT"
-    assert "Need at least 2" in result["rejection_reason"]
+    # min_agents_agree is now 3, so 1 agent is always rejected
+    assert "Need at least" in result["rejection_reason"]
 
 
-def test_two_agents_weighted_confidence_above_65_is_allowed() -> None:
+def test_three_agents_weighted_confidence_above_threshold_is_allowed() -> None:
     agent = DecisionAgent(load_config())
+    min_cons = agent.min_consensus_confidence
     votes = {
-        "BUY": [_vote("technical", 66, 0.20), _vote("smc", 66, 0.25)],
+        "BUY": [
+            _vote("technical", min_cons + 5, 0.20),
+            _vote("smc", min_cons + 5, 0.20),
+            _vote("classical", min_cons + 5, 0.25),
+        ],
         "SELL": [],
         "WAIT": [],
     }
@@ -41,8 +47,8 @@ def test_two_agents_weighted_confidence_above_65_is_allowed() -> None:
     result = agent._classic_decision(votes)
 
     assert result["decision"] == "BUY"
-    assert result["confidence"] >= 65
-    assert result["consensus"]["BUY"]["support_count"] == 2
+    assert result["confidence"] >= min_cons
+    assert result["consensus"]["BUY"]["support_count"] >= 3
 
 
 def test_opposing_agent_subtracts_from_signal_confidence() -> None:
