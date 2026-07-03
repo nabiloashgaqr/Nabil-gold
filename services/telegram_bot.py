@@ -104,70 +104,33 @@ class TelegramService:
         return True
 
     def _votes_lines(self, decision: Dict[str, Any]) -> List[str]:
-        votes = decision.get("votes") or {}
         agent_details = decision.get("agent_details") or {}
-        if not votes and not agent_details:
+        if not agent_details:
             return []
         lines = ["🗳️ <b>AGENT VOTES</b>"]
-        marker = {"BUY": "🟢", "SELL": "🔴", "WAIT": "⚪", "NEUTRAL": "⚪"}
-        qualified_agents: set[str] = set()
-        rendered_any_vote = False
-        for direction in ("BUY", "SELL"):
-            entries = votes.get(direction) or []
-            if not entries:
-                continue
-            rendered_any_vote = True
-            parts = []
-            for item in entries:
-                if isinstance(item, dict):
-                    agent = str(item.get("agent", "agent"))
-                    qualified_agents.add(agent)
-                    conf = item.get("confidence")
-                    parts.append(f"{agent}{f' {conf}%' if conf is not None else ''}")
-                else:
-                    parts.append(str(item))
-            lines.append(f"{marker.get(direction, '⚪')} <b>{direction} qualified:</b> {html.escape(', '.join(parts))}")
-        if not rendered_any_vote:
-            lines.append("⚪ <b>Qualified:</b> none")
-        wait_entries = votes.get("WAIT") or []
-        wait_parts = []
-        for item in wait_entries:
-            if isinstance(item, dict):
-                agent = str(item.get("agent", "agent"))
-                qualified_agents.add(agent)
-                conf = item.get("confidence")
-                wait_parts.append(f"{agent}{f' {conf}%' if conf is not None else ''}")
-            else:
-                wait_parts.append(str(item))
-        if wait_parts:
-            lines.append(f"⚪ <b>WAIT / not directional:</b> {html.escape(', '.join(wait_parts))}")
-
-        not_qualified = []
-        for key, detail in agent_details.items():
+        # Emoji by direction: green=BUY, red=SELL, yellow=WAIT/neutral
+        marker = {"BUY": "🟢", "SELL": "🔴"}
+        # Render order: core 5 agents first, then any extras
+        core_order = ["technical", "classical", "smc", "price_action", "multitimeframe", "macro_fundamental"]
+        ordered_keys = [k for k in core_order if k in agent_details]
+        for key in agent_details:
+            if key not in ordered_keys:
+                ordered_keys.append(key)
+        for key in ordered_keys:
+            detail = agent_details.get(key)
             if not isinstance(detail, dict):
                 continue
-            if str(key) not in qualified_agents and str(detail.get("label") or key) not in qualified_agents:
-                direction = str(detail.get("direction") or "WAIT").upper()
-                if direction in {"WAIT", "NEUTRAL", "HOLD", "NO_TRADE", ""}:
-                    not_qualified.append(str(detail.get("label") or key))
-        if not_qualified:
-            lines.append(f"⚪ <b>Not qualified:</b> {html.escape(', '.join(not_qualified[:5]))}")
-
-        if agent_details:
-            lines.append("📎 <b>Market notes:</b>")
-        for key, detail in agent_details.items():
-            if not isinstance(detail, dict):
-                continue
-            signals = detail.get("signals") or []
-            if not signals:
-                continue
-            label = detail.get("label") or key or "Agent"
+            label = str(detail.get("label") or key).strip()
             direction = str(detail.get("direction") or "WAIT").upper()
-            prefix = marker.get(direction, "⚪")
-            lines.append(f"{prefix} <b>{html.escape(str(label))}:</b>")
+            if direction in {"NEUTRAL", "HOLD", "NO_TRADE", ""}:
+                direction = "WAIT"
+            confidence = detail.get("confidence")
+            emoji = marker.get(direction, "🟡")
+            conf_text = f" {confidence}%" if confidence is not None else ""
+            lines.append(f"{emoji} <b>{html.escape(label)}</b>{html.escape(conf_text)}")
+            signals = detail.get("signals") or []
             for sig in signals[:3]:
                 text = self._friendly_signal_text(sig)
-                # Avoid repeating the exact entry price in pattern/rejection notes.
                 lines.append(f"  • {text}")
         return lines
 
@@ -368,20 +331,6 @@ class TelegramService:
                     lines.append(f"• {self._clean_text(bullet)}")
                 if advice:
                     lines.append(f"• Advice: {self._clean_text(advice)}")
-
-        reasons = decision.get("reasons") or []
-        lines.append("──────────────────")
-        lines.append("💡 <b>WHY THIS TRADE</b>")
-        attribution = self._attribution_lines(decision)
-        if attribution:
-            lines.extend(attribution)
-        technical_cautions = self._technical_caution_lines(decision)
-        if technical_cautions:
-            lines.extend(technical_cautions)
-        for r in reasons[:3]:
-            lines.append(f"• {self._friendly_signal_text(r)}")
-        if len(reasons) > 3:
-            lines.append(f"• … {len(reasons) - 3} more internal confirmations")
 
         lines.extend([
             "━━━━━━━━━━━━━━━━━━━━━",
