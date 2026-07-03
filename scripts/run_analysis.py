@@ -316,8 +316,8 @@ async def _check_scale_in(
     if current_price <= 0:
         return
     symbol = str(all_results.get("symbol") or config.get("symbol") or "XAU/USD")
-    trigger_points = float(fr.get("scale_in_trigger_points", 50) or 50)
-    max_scale_ins = int(fr.get("scale_in_max", 1) or 1)
+    trigger_points = float(fr.get("scale_in_trigger_points", 200) or 200)
+    max_scale_ins = int(fr.get("scale_in_max", 2) or 2)
     if max_scale_ins <= 0:
         return
 
@@ -401,7 +401,7 @@ async def _check_scale_in(
                 "type": side,
                 "scale_in": True,
                 "parent_trade_id": parent_id,
-                "scale_in_size_ratio": float(fr.get("scale_in_size_ratio", 1.0) or 1.0),
+                "scale_in_size_ratio": float(fr.get("scale_in_size_ratio", 0.5) or 0.5),
                 "entry": {"price": entry_price, "kind": "MARKET"},
                 "entry_kind": "MARKET",
                 "stop_loss": stop_loss,

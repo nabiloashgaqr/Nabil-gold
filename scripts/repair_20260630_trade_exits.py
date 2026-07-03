@@ -69,7 +69,7 @@ def main() -> None:
     high_raw = os.environ.get("CANDLE_HIGH")
     high = _f(high_raw, 0.0) if high_raw else 0.0
 
-    trailing_points = float((config.get("trailing_stop", {}) or {}).get("trailing_distance", 100.0) or 100.0)
+    trailing_points = float((config.get("trailing_stop", {}) or {}).get("trailing_distance", 150.0) or 150.0)
     trailing_distance = points_to_price(trailing_points, symbol)
     decimals = price_decimals(symbol)
     corrected_sell_stop = round(low + trailing_distance, decimals)
