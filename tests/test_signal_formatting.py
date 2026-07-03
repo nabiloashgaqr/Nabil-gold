@@ -92,16 +92,24 @@ def test_empty_risk_section_dropped_without_gap():
     decision["ai"] = {"available": True, "signal": "SELL", "confidence": 74}
     decision["daily_bias"] = {"bias": "NEUTRAL"}
     text = _capture_signal(decision)
-    assert "RISK" not in text.split("AGENT VOTES")[-1].split("WHY THIS TRADE")[-1]
+    assert "RISK" not in text.split("AGENT VOTES")[-1].split("━━━━━━━━━━━━━━━━━━━━━")[-1]
     # No triple blank lines anywhere.
     assert "\n\n\n" not in text
 
 
 def test_agent_votes_have_direction_markers():
-    text = _capture_signal(_full_decision())
+    decision = _full_decision()
+    decision["agent_details"] = {
+        "technical": {"label": "Technical", "direction": "WAIT", "confidence": 55, "signals": ["RSI neutral"]},
+        "classical": {"label": "Classical", "direction": "SELL", "confidence": 82, "signals": ["Bearish pattern"]},
+        "smc": {"label": "SMC", "direction": "WAIT", "confidence": 45, "signals": ["Structure bearish"]},
+        "price_action": {"label": "Price Action", "direction": "SELL", "confidence": 67, "signals": ["Bearish rejection"]},
+        "multitimeframe": {"label": "Multitimeframe", "direction": "SELL", "confidence": 70, "signals": ["4H bearish"]},
+    }
+    text = _capture_signal(decision)
     assert "AGENT VOTES" in text
-    # Directional dots present.
-    assert "🔴" in text and "⚪" in text
+    # Directional dots present: red for SELL, yellow for WAIT.
+    assert "🔴" in text and "🟡" in text
 
 
 def test_signal_includes_trade_management_rule():

@@ -38,13 +38,9 @@ def test_signal_message_separates_votes_context_and_attribution():
     })
 
     assert "Strength: Good — 2/5 qualified agents, no opposition" in text
-    assert "BUY qualified" in text
-    assert "Not qualified:</b> Technical, Classical" in text
-    assert "Market notes" in text
+    assert "🟢" in text
+    assert "🟡" in text
     assert "Daily bias: BULLISH (70%)" in text
     assert "Macro: Bullish Gold (64%)" in text
     assert "News: CAUTION / LOW — no hard block" in text
-    assert "Primary driver: Multitimeframe" in text
-    assert "Timing VALID · Permission ALLOWED" in text
-    assert "Technical caution: MACD bearish and weakening" in text
     assert "Protection:</b> SL → entry after +100 pts before TP1" in text

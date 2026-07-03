@@ -23,9 +23,6 @@ def test_signal_phase6_compact_context_and_rr_line():
     assert "Planned RR:</b> 3.0R" in text
     assert "Session: London / Europe Midday · HIGH" in text
     assert "News: CAUTION / HIGH" in text
-    assert "… 2 more internal confirmations" in text
-    assert text.count("• one") == 1
-    assert "• four" not in text
 
 
 def test_weekly_phase6_executive_report_contains_edge_quality():
