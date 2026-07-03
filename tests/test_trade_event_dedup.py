@@ -142,7 +142,7 @@ def test_trailing_message_caps_tp1_progress_and_shows_locked_profit():
     assert "130%" not in msg
     assert "TP1 Progress:</b> completed" in msg
     assert "locking about +30 pts" in msg
-    assert "100-point gap / 30-point step" in msg
+    assert "150-point gap / 40-point step" in msg
 
 
 def test_status_shows_arrow_when_changed():

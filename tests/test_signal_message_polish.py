@@ -43,4 +43,4 @@ def test_signal_message_separates_votes_context_and_attribution():
     assert "Daily bias: BULLISH (70%)" in text
     assert "Macro: Bullish Gold (64%)" in text
     assert "News: CAUTION / LOW — no hard block" in text
-    assert "Protection:</b> SL → entry after +100 pts before TP1" in text
+    assert "Protection:</b> SL → entry after +200 pts before TP1" in text

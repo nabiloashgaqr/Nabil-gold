@@ -115,8 +115,8 @@ def test_agent_votes_have_direction_markers():
 def test_signal_includes_trade_management_rule():
     text = _capture_signal(_full_decision())
     assert "Management:" in text
-    assert "SL → entry after +100 pts" in text
-    assert "Trail gap 100 pts / step 30 pts" in text
+    assert "SL → entry after +200 pts" in text
+    assert "Trail gap 150 pts / step 40 pts" in text
     assert "check 5m" in text
 
 
