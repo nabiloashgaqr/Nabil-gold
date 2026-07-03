@@ -12,7 +12,7 @@ five analysis agents only:
 Rules:
 - Ignore agents below ``agent_min_confidence`` (default 60%).
 - A normal entry needs at least 2 qualified agents in the same direction.
-- Their net weighted confidence after subtracting opposition must be >=65%.
+- Their net weighted confidence after subtracting opposition must be >=72%.
 - Counter-trend trades against Daily Bias need at least 2 qualified agents and
   net confidence >=75%.
 """
