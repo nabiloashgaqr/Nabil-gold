@@ -263,8 +263,8 @@ class TelegramService:
         ])
         if rr:
             lines.append(f"• <b>Planned RR:</b> {html.escape(str(rr))}R")
-        lines.append("• <b>Protection:</b> SL → entry after +100 pts before TP1")
-        lines.append("• <b>Management:</b> Trail gap 100 pts / step 30 pts · check 5m")
+        lines.append("• <b>Protection:</b> SL → entry after +200 pts before TP1")
+        lines.append("• <b>Management:</b> Trail gap 150 pts / step 40 pts · check 5m")
 
         vote_lines = self._votes_lines(decision)
         if vote_lines:
@@ -357,7 +357,7 @@ class TelegramService:
         if "MOVE_SL_TO_BE" in events:
             notes.append("Stop loss moved to entry / breakeven protection.")
         if "TRAILING_SL_UPDATED" in events:
-            notes.append("Trailing stop updated using 100-point gap / 30-point step.")
+            notes.append("Trailing stop updated using 150-point gap / 40-point step.")
         if "TP1_HIT" in events:
             notes.append("TP1 reached; partial profit/protection rules applied.")
         if "TP2_HIT" in events:
@@ -438,7 +438,7 @@ class TelegramService:
                     lines.append(f"• <b>New SL:</b> {self._money(new_sl, symbol)} — locking about +{locked:.0f} pts")
                 except (TypeError, ValueError):
                     lines.append(f"• <b>New SL:</b> {self._money(new_sl, symbol)}")
-            lines.append("• <b>Trailing rule:</b> 100-point gap / 30-point step")
+            lines.append("• <b>Trailing rule:</b> 150-point gap / 40-point step")
         notes = self._event_notes(events)
         if notes:
             lines.append("──────────────────")
