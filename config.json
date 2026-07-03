@@ -1,368 +1,370 @@
 {
-  "symbol": "XAU/USD",
-  "timeframes": [
-    "5m",
-    "15m",
-    "1H",
-    "4H"
-  ],
-  "primary_timeframe": "15m",
-  "trend_timeframe": "4H",
-  "entry_timeframe": "15m",
-  "data_source": {
-    "primary": "twelvedata",
-    "fallback": null,
-    "description_fallback": "لا يوجد fallback مجاني موثوق لشموع XAU/USD 5m للتحليل. عند انتهاء كوتة Twelve Data يتم إيقاف التحليل بأمان. لإدارة الصفقات المفتوحة فقط يستخدم النظام Swissquote spot quote كسعر حي لحماية SL/TP دون توليد إشارات جديدة.",
-    "api_keys": {
-      "twelvedata": "ENV:TWELVEDATA_API_KEY"
+    "symbol": "XAU/USD",
+    "timeframes": [
+        "5m",
+        "15m",
+        "1H",
+        "4H"
+    ],
+    "primary_timeframe": "15m",
+    "trend_timeframe": "4H",
+    "entry_timeframe": "15m",
+    "data_source": {
+        "primary": "twelvedata",
+        "fallback": null,
+        "description_fallback": "لا يوجد fallback مجاني موثوق لشموع XAU/USD 5m للتحليل. عند انتهاء كوتة Twelve Data يتم إيقاف التحليل بأمان. لإدارة الصفقات المفتوحة فقط يستخدم النظام Swissquote spot quote كسعر حي لحماية SL/TP دون توليد إشارات جديدة.",
+        "api_keys": {
+            "twelvedata": "ENV:TWELVEDATA_API_KEY"
+        },
+        "allow_synthetic_in_production": false,
+        "resample_timeframes_from_base": true,
+        "base_timeframe": "5m",
+        "base_outputsize": 2500,
+        "description_resample_timeframes_from_base": "Fetch one 5m series per symbol then locally resample 15m/1H/4H to reduce API calls."
     },
-    "allow_synthetic_in_production": false,
-    "resample_timeframes_from_base": true,
-    "base_timeframe": "5m",
-    "base_outputsize": 2500,
-    "description_resample_timeframes_from_base": "Fetch one 5m series per symbol then locally resample 15m/1H/4H to reduce API calls."
-  },
-  "telegram": {
-    "bot_token": "ENV:TELEGRAM_BOT_TOKEN",
-    "chat_id": "ENV:TELEGRAM_CHAT_ID",
-    "signals_channel": "ENV:TELEGRAM_CHAT_ID"
-  },
-  "database": {
-    "provider": "supabase",
-    "url": "ENV:SUPABASE_URL",
-    "key": "ENV:SUPABASE_KEY",
-    "local_fallback_file": "storage/trades.json"
-  },
-  "agent_weights": {
-    "technical": 0.2,
-    "classical": 0.2,
-    "smc": 0.25,
-    "price_action": 0.15,
-    "multitimeframe": 0.2
-  },
-  "risk_settings": {
-    "min_confidence": 65,
-    "min_rr_ratio": 1.5,
-    "default_risk_percent": 1.0,
-    "atr_multiplier_sl": 1.5,
-    "atr_multiplier_tp1": 2.0,
-    "atr_multiplier_tp2": 3.5,
-    "min_sl_distance_points": 300,
-    "description_min_sl_distance_points": "حد أدنى لمسافة SL (200 نقطة = 20$) لأن الذهب يتحرك 50-100 نقطة بثواني؛ SL أضيق من هذا يُفتح بالضوضاء وليس بانعكاس حقيقي. عند تفعيله يُعاد حساب TP1/TP2/TP3 بنفس نسبة R:R المُعتمدة من ATR للحفاظ على min_rr_ratio.",
-    "account_capital": 10000,
-    "max_rr_ratio": 4.0,
-    "max_open_trades": 50,
-    "max_daily_signals": 50,
-    "description_max_open_trades_daily_signals": "مرحلة تعلّم: رُفعت من الافتراضي (3 / 8) مؤقتاً للسماح بخروج كل الإشارات دون عداد يومي/متزامن، إلى أن نُشدد بعد جمع بيانات كافية.",
-    "description_max_rr_ratio": "سقف R:R لتجنب أهداف TP2 غير واقعية في الإشارات التجريبية/الحية"
-  },
-  "signal_requirements": {
-    "min_agents_agree": 2,
-    "min_agreement_percentage": 1,
-    "allow_all_signals": false,
-    "description": "Classic consensus mode: enter only when at least two qualified agents agree and their net weighted confidence after opposition penalty is >=65%.",
-    "min_consensus_confidence": 65,
-    "strong_single_agent_confidence": 0,
-    "strong_single_agent_enabled": false,
-    "agent_min_confidence": 60
-  },
-  "schedule": {
-    "analysis_interval_minutes": 5,
-    "trade_update_interval_minutes": 5,
-    "daily_report_time": "23:00",
-    "timezone": "Asia/Hebron"
-  },
-  "filters": {
-    "no_signal_before_news_minutes": 30,
-    "no_signal_after_news_minutes": 15,
-    "max_spread_points": 5,
-    "min_atr_for_entry": 1.0,
-    "max_consecutive_losses": 999
-  },
-  "trading_hours": {
-    "enabled": true,
-    "timezone": "Asia/Hebron",
-    "sessions": [
-      {
-        "name": "Main Trading Session",
-        "start_hour": 3,
-        "start_minute": 0,
-        "end_hour": 22,
-        "end_minute": 0,
-        "days": [
-          0,
-          1,
-          2,
-          3,
-          4
+    "telegram": {
+        "bot_token": "ENV:TELEGRAM_BOT_TOKEN",
+        "chat_id": "ENV:TELEGRAM_CHAT_ID",
+        "signals_channel": "ENV:TELEGRAM_CHAT_ID"
+    },
+    "database": {
+        "provider": "supabase",
+        "url": "ENV:SUPABASE_URL",
+        "key": "ENV:SUPABASE_KEY",
+        "local_fallback_file": "storage/trades.json"
+    },
+    "agent_weights": {
+        "technical": 0.2,
+        "classical": 0.2,
+        "smc": 0.25,
+        "price_action": 0.15,
+        "multitimeframe": 0.2
+    },
+    "risk_settings": {
+        "min_confidence": 65,
+        "min_rr_ratio": 1.5,
+        "default_risk_percent": 1.0,
+        "atr_multiplier_sl": 2.0,
+        "atr_multiplier_tp1": 2.5,
+        "atr_multiplier_tp2": 4.5,
+        "min_sl_distance_points": 400,
+        "description_min_sl_distance_points": "حد أدنى لمسافة SL (400 نقطة = 40$) لأن الذهب يتحرك 50-100 نقطة بثواني؛ SL أضيق من هذا يُفتح بالضوضاء وليس بانعكاس حقيقي. تم رفعه من 300 إلى 400 لتقليل ضرب الستوب بالضوضا المؤقتة. عند تفعيله يُعاد حساب TP1/TP2/TP3 بنفس نسبة R:R المُعتمدة من ATR للحفاظ على min_rr_ratio.",
+        "account_capital": 10000,
+        "max_rr_ratio": 4.0,
+        "max_open_trades": 50,
+        "max_daily_signals": 50,
+        "description_max_open_trades_daily_signals": "مرحلة تعلّم: رُفعت من الافتراضي (3 / 8) مؤقتاً للسماح بخروج كل الإشارات دون عداد يومي/متزامن، إلى أن نُشدد بعد جمع بيانات كافية.",
+        "description_max_rr_ratio": "سقف R:R لتجنب أهداف TP2 غير واقعية في الإشارات التجريبية/الحية"
+    },
+    "signal_requirements": {
+        "min_agents_agree": 2,
+        "min_agreement_percentage": 1,
+        "allow_all_signals": false,
+        "description": "Classic consensus mode: enter only when at least two qualified agents agree and their net weighted confidence after opposition penalty is >=65%.",
+        "min_consensus_confidence": 65,
+        "strong_single_agent_confidence": 0,
+        "strong_single_agent_enabled": false,
+        "agent_min_confidence": 60
+    },
+    "schedule": {
+        "analysis_interval_minutes": 5,
+        "trade_update_interval_minutes": 5,
+        "daily_report_time": "23:00",
+        "timezone": "Asia/Hebron"
+    },
+    "filters": {
+        "no_signal_before_news_minutes": 30,
+        "no_signal_after_news_minutes": 15,
+        "max_spread_points": 5,
+        "min_atr_for_entry": 1.0,
+        "max_consecutive_losses": 999
+    },
+    "trading_hours": {
+        "enabled": true,
+        "timezone": "Asia/Hebron",
+        "sessions": [
+            {
+                "name": "Main Trading Session",
+                "start_hour": 3,
+                "start_minute": 0,
+                "end_hour": 22,
+                "end_minute": 0,
+                "days": [
+                    0,
+                    1,
+                    2,
+                    3,
+                    4
+                ],
+                "quality": "HIGH",
+                "allow_signals": true,
+                "allow_reports": true,
+                "description": "Signals allowed 3:00 AM - 10:00 PM on weekdays (Monday-Friday) in Asia/Hebron timezone. Weekends are blocked."
+            }
         ],
-        "quality": "HIGH",
-        "allow_signals": true,
-        "allow_reports": true,
-        "description": "Signals allowed 3:00 AM - 10:00 PM on weekdays (Monday-Friday) in Asia/Hebron timezone. Weekends are blocked."
-      }
+        "min_quality_required": "HIGH",
+        "allow_friday_after_hours": true,
+        "friday_cutoff_hour": 22,
+        "exclude_weekends": false,
+        "enforce_friday_cutoff": false,
+        "friday_cutoff_minute": 0,
+        "description": "توليد الإشارات مسموح 3:00-22:00 خلال أيام العمل فقط (الإثنين-الجمعة) بتوقيت Asia/Hebron. لا إشارات يومي السبت والأحد. متابعة الصفقات المفتوحة تبقى منفصلة وتعمل عند وجود صفقة لحماية SL/TP/Trailing."
+    },
+    "signal_filters": {
+        "require_trading_hours": true,
+        "allow_contrarian_in_low_quality": false
+    },
+    "github_actions": {
+        "enabled": true,
+        "state_storage": "supabase",
+        "note": "GitHub Actions is stateless; persistent trades must be stored in Supabase.",
+        "require_supabase": true
+    },
+    "trade_management": {
+        "near_tp1_progress": 0.8,
+        "time_warning_hours": 4,
+        "expire_after_hours": 24,
+        "auto_move_sl_to_entry_after_tp1": true,
+        "trailing_stop_enabled": true,
+        "trailing_activation_at": "TP1",
+        "trailing_distance_points": 100,
+        "partial_close_at_tp1": true,
+        "partial_close_percentage": 50,
+        "update_outside_trading_hours": true,
+        "description_update_outside_trading_hours": "متابعة الصفقات المفتوحة (SL/TP/breakeven/trailing) تعمل على مدار الساعة حتى خارج نافذة توليد الإشارات (02:00-22:00). الذهب يتحرك 24/5 وقد تضرب الصفقة هدفاً/وقفاً في أي وقت. توليد الإشارات الجديدة يبقى مقيّداً بالنافذة، لكن إدارة الصفقات القائمة لا تتوقف.",
+        "keep_protected_winners_open": true,
+        "description_expire": "expire_after_hours=24: تُغلق الصفقة تلقائياً بعد 24 ساعة. keep_protected_winners_open=true: لا تُغلق صفقة رابحة وقفها مُؤمّن عند الدخول أو أفضل حتى لو انتهت المدة — يُترك الستوب/التريلينغ يديرها بدل قطعها بالساعة.",
+        "trailing_step_points": 30,
+        "description_trailing_stop": "إجباري: عند ربح +100 نقطة ينقل SL إلى الدخول فوراً. بعدها يبدأ Trailing مباشرة بمسافة ثابتة 100 نقطة خلف السعر، ويتحرك كلما تحرك السعر 30 نقطة لصالح الصفقة (step=30). يتم إرسال Telegram عند كل نقل SL/Trailing/TP/SL.",
+        "early_breakeven_points": 150,
+        "description_early_breakeven": "early_breakeven_points=150: عند وصول الصفقة إلى +150 نقطة (15$) يُنقل الستوب إلى الدخول فوراً دون انتظار TP1. تم رفعه من 100 إلى 150 لأن SL أصبح 400pts فنحتاج ربح أكبر قبل نقل الستوب. بعدها يبدأ Trailing مباشرة بمسافة trailing_distance=100 نقطة خلف السعر."
+    },
+    "performance": {
+        "track_win_rate_per_agent": true,
+        "track_session_performance": true,
+        "alert_on_drawdown_percent": 5,
+        "report_interval_days": 7
+    },
+    "trailing_stop": {
+        "enabled": true,
+        "tp1_trigger_pct": 50.0,
+        "partial_close_pct": 50.0,
+        "trailing_distance": 100.0,
+        "trailing_step": 30.0,
+        "tp2_trigger_pct": 100.0,
+        "tp2_distance": 15.0,
+        "min_profit_lock": 0.0,
+        "early_breakeven_points": 100.0,
+        "description_early_breakeven": "early_breakeven_points=100: عند وصول الصفقة إلى +100 نقطة (10$) يُنقل الستوب إلى الدخول فوراً دون انتظار TP1. بعدها يبدأ Trailing مباشرة بمسافة trailing_distance=100 نقطة خلف السعر، ولا يتحرك إلا كل trailing_step=30 نقطة لصالح الصفقة؛ أي يبقى الفرق بين السعر والستوب حوالي 100 نقطة، وكل تحرك جديد للستوب يرسل تحديث Telegram إجباري. نقاط الذهب: 10 نقاط = 1$."
+    },
+    "news_feed": {
+        "enabled": false,
+        "source": "forexfactory",
+        "hours_before": 2,
+        "hours_after": 1,
+        "min_impact": "medium",
+        "auto_block_on_high": true,
+        "gold_currencies": [
+            "USD",
+            "EUR",
+            "GBP",
+            "AUD",
+            "JPY",
+            "CAD",
+            "CHF"
+        ],
+        "allow_mock": false,
+        "note": "No live provider is configured here. Use NewsRiskAgent with NEWS_EVENTS_JSON or storage/news_events.json until a real provider is added."
+    },
+    "learning": {
+        "enabled": true,
+        "update_frequency_days": 1,
+        "min_predictions_for_adjustment": 3,
+        "max_weight_change": 0.25,
+        "momentum_weight": 0.4,
+        "decay_factor": 0.9,
+        "performance_threshold": 0.6,
+        "auto_adjust_confidence": true,
+        "aggressive_mode": true,
+        "streak_bonus": 0.1,
+        "description": "نظام التعلم الذكي لتحديث أوزان الوكلاء"
+    },
+    "notifications": {
+        "send_no_signal_updates": false,
+        "manual_run_status_updates": true,
+        "hourly_status": false,
+        "hourly_status_interval_minutes": 60,
+        "market_status_title": "Market Status",
+        "status_every_analysis": false,
+        "hourly_market_status": false,
+        "notify_on_blocked_signal": false,
+        "description_notify_on_blocked_signal": "false في التشغيل العادي/الخارجي الصامت. رسائل الحالة/أسباب الرفض تُرسل فقط من Cron Job المخصص لحالة السوق عند send_status=true.",
+        "notify_on_trade_update": false,
+        "description_notify_on_trade_update": "إذا true يرسل Heartbeat مختصر حتى بدون أحداث. أحداث نقل الستوب/Trailing/TP/SL تُرسل دائماً فور تشغيل update_trades ولا تعتمد على هذا الخيار.",
+        "heartbeat_on_trade_update": false,
+        "description_heartbeat_on_trade_update": "false حتى لا يرسل النظام رسائل متابعة دورية بدون تغيير. سيتم إرسال Telegram فقط عند حدوث حدث فعلي: نقل SL للدخول، تحريك Trailing، TP، SL، BE، أو Fill.",
+        "heartbeat_interval_minutes": 60,
+        "description_send_no_signal_updates": "false لأن Market Status أصبح يُرسل فقط من cron-job.org عبر workflow_dispatch مع input send_status=true.",
+        "description_hourly_status": "false لإيقاف حالة السوق الداخلية من المستودع. استخدم Cron Job خارجي كل ساعة مع send_status=true."
+    },
+    "duplicate_signal_filter": {
+        "enabled": true,
+        "price_zone_points": 50,
+        "description_price_zone_points": "نطاق السعر الذي يُعتبر فيه دخولان 'نفس المنطقة' (نقاط الذهب: 1$=10 نقاط، أي 50 نقطة=5$). خارج هذا النطاق يُعد إعداداً جديداً مشروعاً ولا يُحجب.",
+        "open_trade": {
+            "block_same_direction_in_zone": true,
+            "block_same_direction_any_price": false,
+            "max_open_same_direction": 3,
+            "description_max_open_same_direction": "حد أقصى للصفقات المفتوحة بنفس الاتجاه على نفس الرمز. مثال: إذا توجد 3 صفقات SELL مفتوحة، تُمنع صفقة SELL رابعة فقط، بينما BUY يبقى مسموحاً.",
+            "description": "حماية تكديس الصفقات المفتوحة: امنع فتح صفقة بنفس الاتجاه داخل نفس منطقة السعر (in_zone)، ولا تسمح بأكثر من max_open_same_direction صفقات مفتوحة بنفس الاتجاه. فعّل any_price=true إذا أردت صفقة واحدة فقط لكل اتجاه بغضّ النظر عن السعر."
+        },
+        "cooldown": {
+            "lookback_hours": 6,
+            "after_loss_minutes": 90,
+            "after_breakeven_minutes": 45,
+            "after_win_minutes": 30,
+            "description": "تبريد واعٍ بالنتيجة للصفقات المغلقة حديثاً في نفس منطقة السعر فقط: بعد خسارة تبريد أطول (تجنّب التكرار الانتقامي)، بعد تعادل متوسط، بعد ربح أقصر (اتجاه ناجح). lookback_hours يحدد أقصى عمر للصفقة المغلقة التي تُؤخذ بالحسبان."
+        },
+        "description": "فلتر تكرار احترافي بمفهومين منفصلين: (1) حماية تكديس الصفقات المفتوحة في نفس المنطقة، (2) تبريد واعٍ بالنتيجة للصفقات المغلقة حديثاً في نفس المنطقة. دخول في منطقة سعر مختلفة لا يُحجب. مفاتيح legacy (lookback_minutes/same_direction_price_zone_points) ما زالت مدعومة كـ fallback."
+    },
+    "quality_score": {
+        "enabled": true,
+        "description": "يعرض درجة جودة الإشارة في Telegram ولا يمنع الإشارة حالياً"
+    },
+    "trading_mode": "paper",
+    "paper_trading": {
+        "enabled": true,
+        "starting_balance": 10000,
+        "currency": "USD",
+        "default_lot_size": 0.01,
+        "track_virtual_pnl": true,
+        "description": "وضع تجريبي: يتم حفظ ومتابعة الصفقات افتراضياً بدون تنفيذ حقيقي"
+    },
+    "daily_bias_filter": {
+        "enabled": true,
+        "timeframe": "4H",
+        "ema_fast": 20,
+        "ema_slow": 50,
+        "rsi_period": 14,
+        "slope_lookback": 12,
+        "score_threshold": 1.25,
+        "contrarian_min_confidence": 75,
+        "block_strong_contrarian_below": 75,
+        "description": "فلتر اتجاه أعلى (Daily Bias): الصفقات المعاكسة للاتجاه 4H تحتاج موافقة وكيلين مؤهلين على نفس الاتجاه وثقة إشارة ≥75%. الوكلاء المعارضون يخصمون من قوة الإشارة.",
+        "contrarian_min_confidence_two_agents": 75,
+        "contrarian_min_agents_for_lower_confidence": 2
+    },
+    "dynamic_risk_management": {
+        "enabled": false,
+        "warn_after_losses": 2,
+        "halt_after_losses": 3,
+        "daily_loss_limit_points": 1000,
+        "recent_trades_limit": 20,
+        "recent_losses_caution": 2,
+        "normal_min_quality_score": 0,
+        "caution_min_confidence": 75,
+        "strict_min_confidence": 82,
+        "caution_min_quality_score": 70,
+        "strict_min_quality_score": 80,
+        "caution_risk_multiplier": 0.75,
+        "strict_risk_multiplier": 0.5,
+        "description": "يرفع شروط الثقة والجودة أو يوقف التداول بعد خسائر متتالية/خسارة يومية",
+        "description_disabled": "معطّل مؤقتاً (enabled:false) في مرحلة التعلّم لترك كل الإشارات تخرج بغض النظر عن نتائج الصفقات السابقة؛ يُعاد تفعيله بعد جمع بيانات كافية."
+    },
+    "news_risk": {
+        "tier1_before_minutes": 60,
+        "tier1_after_minutes": 30,
+        "tier2_before_minutes": 30,
+        "tier2_after_minutes": 15,
+        "warning_before_minutes": 120,
+        "high_risk_day_tier1_count": 3,
+        "description": "تصنيف أخبار Tier 1/2 مع نوافذ منع وتحذير مخصصة للذهب"
+    },
+    "order_execution": {
+        "enabled": true,
+        "mode": "paper",
+        "default_order_type": "MARKET",
+        "entry_style": "fixed_risk",
+        "description_entry_style": "fixed_risk (300pts): ينتظر أقرب مستوى قوي (دعم/مقاومة/SMC). إذا المسافة ≤ 300 نقطة → دخول MARKET فوري + SL خلف المستوى. التعزيز: حجم كامل (100%)، مسافة 50 نقطة، حد أقصى تعزيز واحد فقط.",
+        "fixed_risk": {
+            "max_risk_distance_points": 300,
+            "description_max_risk_distance_points": "300 نقطة (30$). إذا أقرب مستوى ضمن 300 → دخول MARKET فوراً + SL خلف المستوى.",
+            "sl_buffer_points": 20,
+            "description_sl_buffer_points": "بفر بالأعلى (للبيع) أو الأسفل (للشراء) من المستوى لوضع الستوب. 20 نقطة = 2.00$. يضمن أن الستوب ليس بالضبط عند المستوى.",
+            "scale_in_enabled": false,
+            "scale_in_max": 1,
+            "description_scale_in_max": "أقصى عدد من صفقات التعزيز المسموحة (بالإضافة للأصلية). 2 = يمكن الدخول 3 صفقات في نفس الاتجاه: الأصلية + تعزيز 1 + تعزيز 2.",
+            "scale_in_trigger_points": 50,
+            "description_scale_in_trigger_points": "عندما يبقى بين السعر والمستوى ≤ 100 نقطة (10$)، نعزز باتجاه الصفقة. السعر كاد يلمس المستوى — آخر فرصة قبل الانعكاس.",
+            "scale_in_size_ratio": 1.0,
+            "description_scale_in_size_ratio": "نسبة حجم التعزيز مقارنة بالصفقة الأصلية. 0.5 = نصف الحجم. 1.0 = نفس الحجم.",
+            "description": "fixed_risk zone logic kept for entry levels, but always MARKET execution.",
+            "note": "Zone logic kept only for SL/TP calculation. Execution always MARKET.",
+            "description_scale_in": "Disabled in classic consensus mode to avoid unconfirmed scale-ins."
+        },
+        "allowed_order_types": [
+            "BUY_MARKET",
+            "SELL_MARKET"
+        ],
+        "description": "Paper order classification only: market, limit, or stop based on entry vs current price.",
+        "pending_support_removed": true
+    },
+    "operation_mode": "classic_consensus",
+    "operation_modes": {
+        "classic_consensus": {
+            "description": "Final signal from 5-agent weighted consensus + risk/news/session/duplicate filters.",
+            "requires_three_agents": false,
+            "paper_only": true
+        }
+    },
+    "weekly_report": {
+        "enabled": true,
+        "day_of_week": 5,
+        "lookback_days": 7,
+        "min_trades_for_report": 5,
+        "max_chars": 3500,
+        "send_telegram": true,
+        "storage_path": "storage/weekly_report.json",
+        "timezone": "Asia/Hebron",
+        "report_time": "10:00",
+        "description": "Weekly AI Performance Report — يرسل السبت 10:00 صباحاً بتوقيتك المحلي"
+    },
+    "symbols": [
+        {
+            "symbol": "XAU/USD",
+            "enabled": true
+        },
+        {
+            "symbol": "WTI/USD",
+            "enabled": false,
+            "description_disabled": "WTI/USD disabled temporarily: the free Twelve Data plan does not provide real time_series data for oil (needs Basic plan or higher). Set this back to true after upgrading the plan or adding an oil-capable data source."
+        }
     ],
-    "min_quality_required": "HIGH",
-    "allow_friday_after_hours": true,
-    "friday_cutoff_hour": 22,
-    "exclude_weekends": false,
-    "enforce_friday_cutoff": false,
-    "friday_cutoff_minute": 0,
-    "description": "توليد الإشارات مسموح 3:00-22:00 خلال أيام العمل فقط (الإثنين-الجمعة) بتوقيت Asia/Hebron. لا إشارات يومي السبت والأحد. متابعة الصفقات المفتوحة تبقى منفصلة وتعمل عند وجود صفقة لحماية SL/TP/Trailing."
-  },
-  "signal_filters": {
-    "require_trading_hours": true,
-    "allow_contrarian_in_low_quality": false
-  },
-  "github_actions": {
-    "enabled": true,
-    "state_storage": "supabase",
-    "note": "GitHub Actions is stateless; persistent trades must be stored in Supabase.",
-    "require_supabase": true
-  },
-  "trade_management": {
-    "near_tp1_progress": 0.8,
-    "time_warning_hours": 4,
-    "expire_after_hours": 24,
-    "auto_move_sl_to_entry_after_tp1": true,
-    "trailing_stop_enabled": true,
-    "trailing_activation_at": "TP1",
-    "trailing_distance_points": 100,
-    "partial_close_at_tp1": true,
-    "partial_close_percentage": 50,
-    "update_outside_trading_hours": true,
-    "description_update_outside_trading_hours": "متابعة الصفقات المفتوحة (SL/TP/breakeven/trailing) تعمل على مدار الساعة حتى خارج نافذة توليد الإشارات (02:00-22:00). الذهب يتحرك 24/5 وقد تضرب الصفقة هدفاً/وقفاً في أي وقت. توليد الإشارات الجديدة يبقى مقيّداً بالنافذة، لكن إدارة الصفقات القائمة لا تتوقف.",
-    "keep_protected_winners_open": true,
-    "description_expire": "expire_after_hours=24: تُغلق الصفقة تلقائياً بعد 24 ساعة. keep_protected_winners_open=true: لا تُغلق صفقة رابحة وقفها مُؤمّن عند الدخول أو أفضل حتى لو انتهت المدة — يُترك الستوب/التريلينغ يديرها بدل قطعها بالساعة.",
-    "trailing_step_points": 30,
-    "description_trailing_stop": "إجباري: عند ربح +100 نقطة ينقل SL إلى الدخول فوراً. بعدها يبدأ Trailing مباشرة بمسافة ثابتة 100 نقطة خلف السعر، ويتحرك كلما تحرك السعر 30 نقطة لصالح الصفقة (step=30). يتم إرسال Telegram عند كل نقل SL/Trailing/TP/SL."
-  },
-  "performance": {
-    "track_win_rate_per_agent": true,
-    "track_session_performance": true,
-    "alert_on_drawdown_percent": 5,
-    "report_interval_days": 7
-  },
-  "trailing_stop": {
-    "enabled": true,
-    "tp1_trigger_pct": 50.0,
-    "partial_close_pct": 50.0,
-    "trailing_distance": 100.0,
-    "trailing_step": 30.0,
-    "tp2_trigger_pct": 100.0,
-    "tp2_distance": 15.0,
-    "min_profit_lock": 0.0,
-    "early_breakeven_points": 100.0,
-    "description_early_breakeven": "early_breakeven_points=100: عند وصول الصفقة إلى +100 نقطة (10$) يُنقل الستوب إلى الدخول فوراً دون انتظار TP1. بعدها يبدأ Trailing مباشرة بمسافة trailing_distance=100 نقطة خلف السعر، ولا يتحرك إلا كل trailing_step=30 نقطة لصالح الصفقة؛ أي يبقى الفرق بين السعر والستوب حوالي 100 نقطة، وكل تحرك جديد للستوب يرسل تحديث Telegram إجباري. نقاط الذهب: 10 نقاط = 1$."
-  },
-  "news_feed": {
-    "enabled": false,
-    "source": "forexfactory",
-    "hours_before": 2,
-    "hours_after": 1,
-    "min_impact": "medium",
-    "auto_block_on_high": true,
-    "gold_currencies": [
-      "USD",
-      "EUR",
-      "GBP",
-      "AUD",
-      "JPY",
-      "CAD",
-      "CHF"
-    ],
-    "allow_mock": false,
-    "note": "No live provider is configured here. Use NewsRiskAgent with NEWS_EVENTS_JSON or storage/news_events.json until a real provider is added."
-  },
-  "learning": {
-    "enabled": true,
-    "update_frequency_days": 1,
-    "min_predictions_for_adjustment": 3,
-    "max_weight_change": 0.25,
-    "momentum_weight": 0.4,
-    "decay_factor": 0.9,
-    "performance_threshold": 0.6,
-    "auto_adjust_confidence": true,
-    "aggressive_mode": true,
-    "streak_bonus": 0.1,
-    "description": "نظام التعلم الذكي لتحديث أوزان الوكلاء"
-  },
-  "notifications": {
-    "send_no_signal_updates": false,
-    "manual_run_status_updates": true,
-    "hourly_status": false,
-    "hourly_status_interval_minutes": 60,
-    "market_status_title": "Market Status",
-    "status_every_analysis": false,
-    "hourly_market_status": false,
-    "notify_on_blocked_signal": false,
-    "description_notify_on_blocked_signal": "false في التشغيل العادي/الخارجي الصامت. رسائل الحالة/أسباب الرفض تُرسل فقط من Cron Job المخصص لحالة السوق عند send_status=true.",
-    "notify_on_trade_update": false,
-    "description_notify_on_trade_update": "إذا true يرسل Heartbeat مختصر حتى بدون أحداث. أحداث نقل الستوب/Trailing/TP/SL تُرسل دائماً فور تشغيل update_trades ولا تعتمد على هذا الخيار.",
-    "heartbeat_on_trade_update": false,
-    "description_heartbeat_on_trade_update": "false حتى لا يرسل النظام رسائل متابعة دورية بدون تغيير. سيتم إرسال Telegram فقط عند حدوث حدث فعلي: نقل SL للدخول، تحريك Trailing، TP، SL، BE، أو Fill.",
-    "heartbeat_interval_minutes": 60,
-    "description_send_no_signal_updates": "false لأن Market Status أصبح يُرسل فقط من cron-job.org عبر workflow_dispatch مع input send_status=true.",
-    "description_hourly_status": "false لإيقاف حالة السوق الداخلية من المستودع. استخدم Cron Job خارجي كل ساعة مع send_status=true."
-  },
-  "duplicate_signal_filter": {
-    "enabled": true,
-    "price_zone_points": 50,
-    "description_price_zone_points": "نطاق السعر الذي يُعتبر فيه دخولان 'نفس المنطقة' (نقاط الذهب: 1$=10 نقاط، أي 50 نقطة=5$). خارج هذا النطاق يُعد إعداداً جديداً مشروعاً ولا يُحجب.",
-    "open_trade": {
-      "block_same_direction_in_zone": true,
-      "block_same_direction_any_price": false,
-      "max_open_same_direction": 3,
-      "description_max_open_same_direction": "حد أقصى للصفقات المفتوحة بنفس الاتجاه على نفس الرمز. مثال: إذا توجد 3 صفقات SELL مفتوحة، تُمنع صفقة SELL رابعة فقط، بينما BUY يبقى مسموحاً.",
-      "description": "حماية تكديس الصفقات المفتوحة: امنع فتح صفقة بنفس الاتجاه داخل نفس منطقة السعر (in_zone)، ولا تسمح بأكثر من max_open_same_direction صفقات مفتوحة بنفس الاتجاه. فعّل any_price=true إذا أردت صفقة واحدة فقط لكل اتجاه بغضّ النظر عن السعر."
-    },
-    "cooldown": {
-      "lookback_hours": 6,
-      "after_loss_minutes": 90,
-      "after_breakeven_minutes": 45,
-      "after_win_minutes": 30,
-      "description": "تبريد واعٍ بالنتيجة للصفقات المغلقة حديثاً في نفس منطقة السعر فقط: بعد خسارة تبريد أطول (تجنّب التكرار الانتقامي)، بعد تعادل متوسط، بعد ربح أقصر (اتجاه ناجح). lookback_hours يحدد أقصى عمر للصفقة المغلقة التي تُؤخذ بالحسبان."
-    },
-    "description": "فلتر تكرار احترافي بمفهومين منفصلين: (1) حماية تكديس الصفقات المفتوحة في نفس المنطقة، (2) تبريد واعٍ بالنتيجة للصفقات المغلقة حديثاً في نفس المنطقة. دخول في منطقة سعر مختلفة لا يُحجب. مفاتيح legacy (lookback_minutes/same_direction_price_zone_points) ما زالت مدعومة كـ fallback."
-  },
-  "quality_score": {
-    "enabled": true,
-    "description": "يعرض درجة جودة الإشارة في Telegram ولا يمنع الإشارة حالياً"
-  },
-  "trading_mode": "paper",
-  "paper_trading": {
-    "enabled": true,
-    "starting_balance": 10000,
-    "currency": "USD",
-    "default_lot_size": 0.01,
-    "track_virtual_pnl": true,
-    "description": "وضع تجريبي: يتم حفظ ومتابعة الصفقات افتراضياً بدون تنفيذ حقيقي"
-  },
-  "daily_bias_filter": {
-    "enabled": true,
-    "timeframe": "4H",
-    "ema_fast": 20,
-    "ema_slow": 50,
-    "rsi_period": 14,
-    "slope_lookback": 12,
-    "score_threshold": 1.25,
-    "contrarian_min_confidence": 75,
-    "block_strong_contrarian_below": 75,
-    "description": "فلتر اتجاه أعلى (Daily Bias): الصفقات المعاكسة للاتجاه 4H تحتاج موافقة وكيلين مؤهلين على نفس الاتجاه وثقة إشارة ≥75%. الوكلاء المعارضون يخصمون من قوة الإشارة.",
-    "contrarian_min_confidence_two_agents": 75,
-    "contrarian_min_agents_for_lower_confidence": 2
-  },
-  "dynamic_risk_management": {
-    "enabled": false,
-    "warn_after_losses": 2,
-    "halt_after_losses": 3,
-    "daily_loss_limit_points": 1000,
-    "recent_trades_limit": 20,
-    "recent_losses_caution": 2,
-    "normal_min_quality_score": 0,
-    "caution_min_confidence": 75,
-    "strict_min_confidence": 82,
-    "caution_min_quality_score": 70,
-    "strict_min_quality_score": 80,
-    "caution_risk_multiplier": 0.75,
-    "strict_risk_multiplier": 0.5,
-    "description": "يرفع شروط الثقة والجودة أو يوقف التداول بعد خسائر متتالية/خسارة يومية",
-    "description_disabled": "معطّل مؤقتاً (enabled:false) في مرحلة التعلّم لترك كل الإشارات تخرج بغض النظر عن نتائج الصفقات السابقة؛ يُعاد تفعيله بعد جمع بيانات كافية."
-  },
-  "news_risk": {
-    "tier1_before_minutes": 60,
-    "tier1_after_minutes": 30,
-    "tier2_before_minutes": 30,
-    "tier2_after_minutes": 15,
-    "warning_before_minutes": 120,
-    "high_risk_day_tier1_count": 3,
-    "description": "تصنيف أخبار Tier 1/2 مع نوافذ منع وتحذير مخصصة للذهب"
-  },
-  "order_execution": {
-    "enabled": true,
-    "mode": "paper",
-    "default_order_type": "MARKET",
-    "entry_style": "fixed_risk",
-    "description_entry_style": "fixed_risk (300pts): ينتظر أقرب مستوى قوي (دعم/مقاومة/SMC). إذا المسافة ≤ 300 نقطة → دخول MARKET فوري + SL خلف المستوى. التعزيز: حجم كامل (100%)، مسافة 50 نقطة، حد أقصى تعزيز واحد فقط.",
-    "fixed_risk": {
-      "max_risk_distance_points": 300,
-      "description_max_risk_distance_points": "300 نقطة (30$). إذا أقرب مستوى ضمن 300 → دخول MARKET فوراً + SL خلف المستوى.",
-      "sl_buffer_points": 20,
-      "description_sl_buffer_points": "بفر بالأعلى (للبيع) أو الأسفل (للشراء) من المستوى لوضع الستوب. 20 نقطة = 2.00$. يضمن أن الستوب ليس بالضبط عند المستوى.",
-      "scale_in_enabled": false,
-      "scale_in_max": 1,
-      "description_scale_in_max": "أقصى عدد من صفقات التعزيز المسموحة (بالإضافة للأصلية). 2 = يمكن الدخول 3 صفقات في نفس الاتجاه: الأصلية + تعزيز 1 + تعزيز 2.",
-      "scale_in_trigger_points": 50,
-      "description_scale_in_trigger_points": "عندما يبقى بين السعر والمستوى ≤ 100 نقطة (10$)، نعزز باتجاه الصفقة. السعر كاد يلمس المستوى — آخر فرصة قبل الانعكاس.",
-      "scale_in_size_ratio": 1.0,
-      "description_scale_in_size_ratio": "نسبة حجم التعزيز مقارنة بالصفقة الأصلية. 0.5 = نصف الحجم. 1.0 = نفس الحجم.",
-      "description": "fixed_risk zone logic kept for entry levels, but always MARKET execution.",
-      "note": "Zone logic kept only for SL/TP calculation. Execution always MARKET.",
-      "description_scale_in": "Disabled in classic consensus mode to avoid unconfirmed scale-ins."
-    },
-    "allowed_order_types": [
-      "BUY_MARKET",
-      "SELL_MARKET"
-    ],
-    "description": "Paper order classification only: market, limit, or stop based on entry vs current price.",
-    "pending_support_removed": true
-  },
-  "operation_mode": "classic_consensus",
-  "operation_modes": {
-    "classic_consensus": {
-      "description": "Final signal from 5-agent weighted consensus + risk/news/session/duplicate filters.",
-      "requires_three_agents": false,
-      "paper_only": true
-    }
-  },
-  "weekly_report": {
-    "enabled": true,
-    "day_of_week": 5,
-    "lookback_days": 7,
-    "min_trades_for_report": 5,
-    "max_chars": 3500,
-    "send_telegram": true,
-    "storage_path": "storage/weekly_report.json",
-    "timezone": "Asia/Hebron",
-    "report_time": "10:00",
-    "description": "Weekly AI Performance Report — يرسل السبت 10:00 صباحاً بتوقيتك المحلي"
-  },
-  "symbols": [
-    {
-      "symbol": "XAU/USD",
-      "enabled": true
-    },
-    {
-      "symbol": "WTI/USD",
-      "enabled": false,
-      "description_disabled": "WTI/USD disabled temporarily: the free Twelve Data plan does not provide real time_series data for oil (needs Basic plan or higher). Set this back to true after upgrading the plan or adding an oil-capable data source."
-    }
-  ],
-  "instruments": [
-    {
-      "symbol": "XAU/USD",
-      "name": "Gold",
-      "category": "metal",
-      "point_size": 0.1,
-      "price_decimals": 2,
-      "min_sl_distance_points": 300,
-      "trailing_distance": 100,
-      "trailing_step": 30,
-      "early_breakeven_points": 100,
-      "duplicate_zone_points": 50
-    },
-    {
-      "symbol": "WTI/USD",
-      "name": "WTI Crude Oil",
-      "category": "oil",
-      "point_size": 0.01,
-      "price_decimals": 2,
-      "min_sl_distance_points": 120,
-      "trailing_distance": 70,
-      "trailing_step": 25,
-      "early_breakeven_points": 70,
-      "duplicate_zone_points": 100,
-      "description_oil_risk_profile": "Balanced WTI profile: 1 point = $0.01, SL floor 120 pts ($1.20), breakeven at +70 pts ($0.70), trailing gap 70 pts and step 25 pts."
-    }
-  ]
+    "instruments": [
+        {
+            "symbol": "XAU/USD",
+            "name": "Gold",
+            "category": "metal",
+            "point_size": 0.1,
+            "price_decimals": 2,
+            "min_sl_distance_points": 400,
+            "trailing_distance": 100,
+            "trailing_step": 30,
+            "early_breakeven_points": 150,
+            "duplicate_zone_points": 50
+        },
+        {
+            "symbol": "WTI/USD",
+            "name": "WTI Crude Oil",
+            "category": "oil",
+            "point_size": 0.01,
+            "price_decimals": 2,
+            "min_sl_distance_points": 120,
+            "trailing_distance": 70,
+            "trailing_step": 25,
+            "early_breakeven_points": 70,
+            "duplicate_zone_points": 100,
+            "description_oil_risk_profile": "Balanced WTI profile: 1 point = $0.01, SL floor 120 pts ($1.20), breakeven at +70 pts ($0.70), trailing gap 70 pts and step 25 pts."
+        }
+    ]
 }
