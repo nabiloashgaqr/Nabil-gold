@@ -349,6 +349,25 @@ async def _check_scale_in(
                 )
                 continue
 
+        parent_entry = _safe_float(parent.get("entry_price"), 0.0)
+
+        # Scale-in only at a BETTER price than the parent entry:
+        #   BUY  → price must be at least trigger_points BELOW entry (pullback/discount)
+        #   SELL → price must be at least trigger_points ABOVE entry (pullback/discount)
+        # This prevents scale-ins at the same price or worse (adding to a loser).
+        if parent_entry > 0:
+            if side == "BUY":
+                pullback_pts = price_to_points(parent_entry - current_price, symbol=symbol)
+            else:
+                pullback_pts = price_to_points(current_price - parent_entry, symbol=symbol)
+            if pullback_pts < trigger_points:
+                logger.info(
+                    "Scale-in skipped for %s %s: price %.2f is only %.0f pts pullback from entry %.2f (need ≥%d pts %s entry)",
+                    side, symbol, current_price, pullback_pts, parent_entry, trigger_points,
+                    "below" if side == "BUY" else "above",
+                )
+                continue
+
         levels = _levels_from_results(all_results, side)
         if not levels:
             continue
@@ -360,11 +379,8 @@ async def _check_scale_in(
             directional_levels = levels
         nearest_level = min(directional_levels, key=lambda level: abs(level - current_price))
         distance_points = abs(price_to_points(current_price - nearest_level, symbol=symbol))
-        if distance_points > trigger_points:
-            continue
 
         entry_price = current_price
-        parent_entry = _safe_float(parent.get("entry_price"), 0.0)
         parent_sl = _safe_float(parent.get("stop_loss"), 0.0)
         parent_tp1 = _safe_float(parent.get("tp1"), 0.0)
         parent_tp2 = _safe_float(parent.get("tp2"), 0.0)
