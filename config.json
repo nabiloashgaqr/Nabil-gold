@@ -51,9 +51,9 @@
         "description_min_sl_distance_points": "حد أدنى لمسافة SL (400 نقطة = 40$) لأن الذهب يتحرك 50-100 نقطة بثواني؛ SL أضيق من هذا يُفتح بالضوضاء وليس بانعكاس حقيقي. تم رفعه من 300 إلى 400 لتقليل ضرب الستوب بالضوضا المؤقتة. عند تفعيله يُعاد حساب TP1/TP2/TP3 بنفس نسبة R:R المُعتمدة من ATR للحفاظ على min_rr_ratio.",
         "account_capital": 10000,
         "max_rr_ratio": 4.0,
-        "max_open_trades": 50,
-        "max_daily_signals": 50,
-        "description_max_open_trades_daily_signals": "مرحلة تعلّم: رُفعت من الافتراضي (3 / 8) مؤقتاً للسماح بخروج كل الإشارات دون عداد يومي/متزامن، إلى أن نُشدد بعد جمع بيانات كافية.",
+        "max_open_trades": 3,
+        "max_daily_signals": 8,
+        "description_max_open_trades_daily_signals": "حد أقصى 3 صفقات مفتوحة (الأصلية + تعزيزين) و8 إشارات يومياً. تم تشديده من مرحلة التعلم (50/50) لأن النظام أصبح مستقراً.",
         "description_max_rr_ratio": "سقف R:R لتجنب أهداف TP2 غير واقعية في الإشارات التجريبية/الحية"
     },
     "signal_requirements": {
