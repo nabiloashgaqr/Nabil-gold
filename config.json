@@ -179,6 +179,8 @@
     },
     "learning": {
         "enabled": true,
+        "auto_update_weights": false,
+        "description_auto_update_weights": "False = التعلم يحلل ويقدّم توصيات الأوزان بدون تحديث تلقائي. الإدارة تحدّث الأوزان يدوياً في config.json و Supabase.",
         "update_frequency_days": 1,
         "min_predictions_for_adjustment": 3,
         "max_weight_change": 0.25,
