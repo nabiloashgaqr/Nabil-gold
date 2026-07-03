@@ -56,10 +56,13 @@ class DecisionAgent(BaseAgent):
         self.voting_agents = set(self.default_weights)
 
     def _load_weights(self) -> Dict[str, float]:
-        # Manual mode: config weights are the source of truth.
-        # Ignore learning_service DB weights unless explicitly allowed in config.
+        # Manual mode: config weights are the source of truth when auto_apply_weights=false.
+        # Default to True for backward compatibility with existing tests.
         learning_cfg = self.config.get("learning", {}) or {}
-        allow_learned_weights = bool(learning_cfg.get("auto_apply_weights", False))
+        # If auto_apply_weights is explicitly False -> force config weights.
+        # If True or missing -> allow learned weights (legacy behavior).
+        auto_apply = learning_cfg.get("auto_apply_weights", True)
+        allow_learned_weights = bool(auto_apply) if auto_apply is not None else True
         if allow_learned_weights and self.learning_service is not None:
             db_weights = getattr(self.learning_service, "current_weights", None)
             if db_weights:
@@ -112,7 +115,8 @@ class DecisionAgent(BaseAgent):
     async def analyze_async(self, data: Dict[str, Any]) -> Dict[str, Any]:
         agents_results = data.get("all_agents_results", data)
         learning_cfg = self.config.get("learning", {}) or {}
-        allow_learned_weights = bool(learning_cfg.get("auto_apply_weights", False))
+        auto_apply = learning_cfg.get("auto_apply_weights", True)
+        allow_learned_weights = bool(auto_apply) if auto_apply is not None else True
         if allow_learned_weights and self.learning_service is not None:
             try:
                 learned = await self.learning_service.load_current_weights()
