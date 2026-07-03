@@ -79,7 +79,7 @@ def test_3_agents_agree_sell():
 
 
 def test_60_percent_agreement():
-    config = {"risk_settings": {"min_confidence": 60, "min_rr_ratio": 1.5}, "signal_requirements": {"min_agents_agree": 1, "min_agreement_percentage": 1}, "agent_weights": {"technical": 0.2, "classical": 0.2, "smc": 0.25, "price_action": 0.15, "multitimeframe": 0.2}}
+    config = {"risk_settings": {"min_confidence": 60, "min_rr_ratio": 1.5}, "signal_requirements": {"min_agents_agree": 1, "min_agreement_percentage": 1, "min_consensus_confidence": 60}, "agent_weights": {"technical": 0.2, "classical": 0.2, "smc": 0.25, "price_action": 0.15, "multitimeframe": 0.2}}
     agent = DecisionAgent(config)
     votes = {'BUY': [
             {'agent': 'technical', 'confidence': 80, 'weight': 0.2, 'score': 0.16, 'adjusted_confidence': 80},
@@ -96,7 +96,7 @@ def test_60_percent_agreement():
 
 def test_below_60_percent_rejected():
     """في وضع One-Agent: حتى 50% مسموح، القرار يعتمد على الوزن"""
-    config = {"risk_settings": {"min_confidence": 60, "min_rr_ratio": 1.5}, "signal_requirements": {"min_agents_agree": 1, "min_agreement_percentage": 1}, "agent_weights": {"technical": 0.2, "classical": 0.2, "smc": 0.25, "price_action": 0.15, "multitimeframe": 0.2}}
+    config = {"risk_settings": {"min_confidence": 60, "min_rr_ratio": 1.5}, "signal_requirements": {"min_agents_agree": 1, "min_agreement_percentage": 1, "min_consensus_confidence": 60}, "agent_weights": {"technical": 0.2, "classical": 0.2, "smc": 0.25, "price_action": 0.15, "multitimeframe": 0.2}}
     agent = DecisionAgent(config)
     votes = {'BUY': [
             {'agent': 'technical', 'confidence': 80, 'weight': 0.2, 'score': 0.16, 'adjusted_confidence': 80},
