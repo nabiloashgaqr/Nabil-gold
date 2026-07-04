@@ -316,7 +316,7 @@ function computeAgentPerformance(closedTrades, agentWeights = []) {
       const codeWeight = CURRENT_WEIGHTS[agent];
       stats[agent] = {
         agent_name: agent,
-        weight: dbWeight || codeWeight || 0,
+        weight: codeWeight || dbWeight || 0,
         predictions: 0,
         wins: 0,
         losses: 0,
