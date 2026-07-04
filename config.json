@@ -34,6 +34,7 @@
         "local_fallback_file": "storage/trades.json"
     },
     "agent_weights": {
+        "_description": "⚠️ المصدر الوحيد للأوزان — كل الكود يقرأ من هنا فقط. DB agent_weights للعرض فقط في Dashboard. التعلم يقدّم توصيات والإدارة تحدّث هنا يدوياً.",
         "multitimeframe": 0.15,
         "classical": 0.25,
         "smc": 0.2,
@@ -159,7 +160,7 @@
         "description_trailing_stop": "Trailing gap 150pts متناسب مع SL=400pts. خطوة 40pts تقلل التحديثات غير الضرورية بالضوضا."
     },
     "news_feed": {
-        "enabled": true,
+        "enabled": false,
         "source": "forexfactory",
         "hours_before": 2,
         "hours_after": 1,
@@ -175,7 +176,7 @@
             "CHF"
         ],
         "allow_mock": false,
-        "note": "NewsRiskAgent fetches live events from ForexFactory (free, no API key) and also reads manual events from NEWS_EVENTS_JSON env var or storage/news_events.json. Gemini interpret_news_context provides AI news analysis when GEMINI_API_KEY is set."
+        "note": "No live provider is configured here. Use NewsRiskAgent with NEWS_EVENTS_JSON or storage/news_events.json until a real provider is added."
     },
     "learning": {
         "enabled": true,
