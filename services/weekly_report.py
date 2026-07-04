@@ -779,7 +779,22 @@ class WeeklyReportService:
         for trade in trades:
             snap = self._snapshot(trade)
             mc = snap.get("market_context") or {}
-            regime = str(trade.get("volatility_regime") or (mc.get("technical_regime") or {}).get("volatility_regime") or "unknown").upper()
+            tech_regime = mc.get("technical_regime") or {}
+            # Prefer composite label, then build from parts
+            regime = str(trade.get("regime_composite") or "").strip().upper()
+            if not regime or regime == "UNKNOWN" or regime == "NONE":
+                vol = str(trade.get("volatility_regime") or tech_regime.get("volatility_regime") or "").strip().upper()
+                phase = str(trade.get("market_phase") or tech_regime.get("market_phase") or "").strip().upper()
+                if phase == "SQUEEZE":
+                    regime = "SQUEEZE"
+                elif vol and phase:
+                    regime = f"{vol} {phase}"
+                elif vol:
+                    regime = vol
+                elif phase:
+                    regime = phase
+                else:
+                    regime = "UNKNOWN"
             pnl = self._trade_pnl(trade)
             bucket = buckets.setdefault(regime, {"count": 0, "pnl": 0.0, "wins": 0})
             bucket["count"] += 1

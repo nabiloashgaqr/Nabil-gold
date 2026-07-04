@@ -171,6 +171,25 @@ class DatabaseService:
         save_trades(trades, self.local_path)
         return trade_id
 
+    @staticmethod
+    def _build_regime_composite(tech_regime: dict) -> str:
+        """Build a composite regime label from volatility_regime + market_phase.
+
+        Examples: 'NORMAL TRENDING', 'HIGH RANGING', 'SQUEEZE', etc.
+        Returns 'UNKNOWN' if neither dimension is available.
+        """
+        vol = str(tech_regime.get("volatility_regime") or "").strip().upper()
+        phase = str(tech_regime.get("market_phase") or "").strip().upper()
+        if phase == "SQUEEZE":
+            return "SQUEEZE"
+        if vol and phase:
+            return f"{vol} {phase}"
+        if vol:
+            return vol
+        if phase:
+            return phase
+        return "UNKNOWN"
+
     def _entry_enrichment(
         self,
         decision: Dict[str, Any],
@@ -232,6 +251,8 @@ class DatabaseService:
             "news_status_at_entry": news_rule.get("market_status") or news_rule.get("status"),
             "news_risk_at_entry": news_rule.get("risk_level") or news_rule.get("risk"),
             "volatility_regime": tech_regime.get("volatility_regime"),
+            "market_phase": tech_regime.get("market_phase"),
+            "regime_composite": self._build_regime_composite(tech_regime),
             "trend_strength": tech_regime.get("trend_strength"),
             "daily_bias_at_entry": (decision.get("daily_bias") or {}).get("bias") if isinstance(decision.get("daily_bias"), dict) else None,
             "primary_entry_driver": (decision.get("entry_attribution") or {}).get("primary_entry_driver") if isinstance(decision.get("entry_attribution"), dict) else None,
@@ -679,6 +700,8 @@ class DatabaseService:
             "news_status_at_entry",
             "news_risk_at_entry",
             "volatility_regime",
+            "market_phase",
+            "regime_composite",
             "trend_strength",
             "daily_bias_at_entry",
             "reasons",
