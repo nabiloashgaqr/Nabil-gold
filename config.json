@@ -200,6 +200,12 @@
         "reset_on_session_change": true,
         "description": "Alert when 2 agents agree — informational only, not entry signal. Requires 100+ points price difference from last alert in same direction. BUY alerts only at lower price, SELL only at higher price. Tracker auto-resets when session changes or after max_age_hours (8h)."
     },
+    "llm_review": {
+        "enabled": true,
+        "max_retries": 3,
+        "retry_delay_seconds": 3,
+        "description": "Gemini independent review. max_retries applies to all calls (signal, news, reports, learning). retry_delay_seconds is base delay with exponential backoff."
+    },
     "notifications": {
         "send_no_signal_updates": false,
         "manual_run_status_updates": true,
