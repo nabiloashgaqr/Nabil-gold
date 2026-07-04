@@ -74,6 +74,8 @@ class LearningReport:
     news_proximity: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     regime_fit: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
+from utils.helpers import get_agent_weights
+
 class LearningService:
     """
     🧠 خدمة التعلم الذكي - الإصدار 2.0
@@ -91,14 +93,8 @@ class LearningService:
         self.config = config
         self.learning_config = self._load_learning_config()
         
-        # الأوزان الافتراضية
-        self.default_weights = {
-            'technical': 0.20,
-            'classical': 0.25,
-            'smc': 0.20,
-            'price_action': 0.20,
-            'multitimeframe': 0.15
-        }
+        # الأوزان الافتراضية — مصدر وحيد من get_agent_weights
+        self.default_weights = get_agent_weights(config)
         
         # الأوزان الحالية
         self.current_weights = self.default_weights.copy()
