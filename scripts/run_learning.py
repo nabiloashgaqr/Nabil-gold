@@ -130,10 +130,17 @@ def main() -> str | None:
         else:
             telegram.send_message(summary)
 
-        # تحديث config بالأوزان الجديدة
+        # عرض الأوزان المقترحة بدون تطبيق تلقائي
+        # الإدارة تحدّث الأوزان يدوياً في config.json و Supabase
         if report.adjusted_weights:
-            config['agent_weights'] = report.adjusted_weights
-            logger.info("✅ تم تحديث الأوزان: %s", report.adjusted_weights)
+            logger.info("📋 الأوزان المقترحة (يدوية): %s", report.adjusted_weights)
+            current = config.get('agent_weights', {})
+            if current:
+                changes = {k: f"{current.get(k, '?'):.2f} → {v:.2f}" for k, v in report.adjusted_weights.items() if abs(current.get(k, 0) - v) > 0.001}
+                if changes:
+                    logger.info("📋 التغييرات المقترحة: %s", changes)
+                else:
+                    logger.info("📋 لا تغييرات مقترحة — الأوزان الحالية مناسبة")
 
         logger.info("✅ اكتمل التعلم الذكي بنجاح")
         logger.info("📊 الصفقات: %d | Win Rate: %.1f%%",
