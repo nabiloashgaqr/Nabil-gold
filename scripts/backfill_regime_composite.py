@@ -90,7 +90,7 @@ def main():
             "market_phase": new_phase,
         })
 
-        if new_composite == "UNKNOWN":
+        if new_composite in ("UNKNOWN", "LEGACY"):
             # Still can't determine → skip
             continue
 
