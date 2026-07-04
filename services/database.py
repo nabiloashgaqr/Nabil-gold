@@ -188,7 +188,7 @@ class DatabaseService:
             return vol
         if phase:
             return phase
-        return "UNKNOWN"
+        return "LEGACY"
 
     def _entry_enrichment(
         self,

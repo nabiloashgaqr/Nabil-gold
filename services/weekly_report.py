@@ -782,7 +782,7 @@ class WeeklyReportService:
             tech_regime = mc.get("technical_regime") or {}
             # Prefer composite label, then build from parts
             regime = str(trade.get("regime_composite") or "").strip().upper()
-            if not regime or regime == "UNKNOWN" or regime == "NONE":
+            if not regime or regime in ("UNKNOWN", "NONE"):
                 vol = str(trade.get("volatility_regime") or tech_regime.get("volatility_regime") or "").strip().upper()
                 phase = str(trade.get("market_phase") or tech_regime.get("market_phase") or "").strip().upper()
                 if phase == "SQUEEZE":
