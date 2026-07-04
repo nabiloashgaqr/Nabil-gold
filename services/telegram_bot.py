@@ -228,6 +228,25 @@ class TelegramService:
         lines.append("• <b>Status:</b> Offline this run")
         return lines
 
+    def _weights_lines(self, decision: Dict[str, Any]) -> List[str]:
+        """Render current agent weights from the unified source."""
+        weights = decision.get("weights") or {}
+        if not weights:
+            return []
+        lines = ["🎚️ <b>AGENT WEIGHTS</b>"]
+        names = {
+            "technical": "Technical",
+            "classical": "Classical",
+            "smc": "SMC",
+            "price_action": "Price Action",
+            "multitimeframe": "Multi-Timeframe",
+        }
+        for key, label in names.items():
+            w = weights.get(key)
+            if w is not None:
+                lines.append(f"  • {html.escape(label)}: {float(w)*100:.0f}%")
+        return lines
+
     def send_signal(self, decision: Dict[str, Any]) -> bool:
         symbol = str(decision.get("symbol", "XAU/USD"))
         signal = decision.get("signal", {}) or {}
@@ -270,6 +289,11 @@ class TelegramService:
         if vote_lines:
             lines.append("──────────────────")
             lines.extend(vote_lines)
+
+        weights_lines = self._weights_lines(decision)
+        if weights_lines:
+            lines.append("──────────────────")
+            lines.extend(weights_lines)
 
         context_lines: List[str] = []
         if ai.get("available"):
