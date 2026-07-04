@@ -159,7 +159,7 @@
         "description_trailing_stop": "Trailing gap 150pts متناسب مع SL=400pts. خطوة 40pts تقلل التحديثات غير الضرورية بالضوضا."
     },
     "news_feed": {
-        "enabled": false,
+        "enabled": true,
         "source": "forexfactory",
         "hours_before": 2,
         "hours_after": 1,
@@ -175,7 +175,7 @@
             "CHF"
         ],
         "allow_mock": false,
-        "note": "No live provider is configured here. Use NewsRiskAgent with NEWS_EVENTS_JSON or storage/news_events.json until a real provider is added."
+        "note": "NewsRiskAgent fetches live events from ForexFactory (free, no API key) and also reads manual events from NEWS_EVENTS_JSON env var or storage/news_events.json. Gemini interpret_news_context provides AI news analysis when GEMINI_API_KEY is set."
     },
     "learning": {
         "enabled": true,
