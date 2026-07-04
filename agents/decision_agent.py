@@ -23,6 +23,7 @@ import logging
 from typing import Any, Dict
 
 from agents.base_agent import BaseAgent
+from utils.helpers import get_agent_weights
 
 logger = logging.getLogger(__name__)
 
@@ -45,13 +46,7 @@ class DecisionAgent(BaseAgent):
         self.agent_min_confidence = int(signal_req.get("agent_min_confidence", 70) or 70)
         self.min_consensus_confidence = float(signal_req.get("min_consensus_confidence", 72) or 72)
 
-        self.default_weights = {
-            "technical": 0.20,
-            "classical": 0.25,
-            "smc": 0.20,
-            "price_action": 0.20,
-            "multitimeframe": 0.15,
-        }
+        self.default_weights = get_agent_weights(config)
         self.current_weights = self._load_weights()
         self.voting_agents = set(self.default_weights)
 

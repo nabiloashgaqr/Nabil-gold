@@ -3,6 +3,7 @@
 import logging
 from typing import Dict, Any, List, Tuple
 from .base_agent import BaseAgent
+from utils.helpers import get_agent_weights
 from utils.indicators import calculate_ema, calculate_rsi, calculate_macd, calculate_atr, calculate_bollinger_bands, detect_support_resistance, detect_swing_points
 from services.market_snapshot import build_market_snapshot
 
@@ -13,7 +14,7 @@ class TechnicalAgent(BaseAgent):
     
     def __init__(self, config: Dict, **_kwargs):
         super().__init__(config)
-        self.weight = config.get('agent_weights', {}).get('technical', 0.2)
+        self.weight = get_agent_weights(config).get('technical', 0.2)
     
     def analyze(self, data: Dict) -> Dict[str, Any]:
         """
