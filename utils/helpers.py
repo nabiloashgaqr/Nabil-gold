@@ -197,15 +197,26 @@ def get_agent_weights(config: Dict[str, Any]) -> Dict[str, float]:
     This is the SINGLE SOURCE OF TRUTH for agent weights across the codebase.
     Any module that needs agent weights should call this function instead of
     hard-coding defaults locally.
+
+    Keys starting with '_' (e.g. _description) are silently ignored.
+    Non-numeric values are skipped safely.
     """
     config_weights = config.get("agent_weights", {}) or {}
     if config_weights:
-        weights = {k: float(v) for k, v in config_weights.items()}
+        weights = {}
+        for k, v in config_weights.items():
+            if k.startswith("_"):
+                continue
+            try:
+                weights[k] = float(v)
+            except (TypeError, ValueError):
+                continue
         total = sum(weights.values())
         # Normalize if the sum is materially off 1.0 (protects against bad configs/tests)
         if total > 0 and abs(total - 1.0) > 0.01:
             weights = {k: v / total for k, v in weights.items()}
-        return weights
+        if weights:
+            return weights
     return {
         "technical": 0.20,
         "classical": 0.25,
