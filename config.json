@@ -34,7 +34,6 @@
         "local_fallback_file": "storage/trades.json"
     },
     "agent_weights": {
-        "_description": "⚠️ المصدر الوحيد للأوزان — كل الكود يقرأ من هنا فقط. DB agent_weights للعرض فقط في Dashboard. التعلم يقدّم توصيات والإدارة تحدّث هنا يدوياً.",
         "multitimeframe": 0.15,
         "classical": 0.25,
         "smc": 0.2,
