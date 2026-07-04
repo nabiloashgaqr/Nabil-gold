@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Tuple
 
 from agents.base_agent import BaseAgent
-from utils.helpers import calculate_pips, load_config, get_agent_weights
+from utils.helpers import calculate_pips, load_config
 from utils.instruments import points_to_price, price_to_points
 
 class RiskManagementAgent(BaseAgent):
@@ -22,7 +22,11 @@ class RiskManagementAgent(BaseAgent):
         super().__init__(config or load_config())
         self.settings = self.config.get("risk_settings", {})
         self.filters = self.config.get("filters", {})
-        self.weights = get_agent_weights(self.config)
+        raw_weights = self.config.get("agent_weights", {"technical": 0.20, "classical": 0.25, "smc": 0.20, "price_action": 0.20, "multitimeframe": 0.15})
+        # Filter out non-numeric keys (e.g. _description)
+        self.weights = {k: float(v) for k, v in raw_weights.items() if not k.startswith("_") and isinstance(v, (int, float))}
+        if not self.weights:
+            self.weights = {"technical": 0.20, "classical": 0.25, "smc": 0.20, "price_action": 0.20, "multitimeframe": 0.15}
         self.symbol = self.config.get("symbol", "XAU/USD")
 
     def evaluate(self, results: Dict[str, Any]) -> Dict[str, Any]:

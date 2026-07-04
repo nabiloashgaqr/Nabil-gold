@@ -23,7 +23,6 @@ import logging
 from typing import Any, Dict
 
 from agents.base_agent import BaseAgent
-from utils.helpers import get_agent_weights
 
 logger = logging.getLogger(__name__)
 
@@ -46,24 +45,37 @@ class DecisionAgent(BaseAgent):
         self.agent_min_confidence = int(signal_req.get("agent_min_confidence", 70) or 70)
         self.min_consensus_confidence = float(signal_req.get("min_consensus_confidence", 72) or 72)
 
-        self.default_weights = get_agent_weights(config)
+        self.default_weights = {
+            "technical": 0.20,
+            "classical": 0.25,
+            "smc": 0.20,
+            "price_action": 0.20,
+            "multitimeframe": 0.15,
+        }
         self.current_weights = self._load_weights()
         self.voting_agents = set(self.default_weights)
 
     def _load_weights(self) -> Dict[str, float]:
-        # Manual mode: config weights are the source of truth when auto_apply_weights=false.
-        # Default to True for backward compatibility with existing tests.
-        learning_cfg = self.config.get("learning", {}) or {}
-        # If auto_apply_weights is explicitly False -> force config weights.
-        # If True or missing -> allow learned weights (legacy behavior).
-        auto_apply = learning_cfg.get("auto_apply_weights", True)
-        allow_learned_weights = bool(auto_apply) if auto_apply is not None else True
-        if allow_learned_weights and self.learning_service is not None:
-            db_weights = getattr(self.learning_service, "current_weights", None)
-            if db_weights:
-                return {k: float(v) for k, v in dict(db_weights).items()}
-        # Use the canonical helper so config changes propagate everywhere.
-        return get_agent_weights(self.config)
+        """Load weights with config.json as the single source of truth.
+
+        Priority: config.json → default_weights (hardcoded).
+        DB weights are NOT used for decisions — only for learning recommendations
+        and dashboard display.  The user manually updates config.json + Supabase
+        when they accept a learning recommendation.
+        """
+        config_weights = self.config.get("agent_weights", {}) or {}
+        # Filter out non-numeric keys (e.g. _description)
+        numeric_weights = {}
+        for k, v in config_weights.items():
+            if k.startswith("_"):
+                continue
+            try:
+                numeric_weights[k] = float(v)
+            except (TypeError, ValueError):
+                continue
+        if numeric_weights:
+            return numeric_weights
+        return self.default_weights.copy()
 
     def update_weights(self, new_weights: Dict[str, float]) -> None:
         self.current_weights = {k: float(v) for k, v in new_weights.items()}
@@ -107,16 +119,9 @@ class DecisionAgent(BaseAgent):
 
     async def analyze_async(self, data: Dict[str, Any]) -> Dict[str, Any]:
         agents_results = data.get("all_agents_results", data)
-        learning_cfg = self.config.get("learning", {}) or {}
-        auto_apply = learning_cfg.get("auto_apply_weights", True)
-        allow_learned_weights = bool(auto_apply) if auto_apply is not None else True
-        if allow_learned_weights and self.learning_service is not None:
-            try:
-                learned = await self.learning_service.load_current_weights()
-                if learned:
-                    self.current_weights = {k: float(v) for k, v in learned.items()}
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Could not load learned weights, using current/config weights: %s", exc)
+        # Learning service is used only for confidence adjustments and
+        # recommendations — NOT for overriding the active weights.
+        # Weights come exclusively from config.json (single source of truth).
         return self.analyze({**data, "all_agents_results": agents_results})
 
     def _collect_votes(self, agents_results: Dict[str, Any]) -> Dict[str, list]:
