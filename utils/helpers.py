@@ -189,3 +189,27 @@ def get_today_trades(path: str | Path | None = None) -> List[Dict[str, Any]]:
         if created_at.startswith(today):
             results.append(trade)
     return results
+
+
+def get_agent_weights(config: Dict[str, Any]) -> Dict[str, float]:
+    """Return the canonical agent weights from config with safe fallbacks.
+
+    This is the SINGLE SOURCE OF TRUTH for agent weights across the codebase.
+    Any module that needs agent weights should call this function instead of
+    hard-coding defaults locally.
+    """
+    config_weights = config.get("agent_weights", {}) or {}
+    if config_weights:
+        weights = {k: float(v) for k, v in config_weights.items()}
+        total = sum(weights.values())
+        # Normalize if the sum is materially off 1.0 (protects against bad configs/tests)
+        if total > 0 and abs(total - 1.0) > 0.01:
+            weights = {k: v / total for k, v in weights.items()}
+        return weights
+    return {
+        "technical": 0.20,
+        "classical": 0.25,
+        "smc": 0.20,
+        "price_action": 0.20,
+        "multitimeframe": 0.15,
+    }
