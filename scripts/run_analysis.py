@@ -874,8 +874,17 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                         _log_gemini_result("signal review", decision.get("gemini_review"))
                     else:
                         logger.info("🧠 Gemini signal review skipped: WAIT hourly status")
-                    decision["gemini_news_review"] = gemini.interpret_news_context({"symbol": symbol, "current_price": data.get("current_price"), "session": all_results.get("session"), "news": all_results.get("news"), "daily_bias": all_results.get("daily_bias"), "technical_context": all_results.get("technical")})
+                    decision["gemini_news_review"] = gemini.interpret_news_context({"symbol": symbol, "current_price": data.get("current_price"), "session": all_results.get("session"), "news": all_results.get("news"), "daily_bias": all_results.get("daily_bias"), "technical_context": all_results.get("technical"), "macro_agent": all_results.get("macro_fundamental")})
                     _log_gemini_result("news review", decision.get("gemini_news_review"))
+
+                    # ── NEW: Macro-only independent review — July 2026 ──
+                    try:
+                        macro_agent_result = all_results.get("macro_fundamental", {}) or {}
+                        if macro_agent_result.get("macro_direction"):
+                            decision["gemini_macro_review"] = gemini.interpret_macro_context(macro_agent_result)
+                            _log_gemini_result("macro", decision.get("gemini_macro_review"))
+                    except Exception as _macro_exc:
+                        logger.warning("Gemini macro review failed: %s", _macro_exc)
 
                     # ── Post-news analysis: after a TIER_1/TIER_2 event releases ──
                     _check_and_send_post_news(
