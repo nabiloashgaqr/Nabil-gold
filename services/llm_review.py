@@ -27,6 +27,9 @@ class GeminiReviewService:
         self.model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
         self.enabled = bool(self.api_key)
         self.timeout = int(os.environ.get("GEMINI_TIMEOUT_SECONDS", "20") or 20)
+        llm_cfg = self.config.get("llm_review") or {}
+        self.max_retries = int(llm_cfg.get("max_retries", 3))
+        self.retry_delay = int(llm_cfg.get("retry_delay_seconds", 3))
         self.session = requests.Session()
 
     def review_signal(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -65,6 +68,29 @@ class GeminiReviewService:
         )
         return self._generate_json(prompt, kind="news")
 
+    def interpret_post_news(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Post-news analysis: after a major event, analyze its impact on gold.
+
+        Uses actual vs forecast numbers, price reaction, and DXY macro context
+        to give a special recommendation (not a trade entry signal).
+        """
+        if not self.enabled: return self._unavailable("API key missing")
+        compact = self._compact_post_news_payload(payload)
+        prompt = (
+            "You are a Senior Gold Market Analyst. A major economic event just released its numbers. "
+            "Analyze the IMPACT on Gold (XAU/USD) specifically. "
+            "Consider: actual vs forecast surprise, DXY/dollar strength from macro context, "
+            "and the current price reaction. "
+            "Give your RECOMMENDATION - this is NOT an entry signal, it is an informed observation. "
+            "Return STRICT JSON: "
+            "{ 'event': 'event name', 'surprise': 'BETTER/WORSE/IN_LINE', "
+            "'gold_impact': 'BULLISH/BEARISH/NEUTRAL', 'dxy_impact': 'STRENGTHENING/WEAKENING/NEUTRAL', "
+            "'recommendation': 'one clear sentence about gold outlook', "
+            "'confidence': 1-100, 'key_insight': 'one sentence explaining the main takeaway' }"
+            f"\n\nDATA:\n{json.dumps(compact)}"
+        )
+        return self._generate_json(prompt, kind="post_news")
+
     def summarize_learning(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Independent learning summary in points."""
         if not self.enabled: return self._unavailable("API key missing")
@@ -99,28 +125,50 @@ class GeminiReviewService:
         return self._generate_json(prompt, kind="weekly")
 
     def _generate_json(self, prompt: str, kind: str = "generic") -> Dict[str, Any]:
-        try:
-            url = self.API_URL.format(model=self.model)
-            resp = self.session.post(url, params={"key": self.api_key}, json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.1, "responseMimeType": "application/json"}}, timeout=self.timeout)
-            if resp.status_code != 200:
-                return self._unavailable(f"HTTP {resp.status_code}", kind=kind)
-            text = self._extract_text(resp.json())
-            if not text:
-                return self._unavailable("Empty API result", kind=kind)
-            parsed = json.loads(text)
-            parsed["available"] = True
-            parsed["kind"] = kind
-            parsed["suppressed"] = False
-            parsed["quality"] = self._quality_label(parsed, kind)
-            if self._is_generic_output(parsed, kind):
-                parsed["available"] = False
-                parsed["suppressed"] = True
-                parsed["suppress_reason"] = "generic_or_insufficient_output"
-                logger.info("🧠 Gemini %s review suppressed: generic/insufficient output", kind)
-            return parsed
-        except Exception as e:
-            logger.error("Gemini %s failed: %s", kind, e)
-            return self._unavailable(str(e), kind=kind)
+        import time as _time
+        last_error = ""
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                url = self.API_URL.format(model=self.model)
+                resp = self.session.post(url, params={"key": self.api_key}, json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.1, "responseMimeType": "application/json"}}, timeout=self.timeout)
+                if resp.status_code != 200:
+                    last_error = f"HTTP {resp.status_code}"
+                    if attempt < self.max_retries:
+                        delay = self.retry_delay * attempt
+                        logger.warning("Gemini %s attempt %d/%d failed: %s — retry in %ds", kind, attempt, self.max_retries, last_error, delay)
+                        _time.sleep(delay)
+                        continue
+                    return self._unavailable(last_error, kind=kind)
+                text = self._extract_text(resp.json())
+                if not text:
+                    last_error = "Empty API result"
+                    if attempt < self.max_retries:
+                        delay = self.retry_delay * attempt
+                        logger.warning("Gemini %s attempt %d/%d: empty result — retry in %ds", kind, attempt, self.max_retries, delay)
+                        _time.sleep(delay)
+                        continue
+                    return self._unavailable(last_error, kind=kind)
+                parsed = json.loads(text)
+                parsed["available"] = True
+                parsed["kind"] = kind
+                parsed["suppressed"] = False
+                parsed["quality"] = self._quality_label(parsed, kind)
+                parsed["attempts"] = attempt
+                if self._is_generic_output(parsed, kind):
+                    parsed["available"] = False
+                    parsed["suppressed"] = True
+                    parsed["suppress_reason"] = "generic_or_insufficient_output"
+                    logger.info("Gemini %s review suppressed: generic/insufficient output (attempt %d)", kind, attempt)
+                return parsed
+            except Exception as e:
+                last_error = str(e)
+                if attempt < self.max_retries:
+                    delay = self.retry_delay * attempt
+                    logger.warning("Gemini %s attempt %d/%d exception: %s — retry in %ds", kind, attempt, self.max_retries, last_error, delay)
+                    _time.sleep(delay)
+                else:
+                    logger.error("Gemini %s failed after %d attempts: %s", kind, self.max_retries, last_error)
+        return self._unavailable(last_error, kind=kind)
 
     def _extract_text(self, data: Dict[str, Any]) -> str:
         candidates = data.get("candidates") or []
@@ -141,6 +189,22 @@ class GeminiReviewService:
 
     def _compact_news_payload(self, p: Dict[str, Any]) -> Dict[str, Any]:
         return {"symbol": p.get("symbol"), "news": p.get("news", {})}
+
+    def _compact_post_news_payload(self, p: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "symbol": p.get("symbol", "XAU/USD"),
+            "event_name": p.get("event_name"),
+            "actual": p.get("actual"),
+            "forecast": p.get("forecast"),
+            "previous": p.get("previous"),
+            "impact_tier": p.get("impact_tier"),
+            "minutes_since_release": p.get("minutes_since_release"),
+            "current_price": p.get("current_price"),
+            "price_before_event": p.get("price_before_event"),
+            "price_change_since_event": p.get("price_change_since_event"),
+            "dxy_macro": p.get("dxy_macro"),
+            "session": p.get("session"),
+        }
 
     def _compact_learning_payload(self, p: Dict[str, Any]) -> Dict[str, Any]:
         return {

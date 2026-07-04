@@ -471,6 +471,49 @@ class TelegramService:
         text = text.replace("\n", "\n")
         return self.send_message(text)
 
+    def send_post_news_analysis(self, analysis: Dict[str, Any], event_name: str, symbol: str) -> bool:
+        """Send a post-news analysis alert — NOT an entry signal.
+
+        English-only message. Sent after a major economic event releases its numbers.
+        Includes: event details, surprise factor, gold impact, DXY impact, recommendation.
+        """
+        if not analysis.get("available") or analysis.get("suppressed"):
+            return False
+
+        event = html.escape(str(analysis.get("event") or event_name))
+        surprise = str(analysis.get("surprise", "N/A")).upper()
+        gold_impact = str(analysis.get("gold_impact", "N/A")).upper()
+        dxy_impact = str(analysis.get("dxy_impact", "N/A")).upper()
+        recommendation = html.escape(str(analysis.get("recommendation") or ""))
+        confidence = analysis.get("confidence", 0)
+        key_insight = html.escape(str(analysis.get("key_insight") or ""))
+
+        # Emoji mapping
+        surprise_emoji = {"BETTER": "📈", "WORSE": "📉", "IN_LINE": "➖"}.get(surprise, "❓")
+        gold_emoji = {"BULLISH": "🟢", "BEARISH": "🔴", "NEUTRAL": "🟡"}.get(gold_impact, "⚪")
+        dxy_emoji = {"STRENGTHENING": "💪", "WEAKENING": "🔻", "NEUTRAL": "➖"}.get(dxy_impact, "⚪")
+
+        message = "\n".join([
+            f"📰 <b>Post-News Analysis — {html.escape(symbol)}</b>",
+            "━━━━━━━━━━━━━━━━━━━━━",
+            f"🔔 <b>Event:</b> {event}",
+            f"{surprise_emoji} <b>Surprise:</b> {surprise}",
+            "",
+            f"{gold_emoji} <b>Gold Impact:</b> {gold_impact}",
+            f"{dxy_emoji} <b>DXY Impact:</b> {dxy_impact}",
+            f"📊 <b>Confidence:</b> {confidence}%",
+            "",
+            f"💡 <b>Recommendation:</b> {recommendation}",
+            "",
+            f"🔑 <b>Key Insight:</b> {key_insight}",
+            "",
+            "━━━ ⚠️ NOTICE ━━━",
+            "This is an <b>observation</b>, NOT an entry signal.",
+            "Wait for full 3-agent consensus for any trade.",
+            "━━━━━━━━━━━━━━━━━━━━━",
+        ])
+        return self.send_message(message)
+
     def send_partial_consensus(self, decision: Dict[str, Any], all_results: Dict[str, Any], config: Dict[str, Any]) -> bool:
         """Send a partial-consensus alert (2 agents agree, not enough for entry).
 
@@ -559,6 +602,7 @@ import json as _json
 from pathlib import Path as _Path
 
 _PARTIAL_ALERT_FILE = _Path("storage/partial_alert_tracker.json")
+_POST_NEWS_TRACKER_FILE = _Path("storage/post_news_tracker.json")
 
 
 def _partial_alert_tracker_load() -> dict:
@@ -649,3 +693,35 @@ def _partial_alert_record(symbol: str, side: str, price: float) -> None:
         "session": session_label_from_utc(datetime.now(timezone.utc)),
     }
     _partial_alert_tracker_save(tracker)
+
+
+# ── Post-news tracker ──
+
+def _post_news_tracker_load() -> dict:
+    """Load the post-news alert tracker."""
+    try:
+        if _POST_NEWS_TRACKER_FILE.exists():
+            return _json.loads(_POST_NEWS_TRACKER_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+def _post_news_tracker_save(data: dict) -> None:
+    """Persist the post-news tracker."""
+    try:
+        _POST_NEWS_TRACKER_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _POST_NEWS_TRACKER_FILE.write_text(_json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+def post_news_alert_sent(event_key: str) -> bool:
+    """Check if a post-news alert was already sent for this event."""
+    tracker = _post_news_tracker_load()
+    return event_key in tracker
+
+def post_news_alert_record(event_key: str) -> None:
+    """Record that a post-news alert was sent for this event."""
+    from datetime import datetime, timezone
+    tracker = _post_news_tracker_load()
+    tracker[event_key] = datetime.now(timezone.utc).isoformat()
+    _post_news_tracker_save(tracker)
