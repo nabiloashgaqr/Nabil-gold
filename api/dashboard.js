@@ -299,13 +299,24 @@ function extractAgentVotes(trade) {
 
 function computeAgentPerformance(closedTrades, agentWeights = []) {
   const defaultAgents = ['technical', 'classical', 'smc', 'price_action', 'multitimeframe'];
+  // Fallback weights — must match config.json::agent_weights and utils/helpers.py::get_agent_weights
+  const CURRENT_WEIGHTS = {
+    technical: 0.20,
+    classical: 0.25,
+    smc: 0.20,
+    price_action: 0.20,
+    multitimeframe: 0.15,
+  };
   const stats = {};
   function ensure(agent) {
     if (!stats[agent]) {
-      const w = (agentWeights || []).find(a => String(a.agent_name || '').toLowerCase() === agent);
+      // Prefer live DB weight over code fallback so config changes propagate
+      const dbEntry = (agentWeights || []).find(a => String(a.agent_name || '').toLowerCase() === agent);
+      const dbWeight = dbEntry ? Number(dbEntry.weight ?? 0) : 0;
+      const codeWeight = CURRENT_WEIGHTS[agent];
       stats[agent] = {
         agent_name: agent,
-        weight: Number(w?.weight ?? 0) || 0,
+        weight: dbWeight || codeWeight || 0,
         predictions: 0,
         wins: 0,
         losses: 0,
@@ -328,7 +339,7 @@ function computeAgentPerformance(closedTrades, agentWeights = []) {
       st.predictions += 1;
       st.confidence_sum += v.confidence;
       st.last_signal = v.signal;
-      if (!st.weight && v.weight) st.weight = v.weight;
+      // Don't let old trade snapshot weights override current authoritative weights
       const correct = v.signal === tradeSide ? pnl > 0 : pnl < 0;
       if (correct) st.wins += 1;
       else st.losses += 1;
