@@ -26,13 +26,13 @@ class MacroDataProvider:
     TWELVEDATA_URL = "https://api.twelvedata.com/time_series"
 
     DEFAULT_SYMBOLS = {
-        # USD proxy basket available on Basic via Forex.
+        # USD strength basket — 4 majors only, 100% TwelveData Basic Free
+        # Total: 4 credits/hour = 96/day — well under 800/day free limit
+        # DXY weight coverage: EUR ~57.6%, JPY ~13.6%, GBP ~11.9%, AUD ~proxy
         "EUR/USD": {"component": "usd", "inverse_usd": True},
         "GBP/USD": {"component": "usd", "inverse_usd": True},
         "USD/JPY": {"component": "usd", "inverse_usd": False},
-        "USD/CNY": {"component": "usd", "inverse_usd": False},
-        # Basic includes US market data; use SPY as a lightweight risk proxy.
-        "SPY": {"component": "risk", "inverse_usd": False},
+        "AUD/USD": {"component": "usd", "inverse_usd": True},
     }
 
     def __init__(self, config: Dict[str, Any] | None = None, session: requests.Session | None = None) -> None:

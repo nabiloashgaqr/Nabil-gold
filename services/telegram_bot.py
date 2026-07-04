@@ -147,12 +147,17 @@ class TelegramService:
         opp_text = "no opposition" if opposition == 0 else f"{opposition} opposing"
         return f"💪 Strength: {label} — {support}/{total_core} qualified agents, {opp_text}"
 
-    def _macro_line(self, decision: Dict[str, Any]) -> str:
+    def _macro_block(self, decision: Dict[str, Any]) -> List[str]:
+        """Rich macro block for signal messages — July 2026 macro-aware upgrade."""
         attr = decision.get("entry_attribution") or {}
         market_context = decision.get("market_context") or {}
         news_context = decision.get("news_context") or {}
         macro_agent = news_context.get("macro", {}) if isinstance(news_context, dict) else {}
+        # try full agent result too
+        if not macro_agent:
+            macro_agent = market_context if isinstance(market_context, dict) else {}
         macro = {}
+        macro_full = {}
         for candidate in (
             attr.get("macro_direction") if isinstance(attr, dict) else None,
             market_context.get("macro_direction") if isinstance(market_context, dict) else None,
@@ -161,12 +166,39 @@ class TelegramService:
             if isinstance(candidate, dict) and candidate:
                 macro = candidate
                 break
+        # try to get full agent for drivers/breakdown
+        for full_candidate in (
+            news_context.get("macro") if isinstance(news_context, dict) else None,
+            decision.get("macro_agent"),
+            market_context,
+        ):
+            if isinstance(full_candidate, dict) and full_candidate.get("macro_direction"):
+                macro_full = full_candidate
+                break
+        if not macro or (str(macro.get("bias", "NEUTRAL")).upper() == "NEUTRAL" and not macro.get("confidence")):
+            return ["• Macro: Collecting hourly data"]
         bias = str(macro.get("bias") or "NEUTRAL").replace("_", " ").title()
         conf = macro.get("confidence")
-        if not macro or str(macro.get("bias", "NEUTRAL")).upper() == "NEUTRAL" and not conf:
-            return "• Macro: Collecting hourly data"
-        conf_text = f" ({conf}%)" if conf not in {None, ""} else ""
-        return f"• Macro: {html.escape(bias)}{html.escape(conf_text)}"
+        score = macro.get("score")
+        drivers = macro.get("drivers") or []
+        breakdown = macro.get("confidence_breakdown") or {}
+        invalidations = macro.get("invalidations") or []
+        lines = [f"• Macro: {html.escape(bias)}" + (f" ({conf}%)" if conf not in {None, ""} else "") + (f" · score {score}" if score not in {None, ""} else "")]
+        if drivers:
+            lines.append(f"  ↳ {html.escape('; '.join(drivers[:2]))}")
+        if breakdown:
+            # show top 2 components
+            top = sorted(breakdown.items(), key=lambda kv: abs(float(kv[1] or 0)), reverse=True)[:2]
+            bd_txt = ", ".join(f"{k}:{v:+.1f}" for k, v in top)
+            lines.append(f"  ↳ {html.escape(bd_txt)}")
+        if invalidations:
+            lines.append(f"  ⚠ Invalidation: {html.escape(str(invalidations[0])[:90])}")
+        return lines
+
+    def _macro_line(self, decision: Dict[str, Any]) -> str:
+        # backward compat: first line of block
+        block = self._macro_block(decision)
+        return block[0] if block else "• Macro: Collecting hourly data"
 
     def _attribution_lines(self, decision: Dict[str, Any]) -> List[str]:
         attr = decision.get("entry_attribution") or {}
@@ -199,7 +231,7 @@ class TelegramService:
         return cautions[:1]
 
     def _independent_review_lines(self, decision: Dict[str, Any]) -> List[str]:
-        """Render Gemini state every time without exposing technical secrets."""
+        """Render Gemini state every time — macro-aware July 2026."""
         review = decision.get("gemini_review")
         lines = ["🧠 <b>GEMINI INDEPENDENT REVIEW</b>"]
         if isinstance(review, dict) and review.get("available"):
@@ -209,6 +241,22 @@ class TelegramService:
             confidence = review.get("confidence")
             if confidence not in {None, ""}:
                 lines.append(f"• <b>Review confidence:</b> {html.escape(str(confidence))}%")
+            macro_align = review.get("macro_alignment")
+            if macro_align:
+                emoji = {"ALIGNED": "✅", "CONFLICT": "⚠️", "NEUTRAL": "➖"}.get(str(macro_align).upper(), "•")
+                lines.append(f"{emoji} <b>Macro alignment:</b> {html.escape(str(macro_align))}")
+            risk_level = review.get("risk_level")
+            if risk_level:
+                lines.append(f"• <b>Risk:</b> {html.escape(str(risk_level))}")
+            invalidation = review.get("invalidation")
+            if invalidation:
+                lines.append(f"• <b>Invalidation:</b> {self._clean_text(invalidation)}")
+            # also show macro context used
+            macro_ctx = (decision.get("market_context", {}) or {}).get("macro_direction") or (decision.get("entry_attribution", {}) or {}).get("macro_direction")
+            if isinstance(macro_ctx, dict) and macro_ctx.get("bias"):
+                mbias = str(macro_ctx.get("bias")).replace("_", " ").title()
+                mconf = macro_ctx.get("confidence")
+                lines.append(f"• <b>Macro input:</b> {html.escape(mbias)}" + (f" ({mconf}%)" if mconf else ""))
             return lines
 
         if isinstance(review, dict) and review.get("suppressed"):
@@ -216,8 +264,6 @@ class TelegramService:
             return lines
 
         if isinstance(review, dict):
-            # Keep the subscriber-facing text non-technical even if the internal
-            # reason is an API-key/timeout/provider detail.
             summary = str(review.get("summary") or review.get("reason") or "").lower()
             if any(token in summary for token in ("api key", "not configured", "disabled", "credential")):
                 lines.append("• <b>Status:</b> Offline this run")
@@ -286,7 +332,8 @@ class TelegramService:
             context_lines.append(
                 f"• Daily bias: {html.escape(str(daily_bias.get('bias', 'NEUTRAL')))}{html.escape(bias_conf_text)}"
             )
-        context_lines.append(self._macro_line(decision))
+        # Macro block — rich macro-aware July 2026
+        context_lines.extend(self._macro_block(decision))
         session_info = decision.get("session_info") or {}
         if session_info.get("current_session"):
             session_quality = session_info.get("session_quality") or session_info.get("quality")
@@ -317,6 +364,27 @@ class TelegramService:
         if independent_review:
             lines.append("──────────────────")
             lines.extend(independent_review)
+
+        # Macro independent review — July 2026
+        gemini_macro = decision.get("gemini_macro_review", {}) or {}
+        if gemini_macro.get("available"):
+            lines.append("──────────────────")
+            lines.append("🌍 <b>GEMINI MACRO REVIEW</b>")
+            mv = str(gemini_macro.get("macro_verdict", "NEUTRAL"))
+            mconf = gemini_macro.get("confidence", "")
+            mdriver = gemini_macro.get("primary_driver", "")
+            mreason = gemini_macro.get("reason", "")
+            mtbias = gemini_macro.get("trade_bias", "")
+            lines.append(f"• <b>Verdict:</b> {html.escape(mv)}" + (f" ({mconf}%)" if mconf not in {None, ""} else ""))
+            if mdriver:
+                lines.append(f"• <b>Driver:</b> {html.escape(str(mdriver))}")
+            if mreason:
+                lines.append(f"• {self._clean_text(mreason)}")
+            if mtbias:
+                lines.append(f"• <b>Trade bias:</b> {html.escape(str(mtbias))}")
+            inval = gemini_macro.get("invalidation")
+            if inval:
+                lines.append(f"• <b>Invalidation:</b> {self._clean_text(inval)}")
 
         gemini_news = decision.get("gemini_news_review", {}) or {}
         if gemini_news.get("available"):

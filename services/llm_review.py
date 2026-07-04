@@ -1,5 +1,6 @@
 """Gemini-based review service.
 Independent discretionary analyst for trading signals and performance.
+Macro-aware version — July 2026
 """
 
 from __future__ import annotations
@@ -33,40 +34,92 @@ class GeminiReviewService:
         self.session = requests.Session()
 
     def review_signal(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Independent expert review of a trade setup."""
+        """Independent expert review of a trade setup — macro aware."""
         if not self.enabled: return self._unavailable("API key missing")
         compact = self._compact_signal_payload(payload)
         prompt = (
-            "You are an Independent Senior Hedge Fund Trader. "
-            "Evaluate the data and give your OWN independent opinion (BUY, SELL, or WAIT). "
-            "DO NOT review internal agents. Provide your verdict and ONE concise sentence reasoning. "
-            "Return STRICT JSON: { 'verdict': 'BUY/SELL/WAIT', 'reason': 'sentence' }"
-            f"\n\nDATA:\n{json.dumps(compact)}"
+            "You are an Independent Senior Hedge Fund Trader specialized in XAU/USD.\n"
+            "You receive: technical consensus, macro/fundamental context, daily bias, risk parameters.\n"
+            "Evaluate INDEPENDENTLY — give YOUR own verdict (BUY, SELL, or WAIT).\n"
+            "You MUST explicitly consider the macro_direction block:\n"
+            "- dxy_trend / usd_strength\n"
+            "- yields_trend (us10y / real_yields)\n"
+            "- fed_tone\n"
+            "- risk_sentiment / geopolitical\n"
+            "If macro_direction conflicts with technical signal, lower confidence and explain alignment.\n"
+            "DO NOT review internal agent names, only market logic.\n"
+            "Return STRICT JSON:\n"
+            "{\n"
+            "  \"verdict\": \"BUY|SELL|WAIT\",\n"
+            "  \"confidence\": 0-100,\n"
+            "  \"reason\": \"one concise sentence, mention macro driver if relevant\",\n"
+            "  \"macro_alignment\": \"ALIGNED|CONFLICT|NEUTRAL\",\n"
+            "  \"risk_level\": \"LOW|MEDIUM|HIGH\",\n"
+            "  \"invalidation\": \"one short invalidation level/condition\"\n"
+            "}\n"
+            f"\n\nDATA:\n{json.dumps(compact, ensure_ascii=False)}"
         )
         return self._generate_json(prompt, kind="signal")
 
     def analyze_market_context(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Form an independent discretionary opinion from market context."""
+        """Form an independent discretionary opinion from market context — macro aware."""
         if not self.enabled: return self._unavailable("API key missing")
         compact = self._compact_market_payload(payload)
         prompt = (
-            "You are a Professional Institutional Analyst. Analyze context independently. "
-            "DO NOT mention internal agents. Return STRICT JSON: "
-            "{ 'market_bias': 'BULLISH/BEARISH/NEUTRAL', 'action': 'BUY/SELL/WAIT', 'reason': 'short sentence' }"
-            f"\n\nDATA:\n{json.dumps(compact)}"
+            "You are a Professional Institutional Analyst for Gold.\n"
+            "Analyze technical + macro context independently.\n"
+            "Use macro_direction (DXY, yields, Fed, risk_sentiment) as PRIMARY filter, "
+            "then confirm with technical regime.\n"
+            "DO NOT mention internal agents.\n"
+            "Return STRICT JSON:\n"
+            "{ \"market_bias\": \"BULLISH/BEARISH/NEUTRAL\", "
+            "\"action\": \"BUY/SELL/WAIT\", "
+            "\"macro_read\": \"BULLISH_GOLD|BEARISH_GOLD|NEUTRAL\", "
+            "\"reason\": \"short sentence including macro driver\" }\n"
+            f"\n\nDATA:\n{json.dumps(compact, ensure_ascii=False)}"
         )
         return self._generate_json(prompt, kind="market")
 
     def interpret_news_context(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Interpret news risk in concise bullet points."""
+        """Interpret news risk in concise bullet points — macro aware."""
         if not self.enabled: return self._unavailable("API key missing")
         compact = self._compact_news_payload(payload)
         prompt = (
-            "Analyze news and context. Return STRICT JSON: "
-            "{ 'risk_level': 'LOW/MEDIUM/HIGH/EXTREME', 'summary_bullets': ['point1', 'point2', 'point3'], 'trading_advice': 'sentence' }"
-            f"\n\nDATA:\n{json.dumps(compact)}"
+            "Analyze news + macro context for XAU/USD. "
+            "Incorporate macro_direction if present (DXY, yields, Fed).\n"
+            "Return STRICT JSON:\n"
+            "{ \"risk_level\": \"LOW/MEDIUM/HIGH/EXTREME\", "
+            "\"summary_bullets\": [\"point1\", \"point2\", \"point3\"], "
+            "\"trading_advice\": \"sentence\", "
+            "\"macro_bias\": \"BULLISH_GOLD|BEARISH_GOLD|NEUTRAL\" }\n"
+            f"\n\nDATA:\n{json.dumps(compact, ensure_ascii=False)}"
         )
         return self._generate_json(prompt, kind="news")
+
+    def interpret_macro_context(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Standalone macro interpretation — NEW July 2026."""
+        if not self.enabled: return self._unavailable("API key missing")
+        compact = self._compact_macro_payload(payload)
+        prompt = (
+            "You are a Senior Macro Strategist for Gold (XAU/USD).\n"
+            "You receive the full MacroFundamentalAgent output: bias, confidence, score, "
+            "confidence_breakdown {dxy, yields, fed, inflation_growth, risk, commodity}, "
+            "drivers, evidence, invalidations, data_quality.\n"
+            "Give an INDEPENDENT macro verdict, do NOT just repeat the input bias.\n"
+            "Weigh DXY + real yields heaviest, then Fed tone, then risk sentiment.\n"
+            "Return STRICT JSON:\n"
+            "{\n"
+            "  \"macro_verdict\": \"BULLISH_GOLD|BEARISH_GOLD|NEUTRAL\",\n"
+            "  \"confidence\": 0-100,\n"
+            "  \"primary_driver\": \"DXY|YIELDS|FED|RISK|GROWTH|INFLATION\",\n"
+            "  \"reason\": \"one sentence with key macro driver\",\n"
+            "  \"invalidation\": \"what would flip the view\",\n"
+            "  \"trade_bias\": \"BUY|SELL|WAIT\",\n"
+            "  \"time_horizon\": \"INTRADAY|SWING|POSITION\"\n"
+            "}\n"
+            f"\n\nDATA:\n{json.dumps(compact, ensure_ascii=False)}"
+        )
+        return self._generate_json(prompt, kind="macro")
 
     def interpret_post_news(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Post-news analysis: after a major event, analyze its impact on gold.
@@ -87,7 +140,7 @@ class GeminiReviewService:
             "'gold_impact': 'BULLISH/BEARISH/NEUTRAL', 'dxy_impact': 'STRENGTHENING/WEAKENING/NEUTRAL', "
             "'recommendation': 'one clear sentence about gold outlook', "
             "'confidence': 1-100, 'key_insight': 'one sentence explaining the main takeaway' }"
-            f"\n\nDATA:\n{json.dumps(compact)}"
+            f"\n\nDATA:\n{json.dumps(compact, ensure_ascii=False)}"
         )
         return self._generate_json(prompt, kind="post_news")
 
@@ -98,7 +151,7 @@ class GeminiReviewService:
         prompt = (
             "Summarize trading performance. Return STRICT JSON: "
             "{ 'execution_score': 1-10, 'key_lessons': ['p1', 'p2', 'p3'], 'adjustment': 'sentence' }"
-            f"\n\nDATA:\n{json.dumps(compact)}"
+            f"\n\nDATA:\n{json.dumps(compact, ensure_ascii=False)}"
         )
         return self._generate_json(prompt, kind="learning")
 
@@ -109,7 +162,7 @@ class GeminiReviewService:
         prompt = (
             "Summarize the day. Return STRICT JSON: "
             "{ 'verdict': 'CLEAN/FRAGILE/NEUTRAL', 'key_points': ['p1', 'p2', 'p3'], 'summary': 'sentence' }"
-            f"\n\nDATA:\n{json.dumps(compact)}"
+            f"\n\nDATA:\n{json.dumps(compact, ensure_ascii=False)}"
         )
         return self._generate_json(prompt, kind="daily")
 
@@ -120,7 +173,7 @@ class GeminiReviewService:
         prompt = (
             "Summarize the week. Return STRICT JSON: "
             "{ 'edge_efficiency': 'val', 'market_regime': 'val', 'strategic_points': ['p1', 'p2', 'p3'], 'strategic_pivot': 'sentence' }"
-            f"\n\nDATA:\n{json.dumps(compact)}"
+            f"\n\nDATA:\n{json.dumps(compact, ensure_ascii=False)}"
         )
         return self._generate_json(prompt, kind="weekly")
 
@@ -130,7 +183,7 @@ class GeminiReviewService:
         for attempt in range(1, self.max_retries + 1):
             try:
                 url = self.API_URL.format(model=self.model)
-                resp = self.session.post(url, params={"key": self.api_key}, json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.1, "responseMimeType": "application/json"}}, timeout=self.timeout)
+                resp = self.session.post(url, params={"key": self.api_key}, json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}}, timeout=self.timeout)
                 if resp.status_code != 200:
                     last_error = f"HTTP {resp.status_code}"
                     if attempt < self.max_retries:
@@ -177,18 +230,127 @@ class GeminiReviewService:
                 if p.get("text"): return str(p.get("text"))
         return ""
 
+    # ---- compact payload builders (macro-aware) ----
+
     def _compact_signal_payload(self, p: Dict[str, Any]) -> Dict[str, Any]:
-        d = p.get("decision", {})
-        s = d.get("signal", {})
-        return {"symbol": p.get("symbol"), "decision": d.get("decision"), "conf": d.get("confidence"), "entry": s.get("entry", {}).get("price"), "sl": s.get("stop_loss"), "tp": s.get("tp2")}
+        d = p.get("decision", {}) or {}
+        s = d.get("signal", {}) or {}
+        ar = p.get("all_results", {}) or {}
+        # Macro extraction — try 3 locations
+        macro = (
+            (ar.get("news", {}) or {}).get("macro_direction")
+            or (ar.get("macro_fundamental", {}) or {}).get("macro_direction")
+            or {}
+        )
+        # Agent votes summary
+        votes_summary = {}
+        for name in ("technical","classical","smc","price_action","multitimeframe"):
+            r = ar.get(name, {}) or {}
+            if r:
+                votes_summary[name] = {
+                    "signal": r.get("signal") or r.get("direction"),
+                    "confidence": r.get("confidence", 0)
+                }
+        return {
+            "symbol": p.get("symbol"),
+            "decision": d.get("decision"),
+            "confidence": d.get("confidence"),
+            "entry": s.get("entry", {}).get("price"),
+            "sl": s.get("stop_loss"),
+            "tp1": s.get("tp1"),
+            "tp2": s.get("tp2"),
+            "rr": s.get("rr_ratio"),
+            # --- macro block ---
+            "macro_direction": {
+                "bias": macro.get("bias"),
+                "confidence": macro.get("confidence"),
+                "score": macro.get("score"),
+                "drivers": (macro.get("drivers") or [])[:4],
+                "confidence_breakdown": macro.get("confidence_breakdown"),
+                "invalidations": (macro.get("invalidations") or [])[:2],
+            } if macro else None,
+            "daily_bias": {
+                "bias": (ar.get("daily_bias", {}) or {}).get("bias"),
+                "confidence": (ar.get("daily_bias", {}) or {}).get("confidence"),
+            },
+            "technical_regime": (
+                (ar.get("technical", {}) or {}).get("market_regime")
+                or ((ar.get("technical", {}) or {}).get("technical") or {}).get("market_regime")
+            ),
+            "news_status": (ar.get("news", {}) or {}).get("market_status"),
+            "agent_votes": votes_summary,
+            "quality": d.get("quality"),
+            "current_price": p.get("current_price"),
+        }
 
     def _compact_market_payload(self, p: Dict[str, Any]) -> Dict[str, Any]:
-        d = p.get("decision", {})
-        ar = p.get("all_results", {})
-        return {"symbol": p.get("symbol"), "price": p.get("current_price"), "bias": ar.get("daily_bias", {}).get("bias"), "rsi": ar.get("technical", {}).get("technical", {}).get("rsi")}
+        d = p.get("decision", {}) or {}
+        ar = p.get("all_results", {}) or {}
+        macro = (
+            (ar.get("news", {}) or {}).get("macro_direction")
+            or (ar.get("macro_fundamental", {}) or {}).get("macro_direction")
+            or {}
+        )
+        tech = ar.get("technical", {}) or {}
+        tech_inner = tech.get("technical", {}) or {}
+        return {
+            "symbol": p.get("symbol"),
+            "price": p.get("current_price"),
+            "bias": (ar.get("daily_bias", {}) or {}).get("bias"),
+            "rsi": tech_inner.get("rsi") or tech.get("rsi"),
+            "macro_direction": {
+                "bias": macro.get("bias"),
+                "confidence": macro.get("confidence"),
+                "score": macro.get("score"),
+                "drivers": macro.get("drivers", [])[:3],
+                "breakdown": macro.get("confidence_breakdown"),
+            } if macro else None,
+            "technical_regime": tech_inner.get("market_regime") or tech.get("market_regime"),
+            "session": (ar.get("session", {}) or {}).get("current_session"),
+        }
 
     def _compact_news_payload(self, p: Dict[str, Any]) -> Dict[str, Any]:
-        return {"symbol": p.get("symbol"), "news": p.get("news", {})}
+        news = p.get("news", {}) or {}
+        macro = news.get("macro_direction") or {}
+        # also try top-level macro_agent
+        if not macro and p.get("macro_agent"):
+            macro = (p.get("macro_agent", {}) or {}).get("macro_direction", {}) or {}
+        return {
+            "symbol": p.get("symbol"),
+            "news": {
+                "market_status": news.get("market_status"),
+                "can_trade": news.get("can_trade"),
+                "risk_level": news.get("risk_level"),
+                "upcoming_events": (news.get("upcoming_events") or [])[:2],
+            },
+            "macro_direction": {
+                "bias": macro.get("bias"),
+                "confidence": macro.get("confidence"),
+                "drivers": (macro.get("drivers") or [])[:3],
+            } if macro else None,
+            "daily_bias": p.get("daily_bias"),
+        }
+
+    def _compact_macro_payload(self, p: Dict[str, Any]) -> Dict[str, Any]:
+        """Full macro agent output for standalone macro review."""
+        # Accept either raw macro_direction or full agent result
+        md = p.get("macro_direction") or p.get("macro") or p
+        # if it's the full agent result, unwrap
+        if "macro_direction" in md and isinstance(md.get("macro_direction"), dict):
+            md = md["macro_direction"]
+        return {
+            "bias": md.get("bias"),
+            "confidence": md.get("confidence"),
+            "score": md.get("score"),
+            "drivers": md.get("drivers", []),
+            "reason_codes": md.get("reason_codes", [])[:8],
+            "evidence": md.get("evidence", [])[:6],
+            "confidence_breakdown": md.get("confidence_breakdown", {}),
+            "invalidations": md.get("invalidations", []),
+            "data_quality": md.get("data_quality", {}),
+            "warnings": md.get("warnings", []),
+            "summary": md.get("summary"),
+        }
 
     def _compact_post_news_payload(self, p: Dict[str, Any]) -> Dict[str, Any]:
         return {
@@ -246,6 +408,8 @@ class GeminiReviewService:
         for key in (
             "summary", "reason", "trading_advice", "adjustment", "strategic_pivot",
             "edge_efficiency", "market_regime", "verdict", "market_bias", "action",
+            "macro_verdict", "primary_driver", "invalidation", "key_insight", "recommendation",
+            "macro_alignment",
         ):
             value = payload.get(key)
             if value is not None:
@@ -268,7 +432,7 @@ class GeminiReviewService:
         if any(marker in combined for marker in generic_markers):
             return True
         meaningful = [t for t in texts if len(t) >= 18 and len(set(t.lower().split())) >= 4]
-        if kind in {"daily", "weekly", "learning", "news"} and not meaningful:
+        if kind in {"daily", "weekly", "learning", "news", "macro"} and not meaningful:
             return True
         return False
 
