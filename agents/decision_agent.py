@@ -62,10 +62,8 @@ class DecisionAgent(BaseAgent):
             db_weights = getattr(self.learning_service, "current_weights", None)
             if db_weights:
                 return {k: float(v) for k, v in dict(db_weights).items()}
-        config_weights = self.config.get("agent_weights", {}) or {}
-        if config_weights:
-            return {k: float(v) for k, v in config_weights.items()}
-        return self.default_weights.copy()
+        # Use the canonical helper so config changes propagate everywhere.
+        return get_agent_weights(self.config)
 
     def update_weights(self, new_weights: Dict[str, float]) -> None:
         self.current_weights = {k: float(v) for k, v in new_weights.items()}
