@@ -23,6 +23,7 @@ import logging
 from typing import Any, Dict
 
 from agents.base_agent import BaseAgent
+from utils.helpers import get_agent_weights
 
 logger = logging.getLogger(__name__)
 
@@ -45,37 +46,19 @@ class DecisionAgent(BaseAgent):
         self.agent_min_confidence = int(signal_req.get("agent_min_confidence", 70) or 70)
         self.min_consensus_confidence = float(signal_req.get("min_consensus_confidence", 72) or 72)
 
-        self.default_weights = {
-            "technical": 0.20,
-            "classical": 0.25,
-            "smc": 0.20,
-            "price_action": 0.20,
-            "multitimeframe": 0.15,
-        }
+        self.default_weights = get_agent_weights(config)
         self.current_weights = self._load_weights()
         self.voting_agents = set(self.default_weights)
 
     def _load_weights(self) -> Dict[str, float]:
         """Load weights with config.json as the single source of truth.
 
-        Priority: config.json → default_weights (hardcoded).
+        Priority: config.json → default_weights (from get_agent_weights).
         DB weights are NOT used for decisions — only for learning recommendations
         and dashboard display.  The user manually updates config.json + Supabase
         when they accept a learning recommendation.
         """
-        config_weights = self.config.get("agent_weights", {}) or {}
-        # Filter out non-numeric keys (e.g. _description)
-        numeric_weights = {}
-        for k, v in config_weights.items():
-            if k.startswith("_"):
-                continue
-            try:
-                numeric_weights[k] = float(v)
-            except (TypeError, ValueError):
-                continue
-        if numeric_weights:
-            return numeric_weights
-        return self.default_weights.copy()
+        return get_agent_weights(self.config)
 
     def update_weights(self, new_weights: Dict[str, float]) -> None:
         self.current_weights = {k: float(v) for k, v in new_weights.items()}
