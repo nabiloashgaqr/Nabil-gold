@@ -35,7 +35,7 @@ from services.market_data import MarketDataService
 from services.telegram_bot import TelegramService
 from services.learning_service import get_learning_service
 from services.llm_review import get_gemini_review_service
-from utils.helpers import load_config, setup_logging
+from utils.helpers import load_config, setup_logging, get_agent_weights
 from utils.instruments import enabled_instruments, config_for_instrument, normalize_symbol, price_to_points, points_to_price
 
 setup_logging()
@@ -381,7 +381,7 @@ async def _check_scale_in(
         min_net_conf = float(sr.get("min_consensus_confidence", 72) or 72)
 
         agent_names = ["technical", "classical", "smc", "price_action", "multitimeframe"]
-        weights = config.get("agent_weights", {}) or {}
+        weights = get_agent_weights(config)
         agree_count = 0
         oppose_count = 0
         net_weighted = 0.0
