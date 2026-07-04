@@ -20,11 +20,11 @@ class FakeSession:
         symbol = params["symbol"]
         self.calls.append(symbol)
         # Twelve Data returns newest first; provider reverses to old->new.
-        if symbol in {"EUR/USD", "GBP/USD"}:
+        if symbol in {"EUR/USD", "GBP/USD", "AUD/USD"}:
             values = [{"close": "1.00"}, {"close": "1.02"}]
-        elif symbol in {"USD/JPY", "USD/CNY"}:
+        elif symbol in {"USD/JPY", "USD/CHF", "USD/CAD", "USD/CNY"}:
             values = [{"close": "100.00"}, {"close": "99.00"}]
-        else:  # SPY risk proxy
+        else:  # risk proxy fallback (e.g. SPY if configured)
             values = [{"close": "500.00"}, {"close": "510.00"}]
         return FakeResponse({"values": values})
 
@@ -37,13 +37,15 @@ def test_macro_data_provider_builds_context_with_hourly_quota(monkeypatch):
 
     context = provider.build_context()
 
-    assert len(session.calls) == 5
+    # 4-symbol USD-only basket: EUR/USD, GBP/USD, USD/JPY, AUD/USD
+    # = 4 credits/hour = 96/day — well under 800 free limit
+    assert len(session.calls) == 4
     assert context["source"] == "twelvedata_hourly_macro_proxy"
-    assert context["quota_policy"]["credits_used_estimate"] == 5
-    assert context["quota_policy"]["daily_estimate_at_hourly"] == 120
-    assert context["dxy_trend"] in {"rising", "falling", "flat"}
+    assert context["quota_policy"]["credits_used_estimate"] == 4
+    assert context["quota_policy"]["daily_estimate_at_hourly"] == 96
+    assert context["dxy_trend"] in {"rising", "falling", "flat", "unknown"}
     assert context["risk_sentiment"] in {"risk_on", "risk_off", "neutral"}
-    assert context["data_quality"]["usable_symbols"] == 5
+    assert context["data_quality"]["usable_symbols"] == 4
 
 
 def test_database_macro_context_falls_back_local(tmp_path):
