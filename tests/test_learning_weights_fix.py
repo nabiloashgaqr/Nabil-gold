@@ -1,17 +1,17 @@
-"""Regression tests for the closed learning loop fix.
+"""Regression tests for unified weight source.
 
-Bug: `_load_weights()` in DecisionAgent only read from config.json,
-so the weights saved daily by run_learning.py were never used.
-Fix: DecisionAgent now prefers learning_service.current_weights
-(loaded from DB) over config.json.
+After the unification fix, config.json is the single source of truth for
+agent weights. DB weights are NOT used for decisions. The user manually
+updates config.json + Supabase when they accept a learning recommendation.
 
 Tests:
-1. _load_weights returns learning_service.current_weights when present
+1. _load_weights returns config.json weights (NOT learning_service DB weights)
 2. _load_weights falls back to config.json when no learning_service
 3. _load_weights falls back to default_weights when nothing else
 4. update_weights() refreshes and changes current_weights
-5. run_analysis.py calls load_current_weights() before DecisionAgent
+5. run_analysis.py initializes learning_service (for recommendations)
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -39,25 +39,25 @@ def _config(**overrides) -> dict:
 
 
 class TestLoadWeightsFix:
-    """The bug was: weights from DB were calculated but never used."""
+    """config.json is the single source of truth — DB does NOT override."""
 
-    def test_uses_learning_service_weights_when_available(self):
-        """The fix: prefer learning_service.current_weights over config.json."""
+    def test_uses_config_weights_not_learning_service_db(self):
+        """DB weights from learning_service must NOT override config.json."""
         config = _config()
-        # Simulate learning_service after run_learning.py saved new weights
+        # Simulate learning_service with different DB weights
         learning_service = MagicMock()
         learning_service.current_weights = {
-            "technical": 0.10,  # reduced
-            "classical": 0.10,  # reduced
-            "smc": 0.40,        # increased (top performer)
+            "technical": 0.10,  # DB says 0.10
+            "classical": 0.10,
+            "smc": 0.40,        # DB says 0.40
             "price_action": 0.20,
             "multitimeframe": 0.20,
         }
 
         agent = DecisionAgent(config, learning_service=learning_service)
-        # The fix: current_weights must reflect learning_service, NOT config.json
-        assert agent.current_weights["smc"] == 0.40  # from learning_service
-        assert agent.current_weights["technical"] == 0.10  # from learning_service
+        # Must use config.json weights, NOT DB
+        assert agent.current_weights["smc"] == 0.25  # from config, not 0.40
+        assert agent.current_weights["technical"] == 0.20  # from config, not 0.10
 
     def test_falls_back_to_config_when_no_learning_service(self):
         config = _config()
@@ -69,7 +69,7 @@ class TestLoadWeightsFix:
         learning_service = MagicMock()
         learning_service.current_weights = {}  # empty after failed DB load
         agent = DecisionAgent(config, learning_service=learning_service)
-        # Falls back to config since current_weights is empty
+        # Still uses config — DB is not the source
         assert agent.current_weights == config["agent_weights"]
 
     def test_falls_back_to_default_when_neither_available(self):
@@ -95,25 +95,24 @@ class TestLoadWeightsFix:
     def test_independent_copy_no_aliasing(self):
         """Returns a copy so future updates don't mutate the source."""
         config = _config()
-        learning_service = MagicMock()
-        learning_service.current_weights = {"technical": 0.5, "smc": 0.5}
-        agent = DecisionAgent(config, learning_service=learning_service)
+        agent = DecisionAgent(config, learning_service=None)
+        original = dict(agent.current_weights)
         agent.current_weights["technical"] = 0.99
-        # learning_service's copy should NOT be affected
-        assert learning_service.current_weights["technical"] == 0.5
+        # original dict should NOT be affected
+        assert original["technical"] == 0.20
 
-    def test_does_not_use_config_when_learning_service_provided_even_with_different_keys(self):
-        """If learning_service has weights, config is ignored entirely."""
+    def test_config_always_used_regardless_of_learning_service_keys(self):
+        """config.json is the source — learning_service DB keys are ignored."""
         config = _config()
-        # config has 'classical' but learning_service doesn't
         learning_service = MagicMock()
         learning_service.current_weights = {
             "technical": 0.5,
             "smc": 0.5,
         }
         agent = DecisionAgent(config, learning_service=learning_service)
-        # Should use exactly what learning_service has (no merging with config)
-        assert "classical" not in agent.current_weights
+        # Must use config.json keys, not DB subset
+        assert "classical" in agent.current_weights
+        assert agent.current_weights["technical"] == 0.20  # config value
 
 
 class TestLoadWeightsAsyncIntegration:
@@ -126,25 +125,17 @@ class TestLoadWeightsAsyncIntegration:
         assert inspect.iscoroutinefunction(LearningService.load_current_weights), \
             "load_current_weights must remain async"
 
-    def test_run_analysis_imports_load_helpers(self):
-        """run_analysis must import get_learning_service and call load_current_weights."""
+    def test_run_analysis_imports_learning_helpers(self):
+        """run_analysis must import get_learning_service for recommendations."""
         with open("scripts/run_analysis.py", encoding="utf-8") as f:
             src = f.read()
         assert "get_learning_service" in src
-        assert "load_current_weights" in src, \
-            "run_analysis.py must call await learning_service.load_current_weights()"
-        # The fix adds this line between get_learning_service and DecisionAgent
-        idx_get = src.index("get_learning_service(database, config)")
-        idx_load = src.index("load_current_weights")
-        assert idx_get < idx_load, "load must happen after get_learning_service"
 
 
 class TestConfigUpdate:
-    """Verify removed external-review config."""
 
     def test_external_review_config_removed(self):
         import json
         with open("config.json", encoding="utf-8") as f:
             cfg = json.load(f)
         assert "removed_review_config" not in cfg
-

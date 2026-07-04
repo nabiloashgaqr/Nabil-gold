@@ -1,10 +1,10 @@
-"""Tests for DecisionAgent's learned-weight refresh (analyze_async).
+"""Tests for DecisionAgent's weight loading — config.json is the single source of truth.
 
-Before this fix, run_learning.py computed and saved new agent_weights to
-the DB daily, but DecisionAgent._load_weights() only ever read the static
-agent_weights from config.json - the learning loop had no effect on live
-decisions. analyze_async now asks the injected learning_service for the
-latest DB weights before collecting votes.
+After the unification fix, DecisionAgent._load_weights() reads ONLY from
+config.json (or its hardcoded defaults).  DB weights via learning_service
+are no longer used for decisions — only for learning recommendations and
+dashboard display.  The user manually updates config.json + Supabase
+when they accept a recommendation.
 """
 
 from __future__ import annotations
@@ -53,8 +53,7 @@ def minimal_agents_results():
 
 
 class FakeDatabase:
-    """Minimal stand-in for DatabaseService.execute_query, just enough for
-    LearningService.load_current_weights()."""
+    """Minimal stand-in for DatabaseService.execute_query."""
 
     def __init__(self, rows=None, raise_error=False):
         self._rows = rows
@@ -71,7 +70,8 @@ class FakeDatabase:
 
 
 @pytest.mark.asyncio
-async def test_analyze_async_applies_db_learned_weights():
+async def test_analyze_async_uses_config_weights_not_db():
+    """config.json is the single source of truth — DB weights must NOT override."""
     rows = [
         {"agent_name": "technical", "weight": 0.40},
         {"agent_name": "classical", "weight": 0.10},
@@ -83,14 +83,15 @@ async def test_analyze_async_applies_db_learned_weights():
     learning_service = LearningService(db, base_config())
     agent = DecisionAgent(base_config(), learning_service=learning_service)
 
-    # Before analyze_async runs, weights are still the static config defaults.
+    # Weights must come from config.json, NOT from DB
     assert agent.current_weights["technical"] == 0.20
+    assert agent.current_weights["classical"] == 0.20
 
     await agent.analyze_async(minimal_agents_results())
 
-    assert db.queried is True
-    assert agent.current_weights["technical"] == 0.40
-    assert agent.current_weights["classical"] == 0.10
+    # After analyze_async, weights still from config.json — DB does not override
+    assert agent.current_weights["technical"] == 0.20
+    assert agent.current_weights["classical"] == 0.20
 
 
 @pytest.mark.asyncio
@@ -104,27 +105,23 @@ async def test_analyze_async_keeps_config_weights_when_no_learning_service():
 
 
 @pytest.mark.asyncio
-async def test_analyze_async_falls_back_to_existing_weights_on_db_error():
+async def test_analyze_async_stable_on_db_error():
+    """DB errors must not crash analysis — config weights are always available."""
     db = FakeDatabase(raise_error=True)
     learning_service = LearningService(db, base_config())
     agent = DecisionAgent(base_config(), learning_service=learning_service)
     config_weights = dict(agent.current_weights)
 
-    # Must not raise - DB errors should degrade gracefully, not crash analysis.
-    # LearningService.load_current_weights() itself catches DB errors and
-    # returns its own default_weights, so DecisionAgent ends up using those
-    # (not its own config_weights) - this is expected, documented behavior:
-    # the only thing under test here is that analyze_async doesn't crash.
+    # Must not raise — config weights are the source, DB is irrelevant
     await agent.analyze_async(minimal_agents_results())
 
-    assert db.queried is True
-    assert agent.current_weights  # got *some* usable weights, no crash
+    # Weights unchanged from config
+    assert agent.current_weights == config_weights
 
 
 @pytest.mark.asyncio
 async def test_analyze_async_ignores_empty_db_result():
-    """An empty result from the DB (e.g. table has no rows yet) should not
-    wipe out the perfectly good config-based weights with an empty dict."""
+    """Empty DB result is irrelevant — config weights are always used."""
     db = FakeDatabase(rows=[])
     learning_service = LearningService(db, base_config())
     agent = DecisionAgent(base_config(), learning_service=learning_service)
