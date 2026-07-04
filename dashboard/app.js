@@ -290,9 +290,19 @@ function newsLabelOf(t) {
     return String(t.news_status_at_entry || rule.market_status || rule.status || 'UNKNOWN').toUpperCase();
 }
 function regimeLabelOf(t) {
+    // Prefer composite label (e.g. "NORMAL TRENDING", "HIGH RANGING", "SQUEEZE")
+    const composite = String(t.regime_composite || '').trim().toUpperCase();
+    if (composite && composite !== 'UNKNOWN') return composite;
+    // Fallback: build from parts
     const snap = snapshotOf(t);
     const tech = (snap.market_context || {}).technical_regime || {};
-    return String(t.volatility_regime || tech.volatility_regime || 'UNKNOWN').toUpperCase();
+    const vol = String(t.volatility_regime || tech.volatility_regime || '').trim().toUpperCase();
+    const phase = String(t.market_phase || tech.market_phase || '').trim().toUpperCase();
+    if (phase === 'SQUEEZE') return 'SQUEEZE';
+    if (vol && phase) return `${vol} ${phase}`;
+    if (vol) return vol;
+    if (phase) return phase;
+    return 'UNKNOWN';
 }
 function stopOutcomeOf(t) {
     if (String(t.status || '').toUpperCase() !== 'SL_HIT') return null;
