@@ -493,7 +493,11 @@ class TelegramService:
         # ── Price-diff gate: BUY only at lower price, SELL only at higher price ──
         pca = config.get("partial_consensus_alert") or {}
         min_diff = float(pca.get("min_price_diff_points", 100))
-        if not _partial_alert_price_ok(symbol, best_side, current_price, min_diff):
+        max_age_hours = float(pca.get("max_age_hours", 8))
+        reset_on_session = bool(pca.get("reset_on_session_change", True))
+        if not _partial_alert_price_ok(symbol, best_side, current_price, min_diff,
+                                       max_age_hours=max_age_hours,
+                                       reset_on_session_change=reset_on_session):
             return False
 
         # ── Agent analysis section ──
@@ -576,18 +580,55 @@ def _partial_alert_tracker_save(data: dict) -> None:
         pass
 
 
-def _partial_alert_price_ok(symbol: str, side: str, price: float, min_diff_points: float) -> bool:
-    """Check if this alert should be sent based on price difference.
+def _partial_alert_price_ok(symbol: str, side: str, price: float, min_diff_points: float,
+                            max_age_hours: float = 8.0, reset_on_session_change: bool = True) -> bool:
+    """Check if this alert should be sent based on price difference, age, and session.
 
     BUY: only send if price is min_diff_points BELOW last BUY alert.
     SELL: only send if price is min_diff_points ABOVE last SELL alert.
     First alert for a direction always passes.
+
+    Auto-reset conditions (tracker entry is cleared, so next alert is free):
+    - reset_on_session_change: if current session differs from the recorded session.
+    - max_age_hours: if more than max_age_hours have passed since the last alert.
     """
     tracker = _partial_alert_tracker_load()
     key = f"{symbol}_{side}"
-    last_price = tracker.get(key)
-    if last_price is None:
+    entry = tracker.get(key)
+
+    if entry is None:
         return True  # First alert for this direction
+
+    # ── Age-based reset ──
+    from datetime import datetime, timezone
+    last_ts = entry.get("timestamp") if isinstance(entry, dict) else None
+    if last_ts:
+        try:
+            last_dt = datetime.fromisoformat(str(last_ts).replace("Z", "+00:00"))
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=timezone.utc)
+            age_hours = (datetime.now(timezone.utc) - last_dt).total_seconds() / 3600
+            if age_hours > max_age_hours:
+                # Too old — reset tracker entry so next alert passes freely
+                tracker.pop(key, None)
+                _partial_alert_tracker_save(tracker)
+                return True
+        except Exception:
+            pass  # If timestamp parsing fails, continue to price check
+
+    # ── Session-based reset ──
+    if reset_on_session_change:
+        from utils.sessions import session_label_from_utc
+        current_session = session_label_from_utc(datetime.now(timezone.utc))
+        recorded_session = entry.get("session") if isinstance(entry, dict) else None
+        if recorded_session and current_session != recorded_session:
+            # Session changed — reset tracker entry
+            tracker.pop(key, None)
+            _partial_alert_tracker_save(tracker)
+            return True
+
+    # ── Price-diff check (within same session, within age limit) ──
+    last_price = entry.get("price") if isinstance(entry, dict) else entry
     from utils.instruments import price_to_points
     if side == "BUY":
         diff = price_to_points(last_price - price, symbol=symbol)
@@ -597,8 +638,14 @@ def _partial_alert_price_ok(symbol: str, side: str, price: float, min_diff_point
 
 
 def _partial_alert_record(symbol: str, side: str, price: float) -> None:
-    """Record that an alert was sent at this price."""
+    """Record that an alert was sent at this price, with timestamp and session."""
+    from datetime import datetime, timezone
+    from utils.sessions import session_label_from_utc
     tracker = _partial_alert_tracker_load()
     key = f"{symbol}_{side}"
-    tracker[key] = price
+    tracker[key] = {
+        "price": price,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "session": session_label_from_utc(datetime.now(timezone.utc)),
+    }
     _partial_alert_tracker_save(tracker)
