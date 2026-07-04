@@ -451,7 +451,10 @@ function updateStats(trades, live) {
     setText('bestTrade', pnls.length ? signed(best) : '--');
     setText('worstTrade', pnls.length ? signed(worst) : '--');
     setText('avgTrade', total ? signed(avg) : '--');
-    setText('expectancy', total ? signed(avg) : '--');
+    // Streak: longest consecutive win streak across closed trades
+    let maxStreak = 0, curStreak = 0;
+    trades.forEach(t => { if (pnlOf(t) > 0) { curStreak++; maxStreak = Math.max(maxStreak, curStreak); } else { curStreak = 0; } });
+    setText('streak', maxStreak > 0 ? `${maxStreak}W` : '--');
     setText('tradesCount', total > CLOSED_TRADES_TABLE_LIMIT ? `(${CLOSED_TRADES_TABLE_LIMIT}/${total})` : `(${total})`);
     updateEdgeSnapshot(trades);
 
