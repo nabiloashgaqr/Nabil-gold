@@ -290,7 +290,7 @@ function newsLabelOf(t) {
     return String(t.news_status_at_entry || rule.market_status || rule.status || 'UNKNOWN').toUpperCase();
 }
 function regimeLabelOf(t) {
-    // Prefer composite label (e.g. "NORMAL TRENDING", "HIGH RANGING", "SQUEEZE")
+    // Prefer composite label (e.g. "NORMAL TRENDING", "HIGH RANGING", "SQUEEZE", "LEGACY")
     const composite = String(t.regime_composite || '').trim().toUpperCase();
     if (composite && composite !== 'UNKNOWN') return composite;
     // Fallback: build from parts
@@ -302,7 +302,7 @@ function regimeLabelOf(t) {
     if (vol && phase) return `${vol} ${phase}`;
     if (vol) return vol;
     if (phase) return phase;
-    return 'UNKNOWN';
+    return 'LEGACY';
 }
 function stopOutcomeOf(t) {
     if (String(t.status || '').toUpperCase() !== 'SL_HIT') return null;
