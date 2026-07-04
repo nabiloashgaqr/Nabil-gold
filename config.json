@@ -196,7 +196,9 @@
         "enabled": true,
         "min_agents": 2,
         "min_price_diff_points": 100,
-        "description": "Alert when 2 agents agree — informational only, not entry signal. Requires 100+ points price difference from last alert in same direction. BUY alerts only at lower price, SELL only at higher price."
+        "max_age_hours": 8,
+        "reset_on_session_change": true,
+        "description": "Alert when 2 agents agree — informational only, not entry signal. Requires 100+ points price difference from last alert in same direction. BUY alerts only at lower price, SELL only at higher price. Tracker auto-resets when session changes or after max_age_hours (8h)."
     },
     "notifications": {
         "send_no_signal_updates": false,
