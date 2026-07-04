@@ -703,16 +703,17 @@ def _log_gemini_result(label: str, result: Dict[str, Any] | None) -> None:
 def _check_and_send_post_news(
     gemini, telegram, news_result: Dict[str, Any],
     symbol: str, current_price: float, config: Dict[str, Any],
+    database: Any = None,
 ) -> None:
     """Check if a TIER_1/TIER_2 event recently released and send post-news analysis.
 
     Trigger: event was released 5-30 minutes ago (minutes_until between -5 and -30).
     Only fires once per event (tracked in storage/post_news_tracker.json).
+    Uses persisted macro context from Supabase for DXY/dollar strength analysis.
     """
     from utils.helpers import get_current_session
     try:
         upcoming = news_result.get("upcoming_events") or []
-        now_utc = None
         for event in upcoming:
             tier = str(event.get("tier", "")).upper()
             if tier not in {"TIER_1", "TIER_2"}:
@@ -728,9 +729,29 @@ def _check_and_send_post_news(
                     continue
                 logger.info("📰 Post-news trigger: %s released %d min ago", event_name, abs(minutes_until))
                 # Build payload for Gemini post-news analysis
+                # Read persisted macro context (DXY strength, risk sentiment, etc.)
+                macro_context = {}
+                if database:
+                    try:
+                        macro_context = database.get_macro_context()
+                    except Exception:
+                        pass
                 from agents.macro_fundamental_agent import MacroFundamentalAgent
-                macro = MacroFundamentalAgent(config).macro_direction({})
-                dxy_info = macro.get("summary", "") if isinstance(macro, dict) else ""
+                macro_agent = MacroFundamentalAgent(config)
+                macro = macro_agent.macro_direction(macro_context) if macro_context else macro_agent.macro_direction({})
+                dxy_trend = macro_context.get("dxy_trend") or macro_context.get("usd_trend") or "unknown"
+                risk_sentiment = macro_context.get("risk_sentiment") or "unknown"
+                usd_score_detail = ""
+                observations = macro_context.get("observations") or {}
+                if isinstance(observations, dict):
+                    pairs = [f"{sym}: {obs.get('usd_read', '?')}" for sym, obs in observations.items() if obs.get("component") == "usd"]
+                    if pairs:
+                        usd_score_detail = " | ".join(pairs)
+                dxy_info = f"DXY trend: {dxy_trend}, Risk: {risk_sentiment}"
+                if usd_score_detail:
+                    dxy_info += f", Pairs: [{usd_score_detail}]"
+                if macro.get("summary"):
+                    dxy_info += f", Macro: {macro['summary']}"
                 payload = {
                     "symbol": symbol,
                     "event_name": event_name,
@@ -863,6 +884,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                         symbol=symbol,
                         current_price=data.get("current_price"),
                         config=config,
+                        database=database,
                     )
             except Exception:
                 logger.exception("🧠 Gemini analysis block failed")
