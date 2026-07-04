@@ -854,19 +854,28 @@ function renderReports(payload) {
 }
 
 function updateAgentPerformance() {
-    const agents = (dashboardPayload?.agentPerformance || dashboardPayload?.agentWeights || []);
+    const agents = (dashboardPayload?.agentPerformance || []);
+    const agentWeightsFromApi = (dashboardPayload?.agentWeights || []);
     const grid = $('agentsGrid');
     if (!grid) return;
     if (!agents.length) {
+        // Fallback weights — must match config.json::agent_weights and utils/helpers.py::get_agent_weights
         const fallbackWeights = {multitimeframe: 0.15, classical: 0.25, smc: 0.20, price_action: 0.20, technical: 0.20};
         grid.innerHTML = Object.keys(fallbackWeights).map(name => `<div class="agent-card"><div class="agent-header"><span class="agent-icon">🤖</span><span class="agent-name">${name}</span></div><div class="agent-stats"><div class="agent-metric"><span>${currentLang === 'ar' ? 'الوزن' : 'Weight'}</span><strong>${(fallbackWeights[name]*100).toFixed(1)}%</strong></div></div><div class="muted">No performance data yet</div></div>`).join('');
         setText('consensusStrength', '--');
         return;
     }
+    // Build a lookup from API agentWeights so DB values override code fallbacks
+    const weightMap = {};
+    (agentWeightsFromApi || []).forEach(a => {
+        const name = String(a.agent_name || '').toLowerCase();
+        if (name) weightMap[name] = Number(a.weight ?? 0);
+    });
     grid.innerHTML = agents.map(a => {
         const hasComputed = a.win_rate !== null && a.win_rate !== undefined && Number.isFinite(Number(a.win_rate));
         const wr = hasComputed ? num(a.win_rate) : 0;
-        const weight = num(a.weight) * 100;
+        const apiWeight = weightMap[String(a.agent_name || '').toLowerCase()];
+        const weight = num(apiWeight !== undefined ? apiWeight : a.weight) * 100;
         const predictions = num(a.total_predictions ?? a.predictions ?? 0);
         const wins = num(a.wins ?? 0);
         const losses = num(a.losses ?? 0);
