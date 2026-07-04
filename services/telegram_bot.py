@@ -470,3 +470,135 @@ class TelegramService:
         # Preserve report line breaks after escaping.
         text = text.replace("\n", "\n")
         return self.send_message(text)
+
+    def send_partial_consensus(self, decision: Dict[str, Any], all_results: Dict[str, Any], config: Dict[str, Any]) -> bool:
+        """Send a partial-consensus alert (2 agents agree, not enough for entry).
+
+        English-only message. Only sent when price is meaningfully different
+        from the last alert for the same direction:
+        - BUY: only at a lower price (≥100 pts below last BUY alert)
+        - SELL: only at a higher price (≥100 pts above last SELL alert)
+        """
+        symbol = str(decision.get("symbol") or "XAU/USD")
+        current_price = float(decision.get("current_price") or all_results.get("current_price", 0))
+
+        classic = decision.get("classic") or {}
+        consensus = classic.get("consensus") or {}
+        buy_metrics = consensus.get("BUY") or {}
+        sell_metrics = consensus.get("SELL") or {}
+        best_side = "BUY" if buy_metrics.get("support_count", 0) >= sell_metrics.get("support_count", 0) else "SELL"
+        best_metrics = buy_metrics if best_side == "BUY" else sell_metrics
+        confidence = best_metrics.get("confidence", 0)
+
+        # ── Price-diff gate: BUY only at lower price, SELL only at higher price ──
+        pca = config.get("partial_consensus_alert") or {}
+        min_diff = float(pca.get("min_price_diff_points", 100))
+        if not _partial_alert_price_ok(symbol, best_side, current_price, min_diff):
+            return False
+
+        # ── Agent analysis section ──
+        vote_emojis = {"BUY": "🟢", "SELL": "🔴"}
+        min_agent_conf = int((config.get("signal_requirements") or {}).get("agent_min_confidence", 70))
+        agent_names = ["technical", "classical", "smc", "price_action", "multitimeframe"]
+        analysis_lines = []
+        for name in agent_names:
+            result = all_results.get(name, {}) or {}
+            agent_signal = str(result.get("signal", "WAIT")).upper()
+            agent_conf = float(result.get("confidence", 0) or 0)
+            emoji = vote_emojis.get(agent_signal, "🟡")
+            if agent_conf < min_agent_conf and agent_signal not in vote_emojis:
+                emoji = "⚪"
+            display = _AGENT_DISPLAY.get(name, name.title())
+            analysis_lines.append(f"{emoji} <b>{display}</b> — {html.escape(agent_signal)} {agent_conf:.0f}%")
+            reasons = result.get("reasons") or result.get("evidence") or []
+            if isinstance(reasons, (list, tuple)):
+                for r in reasons[:2]:
+                    analysis_lines.append(f"  • {html.escape(str(r)[:60])}")
+            elif reasons:
+                analysis_lines.append(f"  • {html.escape(str(reasons)[:60])}")
+            if not reasons:
+                analysis_lines.append(f"  • No details available")
+        analysis_block = "\n".join(analysis_lines)
+
+        # ── Build message ──
+        message = (
+            f"👀 <b>Partial Consensus — {html.escape(symbol)}</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📈 Price: {current_price:.2f} | Weighted Confidence: {confidence:.0f}%\n"
+            "\n"
+            f"{analysis_block}\n"
+            "\n"
+            "━━━ ⚠️ NOTICE ━━━\n"
+            "This is <b>NOT</b> an entry signal.\n"
+            "Wait for 3-agent consensus (70%+ confidence)\n"
+            "and 72%+ net confidence to generate a signal.\n"
+            "━━━━━━━━━━━━━━━━━━━━━"
+        )
+        sent = self.send_message(message)
+        if sent:
+            _partial_alert_record(symbol, best_side, current_price)
+        return sent
+
+
+# ── Friendly agent names ──
+_AGENT_DISPLAY = {
+    "technical": "Technical",
+    "classical": "Classical",
+    "smc": "SMC",
+    "price_action": "Price Action",
+    "multitimeframe": "Multi-TF",
+}
+
+
+# ── Partial alert price tracker ──
+import json as _json
+from pathlib import Path as _Path
+
+_PARTIAL_ALERT_FILE = _Path("storage/partial_alert_tracker.json")
+
+
+def _partial_alert_tracker_load() -> dict:
+    """Load the last-alert prices per symbol+direction."""
+    try:
+        if _PARTIAL_ALERT_FILE.exists():
+            return _json.loads(_PARTIAL_ALERT_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _partial_alert_tracker_save(data: dict) -> None:
+    """Persist the tracker."""
+    try:
+        _PARTIAL_ALERT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _PARTIAL_ALERT_FILE.write_text(_json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _partial_alert_price_ok(symbol: str, side: str, price: float, min_diff_points: float) -> bool:
+    """Check if this alert should be sent based on price difference.
+
+    BUY: only send if price is min_diff_points BELOW last BUY alert.
+    SELL: only send if price is min_diff_points ABOVE last SELL alert.
+    First alert for a direction always passes.
+    """
+    tracker = _partial_alert_tracker_load()
+    key = f"{symbol}_{side}"
+    last_price = tracker.get(key)
+    if last_price is None:
+        return True  # First alert for this direction
+    from utils.instruments import price_to_points
+    if side == "BUY":
+        diff = price_to_points(last_price - price, symbol=symbol)
+    else:
+        diff = price_to_points(price - last_price, symbol=symbol)
+    return diff >= min_diff_points
+
+
+def _partial_alert_record(symbol: str, side: str, price: float) -> None:
+    """Record that an alert was sent at this price."""
+    tracker = _partial_alert_tracker_load()
+    key = f"{symbol}_{side}"
+    tracker[key] = price
+    _partial_alert_tracker_save(tracker)
