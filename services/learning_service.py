@@ -91,14 +91,9 @@ class LearningService:
         self.config = config
         self.learning_config = self._load_learning_config()
         
-        # الأوزان الافتراضية
-        self.default_weights = {
-            'technical': 0.20,
-            'classical': 0.25,
-            'smc': 0.20,
-            'price_action': 0.20,
-            'multitimeframe': 0.15
-        }
+        # الأوزان الافتراضية — مصدر وحيد من get_agent_weights
+        from utils.helpers import get_agent_weights
+        self.default_weights = get_agent_weights(config)
         
         # الأوزان الحالية
         self.current_weights = self.default_weights.copy()
@@ -564,23 +559,10 @@ class LearningService:
         DB agent_weights يُستخدم فقط للعرض في Dashboard.
         الأوزان الفعّالة تأتي من config.json فقط.
         """
-        # المصدر الرئيسي: config.json
-        config_weights = self.config.get('agent_weights', {}) or {}
-        # Filter out non-numeric keys (e.g. _description)
-        numeric_weights = {}
-        for k, v in config_weights.items():
-            if k.startswith("_"):
-                continue
-            try:
-                numeric_weights[k] = float(v)
-            except (TypeError, ValueError):
-                continue
-        if numeric_weights:
-            self.current_weights = numeric_weights
-            return self.current_weights.copy()
-
-        # Fallback: أوزان افتراضية من الكود
-        return self.default_weights.copy()
+        from utils.helpers import get_agent_weights
+        weights = get_agent_weights(self.config)
+        self.current_weights = weights
+        return weights.copy()
     
     def _generate_report_v2(
         self,
