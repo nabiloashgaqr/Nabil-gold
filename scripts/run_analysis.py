@@ -817,8 +817,33 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 database.save_trade(decision)
             else:
                 telegram.send_error_alert("Signal delivery failed: Telegram returned False; trade was not saved.")
-        elif send_hourly_now:
-            telegram.send_message(_build_market_status_message(decision, all_results, database, config))
+        elif decision_type == "WAIT":
+            # ── Partial consensus alert (≥2 agents agree with quality, but <3) ──
+            # Only alert when agent confidence ≥70% AND net confidence ≥72%
+            # but not enough agents (2 instead of 3) for a real signal.
+            pca = config.get("partial_consensus_alert") or {}
+            if pca.get("enabled", False):
+                min_partial = int(pca.get("min_agents", 2))
+                sr = config.get("signal_requirements") or {}
+                min_agent_conf = int(sr.get("agent_min_confidence", 70))
+                min_net_conf = float(sr.get("min_consensus_confidence", 72))
+                classic = decision.get("classic") or {}
+                consensus = classic.get("consensus") or {}
+                buy_m = consensus.get("BUY") or {}
+                sell_m = consensus.get("SELL") or {}
+                best_side = "BUY" if buy_m.get("support_count", 0) >= sell_m.get("support_count", 0) else "SELL"
+                best_m = buy_m if best_side == "BUY" else sell_m
+                best_count = best_m.get("support_count", 0)
+                best_conf = best_m.get("confidence", 0)
+                # All qualified agents already have ≥min_agent_conf (filtered by DecisionAgent)
+                # So we only need to check: ≥2 agents AND ≥72% net confidence AND <3 agents
+                if best_count >= min_partial and best_conf >= min_net_conf and best_count < int(sr.get("min_agents_agree", 3)):
+                    try:
+                        telegram.send_partial_consensus(decision, all_results, config)
+                    except Exception as pca_exc:
+                        logger.warning("Partial consensus alert failed: %s", pca_exc)
+            if send_hourly_now:
+                telegram.send_message(_build_market_status_message(decision, all_results, database, config))
     except Exception as exc:
         telegram.send_error_alert(str(exc))
 
