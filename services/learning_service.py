@@ -74,8 +74,6 @@ class LearningReport:
     news_proximity: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     regime_fit: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
-from utils.helpers import get_agent_weights
-
 class LearningService:
     """
     🧠 خدمة التعلم الذكي - الإصدار 2.0
@@ -93,8 +91,14 @@ class LearningService:
         self.config = config
         self.learning_config = self._load_learning_config()
         
-        # الأوزان الافتراضية — مصدر وحيد من get_agent_weights
-        self.default_weights = get_agent_weights(config)
+        # الأوزان الافتراضية
+        self.default_weights = {
+            'technical': 0.20,
+            'classical': 0.25,
+            'smc': 0.20,
+            'price_action': 0.20,
+            'multitimeframe': 0.15
+        }
         
         # الأوزان الحالية
         self.current_weights = self.default_weights.copy()
@@ -555,24 +559,27 @@ class LearningService:
             logger.error(f"❌ خطأ في حفظ الأوزان: {e}")
     
     async def load_current_weights(self) -> Dict[str, float]:
-        """تحميل الأوزان الحالية من قاعدة البيانات"""
-        try:
-            query = """
-                SELECT agent_name, weight 
-                FROM agent_weights 
-                ORDER BY updated_at DESC
-            """
-            
-            result = await self.db.execute_query(query)
-            
-            if result:
-                weights = {row['agent_name']: row['weight'] for row in result}
-                self.current_weights = weights
-                return weights
-            
-        except Exception as e:
-            logger.error(f"❌ خطأ في تحميل الأوزان: {e}")
-        
+        """تحميل الأوزان الحالية — config.json هو المصدر الوحيد.
+
+        DB agent_weights يُستخدم فقط للعرض في Dashboard.
+        الأوزان الفعّالة تأتي من config.json فقط.
+        """
+        # المصدر الرئيسي: config.json
+        config_weights = self.config.get('agent_weights', {}) or {}
+        # Filter out non-numeric keys (e.g. _description)
+        numeric_weights = {}
+        for k, v in config_weights.items():
+            if k.startswith("_"):
+                continue
+            try:
+                numeric_weights[k] = float(v)
+            except (TypeError, ValueError):
+                continue
+        if numeric_weights:
+            self.current_weights = numeric_weights
+            return self.current_weights.copy()
+
+        # Fallback: أوزان افتراضية من الكود
         return self.default_weights.copy()
     
     def _generate_report_v2(
