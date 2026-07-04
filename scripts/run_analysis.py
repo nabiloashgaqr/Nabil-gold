@@ -32,7 +32,7 @@ from agents.open_trades_manager import OpenTradesManager
 from services.database import DatabaseService
 from services.dynamic_risk import DynamicRiskManager, should_block_signal
 from services.market_data import MarketDataService
-from services.telegram_bot import TelegramService
+from services.telegram_bot import TelegramService, post_news_alert_sent, post_news_alert_record
 from services.learning_service import get_learning_service
 from services.llm_review import get_gemini_review_service
 from utils.helpers import load_config, setup_logging, get_agent_weights
@@ -700,6 +700,62 @@ def _log_gemini_result(label: str, result: Dict[str, Any] | None) -> None:
         logger.info("🧠 Gemini %s: unavailable/skipped (%s)", label, result.get("summary") or result.get("reason") or "unknown")
 
 
+def _check_and_send_post_news(
+    gemini, telegram, news_result: Dict[str, Any],
+    symbol: str, current_price: float, config: Dict[str, Any],
+) -> None:
+    """Check if a TIER_1/TIER_2 event recently released and send post-news analysis.
+
+    Trigger: event was released 5-30 minutes ago (minutes_until between -5 and -30).
+    Only fires once per event (tracked in storage/post_news_tracker.json).
+    """
+    from utils.helpers import get_current_session
+    try:
+        upcoming = news_result.get("upcoming_events") or []
+        now_utc = None
+        for event in upcoming:
+            tier = str(event.get("tier", "")).upper()
+            if tier not in {"TIER_1", "TIER_2"}:
+                continue
+            minutes_until = event.get("minutes_until", 0)
+            # Event was released between 5 and 30 minutes ago
+            if -30 <= minutes_until <= -5:
+                event_name = str(event.get("event", "Unknown Event"))
+                event_time = str(event.get("time", ""))
+                # Create unique key to avoid duplicate alerts
+                event_key = f"{event_name}_{event_time}"
+                if post_news_alert_sent(event_key):
+                    continue
+                logger.info("📰 Post-news trigger: %s released %d min ago", event_name, abs(minutes_until))
+                # Build payload for Gemini post-news analysis
+                from agents.macro_fundamental_agent import MacroFundamentalAgent
+                macro = MacroFundamentalAgent(config).macro_direction({})
+                dxy_info = macro.get("summary", "") if isinstance(macro, dict) else ""
+                payload = {
+                    "symbol": symbol,
+                    "event_name": event_name,
+                    "actual": event.get("actual") or event.get("expected"),  # actual may not be available yet
+                    "forecast": event.get("expected") or event.get("forecast"),
+                    "previous": event.get("previous"),
+                    "impact_tier": tier,
+                    "minutes_since_release": abs(minutes_until),
+                    "current_price": current_price,
+                    "price_before_event": None,  # not tracked per-event
+                    "price_change_since_event": None,
+                    "dxy_macro": dxy_info,
+                    "session": get_current_session(),
+                }
+                analysis = gemini.interpret_post_news(payload)
+                _log_gemini_result("post-news", analysis)
+                if analysis.get("available") and not analysis.get("suppressed"):
+                    sent = telegram.send_post_news_analysis(analysis, event_name, symbol)
+                    if sent:
+                        post_news_alert_record(event_key)
+                        logger.info("📰 Post-news analysis sent for: %s", event_name)
+    except Exception as exc:
+        logger.warning("Post-news analysis check failed: %s", exc)
+
+
 async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
     telegram = TelegramService(config)
     try:
@@ -799,6 +855,15 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                         logger.info("🧠 Gemini signal review skipped: WAIT hourly status")
                     decision["gemini_news_review"] = gemini.interpret_news_context({"symbol": symbol, "current_price": data.get("current_price"), "session": all_results.get("session"), "news": all_results.get("news"), "daily_bias": all_results.get("daily_bias"), "technical_context": all_results.get("technical")})
                     _log_gemini_result("news review", decision.get("gemini_news_review"))
+
+                    # ── Post-news analysis: after a TIER_1/TIER_2 event releases ──
+                    _check_and_send_post_news(
+                        gemini=gemini, telegram=telegram,
+                        news_result=all_results.get("news", {}),
+                        symbol=symbol,
+                        current_price=data.get("current_price"),
+                        config=config,
+                    )
             except Exception:
                 logger.exception("🧠 Gemini analysis block failed")
         elif decision_type == "WAIT":
