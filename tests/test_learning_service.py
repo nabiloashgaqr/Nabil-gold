@@ -113,14 +113,16 @@ class TestLearningService:
         assert len(learning_service.current_weights) == 5
     
     def test_default_weights(self, learning_service):
-        """اختبار الأوزان الافتراضية"""
+        """اختبار الأوزان الافتراضية — تأتي من config عبر get_agent_weights"""
         weights = learning_service.default_weights
         
-        assert weights['technical'] == 0.20
-        assert weights['classical'] == 0.25
-        assert weights['smc'] == 0.20
-        assert weights['price_action'] == 0.20
-        assert weights['multitimeframe'] == 0.15
+        # القيم يجب أن تطابق config fixture (مصدر الحقيقة الوحيد)
+        # Config fixture sums to 0.95, so get_agent_weights normalizes to 1.0
+        assert weights['technical'] == pytest.approx(0.20 / 0.95, abs=0.001)
+        assert weights['classical'] == pytest.approx(0.20 / 0.95, abs=0.001)
+        assert weights['smc'] == pytest.approx(0.25 / 0.95, abs=0.001)
+        assert weights['price_action'] == pytest.approx(0.15 / 0.95, abs=0.001)
+        assert weights['multitimeframe'] == pytest.approx(0.15 / 0.95, abs=0.001)
         # مجموع الأوزان يجب أن يكون قريب من 1.0
         total = sum(weights.values())
         assert 0.99 <= total <= 1.01
