@@ -299,7 +299,7 @@ function extractAgentVotes(trade) {
 
 function computeAgentPerformance(closedTrades, agentWeights = []) {
   const defaultAgents = ['technical', 'classical', 'smc', 'price_action', 'multitimeframe'];
-  // Current authoritative weights (must match decision_agent.py & learning_service.py)
+  // Fallback weights — must match config.json::agent_weights and utils/helpers.py::get_agent_weights
   const CURRENT_WEIGHTS = {
     technical: 0.20,
     classical: 0.25,
@@ -310,13 +310,13 @@ function computeAgentPerformance(closedTrades, agentWeights = []) {
   const stats = {};
   function ensure(agent) {
     if (!stats[agent]) {
-      // Prefer current code weight over stale DB weight
-      const codeWeight = CURRENT_WEIGHTS[agent];
+      // Prefer live DB weight over code fallback so config changes propagate
       const dbEntry = (agentWeights || []).find(a => String(a.agent_name || '').toLowerCase() === agent);
       const dbWeight = dbEntry ? Number(dbEntry.weight ?? 0) : 0;
+      const codeWeight = CURRENT_WEIGHTS[agent];
       stats[agent] = {
         agent_name: agent,
-        weight: codeWeight ?? (dbWeight || 0),
+        weight: dbWeight || codeWeight || 0,
         predictions: 0,
         wins: 0,
         losses: 0,
