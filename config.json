@@ -206,6 +206,12 @@
         "retry_delay_seconds": 3,
         "description": "Gemini independent review. max_retries applies to all calls (signal, news, reports, learning). retry_delay_seconds is base delay with exponential backoff."
     },
+    "macro_data_provider": {
+        "interval": "1h",
+        "outputsize": 30,
+        "request_pause_seconds": 0.2,
+        "description": "Hourly macro context from Twelve Data. 5 FX pairs + SPY to compute USD strength and risk sentiment. Cron-job.org triggers macro_context.yml every hour."
+    },
     "notifications": {
         "send_no_signal_updates": false,
         "manual_run_status_updates": true,
