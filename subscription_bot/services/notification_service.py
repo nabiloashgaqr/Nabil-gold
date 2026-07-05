@@ -74,39 +74,57 @@ async def notify_admin_expiring_3d(bot: Bot, sub: dict):
 
 async def notify_admin_expiring_1d(bot: Bot, sub: dict):
     chat_id = config.admin_destination()
-    text = (
-        "⚠️ <b>URGENT – Subscription expires tomorrow!</b>\n"
-        f"👤 {sub.get('full_name')} @{sub.get('telegram_username') or ''}\n"
-        f"🆔 <code>{sub.get('telegram_id')}</code>\n"
-        f"📅 {sub.get('expiry_date')}"
-    )
+    name = sub.get("full_name")
+    username = sub.get("telegram_username") or ""
+    if username and not username.startswith("@"):
+        username = "@" + username
+    expiry = sub.get("expiry_date")
     sid = sub.get("id")
-    keyboard = [[
-        InlineKeyboardButton("🔄 Renew now", callback_data=f"renew:{sid}"),
-        InlineKeyboardButton("🚫 Auto-kick", callback_data=f"ignore:{sid}")
-    ]]
+    
+    # الرسالة التي تصل للمدير
+    admin_text = (
+        "⚠️ <b>تنبيه: انتهاء اشتراك غداً</b>\n"
+        "━━━━━━━━━━━━━━\n"
+        f"👤 المشترك: {name} {username}\n"
+        f"📅 تاريخ الانتهاء: {expiry}\n\n"
+        "💬 <b>الرسالة المقترحة لإرسالها للمشترك:</b>\n"
+        "━━━━━━━━━━━━━━\n"
+        f"مرحباً {name}، نود تذكيرك بأن اشتراكك في القناة سينتهي غداً. يرجى التواصل معنا لتجديد الاشتراك لضمان استمرار وصول التوصيات. ✨"
+    )
+    
+    keyboard = [[InlineKeyboardButton("🔄 Renew now", callback_data=f"renew:{sid}")]]
     try:
-        await bot.send_message(chat_id, text, parse_mode="HTML",
+        await bot.send_message(chat_id, admin_text, parse_mode="HTML",
                                reply_markup=InlineKeyboardMarkup(keyboard))
-        get_db().log_notification(sid, "before_1_day_admin", chat_id, text)
+        get_db().log_notification(sid, "before_1_day_admin", chat_id, admin_text)
     except Exception:
         logger.exception("notify_admin_expiring_1d failed")
 
 
 async def notify_admin_expired_kicked(bot: Bot, sub: dict):
     chat_id = config.admin_destination()
+    name = sub.get("full_name")
+    username = sub.get("telegram_username") or ""
+    if username and not username.startswith("@"):
+        username = "@" + username
     sid = sub.get("id")
-    text = (
-        "❌ <b>Member auto-kicked – subscription expired</b>\n"
-        f"👤 {sub.get('full_name')}\n"
-        f"🆔 <code>{sub.get('telegram_id')}</code>\n"
-        "Reason: subscription expired"
+    
+    # الرسالة التي تصل للمدير
+    admin_text = (
+        "❌ <b>تنبيه: انتهى الاشتراك اليوم</b>\n"
+        "━━━━━━━━━━━━━━\n"
+        f"👤 المشترك: {name} {username}\n"
+        "حالة الاشتراك: منتهي (تم الطرد تلقائياً)\n\n"
+        "💬 <b>الرسالة المقترحة لإرسالها للمشترك:</b>\n"
+        "━━━━━━━━━━━━━━\n"
+        f"مرحباً {name}، نود إبلاغك بأن اشتراكك قد انتهى وتم إخراجك من القناة. يمكنك التجديد الآن للعودة مجدداً. ✨"
     )
+    
     keyboard = [[InlineKeyboardButton("🔄 Renew & Re-invite", callback_data=f"reinvite:{sid}")]]
     try:
-        await bot.send_message(chat_id, text, parse_mode="HTML",
+        await bot.send_message(chat_id, admin_text, parse_mode="HTML",
                                reply_markup=InlineKeyboardMarkup(keyboard))
-        get_db().log_notification(sid, "expired_admin", chat_id, text)
+        get_db().log_notification(sid, "expired_admin", chat_id, admin_text)
     except Exception:
         logger.exception("notify_admin_expired_kicked failed")
 
