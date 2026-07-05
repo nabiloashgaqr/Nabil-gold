@@ -21,7 +21,6 @@ async def process_admin_updates(app):
     """
     logger.info("📥 Checking for Admin commands and new members...")
     try:
-        # إصلاح هام: إضافة allowed_updates لتشمل 'chat_member' لكي يرسل تليجرام إشعارات دخول الأعضاء
         updates = await app.bot.get_updates(
             offset=0, 
             timeout=30, 
@@ -34,26 +33,27 @@ async def process_admin_updates(app):
 
         logger.info(f"Processing {len(updates)} pending updates...")
         
-        # سياق وهمي بسيط لتمريره للدوال التي تتطلب context.bot
         class MockContext:
             def __init__(self, bot): self.bot = bot
         context = MockContext(app.bot)
 
         for update in updates:
-            # 1. معالجة انضمام الأعضاء (إصلاح: تمرير context بدلاً من None)
+            # 1. معالجة انضمام الأعضاء
             if update.chat_member:
+                # إضافة سطر للفحص: طباعة معرف القناة التي وصل منها التحديث
+                logger.info(f"Detected chat_member update from Chat ID: {update.chat_member.chat.id}")
+                logger.info(f"Target Chat ID in config: {config.TARGET_CHAT_ID}")
+                
                 await chat_member_update(update, context)
             
             # 2. معالجة الرسائل النصية
             if update.message and update.message.text:
                 text = update.message.text.strip()
-                
                 if text == "/start":
                     await start_cmd(update, context)
                 elif text == "/admin":
                     await admin_cmd(update, context)
                 else:
-                    # معالجة الأوامر السريعة (@user 1)
                     from handlers.admin_handler import admin_text_commands
                     await admin_text_commands(update, context)
 
@@ -62,7 +62,6 @@ async def process_admin_updates(app):
                 from handlers.callback_handler import callback_router
                 await callback_router(update, context)
 
-        # تأكيد الاستلام
         last_update_id = updates[-1].update_id
         await app.bot.get_updates(offset=last_update_id + 1, timeout=10)
         
