@@ -7,41 +7,27 @@ from database import get_db
 logger = logging.getLogger(__name__)
 
 async def notify_admin_new_member(bot: Bot, subscriber: dict):
-    """Admin notification – new member joined, needs duration"""
+    """تنبيه المدير بدخول عضو جديد - تعليمات التفعيل السريع"""
     try:
         chat_id = config.admin_destination()
         name = subscriber.get("full_name", "-")
         username = subscriber.get("telegram_username") or "no username"
         if username != "no username" and not username.startswith("@"):
             username = "@" + username
-        tid = subscriber.get("telegram_id")
-        sid = subscriber.get("id")
+        
         text = (
-            "🆕 <b>New member joined</b>\n"
+            "🆕 <b>عضو جديد انضم للقناة</b>\n"
             "━━━━━━━━━━━━━━\n"
-            f"👤 Name: {name}\n"
-            f"🔗 Username: {username}\n"
-            f"🆔 ID: <code>{tid}</code>\n\n"
-            "<b>Set subscription duration:</b>"
+            f"👤 الاسم: {name}\n"
+            f"🔗 اليوزر: {username}\n\n"
+            "💡 <b>لتفعيل الاشتراك أرسل:</b>\n"
+            f"<code>{username} 1</code> ⬅️ شهر واحد\n"
+            f"<code>{username} 3</code> ⬅️ 3 أشهر"
         )
-        keyboard = [
-            [
-                InlineKeyboardButton("1 Week", callback_data=f"dur:{sid}:7:day"),
-                InlineKeyboardButton("1 Month", callback_data=f"dur:{sid}:1:month"),
-            ],
-            [
-                InlineKeyboardButton("3 Months", callback_data=f"dur:{sid}:3:month"),
-                InlineKeyboardButton("6 Months", callback_data=f"dur:{sid}:6:month"),
-            ],
-            [
-                InlineKeyboardButton("1 Year", callback_data=f"dur:{sid}:1:year"),
-                InlineKeyboardButton("Custom", callback_data=f"custom:{sid}"),
-            ]
-        ]
+        
         await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML",
-                               reply_markup=InlineKeyboardMarkup(keyboard),
                                disable_web_page_preview=True)
-        get_db().log_notification(sid, "new_member", chat_id, text)
+        get_db().log_notification(subscriber.get("id"), "new_member", chat_id, text)
     except Exception as e:
         logger.exception("notify_admin_new_member failed: %s", e)
 
