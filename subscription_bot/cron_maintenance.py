@@ -17,12 +17,12 @@ logger = logging.getLogger(__name__)
 async def process_pending_updates(app):
     """
     يسحب جميع التحديثات المتراكمة (انضمام أعضاء، أوامر /start) 
-    ويعالجها دفعة واحدة.
+    ويعالجها دفعة واحدة مع زيادة وقت الانتظار لتجنب الـ Timeout.
     """
     logger.info("📥 Fetching pending updates from Telegram...")
     try:
-        # سحب التحديثات من تليجرام
-        updates = await app.bot.get_updates(offset=0, timeout=10)
+        # زيادة الـ timeout إلى 30 ثانية بدلاً من 10 لتجنب httpx.ReadTimeout
+        updates = await app.bot.get_updates(offset=0, timeout=30)
         if not updates:
             logger.info("No pending updates to process.")
             return
@@ -32,31 +32,27 @@ async def process_pending_updates(app):
         for update in updates:
             # 1. معالجة انضمام الأعضاء (Chat Member Update)
             if update.chat_member:
-                await chat_member_update(update, None) # نمرر None لأننا لا نحتاج context هنا غالباً
+                await chat_member_update(update, None)
             
             # 2. معالجة أمر /start (Message Update)
             if update.message and update.message.text == "/start":
-                # محاكاة لـ CommandHandler
-                from telegram.ext import ContextTypes
-                # بناء سياق وهمي بسيط
                 class MockContext:
                     def __init__(self, bot): self.bot = bot
-                
                 await start_cmd(update, MockContext(app.bot))
 
             # 3. معالجة ضغطات الأزرار (Callback Query)
             if update.callback_query and update.callback_query.data.startswith("activate:"):
-                from telegram.ext import ContextTypes
                 class MockContext:
                     def __init__(self, bot): self.bot = bot
                 await activate_callback(update, MockContext(app.bot))
 
         # تأكيد استلام التحديثات لكي لا يتم سحبها مرة أخرى
         last_update_id = updates[-1].update_id
-        await app.bot.get_updates(offset=last_update_id + 1)
+        await app.bot.get_updates(offset=last_update_id + 1, timeout=10)
         
     except Exception as e:
-        logger.exception("Error processing pending updates: %s", e)
+        # تسجيل الخطأ ولكن الاستمرار في تنفيذ مهام الصيانة الأخرى
+        logger.error("⚠️ Could not fetch updates due to timeout or network error: %s", e)
 
 async def run_maintenance():
     """
