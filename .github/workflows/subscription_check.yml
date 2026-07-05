@@ -1,0 +1,57 @@
+name: subscription_check
+
+on:
+  schedule:
+    # Every 6 hours – offset 15min after market analysis
+    - cron: '15 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r subscription_bot/requirements.txt
+
+      - name: Run subscription expiration check
+        env:
+          # Prefer dedicated subscription bot token, fallback supported in code:
+          # SUBSCRIPTION_BOT_TOKEN → BOT_TOKEN → TELEGRAM_BOT_TOKEN
+          TELEGRAM_BOT_TOKEN: ${{ secrets.SUBSCRIPTION_BOT_TOKEN }}
+          BOT_TOKEN: ${{ secrets.SUBSCRIPTION_BOT_TOKEN }}
+          SUBSCRIPTION_BOT_TOKEN: ${{ secrets.SUBSCRIPTION_BOT_TOKEN }}
+          # Shared Supabase – same as Nabil Gold
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          # Channel – reuse Nabil Gold channel
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TARGET_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Admin
+          ADMIN_IDS: ${{ secrets.ADMIN_IDS }}
+          ADMIN_CONTACT: "@Smart_Pro2026"
+          TIMEZONE: "Asia/Hebron"
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/subscription_bot
+        run: |
+          cd ${{ github.workspace }}
+          python -m subscription_bot.scheduler_once
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: subscription-check-logs
+          path: |
+            *.log
+          if-no-files-found: ignore
