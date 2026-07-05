@@ -1,0 +1,38 @@
+name: Subscription Bot Cron
+
+on:
+  schedule:
+    # يعمل كل 6 ساعات (في الساعة 0, 6, 12, 18 من كل يوم)
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # يسمح لك بتشغيل البوت يدوياً من تبويب Actions للتجربة
+
+jobs:
+  run-maintenance:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r subscription_bot/requirements.txt
+
+      - name: Run Maintenance Script
+        env:
+          # ربط المتغيرات من GitHub Secrets إلى بيئة التشغيل
+          SUBSCRIPTION_BOT_TOKEN: ${{ secrets.SUBSCRIPTION_BOT_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          ADMIN_IDS: ${{ secrets.ADMIN_IDS }}
+          TARGET_CHAT_ID: ${{ secrets.TARGET_CHAT_ID }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ADMIN_CONTACT: ${{ secrets.ADMIN_CONTACT }}
+          TIMEZONE: "Asia/Hebron"
+        run: python subscription_bot/cron_maintenance.py
