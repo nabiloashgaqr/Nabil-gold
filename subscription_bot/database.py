@@ -22,17 +22,24 @@ class Database:
             return None
 
     def upsert_on_join(self, telegram_id: int, full_name: str, username: Optional[str]) -> Dict[str, Any]:
-        """عند دخول عضو جديد – pending_duration"""
+        """عند دخول عضو جديد – تفعيل تلقائي لمدة 30 يوم"""
         existing = self.get_subscriber_by_tid(telegram_id)
         today = date.today().isoformat()
+        
+        # المدة الافتراضية: 30 يوم
+        DEFAULT_DAYS = 30
+        expiry_date = (date.today() + timedelta(days=DEFAULT_DAYS)).isoformat()
+
         if existing:
-            # أعد تفعيل كـ pending إذا كان expired
             try:
                 self.client.table("subscribers").update({
                     "full_name": full_name,
                     "telegram_username": username,
                     "join_date": today,
-                    "status": "pending_duration",
+                    "subscription_duration": DEFAULT_DAYS,
+                    "duration_type": "day",
+                    "expiry_date": expiry_date,
+                    "status": "active",
                     "kicked": False,
                     "updated_at": datetime.utcnow().isoformat()
                 }).eq("telegram_id", telegram_id).execute()
@@ -45,7 +52,10 @@ class Database:
             "telegram_username": username,
             "telegram_id": telegram_id,
             "join_date": today,
-            "status": "pending_duration",
+            "subscription_duration": DEFAULT_DAYS,
+            "duration_type": "day",
+            "expiry_date": expiry_date,
+            "status": "active",
             "can_dm": False
         }
         try:
