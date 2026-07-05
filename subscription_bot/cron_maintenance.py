@@ -5,8 +5,8 @@ from telegram.ext import ApplicationBuilder
 import config
 from scheduler import check_expirations
 from handlers.member_handler import chat_member_update
-from handlers.silent_handler import start_cmd, activate_callback
 from handlers.admin_handler import admin_cmd
+from handlers.callback_handler import callback_router
 
 # إعداد السجلات
 logging.basicConfig(
@@ -15,62 +15,54 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-async def process_pending_updates(app):
+async def process_admin_updates(app):
     """
-    يسحب جميع التحديثات المتراكمة ويعالجها (الجدد + /start + /admin).
+    يسحب التحديثات لمعالجة أوامر الإدارة فقط (مثل /admin أو تجديد الاشتراك).
     """
-    logger.info("📥 Fetching pending updates from Telegram...")
+    logger.info("📥 Checking for Admin commands...")
     try:
-        updates = await app.bot.get_updates(offset=0, timeout=30)
+        updates = await app.bot.get_updates(offset=0, timeout=20)
         if not updates:
-            logger.info("No pending updates to process.")
             return
 
-        logger.info(f"Processing {len(updates)} pending updates...")
-        
         for update in updates:
-            # 1. معالجة انضمام الأعضاء
+            # 1. تسجيل الأعضاء الجدد تلقائياً (أهم ميزة)
             if update.chat_member:
                 await chat_member_update(update, None)
             
-            # 2. معالجة الرسائل النصية (أوامر)
-            if update.message and update.message.text:
-                text = update.message.text.strip()
-                
-                # سياق وهمي بسيط لتمريره للدوال
+            # 2. معالجة أوامر المدير فقط
+            if update.message and update.message.text == "/admin":
                 class MockContext:
                     def __init__(self, bot): self.bot = bot
-                context = MockContext(app.bot)
+                await admin_cmd(update, MockContext(app.bot))
 
-                if text == "/start":
-                    await start_cmd(update, context)
-                elif text == "/admin":
-                    await admin_cmd(update, context)
-
-            # 3. معالجة ضغطات الأزرار (التفعيل)
-            if update.callback_query and update.callback_query.data.startswith("activate:"):
+            # 3. معالجة أزرار الإدارة (تجديد، طرد، إلخ)
+            if update.callback_query:
                 class MockContext:
                     def __init__(self, bot): self.bot = bot
-                await activate_callback(update, MockContext(app.bot))
+                await callback_router(update, MockContext(app.bot))
 
-        # تأكيد استلام التحديثات
+        # تأكيد الاستلام
         last_update_id = updates[-1].update_id
         await app.bot.get_updates(offset=last_update_id + 1, timeout=10)
         
     except Exception as e:
-        logger.error("⚠️ Error processing updates: %s", e)
+        logger.error("⚠️ Admin update processing error: %s", e)
 
 async def run_maintenance():
-    logger.info("🚀 Starting 6-Hour Subscription Maintenance Cycle...")
+    logger.info("🚀 Starting Daily Subscription Maintenance Cycle...")
     try:
         app = (ApplicationBuilder()
                .token(config.BOT_TOKEN)
                .build())
 
-        await process_pending_updates(app)
+        # معالجة أوامر المدير وتسجيل الجدد
+        await process_admin_updates(app)
+        
+        # فحص الاشتراكات (تنبيهات المدير والطرود)
         await check_expirations(app)
         
-        logger.info("✅ All maintenance tasks completed successfully.")
+        logger.info("✅ All daily maintenance tasks completed successfully.")
     except Exception as e:
         logger.exception("❌ Critical Maintenance failure: %s", e)
     finally:
