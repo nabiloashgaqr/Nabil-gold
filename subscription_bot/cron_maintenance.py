@@ -5,8 +5,9 @@ from telegram.ext import ApplicationBuilder
 import config
 from scheduler import check_expirations
 from handlers.member_handler import chat_member_update
+from handlers.silent_handler import start_cmd
 from handlers.admin_handler import admin_cmd
-from handlers.callback_handler import callback_router
+from database import get_db
 
 # إعداد السجلات
 logging.basicConfig(
@@ -15,34 +16,79 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+async def process_fast_activation(bot, text):
+    """
+    يعالج الصيغة المختصرة: @username 1 أو @username 3
+    """
+    parts = text.split()
+    if len(parts) != 2:
+        return False
+    
+    identifier = parts[0].strip() # اليوزرنيم
+    duration_code = parts[1].strip() # 1 أو 3
+    
+    # تحديد المدة بالأيام
+    days_map = {"1": 30, "3": 90}
+    if duration_code not in days_map:
+        return False
+    
+    days = days_map[duration_code]
+    db = get_db()
+    
+    # البحث عن المشترك باليوزر
+    sub = db.get_subscriber_by_username(identifier)
+    if not sub:
+        # محاولة البحث بالـ ID إذا لم يكن يوزر
+        if identifier.isdigit():
+            sub = db.get_by_id(identifier)
+        else:
+            return False
+            
+    if sub:
+        expiry = db.set_subscription(sub["id"], days, "day")
+        await bot.send_message(
+            chat_id=config.ADMIN_IDS[0], 
+            text=f"✅ <b>تم التفعيل بنجاح</b>\n👤 {sub.get('full_name')}\n📅 ينتهي في: {expiry}\n⏱ المدة: {days} يوم",
+            parse_mode="HTML"
+        )
+        return True
+    return False
+
 async def process_admin_updates(app):
-    """
-    يسحب التحديثات لمعالجة أوامر الإدارة فقط (مثل /admin أو تجديد الاشتراك).
-    """
-    logger.info("📥 Checking for Admin commands...")
+    logger.info("📥 Checking for Admin commands and fast activations...")
     try:
-        updates = await app.bot.get_updates(offset=0, timeout=20)
+        updates = await app.bot.get_updates(offset=0, timeout=30)
         if not updates:
             return
 
         for update in updates:
-            # 1. تسجيل الأعضاء الجدد تلقائياً (أهم ميزة)
             if update.chat_member:
                 await chat_member_update(update, None)
             
-            # 2. معالجة أوامر المدير فقط
-            if update.message and update.message.text == "/admin":
+            if update.message and update.message.text:
+                text = update.message.text.strip()
+                
                 class MockContext:
                     def __init__(self, bot): self.bot = bot
-                await admin_cmd(update, MockContext(app.bot))
+                context = MockContext(app.bot)
 
-            # 3. معالجة أزرار الإدارة (تجديد، طرد، إلخ)
+                if text == "/start":
+                    await start_cmd(update, context)
+                elif text == "/admin":
+                    await admin_cmd(update, context)
+                else:
+                    # محاولة التفعيل السريع أولاً (@user 1)
+                    if not await process_fast_activation(app.bot, text):
+                        # إذا لم يكن أمراً سريعاً، جرب أوامر الإدارة العادية
+                        from handlers.admin_handler import admin_text_commands
+                        await admin_text_commands(update, context)
+
             if update.callback_query:
                 class MockContext:
                     def __init__(self, bot): self.bot = bot
+                from handlers.callback_handler import callback_router
                 await callback_router(update, MockContext(app.bot))
 
-        # تأكيد الاستلام
         last_update_id = updates[-1].update_id
         await app.bot.get_updates(offset=last_update_id + 1, timeout=10)
         
@@ -56,10 +102,7 @@ async def run_maintenance():
                .token(config.BOT_TOKEN)
                .build())
 
-        # معالجة أوامر المدير وتسجيل الجدد
         await process_admin_updates(app)
-        
-        # فحص الاشتراكات (تنبيهات المدير والطرود)
         await check_expirations(app)
         
         logger.info("✅ All daily maintenance tasks completed successfully.")

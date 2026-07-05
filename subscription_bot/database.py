@@ -21,6 +21,17 @@ class Database:
             logger.exception("get_subscriber_by_tid failed: %s", e)
             return None
 
+    def get_subscriber_by_username(self, username: str) -> Optional[Dict[str, Any]]:
+        """بحث عن مشترك بواسطة اليوزرنيم"""
+        try:
+            # تنظيف اليوزرنيم من @ إذا وجدت
+            clean_username = username.replace("@", "").strip()
+            res = self.client.table("subscribers").select("*").eq("telegram_username", clean_username).limit(1).execute()
+            return res.data[0] if res.data else None
+        except Exception as e:
+            logger.exception("get_subscriber_by_username failed: %s", e)
+            return None
+
     def upsert_on_join(self, telegram_id: int, full_name: str, username: Optional[str]) -> Dict[str, Any]:
         """عند دخول عضو جديد – تفعيل تلقائي لمدة 30 يوم"""
         existing = self.get_subscriber_by_tid(telegram_id)
