@@ -5,7 +5,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Nabil Gold unified – support both naming schemes
-BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN", "")
+# Subscription Bot – dedicated token first, fallback to Nabil Gold shared token
+# Order: SUBSCRIPTION_BOT_TOKEN → BOT_TOKEN → TELEGRAM_BOT_TOKEN
+BOT_TOKEN = (
+    os.getenv("SUBSCRIPTION_BOT_TOKEN")
+    or os.getenv("BOT_TOKEN")
+    or os.getenv("TELEGRAM_BOT_TOKEN", "")
+)
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "") or os.getenv("SUPABASE_SERVICE_KEY", "")
 
@@ -46,9 +52,10 @@ def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
 # English messages – per requirements – subscriber sees only 2 messages in lifetime
+# Updated 2026-07-05 – Smart Gold & Oil Signals branding
 MESSAGES = {
     "start_ok": "✅",
-    "start_need_activate": "👋 Welcome to Nabil Gold Private!\n\nTo receive subscription alerts, please activate notifications:",
+    "start_need_activate": "👋 Welcome to Smart Gold & Oil Signals Private!\n\nTo receive subscription alerts, please activate notifications:",
     "activate_button": "🔔 Activate Alerts",
     "activated_ok": "✅ Activation successful – You will now receive subscription alerts.",
     "already_activated": "✅ Activated – You will receive subscription alerts.",
