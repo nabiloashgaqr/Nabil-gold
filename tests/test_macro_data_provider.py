@@ -37,15 +37,15 @@ def test_macro_data_provider_builds_context_with_hourly_quota(monkeypatch):
 
     context = provider.build_context()
 
-    # 4-symbol USD-only basket: EUR/USD, GBP/USD, USD/JPY, AUD/USD
-    # = 4 credits/hour = 96/day — well under 800 free limit
-    assert len(session.calls) == 4
+    # 5-symbol basket: EUR/USD, GBP/USD, USD/JPY, AUD/USD (USD) + SPY (risk)
+    # = 5 credits/hour = 120/day — well under 800 free limit
+    assert len(session.calls) == 5
     assert context["source"] == "twelvedata_hourly_macro_proxy"
-    assert context["quota_policy"]["credits_used_estimate"] == 4
-    assert context["quota_policy"]["daily_estimate_at_hourly"] == 96
+    assert context["quota_policy"]["credits_used_estimate"] == 5
+    assert context["quota_policy"]["daily_estimate_at_hourly"] == 120
     assert context["dxy_trend"] in {"rising", "falling", "flat", "unknown"}
     assert context["risk_sentiment"] in {"risk_on", "risk_off", "neutral"}
-    assert context["data_quality"]["usable_symbols"] == 4
+    assert context["data_quality"]["usable_symbols"] == 5
 
 
 def test_database_macro_context_falls_back_local(tmp_path):
