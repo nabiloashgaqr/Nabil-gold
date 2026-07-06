@@ -106,12 +106,16 @@ class MacroFundamentalAgent(BaseAgent):
             add("yields", -2.0, "Rising US yields pressure non-yielding gold", "MACRO_YIELDS_BEARISH_GOLD", yields)
         elif yields in {"DOWN", "FALLING", "WEAK", "BEARISH"}:
             add("yields", 2.0, "Falling US yields support gold", "MACRO_YIELDS_BULLISH_GOLD", yields)
+        elif yields == "FLAT":
+            add("yields", 0.0, "US yields flat — no yield pressure on gold", "MACRO_YIELDS_FLAT", yields)
 
         fed = self._norm(context.get("fed_tone") or context.get("fed_policy") or context.get("rate_expectations"))
         if fed in {"HAWKISH", "HIGHER_FOR_LONGER", "RATE_HIKES", "TIGHTENING"}:
             add("fed", -1.8, "Hawkish Fed tone is bearish for gold", "MACRO_FED_HAWKISH", fed)
         elif fed in {"DOVISH", "CUTS", "RATE_CUTS", "EASING"}:
             add("fed", 1.8, "Dovish Fed / cuts expectations support gold", "MACRO_FED_DOVISH", fed)
+        elif fed == "NEUTRAL":
+            add("fed", 0.0, "Fed tone neutral", "MACRO_FED_NEUTRAL", fed)
 
         inflation = self._norm(context.get("inflation_surprise") or context.get("cpi_surprise") or context.get("pce_surprise"))
         if inflation in {"HOT", "ABOVE", "HIGHER", "UPSIDE"}:
@@ -139,6 +143,18 @@ class MacroFundamentalAgent(BaseAgent):
             add("commodity", 0.5, "Higher oil can lift inflation-hedge demand", "MACRO_OIL_UP_SUPPORTS_GOLD", oil)
         elif oil in {"DOWN", "FALLING", "WEAK"}:
             add("commodity", -0.3, "Softer oil reduces inflation-hedge pressure", "MACRO_OIL_DOWN_SOFT_GOLD", oil)
+        elif oil == "FLAT":
+            add("commodity", 0.0, "Oil flat — no commodity pressure", "MACRO_OIL_FLAT", oil)
+
+        # VIX level as an extra risk signal (from yfinance)
+        vix = context.get("vix_level")
+        if isinstance(vix, (int, float)):
+            if vix >= 30:
+                add("risk", 1.5, f"VIX at {vix:.0f} — extreme fear supports gold", "MACRO_VIX_EXTREME_FEAR", vix)
+            elif vix >= 25:
+                add("risk", 1.0, f"VIX at {vix:.0f} — elevated fear supports gold", "MACRO_VIX_ELEVATED", vix)
+            elif vix <= 13:
+                add("risk", -0.5, f"VIX at {vix:.0f} — extreme complacency", "MACRO_VIX_COMPLACENCY", vix)
 
         confidence = self._confidence(score, max_abs, len(evidence))
         if score >= 1.5 and confidence >= 45:
@@ -259,10 +275,17 @@ class MacroFundamentalAgent(BaseAgent):
             "yields_trend": ("us10y_trend", "real_yields_trend", "yields_trend"),
             "fed_tone": ("fed_tone", "fed_policy", "rate_expectations"),
             "risk_sentiment": ("risk_sentiment", "risk_regime", "geopolitical_risk"),
+            "oil_trend": ("oil_trend", "commodity_inflation"),
         }
         missing = []
         for label, keys in groups.items():
-            if not any(context.get(k) for k in keys):
+            val = None
+            for k in keys:
+                v = context.get(k)
+                if v and str(v).lower() not in {"unknown", "none", ""}:
+                    val = v
+                    break
+            if not val:
                 missing.append(label)
         return missing
 
