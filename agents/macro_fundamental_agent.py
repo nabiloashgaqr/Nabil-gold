@@ -123,6 +123,8 @@ class MacroFundamentalAgent(BaseAgent):
             warnings.append("Hot inflation has mixed impact if yields and USD rise together")
         elif inflation in {"COOL", "BELOW", "LOWER", "DOWNSIDE"}:
             add("inflation_growth", 0.7, "Cooling inflation can support gold through lower rate expectations", "MACRO_INFLATION_COOLING", inflation)
+        elif inflation == "NEUTRAL":
+            add("inflation_growth", 0.0, "Inflation expectations neutral — no surprise pressure", "MACRO_INFLATION_NEUTRAL", inflation)
 
         growth = self._norm(context.get("growth_surprise") or context.get("recession_risk") or context.get("labor_market"))
         if growth in {"WEAK", "RECESSION", "RISK", "SOFTENING", "COOLING"}:
@@ -276,6 +278,7 @@ class MacroFundamentalAgent(BaseAgent):
             "fed_tone": ("fed_tone", "fed_policy", "rate_expectations"),
             "risk_sentiment": ("risk_sentiment", "risk_regime", "geopolitical_risk"),
             "oil_trend": ("oil_trend", "commodity_inflation"),
+            "inflation_surprise": ("inflation_surprise", "cpi_surprise", "pce_surprise"),
         }
         missing = []
         for label, keys in groups.items():
