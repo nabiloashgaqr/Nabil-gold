@@ -726,7 +726,7 @@ def _check_and_send_post_news(
                 event_time = str(event.get("time", ""))
                 # Create unique key to avoid duplicate alerts
                 event_key = f"{event_name}_{event_time}"
-                if post_news_alert_sent(event_key):
+                if post_news_alert_sent(event_key, database=database):
                     continue
                 logger.info("📰 Post-news trigger: %s released %d min ago", event_name, abs(minutes_until))
                 # Build payload for Gemini post-news analysis
@@ -772,7 +772,7 @@ def _check_and_send_post_news(
                 if analysis.get("available") and not analysis.get("suppressed"):
                     sent = telegram.send_post_news_analysis(analysis, event_name, symbol)
                     if sent:
-                        post_news_alert_record(event_key)
+                        post_news_alert_record(event_key, database=database)
                         logger.info("📰 Post-news analysis sent for: %s", event_name)
     except Exception as exc:
         logger.warning("Post-news analysis check failed: %s", exc)
