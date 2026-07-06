@@ -1,0 +1,41 @@
+name: 🩹 Restore Price-Sanity Trade
+
+on:
+  workflow_dispatch:
+    inputs:
+      trade_id:
+        description: "Trade ID to restore (e.g. TRADE_20260706_124621_400170_3e420018)"
+        required: true
+        type: string
+        default: "TRADE_20260706_124621_400170_3e420018"
+      current_price:
+        description: "Current XAU/USD price (leave empty to auto-fetch from Swissquote)"
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 📦 Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: 🛠 Restore trade
+        run: python scripts/restore_price_sanity_trade.py
+        env:
+          TRADE_ID: ${{ github.event.inputs.trade_id }}
+          CURRENT_PRICE: ${{ github.event.inputs.current_price }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
