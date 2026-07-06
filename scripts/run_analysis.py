@@ -794,6 +794,18 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         market_data = MarketDataService(config)
         data = market_data.get_gold_data()
         if not data: return
+        # Global price sanity — reject obviously corrupt ticks before analysis
+        _cp = float(data.get('current_price', 0))
+        _sym = str(config.get('symbol', 'XAU/USD'))
+        _sane_min = 2500.0 if _sym.startswith('XAU') else 30.0
+        _sane_max = 5500.0 if _sym.startswith('XAU') else 150.0
+        if _cp > 0 and (_cp < _sane_min or _cp > _sane_max):
+            logger.error(
+                'PRICE SANITY FAILED (analysis): %s price=%.2f outside [%.0f-%.0f]. '
+                'Skipping cycle — data provider glitch.',
+                _sym, _cp, _sane_min, _sane_max,
+            )
+            return
         if has_symbol_active_trades:
             high, low = _latest_candle_extremes(data)
             OpenTradesManager(config).update_trades(open_trades=[t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol], current_price=float(data.get("current_price", 0)), candle_high=high, candle_low=low, database=database, telegram=telegram, now=datetime.now(timezone.utc))
