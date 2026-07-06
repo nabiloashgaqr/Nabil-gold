@@ -200,6 +200,22 @@ def main() -> None:
                 logger.error("Failed to fetch price for symbol %s", symbol)
                 continue
             current_price = float(symbol_price)
+            # ── Global price sanity: reject obviously corrupt ticks ──
+            # XAU/USD realistic range: 2500-5500. WTI: 30-150.
+            # Anything outside this is a data provider glitch.
+            _sane_min = 2500.0 if symbol.startswith("XAU") else 30.0
+            _sane_max = 5500.0 if symbol.startswith("XAU") else 150.0
+            if current_price < _sane_min or current_price > _sane_max:
+                logger.error(
+                    "PRICE SANITY FAILED (global): %s current_price=%.2f outside range [%.0f-%.0f]. Skipping trade updates this cycle.",
+                    symbol, current_price, _sane_min, _sane_max,
+                )
+                if not eod_quiet:
+                    telegram.send_error_alert(
+                        f"Trade updates skipped for {symbol}: corrupted price {current_price:.2f} "
+                        f"(expected {_sane_min:.0f}-{_sane_max:.0f}). Data provider glitch."
+                    )
+                continue
             latest_candle = (price_payload.get("data") or [{}])[-1] or {}
             try:
                 candle_high = float(latest_candle.get("high") or current_price)
