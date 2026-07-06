@@ -671,7 +671,8 @@ def _compact_agent_details(all_results: Dict[str, Any]) -> Dict[str, Any]:
     details: Dict[str, Any] = {}
     for key, label in labels.items():
         result = all_results.get(key, {}) or {}
-        direction = str(result.get("direction") or result.get("signal") or "WAIT").upper()
+        # Unify reading order: signal first, then direction (same as DecisionAgent._collect_votes)
+        direction = str(result.get("signal") or result.get("direction") or "WAIT").upper()
         if direction in {"NEUTRAL", "HOLD", "NO_TRADE", "NONE", ""}: direction = "WAIT"
         signals = result.get("signals") or result.get("reasons") or []
         if not signals and key == "technical": signals = (result.get("technical", {}) or {}).get("reasons") or []
@@ -933,9 +934,10 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 best_conf = best_m.get("confidence", 0)
                 # All qualified agents already have ≥min_agent_conf (filtered by DecisionAgent)
                 # So we only need to check: ≥2 agents AND ≥72% net confidence AND <3 agents
-                if best_count >= min_partial and best_conf >= min_net_conf and best_count < int(sr.get("min_agents_agree", 3)):
+                # Guard: must have at least 1 directional vote (prevent alert with all WAIT)
+                if best_count >= 1 and best_count >= min_partial and best_conf >= min_net_conf and best_count < int(sr.get("min_agents_agree", 3)):
                     try:
-                        telegram.send_partial_consensus(decision, all_results, config)
+                        telegram.send_partial_consensus(decision, all_results, config, database=database)
                     except Exception as pca_exc:
                         logger.warning("Partial consensus alert failed: %s", pca_exc)
             if send_hourly_now:
