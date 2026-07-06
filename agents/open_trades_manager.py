@@ -22,6 +22,9 @@ class OpenTradesManager(BaseAgent):
     name = "open_trades_manager"
     OPEN_STATUSES = {"OPEN", "PARTIAL", "TP1_HIT"}
     CLOSED_STATUSES = {"TP2_HIT", "SL_HIT", "BE_HIT", "EXPIRED", "MANUAL_CLOSE"}
+    # Events that must NEVER trigger a Telegram notification because they are
+    # internal/system signals not related to actual trade state changes.
+    SILENT_EVENTS = {"PRICE_SANITY_FAILED"}
     # Telegram notifications are intentionally restricted to real trade-state
     # changes. Informational markers such as NEAR_TP1 / LONG_RUNNING /
     # EXIT_WARNING are still persisted in updates_sent to avoid repeated
@@ -110,7 +113,7 @@ class OpenTradesManager(BaseAgent):
             evaluations.append(evaluation)
             trade_id = str(trade.get("id", ""))
             events = evaluation.get("events", []) or []
-            notification_events = [event for event in events if event in self.NOTIFIABLE_EVENTS]
+            notification_events = [event for event in events if event in self.NOTIFIABLE_EVENTS and event not in self.SILENT_EVENTS]
             evaluation["notification_events"] = notification_events
 
             # Send critical trade-management notifications BEFORE writing the DB
@@ -208,6 +211,30 @@ class OpenTradesManager(BaseAgent):
         max_adverse_excursion = min(previous_mae, pnl_points, adverse_points)
         management_phase = self._management_phase(old_status, sl_moved_to_entry, partial_close, pnl_points)
         exit_warning = self._exit_warning(trade_type, entry, stop_loss, tp1, current_price, pnl_points)
+
+        # ═══ Price sanity gate ═══
+        # A single corrupted data tick (provider glitch, wrong symbol, etc.)
+        # must never close a trade. Skip hard-level evaluation when price is
+        # clearly nonsensical relative to the trade's entry. We still update
+        # tracking fields so the system knows we visited this trade.
+        price_sane = not self._price_sanity_failed(current_price, entry, str(trade.get("id", "")))
+        if not price_sane:
+            return {
+                "trade_id": trade.get("id"),
+                "old_status": old_status,
+                "new_status": old_status,
+                "pnl_points": pnl_points,
+                "events": ["PRICE_SANITY_FAILED"],
+                "updates": {
+                    "current_price": round(current_price, 2),
+                    "current_pnl": round(pnl_points, 1),
+                    "current_pnl_points": round(pnl_points, 1),
+                    "max_favorable_excursion": round(max_favorable_excursion, 1),
+                    "max_adverse_excursion": round(max_adverse_excursion, 1),
+                    "management_phase": management_phase,
+                    "last_updated": self._iso(now),
+                },
+            }
         new_status = old_status
         events: List[str] = []
         result: str | None = trade.get("result")
@@ -534,6 +561,32 @@ class OpenTradesManager(BaseAgent):
         current_price = self._f(data.get("current_price"))
         evaluations = [self.evaluate_trade(trade, current_price) for trade in trades]
         return {"agent": self.name, "evaluated": len(evaluations), "results": evaluations, "summary": f"Evaluated {len(evaluations)} open trade(s)"}
+
+    # ── Price sanity gate ──
+    # Data providers occasionally return corrupted ticks (e.g. 3366 for XAU/USD
+    # when the real price is ~4150). A single bad tick must never trigger false
+    # TP/SL hits. We reject any current_price more than 15% away from the
+    # entry_price of the trade being evaluated. For gold, 15% ≈ $600 — far wider
+    # than any realistic intraday move.
+    _PRICE_SANITY_MAX_DEVIATION = 0.15  # 15 % of entry price
+
+    def _price_sanity_failed(self, current_price: float, entry_price: float, trade_id: str = "") -> bool:
+        """Return True if current_price is clearly corrupt relative to entry."""
+        if entry_price <= 0 or current_price <= 0:
+            return True
+        deviation = abs(current_price - entry_price) / entry_price
+        if deviation > self._PRICE_SANITY_MAX_DEVIATION:
+            self.logger.warning(
+                "PRICE SANITY FAILED for %s: current=%.2f vs entry=%.2f (deviation=%.1f%% > %.0f%%). "
+                "Skipping level evaluation — possible data provider glitch.",
+                trade_id or "unknown",
+                current_price,
+                entry_price,
+                deviation * 100,
+                self._PRICE_SANITY_MAX_DEVIATION * 100,
+            )
+            return True
+        return False
 
     def _management_phase(self, status: str, sl_moved_to_entry: bool, partial_close: bool, pnl_points: float) -> str:
         if status == "TP1_HIT" or partial_close:
