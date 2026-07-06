@@ -46,6 +46,19 @@ class DecisionAgent(BaseAgent):
         self.agent_min_confidence = int(signal_req.get("agent_min_confidence", 70) or 70)
         self.min_consensus_confidence = float(signal_req.get("min_consensus_confidence", 72) or 72)
 
+        # ── Two-Agent Entry Path (Path 2) ──
+        tae_cfg = signal_req.get("two_agent_entry") or {}
+        self.two_agent_enabled = bool(tae_cfg.get("enabled", False))
+        self.tae_min_agents = int(tae_cfg.get("min_agents_agree", 2) or 2)
+        self.tae_min_confidence = float(tae_cfg.get("min_consensus_confidence", 72) or 72)
+        tae_macro = tae_cfg.get("macro_confirmation") or {}
+        self.tae_macro_enabled = bool(tae_macro.get("enabled", True))
+        self.tae_macro_min_conf = float(tae_macro.get("min_confidence", 55) or 55)
+        tae_gemini = tae_cfg.get("gemini_confirmation") or {}
+        self.tae_gemini_enabled = bool(tae_gemini.get("enabled", True))
+        self.tae_gemini_min_conf = float(tae_gemini.get("min_confidence", 70) or 70)
+        self.tae_cross_distance = int(tae_cfg.get("cross_entry_distance_points", 200) or 200)
+
         self.default_weights = get_agent_weights(config)
         self.current_weights = self._load_weights()
         self.voting_agents = set(self.default_weights)
@@ -189,6 +202,27 @@ class DecisionAgent(BaseAgent):
 
         selected_metrics = buy if decision == "BUY" else sell if decision == "SELL" else None
         supporting_evidence = self._supporting_evidence(decision, selected_metrics, votes)
+
+        # ── Two-Agent Candidate Detection (for Path 2) ──
+        two_agent = None
+        if not valid and self.two_agent_enabled:
+            for side, m in [("BUY", buy), ("SELL", sell)]:
+                if (m["edge"] > 0
+                        and m["support_count"] >= self.tae_min_agents
+                        and m["support_count"] < self.min_agents_agree
+                        and m["confidence"] >= self.tae_min_confidence):
+                    two_agent = {
+                        "side": side,
+                        "support_count": m["support_count"],
+                        "opposition_count": m["opposition_count"],
+                        "edge": m["edge"],
+                        "confidence": m["confidence"],
+                        "supporters": m["supporters"],
+                        "opponents": m["opponents"],
+                        "support_weight": m["support_weight"],
+                    }
+                    break
+
         return {
             "decision": decision,
             "confidence": round(float(confidence), 1),
@@ -205,6 +239,7 @@ class DecisionAgent(BaseAgent):
             "strongest_directional": strongest_ctx,
             "supporting_evidence": supporting_evidence,
             "rejection_reason": rejection_reason,
+            "two_agent": two_agent,
             "consensus": {
                 "mode": "5_agent_weighted_consensus",
                 "selected": selected_metrics,
@@ -373,6 +408,13 @@ class DecisionAgent(BaseAgent):
         opposition_penalty = min(30.0, opposition_ratio * 30.0)
         confidence = max(0.0, min(95.0, support_avg - opposition_penalty))
         valid = bool(edge > 0 and support_count >= self.min_agents_agree and confidence >= self.min_consensus_confidence)
+        # Two-agent candidate: 2 agents meet thresholds but < min_agents_agree for full entry
+        two_agent_valid = bool(
+            edge > 0
+            and support_count >= 2
+            and support_count < self.min_agents_agree
+            and confidence >= self.min_consensus_confidence
+        )
         return {
             "side": side,
             "support_count": support_count,
@@ -385,6 +427,7 @@ class DecisionAgent(BaseAgent):
             "opposition_penalty": round(opposition_penalty, 1),
             "confidence": round(confidence, 1),
             "valid": valid,
+            "two_agent_valid": two_agent_valid,
             "supporters": [v.get("agent") for v in supporters],
             "opponents": [v.get("agent") for v in opponents],
         }
@@ -589,6 +632,12 @@ class DecisionAgent(BaseAgent):
         if signal_payload.get("risk_summary"):
             reasons.append(signal_payload.get("risk_summary"))
         reasons.extend(analysis.get("warnings", []) or [])
+        # Determine entry mode and path
+        two_agent_info = (analysis.get("classic", {}) or {}).get("two_agent")
+        final_two_agent = (two_agent_info or {}) if isinstance(two_agent_info, dict) and final_signal in {"BUY", "SELL"} else None
+        entry_mode = ("two_agent_consensus" if final_two_agent else "three_agent_consensus") if final_signal in {"BUY", "SELL"} else "wait"
+        entry_path = 2 if final_two_agent else (1 if final_signal in {"BUY", "SELL"} else 0)
+
         return {
             "decision": final_signal,
             "signal": signal_payload,
@@ -606,6 +655,8 @@ class DecisionAgent(BaseAgent):
             "reason_codes": analysis.get("reason_codes", []),
             "agent_context": (analysis.get("classic", {}) or {}).get("strongest_directional"),
             "consensus_mode": True,
+            "entry_mode": entry_mode,
+            "entry_path": entry_path,
             "learning": analysis.get("learning", {}),
             "risk": risk,
             "risk_assessment": analysis.get("risk_assessment", {}),
