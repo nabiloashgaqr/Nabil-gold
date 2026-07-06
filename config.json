@@ -64,7 +64,27 @@
         "min_consensus_confidence": 72,
         "strong_single_agent_confidence": 0,
         "strong_single_agent_enabled": false,
-        "agent_min_confidence": 70
+        "agent_min_confidence": 70,
+        "two_agent_entry": {
+            "enabled": true,
+            "min_agents_agree": 2,
+            "min_consensus_confidence": 72,
+            "agent_min_confidence": 70,
+            "macro_confirmation": {
+                "enabled": true,
+                "min_confidence": 55,
+                "description": "MacroFundamentalAgent must confirm same direction with ≥55% confidence"
+            },
+            "gemini_confirmation": {
+                "enabled": true,
+                "min_confidence": 70,
+                "description": "Gemini review must confirm same verdict with ≥70% confidence. Used only when macro does not confirm."
+            },
+            "priority": "macro_first_then_gemini",
+            "cross_entry_distance_points": 200,
+            "description_cross_entry": "When a trade from either path is open, any new signal from the OTHER path needs ≥200 pts distance. BUY entries must be LOWER than existing BUY, SELL entries must be HIGHER than existing SELL.",
+            "description": "When only 2 agents agree (same 70% individual + 72% net thresholds), require external confirmation. Try macro first (no API cost), fall back to Gemini if needed. Macro ≥55% or Gemini ≥70% to confirm."
+        }
     },
     "schedule": {
         "analysis_interval_minutes": 5,
