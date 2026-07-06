@@ -349,7 +349,7 @@ class TelegramService:
         ])
         if rr:
             lines.append(f"• <b>Planned RR:</b> {html.escape(str(rr))}R")
-        lines.append("• <b>Protection:</b> SL → entry after +200 pts before TP1")
+        lines.append("• <b>Protection:</b> SL → entry after +150 pts before TP1")
         lines.append("• <b>Management:</b> Trail gap 150 pts / step 40 pts · check 5m")
 
         vote_lines = self._votes_lines(decision)
