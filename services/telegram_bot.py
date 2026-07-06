@@ -582,11 +582,38 @@ class TelegramService:
         ])
         return self.send_message(message)
 
-    def send_partial_consensus(self, decision: Dict[str, Any], all_results: Dict[str, Any], config: Dict[str, Any]) -> bool:
+    @staticmethod
+    def _format_reason_item(item: Any) -> str:
+        """Format a reason/evidence item for display — handles dicts cleanly.
+
+        Converts raw dict evidence like {'name': 'weighted_bias', 'value': None, 'bias': 'NEUTRAL'}
+        into a human-readable string like "Weighted Bias: NEUTRAL".
+        """
+        if isinstance(item, dict):
+            name = str(item.get("name", "")).replace("_", " ").title()
+            value = item.get("value")
+            bias = str(item.get("bias", "")).upper()
+            # Skip items with no useful information
+            if not name and bias in {"", "NEUTRAL"} and value is None:
+                return ""
+            parts: list[str] = []
+            if name:
+                parts.append(name)
+            if value is not None:
+                parts.append(str(value))
+            if bias and bias != "NEUTRAL":
+                parts.append(f"({bias})")
+            elif bias == "NEUTRAL" and not value and name:
+                parts.append("Neutral")
+            result = ": ".join([parts[0], " ".join(parts[1:])]) if len(parts) > 1 else parts[0] if parts else ""
+            return result if result else str(item)
+        return str(item)
+
+    def send_partial_consensus(self, decision: Dict[str, Any], all_results: Dict[str, Any], config: Dict[str, Any], database: Any = None) -> bool:
         """Send a partial-consensus alert (2 agents agree, not enough for entry).
 
-        English-only message. Only sent when price is meaningfully different
-        from the last alert for the same direction:
+        Shows the direction clearly (BUY/SELL) and only sent when price is
+        meaningfully different from the last alert for the same direction:
         - BUY: only at a lower price (≥100 pts below last BUY alert)
         - SELL: only at a higher price (≥100 pts above last SELL alert)
         """
@@ -600,16 +627,38 @@ class TelegramService:
         best_side = "BUY" if buy_metrics.get("support_count", 0) >= sell_metrics.get("support_count", 0) else "SELL"
         best_metrics = buy_metrics if best_side == "BUY" else sell_metrics
         confidence = best_metrics.get("confidence", 0)
+        support_count = int(best_metrics.get("support_count", 0) or 0)
+
+        # ── Guard: must have at least 1 directional vote ──
+        if support_count < 1:
+            return False
 
         # ── Price-diff gate: BUY only at lower price, SELL only at higher price ──
         pca = config.get("partial_consensus_alert") or {}
         min_diff = float(pca.get("min_price_diff_points", 100))
         max_age_hours = float(pca.get("max_age_hours", 8))
         reset_on_session = bool(pca.get("reset_on_session_change", True))
+        min_agents_agree = int((config.get("signal_requirements") or {}).get("min_agents_agree", 3))
         if not _partial_alert_price_ok(symbol, best_side, current_price, min_diff,
                                        max_age_hours=max_age_hours,
-                                       reset_on_session_change=reset_on_session):
+                                       reset_on_session_change=reset_on_session,
+                                       database=database):
             return False
+
+        # ── Direction label and emoji ──
+        side_emoji = "🟢" if best_side == "BUY" else "🔴"
+        side_label = html.escape(best_side)
+
+        # ── Calculate next alert price threshold ──
+        from utils.instruments import points_to_price
+        try:
+            price_diff = points_to_price(min_diff, symbol=symbol)
+        except Exception:
+            price_diff = min_diff / 10.0
+        if best_side == "BUY":
+            next_threshold = current_price - price_diff
+        else:
+            next_threshold = current_price + price_diff
 
         # ── Agent analysis section ──
         vote_emojis = {"BUY": "🟢", "SELL": "🔴"}
@@ -618,7 +667,10 @@ class TelegramService:
         analysis_lines = []
         for name in agent_names:
             result = all_results.get(name, {}) or {}
-            agent_signal = str(result.get("signal", "WAIT")).upper()
+            # Unify signal reading: signal first, then direction (same as DecisionAgent._collect_votes)
+            agent_signal = str(result.get("signal") or result.get("direction") or "WAIT").upper()
+            if agent_signal in {"NEUTRAL", "HOLD", "NO_TRADE", "NONE", ""}:
+                agent_signal = "WAIT"
             agent_conf = float(result.get("confidence", 0) or 0)
             emoji = vote_emojis.get(agent_signal, "🟡")
             if agent_conf < min_agent_conf and agent_signal not in vote_emojis:
@@ -628,30 +680,34 @@ class TelegramService:
             reasons = result.get("reasons") or result.get("evidence") or []
             if isinstance(reasons, (list, tuple)):
                 for r in reasons[:2]:
-                    analysis_lines.append(f"  • {html.escape(str(r)[:60])}")
+                    formatted = self._format_reason_item(r)
+                    if formatted:
+                        analysis_lines.append(f"  • {html.escape(formatted[:80])}")
             elif reasons:
-                analysis_lines.append(f"  • {html.escape(str(reasons)[:60])}")
-            if not reasons:
-                analysis_lines.append(f"  • No details available")
+                formatted = self._format_reason_item(reasons)
+                if formatted:
+                    analysis_lines.append(f"  • {html.escape(formatted[:80])}")
         analysis_block = "\n".join(analysis_lines)
 
         # ── Build message ──
         message = (
-            f"👀 <b>Partial Consensus — {html.escape(symbol)}</b>\n"
+            f"👀 <b>Partial {side_label} Consensus — {html.escape(symbol)}</b> {side_emoji}\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📈 Price: {current_price:.2f} | Weighted Confidence: {confidence:.0f}%\n"
+            f"📈 Price: {current_price:.2f} | Confidence: {confidence:.0f}%\n"
+            f"📊 {support_count}/{min_agents_agree} agents agree (need {min_agents_agree} for entry)\n"
             "\n"
             f"{analysis_block}\n"
             "\n"
             "━━━ ⚠️ NOTICE ━━━\n"
             "This is <b>NOT</b> an entry signal.\n"
-            "Wait for 3-agent consensus (70%+ confidence)\n"
-            "and 72%+ net confidence to generate a signal.\n"
+            f"Wait for {min_agents_agree}-agent consensus and 72%+ net confidence.\n"
+            f"⏱ Alert expires in {max_age_hours:.0f}h or on session change.\n"
+            f"📌 Next {side_label} alert only at price {'≤' if best_side == 'BUY' else '≥'} {next_threshold:.2f} ({'−' if best_side == 'BUY' else '+'}{min_diff:.0f} pts).\n"
             "━━━━━━━━━━━━━━━━━━━━━"
         )
         sent = self.send_message(message)
         if sent:
-            _partial_alert_record(symbol, best_side, current_price)
+            _partial_alert_record(symbol, best_side, current_price, database=database)
         return sent
 
 
@@ -693,9 +749,11 @@ def _partial_alert_tracker_save(data: dict) -> None:
 
 
 def _partial_alert_price_ok(symbol: str, side: str, price: float, min_diff_points: float,
-                            max_age_hours: float = 8.0, reset_on_session_change: bool = True) -> bool:
+                            max_age_hours: float = 8.0, reset_on_session_change: bool = True,
+                            database: Any = None) -> bool:
     """Check if this alert should be sent based on price difference, age, and session.
 
+    Uses Supabase (via database service) as primary tracker, with local JSON fallback.
     BUY: only send if price is min_diff_points BELOW last BUY alert.
     SELL: only send if price is min_diff_points ABOVE last SELL alert.
     First alert for a direction always passes.
@@ -704,9 +762,20 @@ def _partial_alert_price_ok(symbol: str, side: str, price: float, min_diff_point
     - reset_on_session_change: if current session differs from the recorded session.
     - max_age_hours: if more than max_age_hours have passed since the last alert.
     """
-    tracker = _partial_alert_tracker_load()
-    key = f"{symbol}_{side}"
-    entry = tracker.get(key)
+    # Load entry from Supabase (primary) or local file (fallback)
+    entry = None
+    if database is not None:
+        try:
+            entry = database.get_partial_alert_tracker(symbol, side)
+        except Exception:
+            pass
+    if entry is None:
+        # Fallback to local file
+        tracker = _partial_alert_tracker_load()
+        key = f"{symbol}_{side}"
+        raw = tracker.get(key)
+        if isinstance(raw, dict):
+            entry = raw
 
     if entry is None:
         return True  # First alert for this direction
@@ -714,6 +783,7 @@ def _partial_alert_price_ok(symbol: str, side: str, price: float, min_diff_point
     # ── Age-based reset ──
     from datetime import datetime, timezone
     last_ts = entry.get("timestamp") if isinstance(entry, dict) else None
+    should_reset = False
     if last_ts:
         try:
             last_dt = datetime.fromisoformat(str(last_ts).replace("Z", "+00:00"))
@@ -721,26 +791,38 @@ def _partial_alert_price_ok(symbol: str, side: str, price: float, min_diff_point
                 last_dt = last_dt.replace(tzinfo=timezone.utc)
             age_hours = (datetime.now(timezone.utc) - last_dt).total_seconds() / 3600
             if age_hours > max_age_hours:
-                # Too old — reset tracker entry so next alert passes freely
-                tracker.pop(key, None)
-                _partial_alert_tracker_save(tracker)
-                return True
+                should_reset = True
         except Exception:
             pass  # If timestamp parsing fails, continue to price check
 
     # ── Session-based reset ──
-    if reset_on_session_change:
+    if reset_on_session_change and not should_reset:
         from utils.sessions import session_label_from_utc
         current_session = session_label_from_utc(datetime.now(timezone.utc))
         recorded_session = entry.get("session") if isinstance(entry, dict) else None
         if recorded_session and current_session != recorded_session:
-            # Session changed — reset tracker entry
-            tracker.pop(key, None)
-            _partial_alert_tracker_save(tracker)
-            return True
+            should_reset = True
+
+    if should_reset:
+        # Reset tracker entry so next alert passes freely
+        if database is not None:
+            try:
+                key = f"{symbol}_{side}"
+                # Save empty/None to effectively clear
+                database.save_partial_alert_tracker(symbol, side, {
+                    "price": None, "timestamp": None, "session": None,
+                })
+            except Exception:
+                pass
+        tracker = _partial_alert_tracker_load()
+        tracker.pop(f"{symbol}_{side}", None)
+        _partial_alert_tracker_save(tracker)
+        return True
 
     # ── Price-diff check (within same session, within age limit) ──
     last_price = entry.get("price") if isinstance(entry, dict) else entry
+    if last_price is None:
+        return True
     from utils.instruments import price_to_points
     if side == "BUY":
         diff = price_to_points(last_price - price, symbol=symbol)
@@ -749,17 +831,28 @@ def _partial_alert_price_ok(symbol: str, side: str, price: float, min_diff_point
     return diff >= min_diff_points
 
 
-def _partial_alert_record(symbol: str, side: str, price: float) -> None:
-    """Record that an alert was sent at this price, with timestamp and session."""
+def _partial_alert_record(symbol: str, side: str, price: float, database: Any = None) -> None:
+    """Record that an alert was sent at this price, with timestamp and session.
+
+    Saves to Supabase (via database service) as primary, and local file as backup.
+    """
     from datetime import datetime, timezone
     from utils.sessions import session_label_from_utc
-    tracker = _partial_alert_tracker_load()
-    key = f"{symbol}_{side}"
-    tracker[key] = {
+    data = {
         "price": price,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "session": session_label_from_utc(datetime.now(timezone.utc)),
     }
+    # Save to Supabase primary
+    if database is not None:
+        try:
+            database.save_partial_alert_tracker(symbol, side, data)
+        except Exception:
+            pass
+    # Always save to local file as backup
+    tracker = _partial_alert_tracker_load()
+    key = f"{symbol}_{side}"
+    tracker[key] = data
     _partial_alert_tracker_save(tracker)
 
 

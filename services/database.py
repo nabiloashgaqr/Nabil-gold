@@ -577,6 +577,56 @@ class DatabaseService:
                 break
         return losses
 
+    # ── Partial alert tracker (Supabase with local file fallback) ──
+
+    def get_partial_alert_tracker(self, symbol: str, side: str) -> dict | None:
+        """Get last partial alert data from Supabase or local file.
+
+        Returns dict with 'price', 'timestamp', 'session' keys or None.
+        """
+        key = f"{symbol}_{side}"
+        # Try Supabase first
+        if self.use_supabase and self.client:
+            try:
+                response = (
+                    self.client.table("partial_alert_tracker")
+                    .select("price,timestamp,session")
+                    .eq("key", key)
+                    .limit(1)
+                    .execute()
+                )
+                rows = list(response.data or [])
+                if rows:
+                    return dict(rows[0])
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning("Could not read partial_alert_tracker from Supabase: %s", exc)
+        # Fallback to local file
+        return _local_partial_alert_load().get(key)
+
+    def save_partial_alert_tracker(self, symbol: str, side: str, data: dict) -> None:
+        """Save partial alert data to Supabase and local file.
+
+        Supabase is primary; local file is always updated as backup.
+        """
+        key = f"{symbol}_{side}"
+        # Always update local file as backup
+        tracker = _local_partial_alert_load()
+        tracker[key] = data
+        _local_partial_alert_save(tracker)
+        # Try Supabase
+        if self.use_supabase and self.client:
+            try:
+                payload = {
+                    "key": key,
+                    "price": data.get("price"),
+                    "timestamp": data.get("timestamp"),
+                    "session": data.get("session"),
+                    "updated_at": data.get("timestamp"),
+                }
+                self.client.table("partial_alert_tracker").upsert(payload).execute()
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning("Could not save partial_alert_tracker to Supabase: %s", exc)
+
     # How many unknown columns we are willing to strip one-by-one before giving
     # up and using the minimal legacy payload.
     _MAX_COLUMN_RETRIES = 12
@@ -719,3 +769,26 @@ class DatabaseService:
                 except (TypeError, ValueError):
                     continue
         return 0.0
+
+
+def _local_partial_alert_load() -> dict:
+    """Load partial alert tracker from local JSON file (fallback)."""
+    import json
+    try:
+        path = Path(__file__).resolve().parents[1] / "storage" / "partial_alert_tracker.json"
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _local_partial_alert_save(data: dict) -> None:
+    """Save partial alert tracker to local JSON file (fallback)."""
+    import json
+    try:
+        path = Path(__file__).resolve().parents[1] / "storage" / "partial_alert_tracker.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
