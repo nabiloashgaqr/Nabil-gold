@@ -87,17 +87,19 @@ class MacroFundamentalAgent(BaseAgent):
         def add(component: str, points: float, label: str, code: str, value: Any = None) -> None:
             nonlocal score, max_abs
             score += points
-            max_abs += abs(points)
+            max_abs += abs(points) if points != 0 else 0.3  # flat/neutral contribute breadth even at 0 points
             breakdown[component] = round(breakdown.get(component, 0.0) + points, 2)
             drivers.append(label)
             codes.append(code)
-            evidence.append({"name": component, "value": value if value is not None else label, "bias": "BULLISH_GOLD" if points > 0 else "BEARISH_GOLD"})
+            evidence.append({"name": component, "value": value if value is not None else label, "bias": "BULLISH_GOLD" if points > 0 else "BEARISH_GOLD" if points < 0 else "NEUTRAL"})
 
         dxy = self._norm(context.get("dxy_trend") or context.get("dollar_trend") or context.get("usd_trend"))
         if dxy in {"UP", "RISING", "STRONG", "BULLISH"}:
             add("dxy", -2.2, "Stronger USD pressures gold", "MACRO_DXY_BEARISH_GOLD", dxy)
         elif dxy in {"DOWN", "FALLING", "WEAK", "BEARISH"}:
             add("dxy", 2.2, "Weaker USD supports gold", "MACRO_DXY_BULLISH_GOLD", dxy)
+        elif dxy == "FLAT":
+            add("dxy", 0.0, "DXY flat — no USD directional pressure", "MACRO_DXY_FLAT", dxy)
 
         yields = self._norm(context.get("us10y_trend") or context.get("real_yields_trend") or context.get("yields_trend"))
         if yields in {"UP", "RISING", "STRONG", "BULLISH"}:
@@ -129,6 +131,8 @@ class MacroFundamentalAgent(BaseAgent):
             add("risk", 2.0, "Risk-off / geopolitical stress supports safe-haven gold", "MACRO_RISK_OFF_BULLISH_GOLD", risk)
         elif risk in {"RISK_ON", "LOW", "CALM"}:
             add("risk", -0.9, "Risk-on sentiment reduces safe-haven demand", "MACRO_RISK_ON_BEARISH_GOLD", risk)
+        elif risk == "NEUTRAL":
+            add("risk", 0.0, "Risk sentiment neutral", "MACRO_RISK_NEUTRAL", risk)
 
         oil = self._norm(context.get("oil_trend") or context.get("commodity_inflation"))
         if oil in {"UP", "RISING", "STRONG"}:
@@ -219,8 +223,13 @@ class MacroFundamentalAgent(BaseAgent):
 
     @staticmethod
     def _confidence(score: float, max_abs: float, inputs: int) -> int:
-        if inputs <= 0 or max_abs <= 0:
+        if inputs <= 0:
             return 0
+        # Even flat/neutral inputs contribute information breadth
+        # (data was collected, just no directional signal)
+        if max_abs <= 0:
+            # All inputs are flat/neutral — still valuable to report
+            return int(round(max(0.0, min(30.0, 10 + inputs * 4))))
         conviction = min(abs(score) / max_abs, 1.0)
         breadth = min(inputs / 5.0, 1.0)
         return int(round(max(0.0, min(90.0, 35 + conviction * 35 + breadth * 20))))
@@ -269,4 +278,7 @@ class MacroFundamentalAgent(BaseAgent):
         lead = "; ".join(drivers[:3])
         if len(drivers) > 3:
             lead += f"; +{len(drivers) - 3} more"
-        return f"{bias.replace('_', ' ').title()} ({confidence}%) — {lead}"
+        bias_label = bias.replace("_", " ").title()
+        if bias == "NEUTRAL" and confidence > 0:
+            return f"{bias_label} ({confidence}%) — no strong directional signal; {lead}"
+        return f"{bias_label} ({confidence}%) — {lead}"
