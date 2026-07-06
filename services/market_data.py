@@ -118,6 +118,20 @@ class MarketDataService:
             payload = self._fetch_data(timeframe, outputsize)
 
         if payload is None:
+            # Production guard: synthetic data is NEVER acceptable for signal
+            # analysis or trade management. It produced a catastrophic false SELL
+            # at 3366 (real gold ~4150) and a false TP2_HIT. If Twelve Data is
+            # down and no quote fallback worked, stop cleanly.
+            in_production = os.environ.get('GITHUB_ACTIONS', '') == 'true'
+            if in_production:
+                self.logger.error(
+                    'No real market data for %s %s — Twelve Data may be exhausted '
+                    'or API key invalid. Synthetic data is blocked in production. '
+                    'Stopping this cycle cleanly.',
+                    self.symbol,
+                    timeframe,
+                )
+                return None
             self.logger.warning(
                 "Using synthetic demo data for %s %s. Configure TWELVEDATA_API_KEY or fallback source.",
                 self.symbol,
@@ -335,7 +349,7 @@ class MarketDataService:
         start = now - timedelta(minutes=minutes * outputsize)
         seed = int(now.strftime("%Y%m%d%H")) + minutes
         rng = random.Random(seed)
-        base_prices = {"XAU/USD": 3350.0, "WTI/USD": 75.00}
+        base_prices = {"XAU/USD": 4150.0, "WTI/USD": 75.00}
         base = base_prices.get(str(self.symbol).upper(), 1.0000) * (1 + math.sin(seed / 1000) * 0.002)
         from utils.instruments import price_decimals
         decimals = price_decimals(self.symbol)
