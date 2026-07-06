@@ -488,6 +488,75 @@ CREATE INDEX IF NOT EXISTS idx_weekly_reports_week_start ON weekly_reports (week
 CREATE UNIQUE INDEX IF NOT EXISTS uq_weekly_reports_period ON weekly_reports (week_start, week_end);
 
 -- =====================================================
+-- 12) Partial Alert Tracker (July 2026 — BUG-4 fix)
+-- =====================================================
+-- Tracks last partial-consensus alert per symbol+direction.
+-- Required because GitHub Actions is stateless: local JSON
+-- files don't persist between runs, so the price-diff gate
+-- was always treating every cycle as "first alert".
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS partial_alert_tracker (
+    key TEXT PRIMARY KEY,                    -- e.g. "XAU/USD_BUY" or "XAU/USD_SELL"
+    price DECIMAL(18, 6),                    -- price at which last alert was sent
+    timestamp TIMESTAMPTZ,                   -- when the alert was sent (UTC)
+    session TEXT,                            -- session name at alert time (e.g. "London")
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_partial_alert_key ON partial_alert_tracker(key);
+
+ALTER TABLE partial_alert_tracker ADD COLUMN IF NOT EXISTS price      DECIMAL(18, 6);
+ALTER TABLE partial_alert_tracker ADD COLUMN IF NOT EXISTS timestamp  TIMESTAMPTZ;
+ALTER TABLE partial_alert_tracker ADD COLUMN IF NOT EXISTS session    TEXT;
+ALTER TABLE partial_alert_tracker ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+DROP TRIGGER IF EXISTS update_partial_alert_timestamp ON partial_alert_tracker;
+CREATE TRIGGER update_partial_alert_timestamp
+    BEFORE UPDATE ON partial_alert_tracker
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- =====================================================
+-- 13) Post-News Tracker (July 2026)
+-- =====================================================
+-- Prevents duplicate post-news analysis alerts.
+-- Each event fires only once per release.
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS post_news_tracker (
+    event_key TEXT PRIMARY KEY,              -- unique key: "event_name_time"
+    sent_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE post_news_tracker ADD COLUMN IF NOT EXISTS event_key TEXT;
+ALTER TABLE post_news_tracker ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ DEFAULT NOW();
+
+-- =====================================================
+-- 14) Macro Context (hourly snapshot)
+-- =====================================================
+-- Stores the latest hourly macro context (DXY, risk sentiment, etc.)
+-- Updated by macro_context.yml workflow every hour.
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS macro_context (
+    id TEXT PRIMARY KEY DEFAULT 'latest',
+    context JSONB DEFAULT '{}'::jsonb,
+    source TEXT,
+    generated_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE macro_context ADD COLUMN IF NOT EXISTS context      JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE macro_context ADD COLUMN IF NOT EXISTS source       TEXT;
+ALTER TABLE macro_context ADD COLUMN IF NOT EXISTS generated_at TIMESTAMPTZ;
+ALTER TABLE macro_context ADD COLUMN IF NOT EXISTS updated_at   TIMESTAMPTZ DEFAULT NOW();
+
+DROP TRIGGER IF EXISTS update_macro_context_timestamp ON macro_context;
+CREATE TRIGGER update_macro_context_timestamp
+    BEFORE UPDATE ON macro_context
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- =====================================================
 -- 12) Row Level Security (RLS)
 -- Service Role (SUPABASE_KEY) bypasses RLS automatically.
 -- ============================================================
@@ -501,6 +570,9 @@ ALTER TABLE session_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_weights ENABLE ROW LEVEL SECURITY;
 ALTER TABLE learning_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_evaluations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE partial_alert_tracker ENABLE ROW LEVEL SECURITY;
+ALTER TABLE post_news_tracker ENABLE ROW LEVEL SECURITY;
+ALTER TABLE macro_context ENABLE ROW LEVEL SECURITY;
 
 -- =====================================================
 -- Final: Reload PostgREST schema cache
