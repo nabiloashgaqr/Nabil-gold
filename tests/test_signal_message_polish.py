@@ -37,7 +37,7 @@ def test_signal_message_separates_votes_context_and_attribution():
         "reasons": ["Classic consensus", "Trade approved"],
     })
 
-    assert "Strength: Good — 2/5 qualified agents, no opposition" in text
+    assert "Strength: Good (dual-agent) — 2/5 qualified agents, no opposition" in text
     assert "🟢" in text
     assert "🟡" in text
     assert "Daily bias: BULLISH (70%)" in text

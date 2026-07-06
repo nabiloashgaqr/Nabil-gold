@@ -127,7 +127,7 @@ def test_buy_uses_green_header_emoji():
     decision["votes"] = {"BUY": [{"agent": "technical", "confidence": 70}], "WAIT": []}
     decision["ai"] = {"available": True, "signal": "BUY", "confidence": 70}
     text = _capture_signal(decision)
-    assert "SIGNAL — BUY" in text and "🟢" in text
+    assert "XAU/USD — BUY" in text and "🟢" in text
 
 
 # ── Invalidation deduplication (must not just repeat the stop loss) ─────────
