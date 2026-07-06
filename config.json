@@ -136,8 +136,8 @@
         "description_expire": "expire_after_hours=24: تُغلق الصفقة تلقائياً بعد 24 ساعة. keep_protected_winners_open=true: لا تُغلق صفقة رابحة وقفها مُؤمّن عند الدخول أو أفضل حتى لو انتهت المدة — يُترك الستوب/التريلينغ يديرها بدل قطعها بالساعة.",
         "trailing_step_points": 40,
         "description_trailing_stop": "Trailing gap 150pts ($15) متناسب مع SL=400pts. خطوة 40pts تقلل التحديثات غير الضرورية بالضوضا.",
-        "early_breakeven_points": 200,
-        "description_early_breakeven": "early_breakeven_points=200: عند وصول الصفقة إلى +200 نقطة (20$) يُنقل الستوب إلى الدخول فوراً. تم رفعه من 150 لأن الذهب كثيراً ما يتراجع 150pts بعد التقدم ثم يعود ← لا نريد إغلاق صفقة رابحة على الدخول بسبب ضوضا طبيعية. بعدها يبدأ Trailing بفجوة 150pts."
+        "early_breakeven_points": 150,
+        "description_early_breakeven": "early_breakeven_points=150: عند وصول الصفقة إلى +150 نقطة (15$) يُنقل الستوب إلى الدخول فوراً. بعدها يبدأ Trailing بفجوة 150pts."
     },
     "performance": {
         "track_win_rate_per_agent": true,
@@ -154,8 +154,8 @@
         "tp2_trigger_pct": 100.0,
         "tp2_distance": 15.0,
         "min_profit_lock": 0.0,
-        "early_breakeven_points": 200.0,
-        "description_early_breakeven": "early_breakeven_points=200: عند وصول الصفقة إلى +200 نقطة (20$) يُنقل الستوب إلى الدخول فوراً. متناسب مع SL=400pts و trailing gap=150pts.",
+        "early_breakeven_points": 150.0,
+        "description_early_breakeven": "early_breakeven_points=150: عند وصول الصفقة إلى +150 نقطة (15$) يُنقل الستوب إلى الدخول فوراً. متناسب مع SL=400pts و trailing gap=150pts.",
         "description_trailing_stop": "Trailing gap 150pts متناسب مع SL=400pts. خطوة 40pts تقلل التحديثات غير الضرورية بالضوضا."
     },
     "news_feed": {
@@ -370,9 +370,9 @@
             "min_sl_distance_points": 400,
             "trailing_distance": 150,
             "trailing_step": 40,
-            "early_breakeven_points": 200,
+            "early_breakeven_points": 150,
             "duplicate_zone_points": 50,
-            "description_early_breakeven": "early_breakeven_points=200: عند وصول الصفقة إلى +200 نقطة (20$) يُنقل الستوب إلى الدخول فوراً. متناسب مع SL=400pts و trailing gap=150pts."
+            "description_early_breakeven": "early_breakeven_points=150: عند وصول الصفقة إلى +150 نقطة (15$) يُنقل الستوب إلى الدخول فوراً. متناسب مع SL=400pts و trailing gap=150pts."
         },
         {
             "symbol": "WTI/USD",
