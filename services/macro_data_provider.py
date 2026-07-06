@@ -3,14 +3,14 @@
 Uses Yahoo Finance (yfinance) as the SOLE data source — completely free,
 no API key, no quota limits.
 
-Provides 6/7 macro inputs:
+Provides 7/7 macro inputs:
   ✓ dxy_trend       — DXY direct + FX basket (EUR/USD, GBP/USD, USD/JPY, AUD/USD)
   ✓ risk_sentiment  — VIX + SPY trend
   ✓ us10y_trend     — 10-Year Treasury Yield (^TNX)
   ✓ real_yields_trend — 5-Year Treasury (^FVX)
   ✓ fed_tone        — yield curve shape + 10Y direction
   ✓ oil_trend       — WTI Crude Oil (CL=F)
-  ✗ inflation_surprise — no free real-time CPI/PCE source
+  ✓ inflation_surprise — TIP/STIP ETF trend (inflation expectations proxy)
 
 Cost: 0 API credits — yfinance is completely free, no API key, no quota.
 """
@@ -58,6 +58,13 @@ class MacroDataProvider:
         "DX-Y.NYB":   {"field": "dxy_direct",          "description": "US Dollar Index (direct)"},
         # Oil
         "CL=F":       {"field": "oil_trend",            "description": "WTI Crude Oil Futures"},
+        # Inflation expectations — TIPS bond ETFs
+        # TIP: iShares TIPS Bond ETF (broad inflation protection, 10Y+ duration)
+        # When TIP rises → investors buying inflation protection → expectations HOT
+        # When TIP falls → inflation expectations cooling → COOL
+        "TIP":        {"field": "inflation_tips",       "description": "iShares TIPS Bond ETF (inflation expectations proxy)"},
+        # STIP: 0-5 Year TIPS ETF (short-term inflation expectations)
+        "STIP":       {"field": "inflation_stip",       "description": "0-5 Year TIPS ETF (short-term inflation proxy)"},
     }
 
     def __init__(self, config: Dict[str, Any] | None = None) -> None:
@@ -93,6 +100,7 @@ class MacroDataProvider:
         oil_trend = yf_data.get("oil_trend", "unknown")
         vix_level = yf_data.get("vix_level")
         fed_tone = self._derive_fed_tone(yf_data)
+        inflation_surprise = self._derive_inflation_surprise(yf_data)
 
         # ── Build missing fields list ──
         missing = []
@@ -106,6 +114,8 @@ class MacroDataProvider:
             missing.append("fed_tone")
         if oil_trend == "unknown":
             missing.append("oil_trend")
+        if inflation_surprise == "unknown":
+            missing.append("inflation_surprise")
 
         context = {
             "source": "yfinance_macro_proxy",
@@ -127,7 +137,7 @@ class MacroDataProvider:
             "us10y_trend": us10y_trend,
             "real_yields_trend": real_yields_trend,
             "fed_tone": fed_tone,
-            "inflation_surprise": "unknown",  # No free real-time source
+            "inflation_surprise": inflation_surprise,
             "oil_trend": oil_trend,
             # Extra context
             "vix_level": vix_level,
@@ -219,6 +229,12 @@ class MacroDataProvider:
                     elif field == "volatility_index":
                         result["vix_level"] = round(last, 2)
                         result["vix_trend_pct"] = round(trend_pct, 4)
+                    elif field == "inflation_tips":
+                        result["tips_trend_pct"] = round(trend_pct, 4)
+                        result["tips_value"] = round(last, 2)
+                    elif field == "inflation_stip":
+                        result["stip_trend_pct"] = round(trend_pct, 4)
+                        result["stip_value"] = round(last, 2)
 
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"yfinance {symbol}: {exc}")
@@ -323,6 +339,50 @@ class MacroDataProvider:
             return "hawkish"
         elif real_yields == "falling":
             return "dovish"
+
+        return "unknown"
+
+    # ── Inflation surprise from TIPS ETFs ─────────────────────────────────
+
+    def _derive_inflation_surprise(self, yf_data: Dict[str, Any]) -> str:
+        """Derive inflation surprise from TIPS bond ETF trends.
+
+        Logic:
+        - TIP (broad TIPS) rising → investors buying inflation protection → HOT
+        - TIP falling → inflation expectations cooling → COOL
+        - Flat → NEUTRAL
+        - Use STIP (short-term TIPS) as tiebreaker when TIP is flat
+        """
+        tips_pct = float(yf_data.get("tips_trend_pct", 0.0) or 0.0)
+        stip_pct = float(yf_data.get("stip_trend_pct", 0.0) or 0.0)
+
+        has_tips = "tips_trend_pct" in yf_data
+        has_stip = "stip_trend_pct" in yf_data
+
+        if not has_tips and not has_stip:
+            return "unknown"
+
+        # Primary signal from TIP (broad, more reliable)
+        if has_tips:
+            if tips_pct >= 0.15:
+                return "hot"
+            elif tips_pct <= -0.15:
+                return "cool"
+            # TIP flat — check STIP for short-term signal
+            if has_stip:
+                if stip_pct >= 0.15:
+                    return "hot"
+                elif stip_pct <= -0.15:
+                    return "cool"
+            return "neutral"
+
+        # Only STIP available
+        if has_stip:
+            if stip_pct >= 0.15:
+                return "hot"
+            elif stip_pct <= -0.15:
+                return "cool"
+            return "neutral"
 
         return "unknown"
 
