@@ -136,14 +136,28 @@ class TelegramService:
 
     def _signal_strength_line(self, decision: Dict[str, Any]) -> str | None:
         classic = decision.get("classic") or {}
+        two_agent = classic.get("two_agent")
         signal = str(decision.get("decision") or "").upper()
         selected = ((classic.get("consensus") or {}).get("selected") or {}) if isinstance(classic, dict) else {}
         support = int(selected.get("support_count") or classic.get("buy_count" if signal == "BUY" else "sell_count", 0) or 0)
         opposition = int(selected.get("opposition_count") or 0)
         total_core = 5
+        # For Path 2 entries, pull count from two_agent info
+        if isinstance(two_agent, dict) and support <= 0:
+            support = int(two_agent.get("support_count", 0) or 0)
+            opposition = int(two_agent.get("opposition_count", 0) or 0)
         if support <= 0:
             return None
-        label = "Excellent" if support >= 4 and opposition == 0 else "Strong" if support >= 3 else "Good" if opposition == 0 else "Cautious"
+        if support >= 4 and opposition == 0:
+            label = "Excellent"
+        elif support >= 3:
+            label = "Strong"
+        elif support >= 2 and opposition == 0:
+            label = "Good (dual-agent)"
+        elif opposition == 0:
+            label = "Good"
+        else:
+            label = "Cautious"
         opp_text = "no opposition" if opposition == 0 else f"{opposition} opposing"
         return f"💪 Strength: {label} — {support}/{total_core} qualified agents, {opp_text}"
 
@@ -291,12 +305,32 @@ class TelegramService:
         quality = decision.get("quality") or {}
         entry = signal.get("entry", {}) or {}
 
+        entry_mode = str(decision.get('entry_mode', '')).lower()
+        entry_path_num = int(decision.get('entry_path', 1) or 1)
+        confirm_source = str(decision.get('confirm_source', ''))
+        confirm_conf = decision.get('confirm_confidence')
+
+        # Distinctive header per entry path
+        if entry_path_num == 2:
+            if 'macro' in entry_mode:
+                path_badge = '⚡ DUAL-AGENT + MACRO'
+                confirm_line = f'📊 Macro confirms {trade_type} ({confirm_conf:.0f}% confidence ≥ 55%)' if confirm_conf else None
+            else:
+                path_badge = '🤖 DUAL-AGENT + GEMINI'
+                confirm_line = f'🧠 Gemini confirms {trade_type} ({confirm_conf:.0f}% confidence ≥ 70%)' if confirm_conf else None
+        else:
+            path_badge = '🏆 3-AGENT CONSENSUS'
+            confirm_line = None
+
         lines: List[str] = [
-            f"{emoji} <b>{html.escape(symbol)} SIGNAL — {html.escape(trade_type)}</b>",
+            f"{emoji} <b>{html.escape(symbol)} — {html.escape(trade_type)}</b>",
+            f"<b>{html.escape(path_badge)}</b>",
             "━━━━━━━━━━━━━━━━━━━━━",
             f"📈 Price {self._money(decision.get('current_price'), symbol)} · Confidence {decision.get('confidence')}%",
             f"🕒 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
         ]
+        if confirm_line:
+            lines.append(f"✅ {html.escape(confirm_line)}")
         if quality:
             lines.append(f"🏅 Quality: {html.escape(str(quality.get('grade', '')))} {html.escape(str(quality.get('score', '')))}".rstrip())
         strength_line = self._signal_strength_line(decision)
