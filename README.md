@@ -63,7 +63,7 @@ Nabil-gold/
 | البند | القيمة | الوصف |
 |-------|--------|-------|
 | SL min distance | 400 pts ($40) | حماية من الضوضاء السعرية |
-| Early Breakeven | +200 pts | نقل SL إلى الدخول تلقائياً |
+| Early Breakeven | +150 pts | نقل SL إلى الدخول تلقائياً |
 | Trailing Stop | 150 pts gap / 40 pts step | تحريك الستوب تبعاً للربح |
 | Partial Close @ TP1 | 50% | تأمين نصف الصفقة عند أول هدف |
 | Max Open Trades | 3 | الأصلية + تعزيزان كحد أقصى |
