@@ -1,19 +1,10 @@
 """Fix trade that was wrongly closed as SL_HIT when breakeven should have applied.
 
-The price reached 4202 (+184 pts from entry 4183.58), which is above the
-early_breakeven threshold of +150 pts. The stop should have moved to entry
-before the price dropped back, but the 5-min update cycle missed the peak.
-
-This script changes the trade from SL_HIT/LOSS to BE_HIT/BREAKEVEN.
-
 Usage:
-    TRADE_ID=TRADE_20260706_004128_763880_0d6c2abd python scripts/fix_trade_breakeven.py
+    python scripts/fix_trade_breakeven.py TRADE_20260706_004128_763880_0d6c2abd
 
-Or with environment variables for GitHub Actions:
-    TRADE_ID=TRADE_20260706_004128_763880_0d6c2abd \
-    SUPABASE_URL=... \
-    SUPABASE_KEY=... \
-    python scripts/fix_trade_breakeven.py
+Or via environment variable:
+    TRADE_ID=TRADE_20260706_004128_763880_0d6c2abd python scripts/fix_trade_breakeven.py
 """
 
 from __future__ import annotations
@@ -30,31 +21,67 @@ from services.database import DatabaseService  # noqa: E402
 from utils.helpers import load_config  # noqa: E402
 
 
+def _clean_trade_id(raw: str) -> str:
+    """Clean trade ID — strip whitespace, quotes, and 'TRADE_ID=' prefix."""
+    s = raw.strip().strip("\"'")
+    # Handle case where user typed "TRADE_ID=TRADE_..." in the input field
+    if "=" in s and s.upper().startswith("TRADE_ID="):
+        s = s.split("=", 1)[1].strip().strip("\"'")
+    return s
+
+
+def _find_trade(db: DatabaseService, trade_id: str) -> dict | None:
+    """Search for a trade across all available methods."""
+    # 1. Open trades
+    for t in db.get_open_trades():
+        if str(t.get("id")) == trade_id:
+            return t
+
+    # 2. Recent trades (widen search)
+    for limit in (200, 500, 1000):
+        for t in db.get_recent_trades(limit=limit):
+            if str(t.get("id")) == trade_id:
+                return t
+
+    # 3. Direct Supabase query (for closed trades not in recent list)
+    if db.use_supabase and db.client:
+        try:
+            resp = db.client.table("trades").select("*").eq("id", trade_id).limit(1).execute()
+            rows = list(resp.data or [])
+            if rows:
+                return rows[0]
+        except Exception as exc:
+            print(f"⚠️ Direct Supabase lookup failed: {exc}")
+
+    return None
+
+
 def main() -> int:
-    trade_id = os.environ.get("TRADE_ID", "").strip()
+    # Get trade ID from: command line arg > env variable
+    raw_id = ""
+    if len(sys.argv) > 1:
+        raw_id = sys.argv[1]
+    else:
+        raw_id = os.environ.get("TRADE_ID", "")
+
+    trade_id = _clean_trade_id(raw_id)
     if not trade_id:
-        print("❌ TRADE_ID not set")
-        print("Usage: TRADE_ID=TRADE_... python scripts/fix_trade_breakeven.py")
+        print("❌ TRADE_ID not provided")
+        print("Usage: python scripts/fix_trade_breakeven.py TRADE_...")
+        print("   or: TRADE_ID=TRADE_... python scripts/fix_trade_breakeven.py")
         return 1
+
+    print(f"🔍 Looking for trade: {trade_id}")
 
     cfg = load_config()
     db = DatabaseService(cfg)
     now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
-    # Fetch the trade
-    trade = None
-    for t in db.get_recent_trades(limit=200):
-        if str(t.get("id")) == trade_id:
-            trade = t
-            break
-    if not trade:
-        for t in db.get_open_trades():
-            if str(t.get("id")) == trade_id:
-                trade = t
-                break
+    trade = _find_trade(db, trade_id)
 
     if not trade:
         print(f"❌ Trade {trade_id} not found in database")
+        print("   Checked: open trades, recent trades, and direct Supabase query")
         return 1
 
     entry = float(trade.get("entry_price", 0))
@@ -62,7 +89,7 @@ def main() -> int:
     old_close = trade.get("close_price", "?")
     old_pnl = trade.get("final_pnl_points", trade.get("current_pnl_points", "?"))
 
-    print(f"=== Before ===")
+    print(f"\n=== Before ===")
     print(f"  ID:           {trade_id}")
     print(f"  Status:       {old_status}")
     print(f"  Entry:        {entry}")
@@ -97,7 +124,7 @@ def main() -> int:
     print(f"  PnL Points:   0")
     print(f"  Result:       BREAKEVEN")
     print()
-    print(f"✅ Trade {trade_id} updated: SL_HIT → BE_HIT (breakeven)")
+    print(f"✅ Trade {trade_id} updated: {old_status} → BE_HIT (breakeven)")
 
     return 0
 
