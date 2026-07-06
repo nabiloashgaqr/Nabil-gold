@@ -12,6 +12,12 @@ Provides 7/7 macro inputs:
   ✓ oil_trend       — WTI Crude Oil (CL=F)
   ✓ inflation_surprise — TIP/STIP ETF trend (inflation expectations proxy)
 
+Data freshness:
+  - Primary fetch: 5d × 1h interval (fine-grained trend)
+  - Stale fallback: if last candle > 48h old, retry with 5d × 1d (daily close)
+  - freshness_summary reports any stale symbols with age in hours
+  - stale symbols still contribute to trend but with a warning
+
 Cost: 0 API credits — yfinance is completely free, no API key, no quota.
 """
 
@@ -19,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from utils.helpers import load_config
 
@@ -32,6 +38,9 @@ try:
 except ImportError:
     _yf = None
     _YF_AVAILABLE = False
+
+# Age threshold: if the last candle is older than this, data is "stale"
+_STALE_THRESHOLD_HOURS = 48.0
 
 
 class MacroDataProvider:
@@ -81,6 +90,7 @@ class MacroDataProvider:
 
         yf_data = self._fetch_yfinance_data()
         yf_errors = yf_data.pop("_errors", [])
+        staleness = yf_data.pop("_staleness", {})
 
         # ── DXY from FX basket ──
         dxy_trend = self._compute_dxy_from_fx(yf_data)
@@ -117,11 +127,21 @@ class MacroDataProvider:
         if inflation_surprise == "unknown":
             missing.append("inflation_surprise")
 
+        # ── Freshness summary ──
+        stale_symbols = {k: v for k, v in staleness.items() if v.get("stale")}
+        freshness = "OK" if not stale_symbols else "STALE"
+        freshness_warnings = []
+        for sym, info in stale_symbols.items():
+            hours = info.get("age_hours", 0)
+            freshness_warnings.append(f"{sym}: data {hours:.0f}h old (market closed or holiday)")
+        if freshness_warnings:
+            logger.warning("Stale macro data: %s", "; ".join(freshness_warnings))
+
         context = {
             "source": "yfinance_macro_proxy",
             "provider": "yfinance",
             "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-            "freshness": "OK" if yf_data else "UNKNOWN",
+            "freshness": freshness,
             "update_frequency": "hourly",
             "quota_policy": {
                 "credits_used_estimate": 0,
@@ -145,12 +165,15 @@ class MacroDataProvider:
             "dxy_direct_trend": dxy_direct_trend,
             "fx_observations": yf_data.get("fx_observations", {}),
             "yfinance_observations": yf_data,
+            "freshness_detail": staleness,
+            "stale_symbols": list(stale_symbols.keys()),
             "errors": yf_errors[:8],
             "data_quality": {
                 "source": "yfinance",
-                "freshness": "OK" if yf_data else "UNKNOWN",
+                "freshness": freshness,
+                "stale_symbols": len(stale_symbols),
                 "fx_symbols": len(yf_data.get("fx_observations", {})),
-                "macro_symbols": len([k for k in yf_data if k not in {"fx_observations", "_errors"}]),
+                "macro_symbols": len([k for k in yf_data if k not in {"fx_observations", "_errors", "_staleness"}]),
                 "missing_fields": missing,
             },
         }
@@ -161,12 +184,16 @@ class MacroDataProvider:
     def _fetch_yfinance_data(self) -> Dict[str, Any]:
         """Fetch all macro data from Yahoo Finance (completely free, no API key).
 
+        Uses 1h interval first. If last candle is >48h old (market closed /
+        holiday), retries with 1d interval for that symbol.
+
         Returns dict with:
           - fx_observations: {symbol: {trend_pct, usd_score, usd_read, ...}}
           - us10y_trend, real_yields_trend, oil_trend: trend labels
           - dxy_direct_trend, dxy_direct_value: DXY direct index
           - vix_level: current VIX value
           - yield_curve_spread: 10Y - 13-week spread
+          - _staleness: {symbol: {age_hours, stale, last_candle_time}}
         """
         if not _YF_AVAILABLE:
             return {"_errors": ["yfinance not installed"]}
@@ -174,16 +201,25 @@ class MacroDataProvider:
         result: Dict[str, Any] = {}
         errors: List[str] = []
         fx_observations: Dict[str, Dict[str, Any]] = {}
+        staleness: Dict[str, Dict[str, Any]] = {}
 
         for symbol, meta in self.YFINANCE_SYMBOLS.items():
             try:
-                ticker = _yf.Ticker(symbol)
-                hist = ticker.history(period="5d", interval="1h")
-                if hist.empty:
+                hist, age_hours, last_time = self._fetch_with_freshness(symbol)
+                if hist is None:
                     continue
+
                 closes = hist["Close"].dropna()
                 if len(closes) < 2:
                     continue
+
+                # Track staleness
+                staleness[symbol] = {
+                    "age_hours": round(age_hours, 1),
+                    "stale": age_hours > _STALE_THRESHOLD_HOURS,
+                    "last_candle_time": last_time.isoformat() if last_time else None,
+                }
+
                 first = float(closes.iloc[0])
                 last = float(closes.iloc[-1])
                 trend_pct = ((last - first) / first * 100.0) if first else 0.0
@@ -206,6 +242,7 @@ class MacroDataProvider:
                         "trend_pct": round(trend_pct, 4),
                         "usd_score": round(usd_score, 4) if component == "usd" else None,
                         "usd_read": self._trend_label(usd_score, up="stronger", down="weaker") if component == "usd" else None,
+                        "data_age_hours": round(age_hours, 1),
                     }
                     fx_observations[symbol] = obs
                     # Store SPY trend for risk sentiment
@@ -254,7 +291,69 @@ class MacroDataProvider:
 
         result["fx_observations"] = fx_observations
         result["_errors"] = errors
+        result["_staleness"] = staleness
         return result
+
+    def _fetch_with_freshness(self, symbol: str) -> Tuple[Optional[Any], float, Optional[datetime]]:
+        """Fetch symbol data with freshness tracking.
+
+        Primary: 5d × 1h interval. If last candle > 48h old, retry with 5d × 1d.
+
+        Returns: (DataFrame_or_None, age_hours, last_candle_time)
+        """
+        now = datetime.now(timezone.utc)
+
+        # ── Primary: 1h interval ──
+        ticker = _yf.Ticker(symbol)
+        hist = ticker.history(period="5d", interval="1h")
+
+        if hist.empty:
+            # ── Fallback: 1d interval ──
+            hist = ticker.history(period="5d", interval="1d")
+            if hist.empty:
+                return None, 999.0, None
+
+        closes = hist["Close"].dropna()
+        if len(closes) < 2:
+            return None, 999.0, None
+
+        # Calculate age of last candle
+        last_time = closes.index[-1]
+        if last_time.tzinfo is None:
+            last_time = last_time.replace(tzinfo=timezone.utc)
+        age_hours = (now - last_time.astimezone(timezone.utc)).total_seconds() / 3600.0
+
+        # If stale (>48h), retry with daily interval for better coverage
+        if age_hours > _STALE_THRESHOLD_HOURS:
+            logger.info(
+                "%s: 1h data %.0fh old — retrying with 1d interval",
+                symbol, age_hours,
+            )
+            try:
+                hist_daily = ticker.history(period="5d", interval="1d")
+                if not hist_daily.empty:
+                    closes_daily = hist_daily["Close"].dropna()
+                    if len(closes_daily) >= 2:
+                        last_time_d = closes_daily.index[-1]
+                        if last_time_d.tzinfo is None:
+                            last_time_d = last_time_d.replace(tzinfo=timezone.utc)
+                        age_daily = (now - last_time_d.astimezone(timezone.utc)).total_seconds() / 3600.0
+                        # Use daily if it's same age or fresher
+                        if age_daily <= age_hours:
+                            logger.info(
+                                "%s: using 1d data (%.0fh old, %d candles)",
+                                symbol, age_daily, len(closes_daily),
+                            )
+                            return hist_daily, age_daily, last_time_d
+            except Exception:  # noqa: BLE001
+                pass
+
+            logger.info(
+                "%s: keeping stale 1h data (%.0fh old) — likely market holiday",
+                symbol, age_hours,
+            )
+
+        return hist, age_hours, last_time
 
     # ── DXY from FX basket ────────────────────────────────────────────────
 
