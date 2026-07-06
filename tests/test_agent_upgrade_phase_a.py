@@ -61,7 +61,10 @@ def test_core_agents_emit_structured_evidence_without_breaking_schema(monkeypatc
     assert classical["direction"] in {"BUY", "SELL", "NEUTRAL"}
     assert mtf["direction"] in {"BUY", "SELL", "NEUTRAL"}
 
+    # Prevent agents from reading saved macro_context.json
+    # (which may contain real data and produce a non-neutral bias)
     monkeypatch.setattr(NewsRiskAgent, "_load_events", lambda self: [])
+    monkeypatch.setenv("MACRO_CONTEXT_JSON", "{}")
     news = NewsRiskAgent({}).check(datetime.now(timezone.utc))
     _assert_structured(news)
     assert news["event_risk"]["status"] == news["market_status"]
