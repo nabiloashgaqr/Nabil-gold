@@ -40,7 +40,7 @@ def test_macro_data_provider_builds_context_with_hourly_quota(monkeypatch):
     # 5-symbol basket: EUR/USD, GBP/USD, USD/JPY, AUD/USD (USD) + SPY (risk)
     # = 5 credits/hour = 120/day — well under 800 free limit
     assert len(session.calls) == 5
-    assert context["source"] == "twelvedata_hourly_macro_proxy"
+    assert context["source"] == "twelvedata_yfinance_macro_proxy"
     assert context["quota_policy"]["credits_used_estimate"] == 5
     assert context["quota_policy"]["daily_estimate_at_hourly"] == 120
     assert context["dxy_trend"] in {"rising", "falling", "flat", "unknown"}
