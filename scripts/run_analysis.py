@@ -861,6 +861,148 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             "macro_direction": (all_results.get("news", {}) or {}).get("macro_direction") or (all_results.get("macro_fundamental", {}) or {}).get("macro_direction", {}),
         }
         decision_type = str(decision.get("decision") or "").upper()
+
+        # ═══════════════════════════════════════════════════════════════════
+        # ── Path 2: Two-Agent Entry with External Confirmation ──
+        # ═══════════════════════════════════════════════════════════════════
+        if decision_type == "WAIT":
+            two_agent = (decision.get("classic") or {}).get("two_agent")
+            if isinstance(two_agent, dict) and two_agent:
+                side = str(two_agent.get("side", "")).upper()
+                if side in {"BUY", "SELL"}:
+                    tae_cfg = (config.get("signal_requirements") or {}).get("two_agent_entry") or {}
+                    cross_pts = int(tae_cfg.get("cross_entry_distance_points", 200) or 200)
+                    macro_confirmed = False
+                    gemini_confirmed = False
+                    confirm_source = None
+                    confirm_conf = 0.0
+
+                    # ── Step A: Try Macro Confirmation ──
+                    macro_cfg = tae_cfg.get("macro_confirmation") or {}
+                    if macro_cfg.get("enabled", True):
+                        macro_agent = all_results.get("macro_fundamental", {}) or {}
+                        macro_dir = macro_agent.get("macro_direction", {}) or {}
+                        macro_bias = str(macro_dir.get("bias", "")).upper()
+                        macro_conf_val = float(macro_dir.get("confidence", 0) or 0)
+                        macro_min = float(macro_cfg.get("min_confidence", 55) or 55)
+                        expected_bias = "BULLISH_GOLD" if side == "BUY" else "BEARISH_GOLD"
+                        if macro_bias == expected_bias and macro_conf_val >= macro_min:
+                            macro_confirmed = True
+                            confirm_source = "macro"
+                            confirm_conf = macro_conf_val
+                            logger.info(
+                                "✅ Path 2: Macro confirms %s (bias=%s, conf=%.0f%% ≥ %.0f%%)",
+                                side, macro_bias, macro_conf_val, macro_min
+                            )
+                        else:
+                            logger.info(
+                                "Path 2: Macro does NOT confirm %s (bias=%s, need=%s, conf=%.0f%% < %.0f%% or mismatch)",
+                                side, macro_bias, expected_bias, macro_conf_val, macro_min
+                            )
+
+                    # ── Step B: Fallback to Gemini Confirmation ──
+                    gemini_cfg = tae_cfg.get("gemini_confirmation") or {}
+                    if not macro_confirmed and gemini_cfg.get("enabled", True):
+                        try:
+                            gemini_svc = get_gemini_review_service(config)
+                            if gemini_svc.enabled:
+                                gemini_review = gemini_svc.review_signal({
+                                    "symbol": symbol,
+                                    "decision": decision,
+                                    "all_results": all_results
+                                })
+                                g_verdict = str(gemini_review.get("verdict", "")).upper()
+                                g_conf_val = float(gemini_review.get("confidence", 0) or 0)
+                                g_min = float(gemini_cfg.get("min_confidence", 70) or 70)
+                                if g_verdict == side and g_conf_val >= g_min:
+                                    gemini_confirmed = True
+                                    confirm_source = "gemini"
+                                    confirm_conf = g_conf_val
+                                    logger.info(
+                                        "✅ Path 2: Gemini confirms %s (verdict=%s, conf=%.0f%% ≥ %.0f%%)",
+                                        side, g_verdict, g_conf_val, g_min
+                                    )
+                                    decision["gemini_review"] = gemini_review
+                                else:
+                                    logger.info(
+                                        "❌ Path 2: Gemini does NOT confirm (verdict=%s vs %s, conf=%.0f%% < %.0f%%)",
+                                        g_verdict, side, g_conf_val, g_min
+                                    )
+                            else:
+                                logger.info("Path 2: Gemini skipped — API key not configured")
+                        except Exception as _g_exc:
+                            logger.warning("Path 2: Gemini confirmation failed: %s", _g_exc)
+
+                    # ── If confirmed → rebuild signal payload and finalize entry ──
+                    if macro_confirmed or gemini_confirmed:
+                        risk = all_results.get("risk", {}) or {}
+                        current_price = all_results.get("current_price")
+                        entry_info = risk.get("entry", {}) or {}
+                        entry_zone = entry_info.get("zone", {}) or {}
+                        sl = risk.get("stop_loss", {}) or {}
+                        tp = risk.get("take_profit", {}) or {}
+                        tp1 = tp.get("tp1", {}) or {}
+                        tp2 = tp.get("tp2", {}) or {}
+                        entry_price = entry_info.get("price") or current_price
+                        order_type = entry_info.get("order_type") or f"{side}_MARKET"
+                        entry_kind = entry_info.get("kind") or "MARKET"
+
+                        # Rebuild signal payload
+                        decision["decision"] = side
+                        decision["confidence"] = float(two_agent.get("confidence", 0))
+                        decision["signal"] = {
+                            "type": side,
+                            "entry": {
+                                "price": entry_price,
+                                "low": entry_zone.get("low", entry_price),
+                                "high": entry_zone.get("high", entry_price),
+                                "kind": entry_kind,
+                                "order_type": order_type,
+                                "basis": entry_info.get("basis", ""),
+                                "current_price": entry_info.get("current_price", current_price),
+                                "distance_points": entry_info.get("distance_points", 0.0),
+                            },
+                            "stop_loss": sl.get("price", 0),
+                            "tp1": tp1.get("price", 0),
+                            "tp2": tp2.get("price", 0),
+                            "tp1_rr": tp1.get("rr_ratio", 0),
+                            "tp2_rr": tp2.get("rr_ratio", 0),
+                            "rr_ratio": tp2.get("rr_ratio", tp1.get("rr_ratio", 0)),
+                            "order_type": order_type,
+                            "entry_kind": entry_kind,
+                            "position_size": risk.get("position_size", {}),
+                            "risk_summary": risk.get("summary", ""),
+                        }
+                        decision["entry_mode"] = f"two_agent_{confirm_source}"
+                        decision["entry_path"] = 2
+                        decision["confirm_source"] = confirm_source
+                        decision["confirm_confidence"] = confirm_conf
+                        existing_reasons = list(decision.get("reasons", []))
+                        existing_reasons.append(
+                            f"Two-agent entry: {side} confirmed by {confirm_source} ({confirm_conf:.0f}%)"
+                        )
+                        decision["reasons"] = existing_reasons
+
+                        # Check cross-path distance BEFORE proceeding
+                        cross_reason = _cross_path_distance_check(
+                            decision, database, config, cross_distance_points=cross_pts
+                        )
+                        if cross_reason:
+                            logger.info("❌ Path 2 blocked by cross-path distance: %s", cross_reason)
+                            decision["decision"] = "WAIT"
+                            decision["signal"] = {}
+                            decision["entry_mode"] = "wait"
+                            decision["entry_path"] = 0
+                            decision_type = "WAIT"
+                        else:
+                            decision_type = side  # Set for downstream flow
+                            logger.info(
+                                "✅ Path 2 entry confirmed: %s via %s (2-agent conf=%.0f%%, %s conf=%.0f%%)",
+                                side, confirm_source,
+                                float(two_agent.get("confidence", 0)),
+                                confirm_source, confirm_conf
+                            )
+
         send_hourly_now = should_send_hourly_status(config)
         if (decision_type in {"BUY", "SELL"}) or (decision_type == "WAIT" and send_hourly_now):
             try:
@@ -901,6 +1043,13 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         elif decision_type == "WAIT":
             logger.info("🧠 Gemini skipped: normal WAIT without hourly status")
         if decision_type in {"BUY", "SELL"}:
+            # Cross-path distance check (applies to BOTH Path 1 and Path 2)
+            _tae_cfg_cross = (config.get("signal_requirements") or {}).get("two_agent_entry") or {}
+            _cross_pts = int(_tae_cfg_cross.get("cross_entry_distance_points", 200) or 200)
+            _cross_block = _cross_path_distance_check(decision, database, config, cross_distance_points=_cross_pts)
+            if _cross_block:
+                logger.info("Cross-path distance blocked: %s", _cross_block)
+                return
             if duplicate_signal_reason(decision, database, config): return
             trade_id = database.new_trade_id()
             decision["trade_id"] = trade_id
@@ -944,6 +1093,72 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 telegram.send_message(_build_market_status_message(decision, all_results, database, config))
     except Exception as exc:
         telegram.send_error_alert(str(exc))
+
+def _cross_path_distance_check(
+    decision: Dict[str, Any],
+    database: DatabaseService,
+    config: Dict[str, Any],
+    cross_distance_points: int = 200
+) -> str | None:
+    """Block new entry if too close to existing open trade in same direction.
+    
+    BUY: new entry must be LOWER than existing BUY (buy the dip).
+    SELL: new entry must be HIGHER than existing SELL (sell the rally).
+    Minimum gap: cross_distance_points (default 200 pts for gold).
+    """
+    direction = str(decision.get('decision', '')).upper()
+    if direction not in {'BUY', 'SELL'}:
+        return None
+
+    signal = decision.get('signal', {}) or {}
+    entry_info = signal.get('entry', {}) or {}
+    try:
+        entry_price = float(entry_info.get('price') or decision.get('current_price') or 0)
+    except (TypeError, ValueError):
+        return None
+    if entry_price <= 0:
+        return None
+
+    symbol = str(decision.get("symbol") or config.get("symbol", "XAU/USD"))
+    norm_sym = normalize_symbol(symbol)
+
+    for trade in database.get_open_trades():
+        trade_dir = str(trade.get('type') or trade.get('side') or '').upper()
+        if trade_dir != direction:
+            continue
+        trade_sym = normalize_symbol(str(trade.get('symbol') or ''))
+        if trade_sym != norm_sym:
+            continue
+
+        try:
+            prev_entry = float(trade.get('entry_price') or 0)
+        except (TypeError, ValueError):
+            continue
+        if prev_entry <= 0:
+            continue
+
+        pts = abs(price_to_points(entry_price - prev_entry, symbol=symbol))
+
+        if pts < cross_distance_points:
+            return (
+                f"{direction} blocked: only {pts:.0f} pts from existing {direction} "
+                f"@ {prev_entry:.2f} in {direction} (need ≥{cross_distance_points} pts)"
+            )
+
+        # Directional rule: BUY lower, SELL higher
+        if direction == 'BUY' and entry_price >= prev_entry:
+            return (
+                f"BUY blocked: new entry {entry_price:.2f} is not lower than "
+                f"existing BUY @ {prev_entry:.2f} (buy the dip rule — must be below)"
+            )
+        if direction == 'SELL' and entry_price <= prev_entry:
+            return (
+                f"SELL blocked: new entry {entry_price:.2f} is not higher than "
+                f"existing SELL @ {prev_entry:.2f} (sell the rally rule — must be above)"
+            )
+
+    return None
+
 
 def _latest_candle_extremes(data: Dict[str, Any]) -> tuple[float, float]:
     current = float(data.get("current_price") or 0.0)
