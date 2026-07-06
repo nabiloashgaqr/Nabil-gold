@@ -1,7 +1,7 @@
 """Update hourly macro context for quality scoring and learning.
 
-This job is intentionally separate from the 5-minute analysis loop to protect
-Twelve Data Basic quota.  The latest context is saved to Supabase when available
+This job fetches all macro data from Yahoo Finance (yfinance) — completely free,
+no API key, no quota limits. The latest context is saved to Supabase when available
 and to storage/macro_context.json for local/manual runs.
 """
 
