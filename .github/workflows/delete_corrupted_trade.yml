@@ -1,0 +1,30 @@
+name: 🗑 Delete Corrupted Trade
+
+on:
+  workflow_dispatch:
+    inputs:
+      trade_id:
+        description: "Trade ID to delete"
+        required: true
+        type: string
+        default: "TRADE_20260706_173158_076329_7ca4f66c"
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 📦 Install Dependencies
+        run: pip install -r requirements.txt
+      - name: 🗑 Delete trade
+        run: python scripts/delete_corrupted_trade.py
+        env:
+          TRADE_ID: ${{ github.event.inputs.trade_id }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
