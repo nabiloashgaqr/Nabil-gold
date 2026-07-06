@@ -26,13 +26,15 @@ class MacroDataProvider:
     TWELVEDATA_URL = "https://api.twelvedata.com/time_series"
 
     DEFAULT_SYMBOLS = {
-        # USD strength basket — 4 majors only, 100% TwelveData Basic Free
-        # Total: 4 credits/hour = 96/day — well under 800/day free limit
+        # USD strength basket — 4 majors + 1 risk proxy
+        # Total: 5 credits/hour = 120/day — well under 800/day free limit
         # DXY weight coverage: EUR ~57.6%, JPY ~13.6%, GBP ~11.9%, AUD ~proxy
+        # SPY: risk-on/risk-off sentiment proxy (SPY up = risk-on → bearish gold)
         "EUR/USD": {"component": "usd", "inverse_usd": True},
         "GBP/USD": {"component": "usd", "inverse_usd": True},
         "USD/JPY": {"component": "usd", "inverse_usd": False},
         "AUD/USD": {"component": "usd", "inverse_usd": True},
+        "SPY":     {"component": "risk", "inverse_usd": False},
     }
 
     def __init__(self, config: Dict[str, Any] | None = None, session: requests.Session | None = None) -> None:
@@ -69,10 +71,20 @@ class MacroDataProvider:
         usd_items = [v for v in observations.values() if v.get("component") == "usd" and v.get("usable")]
         risk_items = [v for v in observations.values() if v.get("component") == "risk" and v.get("usable")]
         usd_score = sum(float(x.get("usd_score", 0) or 0) for x in usd_items) / len(usd_items) if usd_items else 0.0
+        # Use the strongest pair's absolute score for a more responsive DXY read,
+        # since averaging 4 pairs often cancels out individual moves.
+        max_usd_abs = max((abs(float(x.get("usd_score", 0) or 0)) for x in usd_items), default=0.0)
+        # DXY trend uses strongest pair direction when avg is flat but a pair moved
+        if abs(usd_score) < 0.15 and max_usd_abs >= 0.15:
+            # Average cancelled out — use sign of the strongest pair
+            for x in usd_items:
+                if abs(float(x.get("usd_score", 0) or 0)) == max_usd_abs:
+                    usd_score = float(x.get("usd_score", 0) or 0)
+                    break
         risk_score = sum(float(x.get("trend_pct", 0) or 0) for x in risk_items) / len(risk_items) if risk_items else 0.0
 
         dxy_trend = self._trend_label(usd_score, up="rising", down="falling") if usd_items else "unknown"
-        risk_sentiment = "risk_on" if risk_score >= 0.25 else "risk_off" if risk_score <= -0.25 else "neutral"
+        risk_sentiment = "risk_on" if risk_score >= 0.15 else "risk_off" if risk_score <= -0.15 else "neutral"
         context = {
             "source": "twelvedata_hourly_macro_proxy",
             "provider": "twelvedata",
@@ -167,9 +179,11 @@ class MacroDataProvider:
 
     @staticmethod
     def _trend_label(value: float, up: str, down: str) -> str:
-        if value >= 0.25:
+        # Lowered from 0.25 to 0.15: averaged FX pairs often cancel out individual
+        # moves, so 0.25 was too high and produced "flat" most of the time.
+        if value >= 0.15:
             return up
-        if value <= -0.25:
+        if value <= -0.15:
             return down
         return "flat"
 

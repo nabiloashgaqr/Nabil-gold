@@ -175,7 +175,13 @@ class TelegramService:
             if isinstance(full_candidate, dict) and full_candidate.get("macro_direction"):
                 macro_full = full_candidate
                 break
-        if not macro or (str(macro.get("bias", "NEUTRAL")).upper() == "NEUTRAL" and not macro.get("confidence")):
+        if not macro or (str(macro.get("bias", "NEUTRAL")).upper() == "NEUTRAL" and not macro.get("confidence") and not macro.get("drivers")):
+            # Check if data was collected but just flat/neutral
+            data_quality = macro.get("data_quality", {}) if isinstance(macro, dict) else {}
+            if data_quality.get("inputs", 0) > 0 or (isinstance(macro, dict) and macro.get("drivers")):
+                drivers = macro.get("drivers", [])
+                driver_text = "; ".join(drivers[:2]) if drivers else "all indicators flat"
+                return [f"• Macro: Neutral — {html.escape(driver_text)}"]
             return ["• Macro: Collecting hourly data"]
         bias = str(macro.get("bias") or "NEUTRAL").replace("_", " ").title()
         conf = macro.get("confidence")
