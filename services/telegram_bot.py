@@ -875,14 +875,45 @@ def _post_news_tracker_save(data: dict) -> None:
     except Exception:
         pass
 
-def post_news_alert_sent(event_key: str) -> bool:
-    """Check if a post-news alert was already sent for this event."""
+def post_news_alert_sent(event_key: str, database: Any = None) -> bool:
+    """Check if a post-news alert was already sent for this event.
+
+    Checks Supabase (primary) then local file (fallback).
+    """
+    if database is not None:
+        try:
+            if database.use_supabase and database.client:
+                response = (
+                    database.client.table("post_news_tracker")
+                    .select("event_key")
+                    .eq("event_key", event_key)
+                    .limit(1)
+                    .execute()
+                )
+                if list(response.data or []):
+                    return True
+        except Exception:
+            pass
     tracker = _post_news_tracker_load()
     return event_key in tracker
 
-def post_news_alert_record(event_key: str) -> None:
-    """Record that a post-news alert was sent for this event."""
+def post_news_alert_record(event_key: str, database: Any = None) -> None:
+    """Record that a post-news alert was sent for this event.
+
+    Saves to Supabase (primary) and local file (backup).
+    """
     from datetime import datetime, timezone
+    # Save to Supabase
+    if database is not None:
+        try:
+            if database.use_supabase and database.client:
+                database.client.table("post_news_tracker").upsert({
+                    "event_key": event_key,
+                    "sent_at": datetime.now(timezone.utc).isoformat(),
+                }).execute()
+        except Exception:
+            pass
+    # Always save to local file as backup
     tracker = _post_news_tracker_load()
     tracker[event_key] = datetime.now(timezone.utc).isoformat()
     _post_news_tracker_save(tracker)
