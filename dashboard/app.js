@@ -481,8 +481,12 @@ function updateEdgeSnapshot(trades) {
     const actualR = [], planned = [];
     trades.forEach(t => {
         const risk = plannedRiskOf(t);
-        if (risk > 0) {
-            actualR.push(pnlOf(t) / risk);
+        const pnl = pnlOf(t);
+        // RR Capture measures how much of the planned reward was actually
+        // captured on WINNING trades only.  Losses and BE are about the
+        // stop/trailing doing their job, not about capturing reward.
+        if (risk > 0 && pnl > 0) {
+            actualR.push(pnl / risk);
             const rr = plannedRrOf(t);
             if (rr > 0) planned.push(rr);
         }
@@ -492,7 +496,7 @@ function updateEdgeSnapshot(trades) {
         const avgPlanned = planned.length ? planned.reduce((a,b)=>a+b,0) / planned.length : 0;
         const capture = avgPlanned ? (avgActual / avgPlanned) * 100 : 0;
         setText('rrCapture', `${capture.toFixed(1)}%`);
-        setText('rrCaptureSub', `${avgActual >= 0 ? '+' : ''}${avgActual.toFixed(2)}R / ${avgPlanned.toFixed(2)}R`);
+        setText('rrCaptureSub', `${avgActual >= 0 ? '+' : ''}${avgActual.toFixed(2)}R / ${avgPlanned.toFixed(2)}R (winners only)`);
     } else {
         setText('rrCapture', '--'); setText('rrCaptureSub', currentLang === 'ar' ? 'لا توجد بيانات' : 'No enriched data');
     }
