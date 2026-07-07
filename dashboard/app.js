@@ -438,13 +438,15 @@ function setChartEmpty(id, isEmpty) {
 function safeDestroyChart(name) {
     if (charts[name]) { charts[name].destroy(); charts[name] = null; }
 }
-function updateStats(trades, live, summaryWinRate) {
+function updateStats(trades, live) {
     const total = trades.length;
     const wins = trades.filter(t => pnlOf(t) > 0 || ['TP2_HIT'].includes(t.status));
     const losses = trades.filter(t => pnlOf(t) < 0);
     const netPnl = trades.reduce((sum, t) => sum + pnlOf(t), 0);
-    // Use the API's pre-calculated winRate (excludes BE trades, matches daily report)
-    const winRate = summaryWinRate !== undefined ? summaryWinRate : (total ? (wins.length / total) * 100 : 0);
+    // Exclude BE trades from win-rate denominator (matches daily report)
+    const decisiveLosses = trades.filter(t => pnlOf(t) < 0);
+    const decisive = wins.length + decisiveLosses.length;
+    const winRate = decisive ? (wins.length / decisive) * 100 : 0;
     const grossProfit = trades.filter(t => pnlOf(t) > 0).reduce((sum, t) => sum + pnlOf(t), 0);
     const grossLoss = Math.abs(trades.filter(t => pnlOf(t) < 0).reduce((sum, t) => sum + pnlOf(t), 0));
     const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss).toFixed(2) : grossProfit > 0 ? '∞' : '--';
