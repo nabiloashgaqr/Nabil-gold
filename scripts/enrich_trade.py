@@ -1,7 +1,7 @@
 """One script to manage every trade — 8 actions, full price context.
 
 Usage:
-    TRADE_ID=... ACTION=be_hit CURRENT_PRICE=4132 LOW_PRICE=4117 python scripts/enrich_trade.py
+    TRADE_ID=... ACTION=trailing_sl_hit CURRENT_PRICE=4110 LOW_PRICE=4092.3 python scripts/enrich_trade.py
 
 Actions:
     reopen         → clear close fields, set OPEN
@@ -12,8 +12,6 @@ Actions:
     tp1_hit        → first target (partial close, SL→entry)
     tp2_hit        → second target (full win)
     delete         → remove trade permanently
-
-Optional env vars: CURRENT_PRICE, HIGH_PRICE, LOW_PRICE, PNL_POINTS
 """
 
 from __future__ import annotations
@@ -27,9 +25,8 @@ sys.path.insert(0, str(ROOT))
 from services.database import DatabaseService
 from utils.helpers import load_config, calculate_pips
 
-logger = logging.getLogger(__name__)
-
-_VALID = {"reopen", "update_prices", "be_hit", "sl_hit", "trailing_sl_hit", "tp1_hit", "tp2_hit", "delete"}
+_VALID = {"reopen", "update_prices", "be_hit", "sl_hit", "trailing_sl_hit",
+          "tp1_hit", "tp2_hit", "delete"}
 
 _CLEARABLE = {"TP2_HIT", "TP1_HIT", "SL_HIT", "TRAILING_SL_HIT", "BE_HIT",
               "EXPIRED", "MANUAL_CLOSE", "MOVE_SL_TO_BE", "TRAILING_SL_UPDATED",
@@ -67,36 +64,52 @@ def _now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+# Columns that definitely exist in the legacy Supabase schema
+_SAFE_COLS = {"status", "result", "close_price", "final_pnl", "final_pnl_points",
+              "closed_at", "close_time", "stop_loss", "sl_moved_to_entry",
+              "partial_close", "current_price", "current_pnl",
+              "current_pnl_points", "last_updated"}
+
+
 def _write(db: DatabaseService, tid: str, updates: dict) -> bool:
+    """Write updates to Supabase with smart column-dropping fallbacks."""
     if not db.use_supabase or not db.client:
         print("❌ Supabase not configured")
         return False
-    try:
-        db.client.table("trades").update(updates).eq("id", tid).execute()
-        return True
-    except Exception as exc:
-        legacy = {k: v for k, v in updates.items()
-                  if k in {"status", "result", "close_price", "final_pnl", "final_pnl_points",
-                           "closed_at", "close_time", "stop_loss", "sl_moved_to_entry",
-                           "partial_close", "max_favorable_excursion", "max_adverse_excursion",
-                           "current_price", "current_pnl", "current_pnl_points", "last_updated"}}
+
+    # Build payloads in order: full → without MFE/MAE → legacy
+    full = dict(updates)
+    no_mfe_mae = {k: v for k, v in updates.items()
+                  if k not in ("max_favorable_excursion", "max_adverse_excursion")}
+    legacy = {k: v for k, v in updates.items() if k in _SAFE_COLS}
+
+    for label, payload in [("full", full), ("no-mfe-mae", no_mfe_mae), ("legacy", legacy)]:
+        if label == "full" and payload == no_mfe_mae:
+            continue  # identical, skip
         try:
-            db.client.table("trades").update(legacy).eq("id", tid).execute()
+            db.client.table("trades").update(payload).eq("id", tid).execute()
+            if label != "full":
+                print(f"   ⚠️  Used {label} fallback — some columns missing in Supabase")
             return True
-        except Exception as exc2:
-            print(f"❌ Supabase update failed: {exc2}")
-            return False
+        except Exception as exc:
+            err = str(exc)[:120]
+            if label == "legacy":
+                print(f"❌ Supabase update failed even with legacy payload: {err}")
+                return False
+            print(f"   ⚠️  {label} payload failed ({err}) — trying next fallback...")
+    return False
 
 
 # ── PnL / MFE / MAE helpers ────────────────────────────────────────
+
 def _pnl(entry: float, price: float, side: str, symbol: str) -> float:
-    """PnL in points from entry to price."""
-    if entry <= 0: return 0
+    if entry <= 0 or price <= 0: return 0
     return round(calculate_pips(entry, price, side, symbol), 1)
 
 
-def _mfe(entry: float, high: float | None, low: float | None, side: str, symbol: str) -> float | None:
-    """Best-case excursion in points from current/high/low."""
+def _mfe(entry: float, high: float | None, low: float | None,
+         side: str, symbol: str) -> float | None:
+    """Best-case excursion — the most favorable price seen."""
     best = None
     for p in (high, low):
         if p is not None and p > 0:
@@ -106,18 +119,20 @@ def _mfe(entry: float, high: float | None, low: float | None, side: str, symbol:
     return best
 
 
-def _mae(entry: float, high: float | None, low: float | None, side: str, symbol: str) -> float | None:
-    """Worst-case excursion in points from current/high/low."""
+def _mae(entry: float, high: float | None, low: float | None,
+         side: str, symbol: str) -> float | None:
+    """Worst-case adverse excursion — only return if negative (drawdown)."""
     worst = None
     for p in (high, low):
         if p is not None and p > 0:
             exc = _pnl(entry, p, side, symbol)
             if worst is None or exc < worst:
                 worst = exc
-    return worst
+    return worst if (worst is not None and worst < 0) else None
 
 
 # ── Main ────────────────────────────────────────────────────────────
+
 def main() -> int:
     cfg = load_config()
     db = DatabaseService(cfg)
@@ -144,7 +159,7 @@ def main() -> int:
     old_mfe = float(trade.get("max_favorable_excursion", 0) or 0) if trade else 0
     old_mae = float(trade.get("max_adverse_excursion", 0) or 0) if trade else 0
 
-    # Print summary
+    # Pre-compute excursions
     mfe_val = _mfe(entry, hi, lo, side, symbol)
     mae_val = _mae(entry, hi, lo, side, symbol)
     cur_pnl = _pnl(entry, cur, side, symbol) if cur else None
@@ -170,24 +185,23 @@ def main() -> int:
     updates: dict = {"last_updated": _now()}
     now = _now()
 
-    # ── update_prices (no close, just tracking data) ──
+    # Helper: merge MFE/MAE
+    def _merge_mfe_mae(u: dict) -> None:
+        fm = old_mfe
+        if mfe_val is not None: fm = max(old_mfe, mfe_val)
+        u["max_favorable_excursion"] = round(fm, 1)
+        if mae_val is not None:
+            u["max_adverse_excursion"] = round(mae_val, 1)
+
+    # ── update_prices ──
     if action == "update_prices":
         if cur is not None:
             updates["current_price"] = round(cur, 2)
             updates["current_pnl"] = cur_pnl
             updates["current_pnl_points"] = cur_pnl
-        # MFE: take the best of old + newly calculated
-        final_mfe = old_mfe
-        if mfe_val is not None:
-            final_mfe = max(old_mfe, mfe_val)
-        final_mae = old_mae
-        if mae_val is not None:
-            final_mae = min(old_mae, mae_val, 0) if old_mae < 0 else min(mae_val, 0)
-        updates["max_favorable_excursion"] = round(final_mfe, 1)
-        updates["max_adverse_excursion"] = round(final_mae, 1)
+        _merge_mfe_mae(updates)
         ok = _write(db, tid, updates)
-        if ok:
-            print(f"✅ {tid} prices updated  |  MFE: {final_mfe:+.1f}  |  MAE: {final_mae:+.1f}")
+        if ok: print(f"✅ {tid} prices updated  |  MFE: {updates.get('max_favorable_excursion', '?')}")
         return 0 if ok else 1
 
     # ── reopen ──
@@ -195,15 +209,11 @@ def main() -> int:
         updates.update(status="OPEN", result=None, closed_at=None, close_time=None,
                        close_price=None, final_pnl=None, final_pnl_points=None)
         updates["updates_sent"] = _clean_us(trade)
-        # Update price tracking
         if cur is not None:
             updates["current_price"] = round(cur, 2)
             updates["current_pnl"] = cur_pnl
             updates["current_pnl_points"] = cur_pnl
-        final_mfe = max(old_mfe, mfe_val) if mfe_val is not None else old_mfe
-        final_mae = min(old_mae, mae_val) if mae_val is not None else old_mae
-        updates["max_favorable_excursion"] = round(final_mfe, 1)
-        updates["max_adverse_excursion"] = round(final_mae, 1)
+        _merge_mfe_mae(updates)
         ok = _write(db, tid, updates)
         if ok: print(f"✅ {tid} → OPEN")
         return 0 if ok else 1
@@ -214,8 +224,8 @@ def main() -> int:
         updates.update(status="BE_HIT", result="BREAKEVEN", sl_moved_to_entry=True,
                        stop_loss=round(entry, 2), close_price=round(entry, 2),
                        final_pnl=0.0, final_pnl_points=0.0, closed_at=now, close_time=now,
-                       max_favorable_excursion=round(final_mfe, 1),
-                       max_adverse_excursion=round(mae_val, 1) if mae_val is not None else old_mae)
+                       max_favorable_excursion=round(final_mfe, 1))
+        if mae_val is not None: updates["max_adverse_excursion"] = round(mae_val, 1)
         updates["updates_sent"] = [e for e in _clean_us(trade) if e != "BE_HIT"] + ["MOVE_SL_TO_BE", "BE_HIT"]
 
     # ── sl_hit ──
@@ -239,7 +249,9 @@ def main() -> int:
                        close_price=round(cp, 2), final_pnl=round(pnl, 1),
                        final_pnl_points=round(pnl, 1), closed_at=now, close_time=now,
                        max_favorable_excursion=round(final_mfe, 1))
-        updates["updates_sent"] = [e for e in _clean_us(trade) if e not in {"TRAILING_SL_HIT", "SL_HIT"}] + ["TRAILING_SL_HIT"]
+        if mae_val is not None: updates["max_adverse_excursion"] = round(mae_val, 1)
+        updates["updates_sent"] = [e for e in _clean_us(trade)
+                                   if e not in {"TRAILING_SL_HIT", "SL_HIT"}] + ["TRAILING_SL_HIT"]
 
     # ── tp1_hit ──
     elif action == "tp1_hit":
@@ -251,7 +263,8 @@ def main() -> int:
                        close_price=round(cp, 2), final_pnl=round(pnl, 1),
                        final_pnl_points=round(pnl, 1),
                        max_favorable_excursion=round(final_mfe, 1))
-        updates["updates_sent"] = [e for e in _clean_us(trade) if e not in {"TP1_HIT", "MOVE_SL_TO_BE"}] + ["TP1_HIT", "MOVE_SL_TO_BE"]
+        updates["updates_sent"] = [e for e in _clean_us(trade)
+                                   if e not in {"TP1_HIT", "MOVE_SL_TO_BE"}] + ["TP1_HIT", "MOVE_SL_TO_BE"]
 
     # ── tp2_hit ──
     elif action == "tp2_hit":
@@ -266,7 +279,7 @@ def main() -> int:
 
     ok = _write(db, tid, updates)
     if ok:
-        print(f"✅ {tid} → {updates.get('status')}  |  PnL: {updates.get('final_pnl', '?')}  |  MFE: {updates.get('max_favorable_excursion', '?')}")
+        print(f"✅ {tid} → {updates.get('status')}  |  PnL: {updates.get('final_pnl', '?')}")
     return 0 if ok else 1
 
 
