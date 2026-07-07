@@ -6,7 +6,7 @@ const OUTCOME_STATUSES = new Set(['TP2_HIT', 'SL_HIT', 'BE_HIT', 'EXPIRED', 'MAN
 const LIVE_STATUSES = new Set(['OPEN', 'TP1_HIT', 'PARTIAL', 'PENDING']);
 const CLOSED_TRADES_TABLE_LIMIT = 50;
 
-let currentLang = 'ar';
+let currentLang = 'en';
 let closedTrades = [];
 let liveTrades = [];
 let filteredTrades = [];
@@ -969,7 +969,7 @@ function refreshData() {
 window.addEventListener('click', (event) => { if (event.target === $('tradeModal')) closeModal(); });
 
 document.addEventListener('DOMContentLoaded', () => {
-    const savedLang = localStorage.getItem('lang') || 'ar';
+    const savedLang = localStorage.getItem('lang') || 'en';
     setLang(savedLang);
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme === 'dark') { document.body.classList.add('dark'); setText('themeBtn', '☀️'); }

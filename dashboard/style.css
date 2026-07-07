@@ -1,223 +1,531 @@
+/* ==========================================================================
+   SmartSignal – Nabil Gold
+   Unified Dashboard Stylesheet v1.0
+   2026-07-07
+   --------------------------------------------------------------------------
+   - Unifies Dashboard / Reports / Agents / Pricing / Subscribe
+   - Keeps ALL existing HTML class names as compatibility aliases
+   - app.js works with zero changes (all IDs preserved)
+   - RTL-first, Dark mode, Responsive
+   ========================================================================== */
+
+/* ========== 1. Design Tokens ========== */
 :root{
-  --bg:#f4f7fb;--bg2:#eef3f9;--panel:#ffffff;--panel2:#f8fafc;--text:#111827;--muted:#64748b;--border:#e2e8f0;
-  --blue:#2563eb;--blue2:#dbeafe;--green:#16a34a;--green2:#dcfce7;--red:#dc2626;--red2:#fee2e2;--gold:#d97706;--gold2:#fef3c7;--purple:#7c3aed;--purple2:#ede9fe;
-  --shadow:0 12px 35px rgba(15,23,42,.08);--shadow2:0 2px 12px rgba(15,23,42,.06);--radius:20px;--radius2:14px;
+  --ss-bg:#f5f7fb;
+  --ss-bg2:#eef1f8;
+  --ss-panel:#ffffff;
+  --ss-panel2:#f8fafc;
+  --ss-text:#0f172a;
+  --ss-muted:#64748b;
+  --ss-border:#e2e8f0;
+
+  --ss-blue:#2563eb;
+  --ss-blue-bg:rgba(37,99,235,.09);
+  --ss-green:#16a34a;
+  --ss-green-bg:rgba(22,163,74,.09);
+  --ss-gold:#d97706;
+  --ss-gold-bg:rgba(217,119,6,.10);
+  --ss-red:#dc2626;
+  --ss-red-bg:rgba(220,38,38,.09);
+  --ss-purple:#7c3aed;
+  --ss-purple-bg:rgba(124,58,237,.10);
+
+  --ss-r:18px;
+  --ss-r-sm:13px;
+  --ss-pad:20px;
+  --ss-gap:16px;
+  --ss-shadow:0 12px 32px rgba(15,23,42,.07);
+  --ss-shadow-sm:0 4px 14px rgba(15,23,42,.06);
+
+  --ss-font:"Tajawal","Cairo",Inter,"Segoe UI",Tahoma,Arial,sans-serif;
+  --ss-font-ltr: Inter,"Segoe UI",system-ui,Arial,sans-serif;
 }
-body.dark{--bg:#08111f;--bg2:#0f172a;--panel:#111827;--panel2:#0b1220;--text:#f8fafc;--muted:#94a3b8;--border:#1f2937;--shadow:0 16px 45px rgba(0,0,0,.35);--shadow2:0 2px 14px rgba(0,0,0,.28);--blue2:rgba(37,99,235,.15);--green2:rgba(22,163,74,.15);--red2:rgba(220,38,38,.15);--gold2:rgba(217,119,6,.16);--purple2:rgba(124,58,237,.17)}
-*{box-sizing:border-box}body{margin:0;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Tahoma,Arial,sans-serif;background:radial-gradient(circle at top left,rgba(37,99,235,.09),transparent 28%),linear-gradient(135deg,var(--bg),var(--bg2));color:var(--text);min-height:100vh;line-height:1.5}button,input,select{font:inherit}[dir=rtl]{font-family:Tajawal,Cairo,Inter,'Segoe UI',Tahoma,Arial,sans-serif}.app-shell{max-width:1540px;margin:0 auto;padding:18px}.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;background:rgba(255,255,255,.82);backdrop-filter:blur(18px);border:1px solid var(--border);border-radius:24px;padding:14px 16px;box-shadow:var(--shadow);position:relative;top:auto;z-index:100}body.dark .topbar{background:rgba(17,24,39,.78)}.brand-block{display:flex;align-items:center;gap:12px;min-width:max-content}.brand-mark{width:44px;height:44px;border-radius:14px;background:linear-gradient(135deg,var(--blue),#06b6d4);color:white;display:grid;place-items:center;font-weight:900;letter-spacing:-1px}.brand-name{font-weight:900;font-size:21px}.brand-subtitle{color:var(--muted);font-size:12px;margin-top:-2px}.status-pill{display:inline-flex;align-items:center;gap:7px;background:var(--green2);color:var(--green);border:1px solid rgba(22,163,74,.25);padding:5px 10px;border-radius:999px;font-size:12px;font-weight:800}.pulse{width:8px;height:8px;background:var(--green);border-radius:50%;box-shadow:0 0 0 5px rgba(22,163,74,.14)}.nav-links{display:flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--border);border-radius:16px;padding:5px;flex-wrap:wrap}.nav-link{color:var(--muted);text-decoration:none;padding:9px 13px;border-radius:12px;font-size:13px;font-weight:800;transition:.18s}.nav-link:hover{color:var(--text);background:var(--panel)}.nav-link.active{color:var(--blue);background:var(--blue2)}.top-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.btn,.icon-btn,.lang-btn{border:0;cursor:pointer;border-radius:13px;font-weight:850;transition:.18s;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}.btn{padding:10px 14px;font-size:13px}.btn-primary{background:linear-gradient(135deg,var(--blue),#06b6d4);color:#fff}.btn-contact{background:linear-gradient(135deg,var(--gold),#f59e0b);color:#fff}.btn-ghost{background:var(--panel);color:var(--text);border:1px solid var(--border)}.btn:hover,.icon-btn:hover,.lang-btn:hover{transform:translateY(-1px);filter:brightness(1.03)}.icon-btn{width:40px;height:40px;background:var(--panel);border:1px solid var(--border)}.segmented{display:flex;background:var(--panel2);border:1px solid var(--border);border-radius:13px;padding:3px}.lang-btn{padding:7px 10px;background:transparent;color:var(--muted);font-size:12px}.lang-btn.active{background:var(--blue);color:#fff}.main-content{padding:20px 2px}.section{display:none}.section.active{display:block}.hero-card{display:flex;justify-content:space-between;gap:20px;align-items:stretch;background:linear-gradient(135deg,rgba(37,99,235,.95),rgba(6,182,212,.86));border-radius:28px;padding:28px;box-shadow:var(--shadow);color:#fff;overflow:hidden;position:relative}.hero-card:after{content:"";position:absolute;inset:auto -80px -90px auto;width:260px;height:260px;background:rgba(255,255,255,.12);border-radius:50%}.eyebrow{text-transform:uppercase;letter-spacing:.14em;font-size:12px;font-weight:900;opacity:.86}.hero-card h1,.page-title h1{margin:7px 0 8px;font-size:clamp(26px,3vw,42px);line-height:1.1;letter-spacing:-.03em}.hero-text{max-width:760px;margin:0;color:rgba(255,255,255,.86)}.hero-meta{min-width:260px;display:grid;gap:10px;position:relative;z-index:1}.meta-item,.auto-refresh{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.22);border-radius:16px;padding:12px}.meta-item span{display:block;font-size:12px;opacity:.78}.meta-item strong{display:block;margin-top:3px}.auto-refresh{display:flex;align-items:center;gap:8px;font-weight:800;font-size:13px}.error-box{background:var(--red2);color:var(--red);border:1px solid rgba(220,38,38,.28);border-radius:16px;padding:14px 16px;margin:16px 0;font-weight:800}.kpi-grid{display:grid;grid-template-columns:repeat(10,1fr);gap:14px;margin:16px 0}.kpi-card{background:var(--panel);border:1px solid var(--border);box-shadow:var(--shadow2);border-radius:var(--radius);padding:17px;display:flex;align-items:center;gap:13px;min-height:94px}.kpi-card:nth-child(1),.kpi-card:nth-child(2),.kpi-card:nth-child(3),.kpi-card:nth-child(4){grid-column:span 2}.kpi-card.compact{grid-column:span 1;display:block;min-height:86px}.kpi-card p{margin:0;color:var(--muted);font-size:12px;font-weight:850}.kpi-card strong{display:block;font-size:28px;line-height:1.1;margin-top:5px;letter-spacing:-.03em}.kpi-card.compact strong{font-size:22px}.kpi-icon{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;font-weight:900;font-size:20px}.green{background:var(--green2);color:var(--green)}.blue{background:var(--blue2);color:var(--blue)}.gold{background:var(--gold2);color:var(--gold)}.purple{background:var(--purple2);color:var(--purple)}.progress-bar{height:7px;background:var(--panel2);border-radius:999px;overflow:hidden;margin-top:9px}.progress-fill{height:100%;width:0;background:linear-gradient(90deg,var(--green),#22c55e);border-radius:999px;transition:width .45s}.toolbar-card{background:var(--panel);border:1px solid var(--border);box-shadow:var(--shadow2);border-radius:var(--radius);padding:14px;display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin-bottom:16px}.filter-group{display:flex;flex-direction:column;gap:5px;min-width:135px}.filter-group label{color:var(--muted);font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.04em}.filter-group input,.filter-group select{height:42px;border:1px solid var(--border);background:var(--panel2);color:var(--text);border-radius:13px;padding:0 12px;outline:none}.filter-group input:focus,.filter-group select:focus{border-color:var(--blue);box-shadow:0 0 0 4px rgba(37,99,235,.12)}.search-group{flex:1;min-width:210px}.toolbar-actions{display:flex;gap:8px;margin-inline-start:auto}.charts-grid{display:grid;grid-template-columns:1.2fr 1fr;gap:16px;margin-bottom:16px}.chart-card{background:var(--panel);border:1px solid var(--border);box-shadow:var(--shadow2);border-radius:var(--radius);padding:16px;min-height:360px;overflow:hidden}.chart-card.primary-chart{min-height:400px}.chart-header{display:flex;align-items:start;justify-content:space-between;gap:12px;margin-bottom:10px}.chart-header h3{margin:0;font-size:16px}.chart-header span{color:var(--muted);font-size:12px;font-weight:700}.chart-header strong{font-size:20px;color:var(--blue)}.chart-area{position:relative;height:300px;width:100%;min-width:0}.primary-chart .chart-area{height:340px}.chart-area canvas{width:100%!important;height:100%!important;display:block}.chart-empty{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:var(--muted);font-weight:900;background:linear-gradient(135deg,transparent,rgba(148,163,184,.06));border-radius:14px}.table-card,.report-card,.agent-summary{background:var(--panel);border:1px solid var(--border);box-shadow:var(--shadow2);border-radius:var(--radius);overflow:hidden}.table-header{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--border)}.table-header h3{margin:0;display:inline}.table-header small,.table-header span{color:var(--muted);font-weight:800}.table-container{overflow:auto}table{width:100%;border-collapse:separate;border-spacing:0;min-width:980px}th,td{padding:13px 14px;border-bottom:1px solid var(--border);font-size:13px;text-align:start;white-space:nowrap}th{background:var(--panel2);color:var(--muted);font-weight:900;text-transform:uppercase;font-size:11px;letter-spacing:.05em}tbody tr{transition:.15s}tbody tr:hover{background:rgba(37,99,235,.045)}.loading,.empty{text-align:center;color:var(--muted);padding:28px!important;font-weight:800}.badge{display:inline-flex;align-items:center;justify-content:center;padding:5px 9px;border-radius:999px;font-size:11px;font-weight:900;text-transform:uppercase}.badge.buy,.badge.win{background:var(--green2);color:var(--green)}.badge.sell,.badge.loss{background:var(--red2);color:var(--red)}.badge.open{background:var(--blue2);color:var(--blue)}.badge.tp1{background:var(--gold2);color:var(--gold)}.badge.neutral{background:var(--panel2);color:var(--muted)}.pnl-positive{color:var(--green);font-weight:900}.pnl-negative{color:var(--red);font-weight:900}.btn-sm{padding:7px 10px;font-size:12px}.page-title{margin:4px 0 18px}.page-title p{margin:0;color:var(--muted);font-weight:700}.mini-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:16px}.mini-stat{background:var(--panel);border:1px solid var(--border);box-shadow:var(--shadow2);border-radius:var(--radius);padding:20px}.mini-stat span{color:var(--muted);font-size:12px;font-weight:900}.mini-stat strong{display:block;font-size:30px;margin-top:5px}.reports-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}.report-card{padding:18px}.report-card h3{margin:0 0 12px}.report-content{margin:0;background:var(--panel2);border:1px solid var(--border);border-radius:16px;padding:16px;color:var(--text);white-space:pre-wrap;max-height:440px;overflow:auto;font:13px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.agents-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin-bottom:16px}.agent-card{background:var(--panel);border:1px solid var(--border);box-shadow:var(--shadow2);border-radius:var(--radius);padding:18px}.agent-header{display:flex;align-items:center;gap:10px;margin-bottom:14px}.agent-icon{width:36px;height:36px;border-radius:12px;background:var(--blue2);color:var(--blue);display:grid;place-items:center}.agent-name{font-weight:900}.agent-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}.agent-metric span{display:block;color:var(--muted);font-size:11px;font-weight:900}.agent-metric strong{font-size:17px}.agent-bar{height:7px;background:var(--panel2);border-radius:999px;overflow:hidden;margin-top:12px}.agent-bar-fill{height:100%;background:linear-gradient(90deg,var(--blue),#06b6d4)}.agent-summary{padding:18px}.modal{position:fixed;inset:0;background:rgba(2,6,23,.6);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;z-index:1000}.modal-content{background:var(--panel);border:1px solid var(--border);border-radius:24px;padding:24px;max-width:720px;width:min(94vw,720px);box-shadow:var(--shadow);position:relative}.close{position:absolute;top:12px;inset-inline-end:18px;font-size:30px;color:var(--muted);cursor:pointer}.trade-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 18px}.trade-detail-grid code{direction:ltr;unicode-bidi:bidi-override;color:var(--blue)}
-@media(max-width:1180px){.topbar{align-items:flex-start;flex-direction:column}.nav-links,.top-actions{width:100%}.kpi-grid{grid-template-columns:repeat(4,1fr)}.kpi-card,.kpi-card:nth-child(1),.kpi-card:nth-child(2),.kpi-card:nth-child(3),.kpi-card:nth-child(4),.kpi-card.compact{grid-column:span 2}.charts-grid{grid-template-columns:1fr}.hero-card{flex-direction:column}.hero-meta{grid-template-columns:1fr 1fr;min-width:0}.auto-refresh{grid-column:span 2}}
-@media(max-width:680px){.app-shell{padding:10px}.topbar,.hero-card{border-radius:18px}.brand-block{width:100%}.nav-links{overflow:auto;flex-wrap:nowrap}.top-actions{display:grid;grid-template-columns:1fr 1fr}.btn-contact{grid-column:span 2}.kpi-grid{grid-template-columns:repeat(2,1fr)}.kpi-card,.kpi-card:nth-child(1),.kpi-card:nth-child(2),.kpi-card:nth-child(3),.kpi-card:nth-child(4),.kpi-card.compact{grid-column:span 1}.kpi-card{padding:14px;min-height:88px}.kpi-card strong{font-size:22px}.toolbar-actions{width:100%;margin:0}.toolbar-actions .btn{flex:1}.chart-area,.primary-chart .chart-area{height:260px}.mini-grid,.reports-grid,.hero-meta{grid-template-columns:1fr}.auto-refresh{grid-column:auto}.trade-detail-grid{grid-template-columns:1fr}}
-.brand-logo{width:48px;height:48px;border-radius:16px;object-fit:cover;border:1px solid rgba(217,119,6,.45);box-shadow:0 10px 24px rgba(217,119,6,.18)}
-.hero-logo-watermark{position:absolute;inset:auto 24px 18px auto;width:190px;height:190px;object-fit:cover;border-radius:50%;opacity:.16;filter:saturate(1.05);pointer-events:none;z-index:0}
-[dir="rtl"] .hero-logo-watermark{inset:auto auto 18px 24px}.hero-card>div,.hero-meta{position:relative;z-index:1}
-@media(max-width:680px){.hero-logo-watermark{width:120px;height:120px;opacity:.12}.brand-logo{width:44px;height:44px}}
-.agent-source{margin-top:10px;color:var(--muted);font-size:11px;font-weight:800;border-top:1px solid var(--border);padding-top:10px}
 
-/* Compact professional header replacing the large hero banner */
-.compact-title-card{background:var(--panel);border:1px solid var(--border);box-shadow:var(--shadow2);border-radius:var(--radius);padding:16px 18px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:16px}
-.title-inline{display:flex;align-items:center;gap:14px;min-width:0}.page-logo{width:58px;height:58px;border-radius:18px;object-fit:cover;border:1px solid rgba(217,119,6,.45);box-shadow:0 8px 20px rgba(217,119,6,.16)}
-.compact-title-card h1{margin:0;font-size:clamp(22px,2vw,30px);letter-spacing:-.03em}.compact-title-card p{margin:4px 0 0;color:var(--muted);font-weight:700}.compact-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}.compact-meta span,.auto-refresh.small{background:var(--panel2);border:1px solid var(--border);border-radius:13px;padding:9px 11px;color:var(--muted);font-size:12px;font-weight:800}.compact-meta strong{color:var(--text);margin-inline-start:5px}.hero-card{display:none!important}.topbar{margin-bottom:14px}.main-content{padding-top:0}
-@media(max-width:800px){.compact-title-card{flex-direction:column;align-items:stretch}.compact-meta{justify-content:flex-start}.page-logo{width:50px;height:50px}}
+body.dark, html.dark body, .dark{
+  --ss-bg:#0a1220;
+  --ss-bg2:#0e1729;
+  --ss-panel:#121d33;
+  --ss-panel2:#0f1a2e;
+  --ss-text:#e8eeff;
+  --ss-muted:#94a3b8;
+  --ss-border:#1e293b;
+  --ss-shadow:0 16px 44px rgba(0,0,0,.35);
+  --ss-shadow-sm:0 4px 16px rgba(0,0,0,.28);
+  --ss-blue-bg:rgba(37,99,235,.14);
+  --ss-green-bg:rgba(22,163,74,.13);
+  --ss-gold-bg:rgba(217,119,6,.13);
+  --ss-red-bg:rgba(220,38,38,.13);
+  --ss-purple-bg:rgba(124,58,237,.14);
+}
 
+/* ========== 2. Reset / Base ========== */
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:var(--ss-font);
+  background:linear-gradient(145deg,var(--ss-bg),var(--ss-bg2));
+  color:var(--ss-text);
+  line-height:1.7;
+  min-height:100vh;
+  -webkit-font-smoothing:antialiased;
+}
+[dir="ltr"] body{font-family:var(--ss-font-ltr)}
+button,input,select{font:inherit}
+a{color:var(--ss-blue);text-decoration:none}
+a:hover{text-decoration:underline}
 
-/* vNext: professional single-line top bar */
+/* ========== 3. Layout Shell ========== */
+.app-shell{max-width:1240px;margin:0 auto;padding:18px}
+.main-content{padding:14px 2px}
+.section{display:none}
+.section.active{display:block}
+
+/* ========== 4. Topbar – unified ========== */
 .topbar{
-  flex-direction:row!important;
-  align-items:center!important;
-  flex-wrap:nowrap!important;
-  gap:12px!important;
-  padding:10px 12px!important;
-  border-radius:18px!important;
-  min-height:66px;
+  display:grid;
+  grid-template-columns:auto 1fr auto;
+  grid-template-rows:auto auto;
+  gap:10px 14px;
+  align-items:center;
+  background:var(--ss-panel);
+  border:1px solid var(--ss-border);
+  border-radius:20px;
+  padding:12px 16px;
+  box-shadow:var(--ss-shadow);
+  position:sticky;top:12px;z-index:50;
 }
-.brand-block{flex:0 0 auto;min-width:210px}.brand-logo{width:42px!important;height:42px!important;border-radius:13px!important}.brand-name{font-size:19px!important;line-height:1}.brand-subtitle{font-size:11px!important;white-space:nowrap;color:var(--gold)!important;font-weight:800}.status-pill{padding:4px 9px!important;font-size:11px!important}.nav-links{flex:1 1 auto;justify-content:center;flex-wrap:nowrap!important;overflow-x:auto;scrollbar-width:none;min-width:0}.nav-links::-webkit-scrollbar{display:none}.nav-link{white-space:nowrap;padding:8px 11px!important;font-size:12px!important}.top-actions{flex:0 0 auto;flex-wrap:nowrap!important;display:flex!important;align-items:center!important;width:auto!important}.btn-contact{white-space:nowrap;background:linear-gradient(135deg,#f59e0b,#d97706)!important;box-shadow:0 8px 18px rgba(217,119,6,.22);font-weight:900}.btn-contact:before{content:"✦";margin-inline-end:6px}.btn-ghost{white-space:nowrap}.segmented{flex:0 0 auto}.icon-btn{flex:0 0 auto}
-@media(max-width:980px){.topbar{overflow-x:auto;scrollbar-width:none}.topbar::-webkit-scrollbar{display:none}.brand-block{min-width:185px}.nav-links{justify-content:flex-start}.top-actions{margin-inline-start:auto}.btn-contact{padding-inline:12px!important}.btn-ghost{display:none!important}}
-@media(max-width:680px){.topbar{display:flex!important;flex-direction:row!important;align-items:center!important}.brand-subtitle,.status-pill{display:none!important}.brand-block{min-width:150px;width:auto!important}.top-actions{display:flex!important;grid-template-columns:none!important}.btn-contact{grid-column:auto!important}.nav-links{max-width:44vw}.lang-btn{padding:6px 8px!important}.icon-btn{width:36px!important;height:36px!important}}
+body.dark .topbar{background:rgba(18,29,51,.88);backdrop-filter:blur(14px)}
 
-/* vNext: organized two-line top bar with visible sections */
-.topbar{
-  display:grid!important;
-  grid-template-columns:minmax(220px,1fr) auto!important;
-  grid-template-rows:auto auto!important;
-  align-items:center!important;
-  gap:10px 14px!important;
-  padding:12px 14px!important;
-  border-radius:20px!important;
-  min-height:auto!important;
-  overflow:visible!important;
+.brand-block{display:flex;align-items:center;gap:12px;grid-column:1;grid-row:1}
+.brand-logo{width:44px;height:44px;border-radius:13px;object-fit:cover;border:1px solid rgba(217,119,6,.28)}
+.brand-name{font-weight:900;font-size:18px}
+.brand-subtitle{color:var(--ss-gold);font-size:11px;font-weight:800}
+.status-pill{display:inline-flex;align-items:center;gap:6px;background:var(--ss-green-bg);color:var(--ss-green);border:1px solid rgba(22,163,74,.22);padding:4px 9px;border-radius:999px;font-size:11px;font-weight:800}
+.pulse{width:7px;height:7px;background:var(--ss-green);border-radius:50%}
+
+.topbar-meta{grid-column:2;grid-row:1;display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap}
+.top-meta-pill{background:var(--ss-panel2);border:1px solid var(--ss-border);border-radius:999px;padding:6px 10px;font-size:11px;color:var(--ss-muted);font-weight:800;white-space:nowrap}
+.top-meta-pill strong{color:var(--ss-text)}
+.top-meta-pill input{margin:0 4px}
+
+.top-actions{grid-column:3;grid-row:1;display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+
+.nav-links{
+  grid-column:1 / -1;grid-row:2;
+  display:flex;align-items:center;justify-content:center;gap:5px;flex-wrap:wrap;
+  background:var(--ss-panel2);border:1px solid var(--ss-border);
+  border-radius:14px;padding:5px;
 }
-.brand-block{grid-column:1;grid-row:1;min-width:0!important;width:auto!important}.top-actions{grid-column:2;grid-row:1;justify-self:end;display:flex!important;align-items:center!important;gap:8px!important;flex-wrap:nowrap!important;width:auto!important}.nav-links{grid-column:1 / -1;grid-row:2;width:100%!important;max-width:none!important;display:flex!important;justify-content:center!important;flex-wrap:wrap!important;overflow:visible!important;background:var(--panel2)!important;border:1px solid var(--border)!important;border-radius:15px!important;padding:5px!important}.nav-link{display:inline-flex!important;align-items:center!important;justify-content:center!important;white-space:nowrap!important;padding:9px 14px!important;font-size:13px!important;min-width:110px}.brand-logo{width:46px!important;height:46px!important}.brand-name{font-size:20px!important}.brand-subtitle{display:block!important}.status-pill{display:inline-flex!important}.btn-contact{padding:10px 14px!important}.btn-ghost{display:inline-flex!important}
-@media(max-width:860px){.topbar{grid-template-columns:1fr!important}.brand-block{grid-column:1;grid-row:1}.top-actions{grid-column:1;grid-row:2;justify-self:stretch;justify-content:space-between!important;flex-wrap:wrap!important}.nav-links{grid-column:1;grid-row:3;justify-content:flex-start!important;flex-wrap:nowrap!important;overflow-x:auto!important;scrollbar-width:none!important}.nav-links::-webkit-scrollbar{display:none}.nav-link{min-width:max-content}.btn-ghost{display:inline-flex!important}.brand-subtitle{display:block!important}.status-pill{display:inline-flex!important}}
-@media(max-width:520px){.top-actions{gap:6px!important}.btn-contact{width:100%;justify-content:center}.segmented{flex:1}.btn-ghost{flex:1}.icon-btn{width:38px!important;height:38px!important}.brand-subtitle{font-size:10px!important}.status-pill{font-size:10px!important;padding:3px 7px!important}}
+.nav-link{color:var(--ss-muted);text-decoration:none;padding:8px 13px;border-radius:10px;font-size:13px;font-weight:800;transition:.15s;white-space:nowrap}
+.nav-link:hover{color:var(--ss-text);background:var(--ss-panel)}
+.nav-link.active{color:var(--ss-blue);background:var(--ss-blue-bg)}
 
-
-/* Daily report per open date */
-.daily-breakdown{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;padding:14px}.daily-day-card{background:var(--panel2);border:1px solid var(--border);border-radius:16px;padding:14px}.daily-day-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.daily-day-head strong{font-size:16px}.daily-day-head span{display:block;color:var(--muted);font-size:12px;font-weight:800;margin-top:2px}.daily-net{font-size:18px;font-weight:950;white-space:nowrap}.daily-mini-stats{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.daily-mini-stats span{background:var(--panel);border:1px solid var(--border);border-radius:999px;padding:4px 8px;font-size:12px;font-weight:850}.daily-trades{display:grid;gap:7px}.daily-trade-row{display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:center;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:8px;font-size:12px}.daily-trade-row span:nth-child(3){color:var(--muted);font-weight:700}@media(max-width:560px){.daily-trade-row{grid-template-columns:auto 1fr}.daily-trade-row span:nth-child(3),.daily-trade-row span:nth-child(4){grid-column:auto}}
-
-/* Monthly report archive */
-.report-archive-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.reports-archive{padding:14px;display:grid;gap:12px}.report-month-folder{background:var(--panel2);border:1px solid var(--border);border-radius:16px;overflow:hidden}.folder-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:13px 14px;background:var(--panel);border-bottom:1px solid var(--border);font-size:13px}.folder-head>div{display:flex;align-items:center;gap:8px}.folder-icon{font-size:18px}.folder-head span:last-child{color:var(--muted);font-weight:800}.folder-body{display:grid;gap:8px;padding:10px}.report-file{background:var(--panel);border:1px solid var(--border);border-radius:13px;overflow:hidden}.report-file-head{width:100%;display:grid;grid-template-columns:auto minmax(110px,1fr) auto;gap:8px;align-items:center;background:transparent;border:0;color:var(--text);padding:10px 12px;cursor:pointer;text-align:start}.report-file-head:hover{background:rgba(37,99,235,.06)}.file-title{font-weight:900}.file-meta{color:var(--muted);font-size:12px;font-weight:800}.report-file-body{display:none;margin:0;background:var(--panel2);border-top:1px solid var(--border);padding:14px;white-space:pre-wrap;max-height:380px;overflow:auto;font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.report-file-body.open{display:block}@media(max-width:980px){.report-archive-grid{grid-template-columns:1fr}.report-file-head{grid-template-columns:auto 1fr}.file-meta{grid-column:2}}
-
-
-/* vNext: remove separate title card; put status/time in top bar */
-.compact-title-card{display:none!important}.topbar{grid-template-columns:minmax(190px,.8fr) minmax(240px,1.1fr) auto!important}.topbar-meta{grid-column:2;grid-row:1;display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;min-width:0}.top-meta-pill{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--border);border-radius:999px;padding:7px 10px;color:var(--muted);font-size:11px;font-weight:850;white-space:nowrap}.top-meta-pill strong{color:var(--text);font-weight:950}.top-meta-pill.auto-refresh{cursor:pointer}.top-meta-pill input{margin:0}.main-content{padding-top:0!important}
-@media(max-width:1100px){.topbar{grid-template-columns:1fr auto!important}.topbar-meta{grid-column:1 / -1;grid-row:2;justify-content:flex-start}.nav-links{grid-row:3!important}.top-actions{grid-column:2!important;grid-row:1!important}.brand-block{grid-column:1!important;grid-row:1!important}}
-@media(max-width:650px){.topbar-meta{overflow-x:auto;flex-wrap:nowrap;justify-content:flex-start;scrollbar-width:none}.topbar-meta::-webkit-scrollbar{display:none}.top-meta-pill{font-size:10px;padding:6px 8px}.topbar{grid-template-columns:1fr!important}.top-actions{grid-column:1!important;grid-row:2!important}.topbar-meta{grid-row:3!important}.nav-links{grid-row:4!important}}
-
-/* Pro pricing / conversion section */
-.pro-pricing{
-  position:relative;
-  overflow:hidden;
-  padding:0!important;
-  margin:0!important;
-  border-radius:28px!important;
-  background:
-    radial-gradient(circle at 18% 8%, rgba(245,158,11,.28), transparent 30%),
-    radial-gradient(circle at 86% 18%, rgba(37,99,235,.24), transparent 34%),
-    linear-gradient(135deg,#07111f 0%,#111827 42%,#1e293b 100%)!important;
-  color:#fff!important;
-  border:1px solid rgba(148,163,184,.18);
-  box-shadow:0 28px 80px rgba(2,6,23,.28);
+/* ========== 5. Unified Card System ==========
+   All visual cards in the app map to .ss-card
+*/
+.ss-card,
+.kpi-card,
+.chart-card,
+.table-card,
+.report-card,
+.agent-card,
+.edge-card,
+.pricing-native-card,
+.pricing-native-head,
+.native-risk,
+.day-trades-panel,
+.report-search-bar,
+.toolbar-card,
+.agent-summary,
+.payment-card,
+.wallet-box,
+.conversion-panel,
+.final-cta,
+.subscribe-summary,
+.native-plan,
+.comparison-product,
+.faq-native-grid div,
+.why-grid div,
+.phase-grid div,
+.edge-feature-grid div,
+.telegram-example-points div,
+.post-news-steps > div,
+.two-paths-grid > div,
+.native-benefits-list div
+{
+  background:var(--ss-panel);
+  border:1px solid var(--ss-border);
+  border-radius:var(--ss-r);
+  box-shadow:var(--ss-shadow-sm);
+  padding:var(--ss-pad);
 }
-.pro-pricing:before{content:"";position:absolute;inset:0;background:linear-gradient(120deg,rgba(255,255,255,.08),transparent 38%,rgba(245,158,11,.08));pointer-events:none}.pricing-hero,.value-strip,.pricing-grid,.conversion-panel,.pricing-footer-note{position:relative;z-index:1}.pricing-hero{display:grid;grid-template-columns:1.3fr .7fr;gap:24px;align-items:stretch;padding:46px 38px 22px}.pricing-kicker{display:inline-flex;align-items:center;gap:8px;background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.35);color:#fbbf24;border-radius:999px;padding:7px 13px;font-size:12px;font-weight:950;letter-spacing:.09em;text-transform:uppercase}.pricing-hero h1{font-size:clamp(34px,5vw,68px);line-height:.98;letter-spacing:-.055em;margin:18px 0 16px;max-width:820px}.pricing-hero p{font-size:clamp(16px,1.5vw,20px);line-height:1.65;color:#cbd5e1;max-width:760px;margin:0}.pricing-hero-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:26px}.hero-cta{width:auto!important;min-width:260px;padding-inline:26px!important}.pricing-telegram{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;color:#e2e8f0;border:1px solid rgba(226,232,240,.22);background:rgba(15,23,42,.55);border-radius:14px;padding:15px 18px;font-weight:900;transition:.18s}.pricing-telegram:hover{transform:translateY(-1px);border-color:rgba(245,158,11,.55);color:#fff}.pricing-snapshot{display:grid;grid-template-columns:1fr 1fr;gap:12px}.pricing-snapshot div{min-height:132px;border:1px solid rgba(148,163,184,.22);background:rgba(15,23,42,.58);border-radius:20px;padding:18px;display:flex;flex-direction:column;justify-content:space-between;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}.pricing-snapshot strong{font-size:32px;line-height:1;letter-spacing:-.04em;color:#fff}.pricing-snapshot span{color:#94a3b8;font-size:13px;font-weight:850}.value-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:0 38px 22px}.value-item{display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:start;background:rgba(255,255,255,.06);border:1px solid rgba(148,163,184,.16);border-radius:18px;padding:16px}.value-item span{grid-row:1 / span 2;width:38px;height:38px;border-radius:13px;display:grid;place-items:center;background:rgba(245,158,11,.16);font-size:18px}.value-item strong{font-size:15px}.value-item small{display:block;color:#94a3b8;font-weight:700;line-height:1.45}.pro-pricing .pricing-grid{display:grid!important;grid-template-columns:1fr 1.08fr!important;gap:22px!important;max-width:1180px!important;margin:0 auto!important;padding:18px 38px 30px!important}.pro-pricing .pricing-card{background:rgba(15,23,42,.78)!important;border:1px solid rgba(148,163,184,.2)!important;border-radius:26px!important;padding:30px!important;color:#fff!important;box-shadow:0 18px 45px rgba(0,0,0,.28)!important;backdrop-filter:blur(16px);transition:.22s}.pro-pricing .pricing-card:hover{transform:translateY(-4px);border-color:rgba(245,158,11,.35)!important}.pro-pricing .pricing-card.popular{transform:none!important;border:2px solid rgba(245,158,11,.85)!important;background:linear-gradient(180deg,rgba(30,41,59,.92),rgba(15,23,42,.86))!important;box-shadow:0 28px 70px rgba(245,158,11,.14),0 22px 60px rgba(0,0,0,.34)!important}.pro-pricing .pricing-card.popular:hover{transform:translateY(-4px)!important}.plan-topline{color:#fbbf24;font-size:12px;font-weight:950;letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px}.pro-pricing .pricing-card h3{font-size:28px!important;margin:0 0 8px!important;letter-spacing:-.03em}.plan-description{color:#94a3b8;margin:0 0 18px;font-weight:700;min-height:48px}.pro-pricing .price{font-size:56px!important;margin:12px 0 8px!important;color:#fff!important;letter-spacing:-.055em}.pro-pricing .price span{font-size:17px!important;color:#94a3b8!important}.pro-pricing .savings{display:inline-flex;color:#22c55e!important;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.22);border-radius:999px;padding:7px 11px;font-size:13px!important;margin-bottom:8px}.pro-pricing .features{list-style:none;padding:0!important;margin:24px 0!important;display:grid;gap:11px}.pro-pricing .features li{margin:0!important;color:#dbeafe;font-weight:760;font-size:14px!important;line-height:1.45}.pro-pricing .features li:before{content:"✓"!important;width:22px;height:22px;min-width:22px;border-radius:999px;display:inline-grid;place-items:center;background:rgba(34,197,94,.13);color:#4ade80!important;margin-inline-end:2px}.pro-pricing .popular-badge{right:26px!important;top:-14px!important;background:linear-gradient(90deg,#f59e0b,#f97316)!important;color:#111827!important;font-weight:1000!important;box-shadow:0 12px 28px rgba(245,158,11,.28)}.pro-pricing .btn-subscribe{border-radius:16px!important;padding:17px 18px!important;font-weight:950!important;letter-spacing:-.01em}.pro-pricing .btn-subscribe.primary{background:linear-gradient(135deg,#f59e0b,#f97316)!important;color:#111827!important;box-shadow:0 15px 34px rgba(245,158,11,.28)}.pro-pricing .btn-subscribe.secondary{background:rgba(255,255,255,.08)!important;color:#fff!important;border:1px solid rgba(226,232,240,.22)!important}.pro-pricing .btn-subscribe:hover{transform:translateY(-2px);filter:brightness(1.06)}.pro-pricing .payment-note{color:#94a3b8!important;font-weight:750}.conversion-panel{display:grid;grid-template-columns:1fr .9fr;gap:24px;align-items:center;margin:0 38px 28px;padding:26px;border-radius:24px;background:linear-gradient(135deg,rgba(245,158,11,.13),rgba(37,99,235,.1));border:1px solid rgba(148,163,184,.2)}.conversion-label{color:#fbbf24;font-size:12px;font-weight:950;letter-spacing:.08em;text-transform:uppercase}.conversion-panel h2{font-size:clamp(24px,3vw,38px);letter-spacing:-.045em;line-height:1.05;margin:8px 0 10px}.conversion-panel p{margin:0;color:#cbd5e1;font-weight:700;line-height:1.65}.conversion-checks{display:grid;grid-template-columns:1fr 1fr;gap:10px}.conversion-checks span{background:rgba(15,23,42,.52);border:1px solid rgba(148,163,184,.18);border-radius:14px;padding:12px;color:#e2e8f0;font-weight:900}.pricing-footer-note{margin:0 38px 38px;padding:14px 16px;border-radius:16px;background:rgba(15,23,42,.55);border:1px solid rgba(148,163,184,.18);color:#94a3b8;font-size:13px;font-weight:750;text-align:center}.pricing-footer-note strong{color:#f8fafc}@media(max-width:980px){.pricing-hero{grid-template-columns:1fr;padding:34px 22px 18px}.pricing-snapshot{grid-template-columns:repeat(4,1fr)}.pricing-snapshot div{min-height:104px}.value-strip{grid-template-columns:1fr;padding:0 22px 18px}.pro-pricing .pricing-grid{grid-template-columns:1fr!important;padding:12px 22px 24px!important}.conversion-panel{grid-template-columns:1fr;margin:0 22px 22px}.pricing-footer-note{margin:0 22px 24px}}@media(max-width:680px){.pricing-hero h1{font-size:38px}.pricing-snapshot{grid-template-columns:1fr 1fr}.hero-cta{width:100%!important;min-width:0}.pricing-telegram{width:100%}.pro-pricing .pricing-card{padding:22px!important}.pro-pricing .price{font-size:44px!important}.conversion-checks{grid-template-columns:1fr}.value-item{grid-template-columns:1fr}.value-item span{grid-row:auto}.plan-description{min-height:0}}
 
-/* Pro pricing content expansion: psychology, agents, comparison, FAQ */
-.psychology-band,.agents-showcase,.comparison-block,.faq-block,.final-cta{position:relative;z-index:1}.psychology-band{display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:start;margin:0 38px 22px;padding:24px;border-radius:24px;background:linear-gradient(135deg,rgba(245,158,11,.16),rgba(15,23,42,.55));border:1px solid rgba(245,158,11,.22);box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}.psychology-icon{width:58px;height:58px;border-radius:20px;display:grid;place-items:center;background:rgba(245,158,11,.18);font-size:28px}.psychology-band h2{margin:7px 0 10px;font-size:clamp(24px,3vw,40px);line-height:1.08;letter-spacing:-.045em}.psychology-band p{margin:0;color:#cbd5e1;line-height:1.7;font-weight:720}.section-heading{text-align:center;max-width:860px;margin:0 auto 20px}.section-heading.compact{margin-bottom:14px}.section-heading h2{font-size:clamp(26px,3.4vw,44px);line-height:1.05;letter-spacing:-.05em;margin:8px 0 10px}.section-heading p{color:#94a3b8;margin:0;line-height:1.65;font-weight:720}.agents-showcase{margin:0 38px 28px;padding:28px;border-radius:26px;background:rgba(15,23,42,.48);border:1px solid rgba(148,163,184,.18)}.agent-feature-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.agent-feature{min-height:142px;padding:16px;border-radius:18px;background:rgba(255,255,255,.055);border:1px solid rgba(148,163,184,.16);display:flex;flex-direction:column;justify-content:space-between;transition:.18s}.agent-feature:hover{transform:translateY(-2px);border-color:rgba(245,158,11,.4);background:rgba(255,255,255,.075)}.agent-feature b{font-size:15px;color:#fff}.agent-feature span{color:#94a3b8;font-size:13px;line-height:1.5;font-weight:720}.agent-feature.accent{background:linear-gradient(135deg,rgba(245,158,11,.12),rgba(37,99,235,.08));border-color:rgba(245,158,11,.22)}.comparison-block,.faq-block{margin:0 38px 28px;padding:26px;border-radius:24px;background:rgba(15,23,42,.44);border:1px solid rgba(148,163,184,.18)}.comparison-table-wrap{overflow:auto;border-radius:18px;border:1px solid rgba(148,163,184,.18)}.comparison-table{min-width:680px!important;background:rgba(15,23,42,.62);color:#e2e8f0}.comparison-table th{background:rgba(255,255,255,.07)!important;color:#f8fafc!important;border-bottom:1px solid rgba(148,163,184,.18)!important}.comparison-table td{border-bottom:1px solid rgba(148,163,184,.13)!important;font-weight:850}.comparison-table td:nth-child(2),.comparison-table td:nth-child(3),.comparison-table th:nth-child(2),.comparison-table th:nth-child(3){text-align:center}.comparison-table td:nth-child(3){color:#fbbf24}.faq-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.faq-item{padding:18px;border-radius:18px;background:rgba(255,255,255,.055);border:1px solid rgba(148,163,184,.16)}.faq-item b{display:block;color:#fff;margin-bottom:8px}.faq-item span{display:block;color:#94a3b8;line-height:1.6;font-weight:720}.final-cta{text-align:center;margin:0 38px 28px;padding:32px;border-radius:26px;background:linear-gradient(135deg,rgba(245,158,11,.17),rgba(37,99,235,.13));border:1px solid rgba(245,158,11,.22)}.final-cta h2{font-size:clamp(28px,4vw,48px);line-height:1.04;letter-spacing:-.055em;margin:0 0 10px}.final-cta p{max-width:720px;margin:0 auto;color:#cbd5e1;font-weight:740;line-height:1.65}.pricing-hero-actions.center{justify-content:center}@media(max-width:1120px){.agent-feature-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:980px){.psychology-band,.agents-showcase,.comparison-block,.faq-block,.final-cta{margin-left:22px;margin-right:22px}.agent-feature-grid{grid-template-columns:1fr 1fr}.faq-grid{grid-template-columns:1fr}}@media(max-width:680px){.psychology-band{grid-template-columns:1fr;padding:20px}.psychology-icon{width:50px;height:50px}.agent-feature-grid{grid-template-columns:1fr}.agents-showcase,.comparison-block,.faq-block,.final-cta{padding:20px}.comparison-table{min-width:560px!important}}
+/* Card titles */
+.ss-card h2, .ss-card h3,
+.chart-header h3,
+.table-header h3,
+.report-card h3,
+.pricing-native-card h2
+{ margin:0 0 10px; font-size:18px; font-weight:900; color:var(--ss-text); letter-spacing:-.015em }
 
-/* Pricing v4: unified with dashboard theme (light/dark), simple plans, one benefits table */
-.pricing-unified.pro-pricing{
-  background:linear-gradient(135deg,var(--panel),var(--panel2))!important;
-  color:var(--text)!important;
-  border:1px solid var(--border)!important;
-  box-shadow:var(--shadow)!important;
+.card-muted, .muted, .table-header small, .table-header span{color:var(--ss-muted)}
+
+/* ========== 6. Buttons – unified ========== */
+.btn, .btn-primary, .btn-contact, .btn-ghost, .btn-subscribe,
+button.btn, a.btn,
+.lang-btn, .icon-btn
+{
+  border:1px solid var(--ss-border);
+  background:var(--ss-panel);
+  color:var(--ss-text);
+  border-radius:var(--ss-r-sm);
+  padding:10px 14px;
+  font-weight:850;
+  font-size:13px;
+  cursor:pointer;
+  transition:.15s;
+  text-decoration:none;
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
 }
-body.dark .pricing-unified.pro-pricing{
-  background:linear-gradient(135deg,var(--panel),var(--bg2))!important;
+.btn:hover, .btn-primary:hover, .btn-contact:hover, .btn-ghost:hover { transform:translateY(-1px); filter:brightness(1.03) }
+
+.btn-primary, .btn-subscribe.primary,
+.btn-contact, .single-telegram-cta
+{
+  background:linear-gradient(135deg,var(--ss-blue),#06b6d4);
+  color:#fff;border-color:transparent;
 }
-.pricing-unified.pro-pricing:before{background:radial-gradient(circle at 12% 0,rgba(217,119,6,.14),transparent 34%),radial-gradient(circle at 90% 10%,rgba(37,99,235,.12),transparent 32%)!important}.pricing-unified .pricing-hero h1,.pricing-unified .psychology-band h2,.pricing-unified .section-heading h2,.pricing-unified .conversion-panel h2,.pricing-unified .final-cta h2,.pricing-unified .pricing-card h3{color:var(--text)!important}.pricing-unified .pricing-hero p,.pricing-unified .psychology-band p,.pricing-unified .section-heading p,.pricing-unified .conversion-panel p,.pricing-unified .final-cta p,.pricing-unified .faq-item span,.pricing-unified .agent-feature span,.pricing-unified .live-monitoring-card p,.pricing-unified .plan-description{color:var(--muted)!important}.pricing-unified .pricing-kicker,.pricing-unified .conversion-label,.pricing-unified .plan-topline{color:var(--gold)!important;background:var(--gold2)!important;border:1px solid rgba(217,119,6,.25)!important}.pricing-unified .pricing-snapshot div,.pricing-unified .psychology-band,.pricing-unified .live-monitoring-card,.pricing-unified .pricing-card,.pricing-unified .subscriber-benefits,.pricing-unified .agents-showcase,.pricing-unified .comparison-block,.pricing-unified .faq-block,.pricing-unified .conversion-panel,.pricing-unified .final-cta{background:var(--panel)!important;border:1px solid var(--border)!important;box-shadow:var(--shadow2)!important}.pricing-unified .pricing-snapshot strong,.pricing-unified .live-monitoring-card strong,.pricing-unified .agent-feature b,.pricing-unified .faq-item b{color:var(--text)!important}.pricing-unified .pricing-snapshot span{color:var(--muted)!important}.pricing-unified .pricing-card.popular{background:var(--panel)!important;border:2px solid var(--gold)!important;box-shadow:0 18px 45px rgba(217,119,6,.14),var(--shadow2)!important}.pricing-unified .price{color:var(--text)!important}.pricing-unified .price span{color:var(--muted)!important}.pricing-unified .pricing-telegram{background:var(--panel)!important;color:var(--text)!important;border:1px solid var(--border)!important}.pricing-unified .btn-subscribe.secondary{background:var(--panel2)!important;color:var(--text)!important;border:1px solid var(--border)!important}.pricing-unified .payment-note,.pricing-unified .pricing-footer-note{color:var(--muted)!important}.pricing-unified .pricing-footer-note{background:var(--panel2)!important;border:1px solid var(--border)!important}.pricing-unified .pricing-footer-note strong{color:var(--text)!important}.pricing-unified .popular-badge{color:#fff!important;background:linear-gradient(90deg,var(--gold),#f59e0b)!important}.pricing-unified .psychology-icon,.pricing-unified .monitor-icon{background:var(--gold2)!important;color:var(--gold)!important}.pricing-unified .agent-feature.accent{background:linear-gradient(135deg,var(--gold2),var(--blue2))!important}.pricing-unified .comparison-table-wrap{border:1px solid var(--border)!important;background:var(--panel)!important}.pricing-unified .comparison-table{background:var(--panel)!important;color:var(--text)!important;min-width:620px!important}.pricing-unified .comparison-table th{background:var(--panel2)!important;color:var(--muted)!important;border-bottom:1px solid var(--border)!important}.pricing-unified .comparison-table td{border-bottom:1px solid var(--border)!important;color:var(--text)!important}.pricing-unified .comparison-table td:last-child{color:var(--green)!important;font-weight:950}.pricing-unified .features{display:none!important}.unified-hero{padding:42px 34px 22px!important}.unified-snapshot div{min-height:118px!important}.live-monitoring-grid{position:relative;z-index:1;display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:0 38px 26px}.live-monitoring-card{border-radius:20px;padding:20px;display:grid;gap:10px}.monitor-icon{width:44px;height:44px;border-radius:15px;display:grid;place-items:center;font-size:21px}.live-monitoring-card strong{font-size:17px;line-height:1.25}.live-monitoring-card p{margin:0;line-height:1.6;font-weight:720}.pricing-plans-simple,.subscriber-benefits{position:relative;z-index:1;margin:0 38px 28px;padding:26px;border-radius:24px}.pricing-unified .simple-plan-grid{grid-template-columns:1fr 1fr!important;padding:0!important;margin:18px auto 0!important;max-width:1040px!important}.pricing-unified .simple-plan-grid .pricing-card{padding:28px!important}.pricing-unified .simple-plan-grid .pricing-card:hover{transform:translateY(-3px)!important}.subscriber-benefits .comparison-table{min-width:560px!important}.subscriber-benefits .comparison-table th:last-child,.subscriber-benefits .comparison-table td:last-child{text-align:center;width:160px}.pricing-unified .unified-agents .agent-feature{background:var(--panel2)!important}.pricing-unified .unified-conversion .conversion-checks span,.pricing-unified .faq-item{background:var(--panel2)!important;border:1px solid var(--border)!important;color:var(--text)!important}.pricing-unified .unified-final-cta{background:linear-gradient(135deg,var(--gold2),var(--blue2))!important}@media(max-width:980px){.live-monitoring-grid{grid-template-columns:1fr;margin-left:22px;margin-right:22px}.pricing-plans-simple,.subscriber-benefits{margin-left:22px;margin-right:22px}.pricing-unified .simple-plan-grid{grid-template-columns:1fr!important}.unified-hero{padding:34px 22px 18px!important}}@media(max-width:680px){.pricing-unified .comparison-table{min-width:500px!important}.pricing-plans-simple,.subscriber-benefits{padding:20px}.live-monitoring-card{padding:18px}.unified-snapshot div{min-height:96px!important}}
+.btn-contact, .single-telegram-cta{
+  background:linear-gradient(135deg,#f59e0b,var(--ss-gold));
+}
+.btn-ghost, .btn-subscribe.secondary { background:var(--ss-panel); color:var(--ss-text) }
+.btn-sm{padding:7px 11px;font-size:12px}
 
-/* RTL polish for translated pricing page */
-[dir=rtl] .pricing-unified .pricing-hero-copy,
-[dir=rtl] .pricing-unified .section-heading,
-[dir=rtl] .pricing-unified .final-cta{text-align:right}
-[dir=rtl] .pricing-unified .section-heading,
-[dir=rtl] .pricing-unified .final-cta{margin-right:auto;margin-left:auto}
-[dir=rtl] .pricing-unified .pricing-hero-actions.center{justify-content:center}
-[dir=rtl] .pricing-unified .pricing-hero-actions{justify-content:flex-start}
-[dir=rtl] .pricing-unified .comparison-table th,
-[dir=rtl] .pricing-unified .comparison-table td{text-align:right}
-[dir=rtl] .pricing-unified .comparison-table th:last-child,
-[dir=rtl] .pricing-unified .comparison-table td:last-child{text-align:center}
+.segmented{display:flex;background:var(--ss-panel2);border:1px solid var(--ss-border);border-radius:var(--ss-r-sm);padding:3px}
+.lang-btn{padding:6px 10px;background:transparent;border:0;color:var(--ss-muted);font-size:12px}
+.lang-btn.active{background:var(--ss-blue);color:#fff}
+.icon-btn{width:38px;height:38px;padding:0}
 
-/* Pricing banner four-word summary + compact agent cards */
-.project-words{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:20px}
-.project-words span{display:inline-flex;align-items:center;justify-content:center;padding:9px 13px;border-radius:999px;background:var(--panel2);border:1px solid var(--border);color:var(--text);font-size:13px;font-weight:950;box-shadow:var(--shadow2)}
-.pricing-unified .compact-agent-grid .agent-feature{min-height:76px;justify-content:center;align-items:center;text-align:center;padding:16px}
-.pricing-unified .compact-agent-grid .agent-feature b{font-size:15px;line-height:1.35}
-[dir=rtl] .project-words{justify-content:flex-start}
-@media(max-width:680px){.project-words span{flex:1;min-width:120px}.pricing-unified .compact-agent-grid .agent-feature{min-height:68px}}
+/* ========== 7. KPI / Stats ========== */
+.kpi-grid{display:grid;grid-template-columns:repeat(10,1fr);gap:12px;margin:14px 0}
+.kpi-card{display:flex;align-items:center;gap:12px;min-height:92px}
+.kpi-card:nth-child(1), .kpi-card:nth-child(2), .kpi-card:nth-child(3), .kpi-card:nth-child(4){grid-column:span 2}
+.kpi-card.compact{grid-column:span 1;display:block;min-height:82px}
+.kpi-card p{margin:0;color:var(--ss-muted);font-size:12px;font-weight:800}
+.kpi-card strong{display:block;font-size:26px;margin-top:4px;letter-spacing:-.025em}
+.kpi-card.compact strong{font-size:21px}
+.kpi-icon{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;font-weight:900}
+.green,.badge.win,.badge.buy{background:var(--ss-green-bg);color:var(--ss-green)}
+.blue{background:var(--ss-blue-bg);color:var(--ss-blue)}
+.gold{background:var(--ss-gold-bg);color:var(--ss-gold)}
+.purple{background:var(--ss-purple-bg);color:var(--ss-purple)}
+.red,.badge.sell,.badge.loss{background:var(--ss-red-bg);color:var(--ss-red)}
+.progress-bar{height:6px;background:var(--ss-panel2);border-radius:999px;overflow:hidden;margin-top:8px}
+.progress-fill{height:100%;background:linear-gradient(90deg,var(--ss-green),#22c55e);border-radius:999px}
 
-/* Pricing v5: dashboard-native layout */
-.pricing-native{display:grid;gap:16px}.pricing-native-head,.pricing-native-card,.native-risk{background:var(--panel);border:1px solid var(--border);box-shadow:var(--shadow2);border-radius:var(--radius);padding:22px}.pricing-native-head{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(320px,.65fr);gap:18px;align-items:stretch}.pricing-native-kicker,.native-card-label{display:inline-flex;align-items:center;width:max-content;background:var(--gold2);color:var(--gold);border:1px solid rgba(217,119,6,.25);border-radius:999px;padding:6px 11px;font-size:12px;font-weight:950;letter-spacing:.04em;text-transform:uppercase}.pricing-native-head h1{font-size:clamp(28px,4vw,50px);line-height:1.05;letter-spacing:-.05em;margin:12px 0 10px;color:var(--text)}.pricing-native-head p,.pricing-native-card p,.native-section-title p{color:var(--muted);font-weight:720;line-height:1.65;margin:0}.native-words{margin-top:16px}.pricing-native-metrics{display:grid;grid-template-columns:1fr 1fr;gap:12px}.pricing-native-metrics div{background:var(--panel2);border:1px solid var(--border);border-radius:16px;padding:15px;display:flex;flex-direction:column;justify-content:space-between;min-height:105px}.pricing-native-metrics strong{font-size:25px;letter-spacing:-.04em;color:var(--text)}.pricing-native-metrics span{color:var(--muted);font-size:12px;font-weight:850}.pricing-native-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.psychology-card{display:grid;grid-template-columns:auto 1fr;gap:14px}.native-card-icon{width:52px;height:52px;border-radius:17px;background:var(--blue2);color:var(--blue);display:grid;place-items:center;font-size:24px}.pricing-native-card h2,.native-section-title h2{margin:9px 0 8px;color:var(--text);font-size:clamp(22px,2.5vw,32px);line-height:1.12;letter-spacing:-.035em}.native-agent-list{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px}.native-agent-list span{background:var(--panel2);border:1px solid var(--border);border-radius:13px;padding:10px;color:var(--text);font-weight:900;font-size:13px;text-align:center}.pricing-plans-card,.benefits-card,.payment-card{display:grid;gap:16px}.native-section-title{text-align:center;max-width:880px;margin:0 auto}.native-plan-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.native-plan{position:relative;background:var(--panel2);border:1px solid var(--border);border-radius:18px;padding:20px;text-align:center}.native-plan.highlighted{border:2px solid var(--gold);background:linear-gradient(135deg,var(--gold2),var(--panel))}.native-plan em{position:absolute;top:-12px;inset-inline-end:18px;background:linear-gradient(90deg,var(--gold),#f59e0b);color:#fff;border-radius:999px;padding:4px 11px;font-style:normal;font-size:11px;font-weight:950}.native-plan span{display:block;color:var(--muted);font-weight:900}.native-plan strong{display:block;font-size:48px;line-height:1;margin:12px 0 7px;color:var(--text);letter-spacing:-.05em}.native-plan small{color:var(--muted);font-weight:800}.native-table-wrap{overflow:auto;border:1px solid var(--border);border-radius:16px}.native-benefits-table{min-width:650px;background:var(--panel);color:var(--text)}.native-benefits-table th{background:var(--panel2);color:var(--muted);border-bottom:1px solid var(--border)}.native-benefits-table td{border-bottom:1px solid var(--border);font-weight:820}.native-benefits-table th:last-child,.native-benefits-table td:last-child{text-align:center;width:140px}.native-benefits-table td:last-child{color:var(--green);font-weight:950;font-size:17px}.payment-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.payment-steps div{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--border);border-radius:14px;padding:12px}.payment-steps b{width:30px;height:30px;border-radius:999px;background:var(--blue2);color:var(--blue);display:grid;place-items:center;flex:0 0 auto}.payment-steps span{font-weight:850;color:var(--text);font-size:13px}.wallet-box{background:var(--panel2);border:1px solid var(--border);border-radius:16px;padding:15px}.wallet-box label{display:block;color:var(--muted);font-size:12px;font-weight:950;text-transform:uppercase;margin-bottom:8px}.wallet-copy-row{display:flex;gap:10px;align-items:center}.wallet-copy-row code{flex:1;display:block;background:var(--panel);border:1px dashed var(--border);border-radius:13px;padding:13px;color:var(--text);font-weight:950;overflow:auto;white-space:nowrap}.wallet-box small{display:block;color:var(--muted);margin-top:8px;font-weight:750}.activation-note{display:flex;gap:8px;align-items:flex-start;background:var(--gold2);border:1px solid rgba(217,119,6,.24);border-radius:15px;padding:13px;color:var(--text)}.activation-note strong{color:var(--gold);white-space:nowrap}.single-telegram-cta{width:max-content;justify-self:center;padding:13px 20px!important}.native-risk{text-align:center;color:var(--muted);font-size:13px}.native-risk strong{color:var(--text)}[dir=rtl] .pricing-native-head,[dir=rtl] .pricing-native-card,[dir=rtl] .native-section-title{text-align:right}[dir=rtl] .native-section-title{margin-inline:auto}[dir=rtl] .native-benefits-table th,[dir=rtl] .native-benefits-table td{text-align:right}[dir=rtl] .native-benefits-table th:last-child,[dir=rtl] .native-benefits-table td:last-child{text-align:center}@media(max-width:1050px){.pricing-native-head,.pricing-native-grid{grid-template-columns:1fr}.pricing-native-metrics{grid-template-columns:repeat(4,1fr)}.pricing-native-metrics div{min-height:90px}}@media(max-width:760px){.pricing-native-head,.pricing-native-card{padding:18px}.pricing-native-metrics,.native-plan-grid,.payment-steps{grid-template-columns:1fr}.native-agent-list{grid-template-columns:1fr}.psychology-card{grid-template-columns:1fr}.wallet-copy-row{flex-direction:column;align-items:stretch}.single-telegram-cta{width:100%}.pricing-native-metrics div{min-height:auto}.activation-note{flex-direction:column}.activation-note strong{white-space:normal}}
+/* Edge snapshot – same card look */
+.edge-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:12px 0}
+.edge-card{min-height:108px;display:grid;gap:4px}
+.edge-card span{font-size:20px}
+.edge-card p{margin:0;color:var(--ss-muted);font-size:11px;font-weight:900;text-transform:uppercase}
+.edge-card strong{font-size:20px}
+.edge-card small{color:var(--ss-muted);font-weight:700}
 
-/* Pricing v6: restore concise agent explanations */
-.agents-card-intro{margin:8px 0 14px!important;color:var(--muted);font-weight:720;line-height:1.6}.detailed-agent-list{grid-template-columns:1fr 1fr!important}.native-agent-list .native-agent-item{background:var(--panel2);border:1px solid var(--border);border-radius:13px;padding:12px;display:grid;gap:5px;text-align:start}.native-agent-list .native-agent-item.accent{background:linear-gradient(135deg,var(--gold2),var(--panel2));border-color:rgba(217,119,6,.25)}.native-agent-list .native-agent-item b{color:var(--text);font-weight:950;font-size:13px;line-height:1.3}.native-agent-list .native-agent-item small{color:var(--muted);font-weight:720;line-height:1.45;font-size:12px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.native-agent-list>span{display:none!important}@media(max-width:760px){.detailed-agent-list{grid-template-columns:1fr!important}}
+/* ========== 8. Toolbar / Filters ========== */
+.toolbar-card, .report-search-bar{
+  display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;
+  padding:14px;
+}
+.filter-group{display:flex;flex-direction:column;gap:5px;min-width:130px}
+.filter-group label{color:var(--ss-muted);font-size:11px;font-weight:900;text-transform:uppercase}
+.filter-group input,.filter-group select{
+  height:40px;border:1px solid var(--ss-border);background:var(--ss-panel2);
+  color:var(--ss-text);border-radius:12px;padding:0 11px;outline:none
+}
+.filter-group input:focus,.filter-group select:focus{border-color:var(--ss-blue);box-shadow:0 0 0 3px rgba(37,99,235,.13)}
+.search-group{flex:1;min-width:190px}
+.toolbar-actions{display:flex;gap:8px;margin-inline-start:auto}
 
-/* Pricing v7: benefits as checked points, not a table */
-.native-benefits-list{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:2px}.native-benefits-list div{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--border);border-radius:14px;padding:12px 13px}.native-benefits-list span{width:24px;height:24px;min-width:24px;border-radius:999px;display:grid;place-items:center;background:var(--green2);color:var(--green);font-weight:950}.native-benefits-list p{margin:0!important;color:var(--text)!important;font-weight:850;line-height:1.35}.pricing-plans-card .native-section-title p:empty{display:none}@media(max-width:760px){.native-benefits-list{grid-template-columns:1fr}}
+/* ========== 9. Charts ========== */
+.charts-grid{display:grid;grid-template-columns:1.15fr 1fr;gap:14px;margin-bottom:14px}
+.chart-card{min-height:330px}
+.chart-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.chart-header h3{margin:0;font-size:16px}
+.chart-area{position:relative;height:270px}
+.chart-area canvas{width:100%!important;height:100%!important}
+.chart-empty{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:var(--ss-muted);font-weight:800;background:var(--ss-panel2);border-radius:12px}
 
-/* Pricing v8: restored problem, why choose, FAQ sections */
-.problem-card,.why-card,.faq-native-card{display:grid;gap:16px}.problem-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.problem-grid div,.why-grid div,.faq-native-grid div{background:var(--panel2);border:1px solid var(--border);border-radius:15px;padding:15px}.problem-grid b,.why-grid b,.faq-native-grid b{display:block;color:var(--text);font-weight:950;line-height:1.35}.problem-grid span,.why-grid p,.faq-native-grid p{display:block;color:var(--muted);font-weight:720;line-height:1.55;margin:7px 0 0}.why-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.why-grid div{position:relative;overflow:hidden}.why-grid div>span{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:12px;background:var(--blue2);color:var(--blue);font-weight:950;margin-bottom:10px}.faq-native-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}[dir=rtl] .problem-grid div,[dir=rtl] .why-grid div,[dir=rtl] .faq-native-grid div{text-align:right}@media(max-width:1050px){.why-grid{grid-template-columns:1fr 1fr}.problem-grid{grid-template-columns:1fr}}@media(max-width:760px){.why-grid,.faq-native-grid{grid-template-columns:1fr}}
+/* ========== 10. Tables ========== */
+.table-header{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--ss-border)}
+.table-header h3{margin:0}
+.table-container{overflow:auto}
+table{width:100%;border-collapse:separate;border-spacing:0;min-width:900px}
+th,td{padding:11px 12px;border-bottom:1px solid var(--ss-border);font-size:13px;text-align:start;white-space:nowrap}
+th{background:var(--ss-panel2);color:var(--ss-muted);font-weight:900;text-transform:uppercase;font-size:11px;letter-spacing:.04em}
+tbody tr:hover{background:rgba(37,99,235,.035)}
+.badge{display:inline-flex;align-items:center;padding:4px 9px;border-radius:999px;font-size:11px;font-weight:900}
+.badge.open{background:var(--ss-blue-bg);color:var(--ss-blue)}
+.badge.tp1{background:var(--ss-gold-bg);color:var(--ss-gold)}
+.badge.neutral{background:var(--ss-panel2);color:var(--ss-muted)}
+.pnl-positive{color:var(--ss-green);font-weight:900}
+.pnl-negative{color:var(--ss-red);font-weight:900}
+.loading,.empty{text-align:center;color:var(--ss-muted);padding:24px!important;font-weight:800}
 
-/* Pricing v9: compact automation story from README */
-.automation-card{display:grid;grid-template-columns:minmax(0,1fr);gap:15px}.automation-copy{max-width:920px;margin:0 auto;text-align:center}.automation-copy h2{margin:9px 0 8px;color:var(--text);font-size:clamp(23px,3vw,34px);line-height:1.1;letter-spacing:-.035em}.automation-copy p{color:var(--muted);font-weight:720;line-height:1.65;margin:0}.automation-flow{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;background:var(--panel2);border:1px solid var(--border);border-radius:16px;padding:12px}.automation-flow span{background:var(--panel);border:1px solid var(--border);border-radius:999px;padding:8px 12px;color:var(--text);font-weight:950;font-size:13px}.automation-flow i{color:var(--muted);font-style:normal;font-weight:950}.automation-points{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.automation-points div{display:flex;align-items:center;gap:9px;background:var(--panel2);border:1px solid var(--border);border-radius:14px;padding:11px}.automation-points span{width:22px;height:22px;min-width:22px;border-radius:999px;display:grid;place-items:center;background:var(--green2);color:var(--green);font-weight:950}.automation-points p{margin:0;color:var(--text);font-weight:850;line-height:1.35;font-size:13px}[dir=rtl] .automation-copy{text-align:right}@media(max-width:1050px){.automation-points{grid-template-columns:1fr 1fr}}@media(max-width:760px){.automation-points{grid-template-columns:1fr}.automation-flow{justify-content:flex-start}.automation-flow i{display:none}}
-
-/* Pricing v10: logical split into overview and subscribe/payment pages */
-.pro-overview,.subscribe-page{display:grid;gap:16px}.pro-hero-clean .overview-actions{margin-top:16px;display:flex;gap:10px;flex-wrap:wrap}.overview-two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}.automation-mini-card{display:flex;flex-direction:column;justify-content:center}.automation-mini-card h2{font-size:clamp(20px,2.2vw,28px);line-height:1.18;margin:9px 0 8px;color:var(--text);letter-spacing:-.03em}.rich-benefits-list{grid-template-columns:repeat(4,1fr)}.overview-bottom-cta{text-align:center;display:grid;justify-items:center;gap:10px}.overview-bottom-cta h2{margin:0;color:var(--text);font-size:clamp(22px,2.5vw,32px)}.overview-bottom-cta p{max-width:760px;color:var(--muted);font-weight:720;line-height:1.6;margin:0}.subscribe-head{grid-template-columns:minmax(0,1fr) minmax(280px,.45fr)}.subscribe-head .btn{margin-top:14px}.subscribe-summary{background:var(--panel2);border:1px solid var(--border);border-radius:18px;padding:18px;display:flex;flex-direction:column;justify-content:center;gap:8px}.subscribe-summary strong{color:var(--text);font-size:20px}.subscribe-summary span{color:var(--muted);font-weight:800;line-height:1.5}.subscribe-benefits-list{grid-template-columns:repeat(4,1fr)}[dir=rtl] .overview-bottom-cta{text-align:center}@media(max-width:1150px){.rich-benefits-list,.subscribe-benefits-list{grid-template-columns:1fr 1fr}.overview-two-col,.subscribe-head{grid-template-columns:1fr}}@media(max-width:760px){.rich-benefits-list,.subscribe-benefits-list{grid-template-columns:1fr}}
-
-/* Standalone subscribe.html page */
-.subscribe-topbar{grid-template-columns:minmax(220px,.8fr) minmax(220px,1fr) auto!important}.subscribe-nav{grid-column:2!important;grid-row:1!important}.standalone-subscribe{display:grid;gap:16px}.standalone-head{grid-template-columns:minmax(0,1.1fr) minmax(300px,.6fr)}.subscribe-layout{display:grid;grid-template-columns:.75fr 1.25fr;gap:16px}.subscribe-main-card{align-content:start}.subscribe-plan-grid{grid-template-columns:1fr!important}.compact-subscribe-benefits{grid-template-columns:1fr 1fr}.standalone-payment-card{gap:16px}.standalone-subscribe .native-risk{text-align:center}@media(max-width:1100px){.subscribe-topbar{grid-template-columns:1fr auto!important}.subscribe-nav{grid-column:1 / -1!important;grid-row:2!important}.standalone-head,.subscribe-layout{grid-template-columns:1fr}.subscribe-plan-grid{grid-template-columns:1fr 1fr!important}}@media(max-width:760px){.compact-subscribe-benefits,.subscribe-plan-grid{grid-template-columns:1fr!important}}
-
-/* Pricing v11: SmartSignal vs Expert Advisor EA comparison */
-.system-comparison-card{display:grid;gap:16px}.comparison-cards-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.comparison-product{border:1px solid var(--border);border-radius:18px;padding:18px;background:var(--panel2)}.comparison-product h3{margin:0 0 12px;color:var(--text);font-size:22px;letter-spacing:-.03em}.comparison-product ul{list-style:none;margin:0;padding:0;display:grid;gap:9px}.comparison-product li{position:relative;color:var(--text);font-weight:820;line-height:1.45;padding-inline-start:28px}.comparison-product li:before{content:"✓";position:absolute;inset-inline-start:0;top:0;width:21px;height:21px;border-radius:999px;display:grid;place-items:center;background:var(--green2);color:var(--green);font-size:12px;font-weight:950}.ea-side li:before{content:"•";background:var(--panel);color:var(--muted);border:1px solid var(--border)}.smartsignal-side{background:linear-gradient(135deg,var(--green2),var(--panel2));border-color:rgba(22,163,74,.25)}.ea-side{background:linear-gradient(135deg,var(--panel2),var(--gold2));border-color:rgba(217,119,6,.2)}.comparison-table-wrap-pro{margin-top:2px}.system-comparison-table{min-width:860px}.system-comparison-table th,.system-comparison-table td{vertical-align:top;white-space:normal!important}.system-comparison-table th:nth-child(2),.system-comparison-table td:nth-child(2){background:rgba(22,163,74,.055)}.system-comparison-table th:nth-child(3),.system-comparison-table td:nth-child(3){background:rgba(217,119,6,.045)}.system-comparison-table td:first-child{font-weight:950;color:var(--text);width:170px}.comparison-note{margin-top:0}@media(max-width:900px){.comparison-cards-grid{grid-template-columns:1fr}.system-comparison-table{min-width:760px}}
-
-/* Pricing v12: reframed Beyond EA section */
-.beyond-ea-card .native-section-title{max-width:980px}.ea-positioning-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.ea-positioning-card{background:var(--panel2);border:1px solid var(--border);border-radius:16px;padding:16px}.ea-positioning-card.strong{background:linear-gradient(135deg,var(--blue2),var(--panel2));border-color:rgba(37,99,235,.22)}.ea-positioning-card span{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:12px;background:var(--panel);border:1px solid var(--border);color:var(--blue);font-weight:950;margin-bottom:10px}.ea-positioning-card b{display:block;color:var(--text);font-weight:950;margin-bottom:7px}.ea-positioning-card p{margin:0;color:var(--muted);font-weight:720;line-height:1.55}.comparison-product-sub{margin:-4px 0 14px!important;color:var(--muted)!important;font-weight:760!important;line-height:1.55}.ea-reframed-cards .smartsignal-side{border:2px solid rgba(22,163,74,.32)}.reframed-ea-side{opacity:.96}.beyond-ea-table th:nth-child(2),.beyond-ea-table td:nth-child(2){border-inline-start:3px solid rgba(22,163,74,.35)}.beyond-ea-table th:nth-child(3),.beyond-ea-table td:nth-child(3){border-inline-start:3px solid rgba(217,119,6,.25)}@media(max-width:980px){.ea-positioning-grid{grid-template-columns:1fr}.beyond-ea-table{min-width:820px}}
-
-/* Reports archive restored + closed trades limit note */
-.table-limit-note{display:block;margin-top:4px;color:var(--muted);font-size:12px;font-weight:750}.report-archive-card{overflow:hidden}.report-archive-card .table-header h3{display:inline}.report-archive-card .table-header span{margin-inline-start:8px;color:var(--muted);font-weight:850}.reports-archive .loading{padding:24px;text-align:center;color:var(--muted);font-weight:850}
-
-/* Report search bar */
-.report-search-bar{background:var(--panel);border:1px solid var(--border);box-shadow:var(--shadow2);border-radius:var(--radius);padding:14px;display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin-bottom:16px}
-.report-search-bar .filter-group{display:flex;flex-direction:column;gap:5px;min-width:160px}
-.report-search-bar .filter-group label{color:var(--muted);font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.04em}
-.report-search-bar .filter-group input{height:42px;border:1px solid var(--border);background:var(--panel2);color:var(--text);border-radius:13px;padding:0 12px;outline:none}
-.report-search-bar .filter-group input:focus{border-color:var(--blue);box-shadow:0 0 0 4px rgba(37,99,235,.12)}
-.report-search-bar .toolbar-actions{display:flex;gap:8px;margin-inline-start:auto}
+/* ========== 11. Reports archive ========== */
+.reports-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.report-content{margin:0;background:var(--ss-panel2);border:1px solid var(--ss-border);border-radius:14px;padding:14px;color:var(--ss-text);white-space:pre-wrap;max-height:420px;overflow:auto;font:12.5px/1.6 ui-monospace,monospace}
+.report-archive-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.reports-archive{padding:12px;display:grid;gap:10px}
+.report-month-folder{background:var(--ss-panel2);border:1px solid var(--ss-border);border-radius:14px;overflow:hidden}
+.folder-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--ss-panel);border-bottom:1px solid var(--ss-border);font-weight:800}
+.folder-body{display:grid;gap:8px;padding:10px}
+.report-file{background:var(--ss-panel);border:1px solid var(--ss-border);border-radius:12px;overflow:hidden}
+.report-file-head{width:100%;display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;background:transparent;border:0;color:var(--ss-text);padding:10px 12px;cursor:pointer;text-align:start}
+.report-file-head:hover{background:rgba(37,99,235,.05)}
+.file-title{font-weight:900}
+.file-meta{color:var(--ss-muted);font-size:12px;font-weight:700}
+.report-file-body{display:none;margin:0;background:var(--ss-panel2);border-top:1px solid var(--ss-border);padding:13px;white-space:pre-wrap;max-height:360px;overflow:auto;font:12px/1.6 ui-monospace,monospace}
+.report-file-body.open{display:block}
+.report-file-actions{padding:0 12px 8px;display:flex;gap:8px}
+.btn-show-trades{background:var(--ss-blue-bg)!important;color:var(--ss-blue)!important;border:1px solid rgba(37,99,235,.2)!important;border-radius:10px!important;padding:6px 11px!important;font-size:12px!important;font-weight:900!important}
+.table-limit-note{display:block;margin-top:4px;color:var(--ss-muted);font-size:12px}
 
 /* Day trades panel */
-.day-trades-panel{background:var(--panel);border:1px solid var(--border);box-shadow:var(--shadow);border-radius:var(--radius);overflow:hidden;margin-bottom:16px;animation:fadeIn .25s ease}
-@keyframes fadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
-.day-trades-header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 18px;border-bottom:1px solid var(--border)}
-.day-trades-header h3{margin:0;font-size:17px}
-.day-trades-subtitle{color:var(--muted);font-size:13px;font-weight:800}
-.day-trades-body{padding:14px}
-.day-trades-body .table-container{overflow:auto}
-.day-trades-body table{min-width:700px}
-.day-trades-body th{background:var(--panel2);color:var(--muted);font-weight:900;text-transform:uppercase;font-size:11px;letter-spacing:.05em;padding:11px 12px;border-bottom:1px solid var(--border)}
-.day-trades-body td{padding:10px 12px;border-bottom:1px solid var(--border);font-size:13px;white-space:nowrap}
+.day-trades-panel{margin-bottom:14px;animation:fadeIn .2s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+.day-trades-header{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--ss-border)}
+.day-trades-body{padding:12px}
 
-/* Show trades button in report files */
-.report-file-actions{padding:0 12px 8px;display:flex;gap:8px}
-.btn-show-trades{background:var(--blue2)!important;color:var(--blue)!important;border:1px solid rgba(37,99,235,.2)!important;border-radius:10px!important;padding:6px 12px!important;font-size:12px!important;font-weight:900!important;cursor:pointer;transition:.15s}
-.btn-show-trades:hover{background:var(--blue)!important;color:#fff!important;transform:translateY(-1px)}
+/* ========== 12. Agents ========== */
+.agents-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:14px}
+.agent-header{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.agent-icon{width:34px;height:34px;border-radius:10px;background:var(--ss-blue-bg);color:var(--ss-blue);display:grid;place-items:center}
+.agent-name{font-weight:900}
+.agent-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.agent-metric span{display:block;color:var(--ss-muted);font-size:11px;font-weight:800}
+.agent-metric strong{font-size:16px}
+.agent-bar{height:6px;background:var(--ss-panel2);border-radius:999px;overflow:hidden;margin-top:10px}
+.agent-bar-fill{height:100%;background:linear-gradient(90deg,var(--ss-blue),#06b6d4)}
+.agent-source{margin-top:8px;color:var(--ss-muted);font-size:11px;font-weight:700;border-top:1px solid var(--ss-border);padding-top:8px}
 
-@media(max-width:680px){.report-search-bar{flex-direction:column}.report-search-bar .filter-group{width:100%}.day-trades-body table{min-width:560px}}
-
-/* Telegram signal example on SmartSignal Pro page */
-.telegram-example-card{overflow:hidden;position:relative}.telegram-example-card:before{content:"";position:absolute;inset:auto -80px -120px auto;width:280px;height:280px;border-radius:999px;background:radial-gradient(circle,rgba(37,99,235,.16),transparent 68%);pointer-events:none}.telegram-example-layout{position:relative;display:grid;grid-template-columns:minmax(0,.9fr) minmax(360px,1.1fr);gap:20px;align-items:center}.telegram-example-copy h2{margin:10px 0 8px;color:var(--text);font-size:clamp(24px,2.8vw,36px);line-height:1.12;letter-spacing:-.04em}.telegram-example-copy p{max-width:620px}.telegram-example-points{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}.telegram-example-points div{display:flex;gap:10px;align-items:center;background:var(--panel2);border:1px solid var(--border);border-radius:14px;padding:12px}.telegram-example-points b{width:31px;height:31px;border-radius:10px;display:grid;place-items:center;background:var(--gold2);color:var(--gold);font-size:12px;flex:0 0 auto}.telegram-example-points span{color:var(--text);font-weight:850;line-height:1.35;font-size:13px}.telegram-phone{background:var(--panel);border:1px solid var(--border);border-radius:28px;padding:13px;box-shadow:var(--shadow),inset 0 1px 0 rgba(255,255,255,.04);color:var(--text);direction:ltr;text-align:left}.telegram-phone-top{height:38px;display:flex;align-items:center;gap:9px;padding:0 9px;color:var(--muted);font-size:12px}.telegram-phone-top span{width:9px;height:9px;border-radius:999px;background:var(--green);box-shadow:0 0 0 4px var(--green2)}.telegram-phone-top b{font-size:13px;color:var(--text)}.telegram-phone-top em{margin-left:auto;font-style:normal;color:var(--blue);font-weight:850}.telegram-message-demo{background:var(--panel2);border:1px solid var(--border);border-radius:20px;padding:16px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;font-size:12px;line-height:1.55;max-height:640px;overflow:auto}.tg-line{margin:4px 0;color:var(--text)}.tg-title{color:var(--blue);font-size:13px}.tg-head{margin:8px 0 5px;color:var(--gold);font-weight:950}.tg-sep,.tg-thin{color:var(--muted);letter-spacing:-1px;margin:7px 0}.tg-indent{padding-left:14px}.tg-sell{color:var(--red)}.tg-line span,.tg-foot{color:var(--muted)}.tg-foot{font-size:11px;margin-top:6px}.telegram-message-demo b{color:var(--text);font-weight:900}@media(max-width:1100px){.telegram-example-layout{grid-template-columns:1fr}.telegram-phone{max-width:760px;width:100%;justify-self:center}}@media(max-width:760px){.telegram-example-points{grid-template-columns:1fr}.telegram-phone{border-radius:22px;padding:9px}.telegram-message-demo{font-size:11px;padding:13px;max-height:560px}.telegram-phone-top em{display:none}}
-
-/* Phase 6 — executive edge snapshot */
-.edge-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:-2px 0 16px}.edge-card{background:linear-gradient(135deg,var(--panel),var(--panel2));border:1px solid var(--border);box-shadow:var(--shadow2);border-radius:var(--radius);padding:16px;display:grid;gap:5px;min-height:118px;position:relative;overflow:hidden}.edge-card:after{content:"";position:absolute;inset:auto -34px -42px auto;width:96px;height:96px;border-radius:999px;background:rgba(37,99,235,.07)}.edge-card span{font-size:22px}.edge-card p{margin:0;color:var(--muted);font-size:12px;font-weight:950;text-transform:uppercase;letter-spacing:.04em}.edge-card strong{font-size:22px;color:var(--text);letter-spacing:-.035em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative;z-index:1}.edge-card small{color:var(--muted);font-weight:850;position:relative;z-index:1}@media(max-width:1050px){.edge-grid{grid-template-columns:1fr 1fr}}@media(max-width:620px){.edge-grid{grid-template-columns:1fr}.edge-card{min-height:auto}}
-
-/* Phase 1-6 marketing injection */
-.phase-stack-card,.edge-quality-card{display:grid;gap:16px}.phase-grid,.edge-feature-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.phase-grid div,.edge-feature-grid div{background:var(--panel2);border:1px solid var(--border);border-radius:16px;padding:15px;display:grid;gap:7px}.phase-grid b{width:34px;height:34px;border-radius:12px;background:var(--blue2);color:var(--blue);display:grid;place-items:center;font-weight:950}.phase-grid strong,.edge-feature-grid b{color:var(--text);font-weight:950;line-height:1.25}.phase-grid span,.edge-feature-grid p{color:var(--muted);font-weight:750;line-height:1.5;margin:0}.edge-feature-grid{grid-template-columns:repeat(4,1fr)}.edge-feature-grid div span{font-size:25px}.phase-why-grid{grid-template-columns:repeat(3,1fr)!important}.telegram-message-demo{max-height:720px}.native-words span:last-child{background:var(--green2);color:var(--green);border-color:rgba(22,163,74,.25)}@media(max-width:1050px){.phase-grid,.edge-feature-grid,.phase-why-grid{grid-template-columns:1fr 1fr!important}}@media(max-width:680px){.phase-grid,.edge-feature-grid,.phase-why-grid{grid-template-columns:1fr!important}}
-
-
-/* ── Two Paths Card ── */
-.two-paths-card { border-left: 3px solid #d4af37; }
-.two-paths-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
-  margin-top: 16px;
+/* ========== 13. Pricing / Pro / Subscribe – UNIFIED ==========
+   All the old .pricing-native-*, .pro-pricing, etc. now look
+   exactly like normal dashboard cards.
+*/
+.pricing-native, .pro-overview, .subscribe-page{display:grid;gap:14px}
+.pricing-native-head, .subscribe-head{
+  display:grid;grid-template-columns:1.3fr .7fr;gap:16px;align-items:center;
 }
-.two-paths-grid > div {
-  background: rgba(212, 175, 55, 0.06); border-radius: 12px;
-  padding: 20px; border: 1px solid rgba(212, 175, 55, 0.15);
+.pricing-native-kicker, .native-card-label{
+  display:inline-flex;background:var(--ss-gold-bg);color:var(--ss-gold);
+  border:1px solid rgba(217,119,6,.22);border-radius:999px;
+  padding:5px 11px;font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.03em
 }
-.two-paths-grid > div span { font-size: 28px; display: block; margin-bottom: 8px; }
-.two-paths-grid > div b { display: block; font-size: 15px; margin-bottom: 6px; color: #f0f0f0; }
-.two-paths-grid > div small { color: #aaa; font-size: 13px; line-height: 1.5; }
-@media (max-width: 640px) { .two-paths-grid { grid-template-columns: 1fr; } }
+.pricing-native-head h1{font-size:clamp(24px,3.2vw,38px);line-height:1.15;margin:8px 0 8px;letter-spacing:-.03em}
+.pricing-native-head p, .pricing-native-card p{color:var(--ss-muted);font-weight:700;line-height:1.65;margin:0}
+.pricing-native-metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.pricing-native-metrics div{background:var(--ss-panel2);border:1px solid var(--ss-border);border-radius:14px;padding:13px}
+.pricing-native-metrics strong{font-size:22px;color:var(--ss-text)}
+.pricing-native-metrics span{display:block;color:var(--ss-muted);font-size:12px;font-weight:800;margin-top:2px}
 
-/* ── Post-News Card ── */
-.post-news-card { border-left: 3px solid #c0392b; }
-.post-news-card p { color: #bbb; margin-bottom: 20px; }
-.post-news-steps { display: flex; flex-direction: column; gap: 14px; margin-bottom: 16px; }
-.post-news-steps > div {
-  display: flex; gap: 14px; align-items: flex-start;
-  background: rgba(192, 57, 43, 0.05); border-radius: 10px;
-  padding: 14px 16px; border: 1px solid rgba(192, 57, 43, 0.12);
+.overview-two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.native-card-icon{width:46px;height:46px;border-radius:14px;background:var(--ss-blue-bg);color:var(--ss-blue);display:grid;place-items:center;font-size:22px}
+.pricing-native-card h2{font-size:20px;margin:8px 0 6px}
+
+/* Agent list in pricing */
+.native-agent-list{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.native-agent-list .native-agent-item,
+.native-agent-list span
+{
+  background:var(--ss-panel2);border:1px solid var(--ss-border);
+  border-radius:12px;padding:11px;text-align:center;font-weight:850;font-size:13px
 }
-.post-news-steps > div b {
-  flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%;
-  background: #c0392b; color: #fff; display: flex; align-items: center;
-  justify-content: center; font-size: 12px;
+.native-agent-list .native-agent-item{text-align:start}
+.native-agent-list .native-agent-item b{display:block;font-weight:900;margin-bottom:4px}
+.native-agent-list .native-agent-item small{color:var(--ss-muted);font-weight:700;line-height:1.45}
+.native-agent-list .native-agent-item.accent{background:linear-gradient(135deg,var(--ss-gold-bg),var(--ss-panel2))}
+
+/* Benefits / feature lists – unified */
+.native-benefits-list{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:8px}
+.native-benefits-list div{
+  display:flex;align-items:center;gap:9px;background:var(--ss-panel2);
+  border:1px solid var(--ss-border);border-radius:12px;padding:11px
 }
-.post-news-steps > div span { color: #ccc; font-size: 13px; line-height: 1.5; }
-.post-news-note {
-  font-size: 13px; color: #999; font-style: italic;
-  border-top: 1px solid rgba(255,255,255,0.06); padding-top: 14px;
+.native-benefits-list span{
+  width:22px;height:22px;min-width:22px;border-radius:999px;
+  display:grid;place-items:center;background:var(--ss-green-bg);color:var(--ss-green);font-weight:900;font-size:12px
+}
+.native-benefits-list p{margin:0;color:var(--ss-text);font-weight:800;font-size:13px}
+
+/* Plans */
+.native-plan-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.native-plan{position:relative;background:var(--ss-panel2);border:1px solid var(--ss-border);border-radius:16px;padding:18px;text-align:center}
+.native-plan.highlighted{border:2px solid var(--ss-gold);background:linear-gradient(135deg,var(--ss-gold-bg),var(--ss-panel2))}
+.native-plan em{position:absolute;top:-10px;inset-inline-end:16px;background:linear-gradient(90deg,#f59e0b,var(--ss-gold));color:#fff;border-radius:999px;padding:3px 10px;font-style:normal;font-size:11px;font-weight:900}
+.native-plan span{display:block;color:var(--ss-muted);font-weight:800}
+.native-plan strong{display:block;font-size:42px;margin:10px 0 6px;letter-spacing:-.04em}
+.native-plan small{color:var(--ss-muted);font-weight:700}
+
+/* Comparison / tables in pricing */
+.native-table-wrap{overflow:auto;border:1px solid var(--ss-border);border-radius:14px}
+.native-benefits-table, .system-comparison-table{width:100%;min-width:620px;border-collapse:separate;border-spacing:0;background:var(--ss-panel)}
+.native-benefits-table th, .system-comparison-table th{background:var(--ss-panel2);color:var(--ss-muted);font-weight:900;font-size:11px;text-transform:uppercase}
+.native-benefits-table td, .system-comparison-table td{border-bottom:1px solid var(--ss-border);font-weight:700}
+.native-benefits-table td:last-child{color:var(--ss-green);font-weight:900}
+
+/* Comparison cards (SmartSignal vs EA) */
+.comparison-cards-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.comparison-product{border:1px solid var(--ss-border);border-radius:14px;padding:16px;background:var(--ss-panel2)}
+.comparison-product h3{margin:0 0 10px;font-size:18px}
+.comparison-product ul{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.comparison-product li{padding-inline-start:24px;position:relative;font-weight:700;font-size:13.5px}
+.comparison-product li:before{content:"✓";position:absolute;inset-inline-start:0;top:0;width:18px;height:18px;border-radius:999px;display:grid;place-items:center;background:var(--ss-green-bg);color:var(--ss-green);font-size:11px;font-weight:900}
+.comparison-product-sub{color:var(--ss-muted)!important;font-weight:700!important;margin:-4px 0 10px!important}
+
+/* FAQ / why / phase grids – all unified to ss-card look */
+.why-grid, .phase-grid, .edge-feature-grid, .faq-native-grid,
+.automation-points, .telegram-example-points,
+.post-news-steps, .two-paths-grid
+{display:grid;gap:10px}
+.why-grid{grid-template-columns:repeat(3,1fr)}
+.phase-grid{grid-template-columns:repeat(3,1fr)}
+.edge-feature-grid{grid-template-columns:repeat(4,1fr)}
+.faq-native-grid{grid-template-columns:1fr 1fr}
+.why-grid div, .phase-grid div, .edge-feature-grid div,
+.faq-native-grid div, .automation-points div,
+.telegram-example-points div, .post-news-steps > div,
+.two-paths-grid > div
+{
+  background:var(--ss-panel2);border:1px solid var(--ss-border);
+  border-radius:13px;padding:13px
+}
+.why-grid b, .phase-grid strong, .edge-feature-grid b,
+.faq-native-grid b{display:block;color:var(--ss-text);font-weight:900;margin-bottom:4px}
+.why-grid p, .phase-grid span, .edge-feature-grid p,
+.faq-native-grid p{margin:0;color:var(--ss-muted);font-weight:700;line-height:1.55}
+.why-grid div > span, .phase-grid b:first-child{
+  width:30px;height:30px;border-radius:10px;background:var(--ss-blue-bg);
+  color:var(--ss-blue);display:grid;place-items:center;font-weight:900;margin-bottom:8px
 }
 
-/* ── Telegram example: path badge & confirm line ── */
-.tg-path { color: #d4af37; font-size: 12px; letter-spacing: 0.5px; }
-.tg-confirm { color: #4caf50; font-size: 12px; }
+/* Telegram example phone */
+.telegram-example-layout{display:grid;grid-template-columns:.9fr 1.1fr;gap:16px;align-items:center}
+.telegram-example-points{grid-template-columns:1fr 1fr}
+.telegram-example-points b{width:28px;height:28px;border-radius:9px;display:grid;place-items:center;background:var(--ss-gold-bg);color:var(--ss-gold);font-size:12px}
+.telegram-example-points span{font-weight:800;font-size:13px;color:var(--ss-text)}
+.telegram-phone{background:var(--ss-panel);border:1px solid var(--ss-border);border-radius:22px;padding:12px;box-shadow:var(--ss-shadow)}
+.telegram-phone-top{display:flex;align-items:center;gap:8px;padding:0 6px 8px;color:var(--ss-muted);font-size:12px}
+.telegram-phone-top span{width:8px;height:8px;border-radius:999px;background:var(--ss-green)}
+.telegram-phone-top b{color:var(--ss-text)}
+.telegram-phone-top em{margin-inline-start:auto;font-style:normal;color:var(--ss-blue);font-weight:800}
+.telegram-message-demo{
+  background:var(--ss-panel2);border:1px solid var(--ss-border);border-radius:16px;
+  padding:14px;font-family:ui-monospace,monospace;font-size:11.5px;line-height:1.55;
+  max-height:620px;overflow:auto;color:var(--ss-text)
+}
+.tg-head{color:var(--ss-gold);font-weight:900;margin:7px 0 4px}
+.tg-sep,.tg-thin{color:var(--ss-muted)}
+.tg-foot{color:var(--ss-muted);font-size:11px}
+
+/* Payment / subscribe */
+.subscribe-head{grid-template-columns:1fr .5fr}
+.subscribe-summary{background:var(--ss-panel2);border:1px solid var(--ss-border);border-radius:14px;padding:16px}
+.subscribe-summary strong{font-size:18px}
+.subscribe-summary span{color:var(--ss-muted);font-weight:700}
+.subscribe-layout{display:grid;grid-template-columns:.75fr 1.25fr;gap:14px}
+.subscribe-benefits-list{grid-template-columns:1fr 1fr}
+
+.payment-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.payment-steps div{display:flex;align-items:center;gap:9px;background:var(--ss-panel2);border:1px solid var(--ss-border);border-radius:12px;padding:11px}
+.payment-steps b{width:28px;height:28px;border-radius:999px;background:var(--ss-blue-bg);color:var(--ss-blue);display:grid;place-items:center;flex:0 0 auto}
+.payment-steps span{font-weight:800;font-size:13px}
+
+.wallet-box{background:var(--ss-panel2);border:1px solid var(--ss-border);border-radius:14px;padding:13px}
+.wallet-box label{display:block;color:var(--ss-muted);font-size:11px;font-weight:900;text-transform:uppercase;margin-bottom:6px}
+.wallet-copy-row{display:flex;gap:8px;align-items:center}
+.wallet-copy-row code{flex:1;display:block;background:var(--ss-panel);border:1px dashed var(--ss-border);border-radius:11px;padding:11px;font-weight:900;overflow:auto}
+.activation-note{display:flex;gap:8px;background:var(--ss-gold-bg);border:1px solid rgba(217,119,6,.22);border-radius:12px;padding:12px}
+.activation-note strong{color:var(--ss-gold);white-space:nowrap}
+
+.native-risk{text-align:center;color:var(--ss-muted);font-size:13px}
+.native-risk strong{color:var(--ss-text)}
+
+/* ========== 14. Modal ========== */
+.modal{position:fixed;inset:0;background:rgba(2,6,23,.55);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;z-index:100}
+.modal-content{background:var(--ss-panel);border:1px solid var(--ss-border);border-radius:20px;padding:22px;max-width:680px;width:min(94vw,680px);box-shadow:var(--ss-shadow);position:relative}
+.close{position:absolute;top:10px;inset-inline-end:16px;font-size:26px;color:var(--ss-muted);cursor:pointer}
+.trade-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;font-size:13.5px}
+
+/* ========== 15. Utility / misc ========== */
+.page-title{margin:2px 0 14px}
+.page-title h1{margin:0;font-size:26px;letter-spacing:-.02em}
+.page-title p{margin:4px 0 0;color:var(--ss-muted);font-weight:700}
+.native-section-title{text-align:center;max-width:820px;margin:0 auto 12px}
+.native-section-title h2{font-size:22px;margin:6px 0}
+
+/* Project words chips */
+.project-words{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.project-words span{background:var(--ss-panel2);border:1px solid var(--ss-border);border-radius:999px;padding:7px 12px;font-weight:900;font-size:12.5px}
+
+/* ========== 16. Responsive ========== */
+@media(max-width:1100px){
+  .kpi-grid{grid-template-columns:repeat(4,1fr)}
+  .kpi-card,.kpi-card:nth-child(1),.kpi-card:nth-child(2),.kpi-card:nth-child(3),.kpi-card:nth-child(4),.kpi-card.compact{grid-column:span 2}
+  .charts-grid{grid-template-columns:1fr}
+  .reports-grid,.report-archive-grid,.overview-two-col,.subscribe-layout{grid-template-columns:1fr}
+  .pricing-native-head,.subscribe-head{grid-template-columns:1fr}
+  .telegram-example-layout{grid-template-columns:1fr}
+  .comparison-cards-grid{grid-template-columns:1fr}
+  .why-grid,.phase-grid,.edge-feature-grid{grid-template-columns:1fr 1fr}
+}
+@media(max-width:680px){
+  .app-shell{padding:10px}
+  .topbar{grid-template-columns:1fr;gap:8px}
+  .brand-block,.top-actions,.topbar-meta,.nav-links{grid-column:1}
+  .top-actions{justify-content:flex-start;flex-wrap:wrap}
+  .nav-links{justify-content:flex-start;overflow-x:auto;flex-wrap:nowrap}
+  .kpi-grid{grid-template-columns:1fr 1fr}
+  .kpi-card,.kpi-card:nth-child(n){grid-column:span 1}
+  .edge-grid{grid-template-columns:1fr}
+  .why-grid,.phase-grid,.edge-feature-grid,.faq-native-grid,
+  .native-benefits-list,.native-plan-grid,.payment-steps{grid-template-columns:1fr}
+  .chart-area{height:240px}
+  .wallet-copy-row{flex-direction:column;align-items:stretch}
+}
+
+/* ========== 17. Compatibility shims ==========
+   Keep every old class name working, mapping to unified look.
+   This is why you can drop this file in with ZERO HTML/JS changes.
+*/
+.pro-pricing, .pricing-unified.pro-pricing { background:var(--ss-panel)!important; color:var(--ss-text)!important; border:1px solid var(--ss-border)!important; box-shadow:var(--ss-shadow-sm)!important }
+.pro-pricing:before, .pricing-unified.pro-pricing:before { display:none!important }
+.pricing-hero, .value-strip, .pricing-grid, .conversion-panel, .psychology-band,
+.agents-showcase, .comparison-block, .faq-block, .final-cta { background:transparent!important; border:0!important; box-shadow:none!important; padding:0!important; margin:0!important }
+.pricing-hero h1, .psychology-band h2, .section-heading h2, .conversion-panel h2, .final-cta h2 { color:var(--ss-text)!important }
+.pricing-hero p, .psychology-band p, .section-heading p { color:var(--ss-muted)!important }
+.pricing-snapshot div, .value-item, .pricing-card, .agent-feature, .faq-item, .conversion-checks span {
+  background:var(--ss-panel2)!important; border:1px solid var(--ss-border)!important; color:var(--ss-text)!important; box-shadow:none!important
+}
+.pricing-card.popular { border:2px solid var(--ss-gold)!important; background:var(--ss-panel)!important }
+.pricing-card h3, .price { color:var(--ss-text)!important }
+.price span, .plan-description { color:var(--ss-muted)!important }
+.features { display:none!important } /* features moved to unified benefits list */
+.btn-subscribe { border-radius:var(--ss-r-sm)!important; font-weight:850!important }
+.btn-subscribe.primary { background:linear-gradient(135deg,var(--ss-blue),#06b6d4)!important; color:#fff!important }
+.btn-subscribe.secondary { background:var(--ss-panel)!important; color:var(--ss-text)!important; border:1px solid var(--ss-border)!important }
+.comparison-table, .native-benefits-table { background:var(--ss-panel)!important; color:var(--ss-text)!important }
+.comparison-table th, .native-benefits-table th { background:var(--ss-panel2)!important; color:var(--ss-muted)!important; border-bottom:1px solid var(--ss-border)!important }
+.comparison-table td, .native-benefits-table td { border-bottom:1px solid var(--ss-border)!important }
+.hero-card, .compact-title-card { display:none!important } /* old hero banners removed in current index.html anyway */
+
+/* Remove old heavy backgrounds that clash with unified look */
+.telegram-example-card:before, .pro-pricing:before { display:none }
+.ea-positioning-card, .problem-grid div { background:var(--ss-panel2)!important; border:1px solid var(--ss-border)!important }
+
+/* Ensure all old button variants look unified */
+.btn-contact, .btn-subscribe, .pricing-telegram { 
+  background:linear-gradient(135deg,#f59e0b,var(--ss-gold))!important; color:#fff!important; border:0!important;
+  padding:10px 14px!important; border-radius:var(--ss-r-sm)!important; font-weight:850!important;
+}
+
+/* End of unified stylesheet */
