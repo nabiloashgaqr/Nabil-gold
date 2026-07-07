@@ -1,0 +1,64 @@
+name: 🧰 Enrich Trade
+
+on:
+  workflow_dispatch:
+    inputs:
+      trade_id:
+        description: "Trade ID"
+        required: true
+        type: string
+      action:
+        description: "Action"
+        required: true
+        type: choice
+        default: "be_hit"
+        options:
+          - reopen
+          - update_prices
+          - be_hit
+          - sl_hit
+          - trailing_sl_hit
+          - tp1_hit
+          - tp2_hit
+          - delete
+      current_price:
+        description: "Current price (optional)"
+        required: false
+        default: ""
+        type: string
+      high_price:
+        description: "Highest price reached (optional — for MFE)"
+        required: false
+        default: ""
+        type: string
+      low_price:
+        description: "Lowest price reached (optional — for MFE)"
+        required: false
+        default: ""
+        type: string
+      pnl_points:
+        description: "PnL in points (optional — overrides auto-calc)"
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - run: python scripts/enrich_trade.py
+        env:
+          TRADE_ID: ${{ github.event.inputs.trade_id }}
+          ACTION: ${{ github.event.inputs.action }}
+          CURRENT_PRICE: ${{ github.event.inputs.current_price }}
+          HIGH_PRICE: ${{ github.event.inputs.high_price }}
+          LOW_PRICE: ${{ github.event.inputs.low_price }}
+          PNL_POINTS: ${{ github.event.inputs.pnl_points }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
