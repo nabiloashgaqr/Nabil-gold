@@ -202,21 +202,27 @@ def format_dashboard_telegram(summary: Dict[str, Any]) -> str:
     pf = summary.get("profit_factor", 0)
     if pf >= 99 or pf == 0 and summary.get("losses", 0) == 0 and summary.get("wins", 0) > 0:
         pf_display = "∞"
-        pf_note = " (All profitable trades → ∞)"
     else:
         pf_display = pf
-        pf_note = ""
     net = summary.get("net_points", 0)
-    return "\n".join(
-        [
-            "📊 <b>Dashboard Updated</b>",
-            "━━━━━━━━━━━━━━━━━━━━",
-            f"Trades: {summary.get('total', 0)} | Open: {summary.get('open', 0)}",
-            f"Win Rate: {summary.get('win_rate', 0)}%",
-            f"Net Points: {net:+}",
-            f"Profit Factor: {pf_display}{pf_note}",
-            "dashboard.html was generated as a GitHub Actions artifact.",
-            "━━━━━━━━━━━━━━━━━━━━",
-            "📌 Note: PF=∞ when no losing trades (gross_loss=0).",
-        ]
-    )
+    wins = summary.get("wins", 0)
+    losses = summary.get("losses", 0)
+    buy_net = summary.get("buy_net", 0)
+    sell_net = summary.get("sell_net", 0)
+    buy_count = summary.get("buy_count", 0)
+    sell_count = summary.get("sell_count", 0)
+    avg_conf = summary.get("avg_confidence", 0)
+    lines = [
+        "📊 <b>Dashboard Updated</b>",
+        "━━━━━━━━━━━━━━━━━━━━",
+        f"Trades: {summary.get('total', 0)} | Open: {summary.get('open', 0)}",
+        f"📈 Win Rate: {summary.get('win_rate', 0)}% · W: {wins} / L: {losses}",
+        f"💰 Net: {net:+} pts · PF: {pf_display}",
+    ]
+    if buy_count or sell_count:
+        lines.append(f"🟢 BUY: {buy_count} trades · {buy_net:+} pts")
+        lines.append(f"🔴 SELL: {sell_count} trades · {sell_net:+} pts")
+    if avg_conf:
+        lines.append(f"🎯 Avg Confidence: {avg_conf}%")
+    lines.append("━━━━━━━━━━━━━━━━━━━━")
+    return "\n".join(lines)
