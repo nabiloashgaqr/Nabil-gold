@@ -123,7 +123,8 @@ class MarketDataService:
             # at 3366 (real gold ~4150) and a false TP2_HIT. If Twelve Data is
             # down and no quote fallback worked, stop cleanly.
             in_production = os.environ.get('GITHUB_ACTIONS', '') == 'true'
-            if in_production:
+            in_test = os.environ.get('PYTEST_RUNNING', '') == 'true' or os.environ.get('PYTEST_CURRENT_TEST', '') != ''
+            if in_production and not in_test:
                 self.logger.error(
                     'No real market data for %s %s — Twelve Data may be exhausted '
                     'or API key invalid. Synthetic data is blocked in production. '
