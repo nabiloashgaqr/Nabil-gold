@@ -1,0 +1,274 @@
+"""One script to manage every trade — 8 actions, full price context.
+
+Usage:
+    TRADE_ID=... ACTION=be_hit CURRENT_PRICE=4132 LOW_PRICE=4117 python scripts/enrich_trade.py
+
+Actions:
+    reopen         → clear close fields, set OPEN
+    update_prices  → update MFE/MAE/PnL from HIGH_PRICE/LOW_PRICE/CURRENT_PRICE
+    be_hit         → breakeven at entry (SL moved, price retraced)
+    sl_hit         → full stop-loss (loss)
+    trailing_sl_hit → trailing stop hit (profit locked)
+    tp1_hit        → first target (partial close, SL→entry)
+    tp2_hit        → second target (full win)
+    delete         → remove trade permanently
+
+Optional env vars: CURRENT_PRICE, HIGH_PRICE, LOW_PRICE, PNL_POINTS
+"""
+
+from __future__ import annotations
+import os, sys, logging
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from services.database import DatabaseService
+from utils.helpers import load_config, calculate_pips
+
+logger = logging.getLogger(__name__)
+
+_VALID = {"reopen", "update_prices", "be_hit", "sl_hit", "trailing_sl_hit", "tp1_hit", "tp2_hit", "delete"}
+
+_CLEARABLE = {"TP2_HIT", "TP1_HIT", "SL_HIT", "TRAILING_SL_HIT", "BE_HIT",
+              "EXPIRED", "MANUAL_CLOSE", "MOVE_SL_TO_BE", "TRAILING_SL_UPDATED",
+              "EXIT_WARNING", "NEAR_TP1", "LONG_RUNNING", "PRICE_SANITY_FAILED",
+              "PARTIAL_CLOSE", "ORDER_FILLED"}
+
+
+def _env(key: str, default: str = "") -> str:
+    return os.environ.get(key, default).strip()
+
+
+def _opt_float(key: str) -> float | None:
+    raw = _env(key)
+    if not raw: return None
+    try: return float(raw)
+    except ValueError:
+        print(f"❌ Invalid float for {key}: {raw}")
+        raise SystemExit(1)
+
+
+def _find(db: DatabaseService, tid: str) -> dict | None:
+    for t in db.get_recent_trades(limit=300):
+        if str(t.get("id")) == tid: return t
+    for t in db.get_open_trades():
+        if str(t.get("id")) == tid: return t
+    return None
+
+
+def _clean_us(trade: dict) -> list:
+    old = trade.get("updates_sent") or []
+    return [e for e in old if e not in _CLEARABLE]
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _write(db: DatabaseService, tid: str, updates: dict) -> bool:
+    if not db.use_supabase or not db.client:
+        print("❌ Supabase not configured")
+        return False
+    try:
+        db.client.table("trades").update(updates).eq("id", tid).execute()
+        return True
+    except Exception as exc:
+        legacy = {k: v for k, v in updates.items()
+                  if k in {"status", "result", "close_price", "final_pnl", "final_pnl_points",
+                           "closed_at", "close_time", "stop_loss", "sl_moved_to_entry",
+                           "partial_close", "max_favorable_excursion", "max_adverse_excursion",
+                           "current_price", "current_pnl", "current_pnl_points", "last_updated"}}
+        try:
+            db.client.table("trades").update(legacy).eq("id", tid).execute()
+            return True
+        except Exception as exc2:
+            print(f"❌ Supabase update failed: {exc2}")
+            return False
+
+
+# ── PnL / MFE / MAE helpers ────────────────────────────────────────
+def _pnl(entry: float, price: float, side: str, symbol: str) -> float:
+    """PnL in points from entry to price."""
+    if entry <= 0: return 0
+    return round(calculate_pips(entry, price, side, symbol), 1)
+
+
+def _mfe(entry: float, high: float | None, low: float | None, side: str, symbol: str) -> float | None:
+    """Best-case excursion in points from current/high/low."""
+    best = None
+    for p in (high, low):
+        if p is not None and p > 0:
+            exc = _pnl(entry, p, side, symbol)
+            if best is None or exc > best:
+                best = exc
+    return best
+
+
+def _mae(entry: float, high: float | None, low: float | None, side: str, symbol: str) -> float | None:
+    """Worst-case excursion in points from current/high/low."""
+    worst = None
+    for p in (high, low):
+        if p is not None and p > 0:
+            exc = _pnl(entry, p, side, symbol)
+            if worst is None or exc < worst:
+                worst = exc
+    return worst
+
+
+# ── Main ────────────────────────────────────────────────────────────
+def main() -> int:
+    cfg = load_config()
+    db = DatabaseService(cfg)
+
+    tid = _env("TRADE_ID")
+    action = _env("ACTION", "reopen").lower()
+    cur = _opt_float("CURRENT_PRICE")
+    hi = _opt_float("HIGH_PRICE")
+    lo = _opt_float("LOW_PRICE")
+    manual_pnl = _opt_float("PNL_POINTS")
+
+    if not tid: print("❌ TRADE_ID required"); return 1
+    if action not in _VALID:
+        print(f"❌ Invalid ACTION. Valid: {', '.join(sorted(_VALID))}"); return 1
+
+    trade = _find(db, tid)
+    entry = float(trade.get("entry_price", 0)) if trade else 0
+    side = str(trade.get("type") or trade.get("side") or "BUY").upper() if trade else "BUY"
+    symbol = str(trade.get("symbol") or "XAU/USD") if trade else "XAU/USD"
+    old_status = str(trade.get("status", "?")) if trade else "?"
+    tp1 = float(trade.get("tp1", 0)) if trade else 0
+    tp2 = float(trade.get("tp2", 0)) if trade else 0
+    sl = float(trade.get("stop_loss", 0)) if trade else 0
+    old_mfe = float(trade.get("max_favorable_excursion", 0) or 0) if trade else 0
+    old_mae = float(trade.get("max_adverse_excursion", 0) or 0) if trade else 0
+
+    # Print summary
+    mfe_val = _mfe(entry, hi, lo, side, symbol)
+    mae_val = _mae(entry, hi, lo, side, symbol)
+    cur_pnl = _pnl(entry, cur, side, symbol) if cur else None
+
+    print(f"🔍 {tid}  |  {side} @ {entry}  |  Status: {old_status}")
+    print(f"   Action: {action}")
+    if cur:  print(f"   Current Price: {cur} → PnL: {cur_pnl:+.1f} pts" if cur_pnl else f"   Current Price: {cur}")
+    if hi:   print(f"   High: {hi}")
+    if lo:   print(f"   Low: {lo}")
+    if mfe_val is not None: print(f"   Calc MFE: {mfe_val:+.1f} pts  |  Old MFE: {old_mfe:+.1f}")
+    if mae_val is not None: print(f"   Calc MAE: {mae_val:+.1f} pts  |  Old MAE: {old_mae:+.1f}")
+
+    # ── Delete ──
+    if action == "delete":
+        if not trade: print("⚠️  Not found"); return 0
+        if db.use_supabase and db.client:
+            db.client.table("trades").delete().eq("id", tid).execute()
+            print(f"✅ {tid} DELETED")
+        return 0
+
+    if not trade: print(f"❌ Trade {tid} not found!"); return 1
+
+    updates: dict = {"last_updated": _now()}
+    now = _now()
+
+    # ── update_prices (no close, just tracking data) ──
+    if action == "update_prices":
+        if cur is not None:
+            updates["current_price"] = round(cur, 2)
+            updates["current_pnl"] = cur_pnl
+            updates["current_pnl_points"] = cur_pnl
+        # MFE: take the best of old + newly calculated
+        final_mfe = old_mfe
+        if mfe_val is not None:
+            final_mfe = max(old_mfe, mfe_val)
+        final_mae = old_mae
+        if mae_val is not None:
+            final_mae = min(old_mae, mae_val, 0) if old_mae < 0 else min(mae_val, 0)
+        updates["max_favorable_excursion"] = round(final_mfe, 1)
+        updates["max_adverse_excursion"] = round(final_mae, 1)
+        ok = _write(db, tid, updates)
+        if ok:
+            print(f"✅ {tid} prices updated  |  MFE: {final_mfe:+.1f}  |  MAE: {final_mae:+.1f}")
+        return 0 if ok else 1
+
+    # ── reopen ──
+    if action == "reopen":
+        updates.update(status="OPEN", result=None, closed_at=None, close_time=None,
+                       close_price=None, final_pnl=None, final_pnl_points=None)
+        updates["updates_sent"] = _clean_us(trade)
+        # Update price tracking
+        if cur is not None:
+            updates["current_price"] = round(cur, 2)
+            updates["current_pnl"] = cur_pnl
+            updates["current_pnl_points"] = cur_pnl
+        final_mfe = max(old_mfe, mfe_val) if mfe_val is not None else old_mfe
+        final_mae = min(old_mae, mae_val) if mae_val is not None else old_mae
+        updates["max_favorable_excursion"] = round(final_mfe, 1)
+        updates["max_adverse_excursion"] = round(final_mae, 1)
+        ok = _write(db, tid, updates)
+        if ok: print(f"✅ {tid} → OPEN")
+        return 0 if ok else 1
+
+    # ── be_hit ──
+    if action == "be_hit":
+        final_mfe = max(old_mfe, mfe_val) if mfe_val is not None else max(old_mfe, 150.0)
+        updates.update(status="BE_HIT", result="BREAKEVEN", sl_moved_to_entry=True,
+                       stop_loss=round(entry, 2), close_price=round(entry, 2),
+                       final_pnl=0.0, final_pnl_points=0.0, closed_at=now, close_time=now,
+                       max_favorable_excursion=round(final_mfe, 1),
+                       max_adverse_excursion=round(mae_val, 1) if mae_val is not None else old_mae)
+        updates["updates_sent"] = [e for e in _clean_us(trade) if e != "BE_HIT"] + ["MOVE_SL_TO_BE", "BE_HIT"]
+
+    # ── sl_hit ──
+    elif action == "sl_hit":
+        cp = cur or sl
+        pnl = manual_pnl if manual_pnl is not None else _pnl(entry, cp, side, symbol)
+        final_mfe = max(old_mfe, mfe_val) if mfe_val is not None else old_mfe
+        updates.update(status="SL_HIT", result="LOSS", close_price=round(cp, 2),
+                       final_pnl=round(pnl, 1), final_pnl_points=round(pnl, 1),
+                       closed_at=now, close_time=now,
+                       max_favorable_excursion=round(final_mfe, 1))
+        updates["updates_sent"] = [e for e in _clean_us(trade) if e != "SL_HIT"] + ["SL_HIT"]
+
+    # ── trailing_sl_hit ──
+    elif action == "trailing_sl_hit":
+        cp = cur or entry
+        pnl = manual_pnl if manual_pnl is not None else _pnl(entry, cp, side, symbol)
+        final_mfe = max(old_mfe, mfe_val) if mfe_val is not None else max(old_mfe, pnl)
+        updates.update(status="SL_HIT", result="WIN" if pnl > 0 else "BREAKEVEN",
+                       sl_moved_to_entry=True, stop_loss=round(cp, 2),
+                       close_price=round(cp, 2), final_pnl=round(pnl, 1),
+                       final_pnl_points=round(pnl, 1), closed_at=now, close_time=now,
+                       max_favorable_excursion=round(final_mfe, 1))
+        updates["updates_sent"] = [e for e in _clean_us(trade) if e not in {"TRAILING_SL_HIT", "SL_HIT"}] + ["TRAILING_SL_HIT"]
+
+    # ── tp1_hit ──
+    elif action == "tp1_hit":
+        cp = cur or tp1
+        pnl = manual_pnl if manual_pnl is not None else _pnl(entry, cp, side, symbol) * 0.5
+        final_mfe = max(old_mfe, _pnl(entry, cp, side, symbol))
+        updates.update(status="TP1_HIT", result=None, partial_close=True,
+                       sl_moved_to_entry=True, stop_loss=round(entry, 2),
+                       close_price=round(cp, 2), final_pnl=round(pnl, 1),
+                       final_pnl_points=round(pnl, 1),
+                       max_favorable_excursion=round(final_mfe, 1))
+        updates["updates_sent"] = [e for e in _clean_us(trade) if e not in {"TP1_HIT", "MOVE_SL_TO_BE"}] + ["TP1_HIT", "MOVE_SL_TO_BE"]
+
+    # ── tp2_hit ──
+    elif action == "tp2_hit":
+        cp = cur or tp2
+        pnl = manual_pnl if manual_pnl is not None else _pnl(entry, cp, side, symbol)
+        final_mfe = max(old_mfe, pnl)
+        updates.update(status="TP2_HIT", result="WIN", close_price=round(cp, 2),
+                       final_pnl=round(pnl, 1), final_pnl_points=round(pnl, 1),
+                       closed_at=now, close_time=now,
+                       max_favorable_excursion=round(final_mfe, 1))
+        updates["updates_sent"] = [e for e in _clean_us(trade) if e != "TP2_HIT"] + ["TP2_HIT"]
+
+    ok = _write(db, tid, updates)
+    if ok:
+        print(f"✅ {tid} → {updates.get('status')}  |  PnL: {updates.get('final_pnl', '?')}  |  MFE: {updates.get('max_favorable_excursion', '?')}")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
