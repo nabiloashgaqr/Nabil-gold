@@ -13,6 +13,11 @@ on:
         required: false
         default: ""
         type: string
+      action:
+        description: "reopen = restore to OPEN | be_hit = close as BE_HIT (use when price reached +150 pts before corruption)"
+        required: false
+        default: "reopen"
+        type: string
 
 jobs:
   restore:
@@ -37,5 +42,6 @@ jobs:
         env:
           TRADE_ID: ${{ github.event.inputs.trade_id }}
           CURRENT_PRICE: ${{ github.event.inputs.current_price }}
+          ACTION: ${{ github.event.inputs.action }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
