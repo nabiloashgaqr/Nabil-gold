@@ -192,7 +192,7 @@ class LearningService:
                     status, entry_time, opened_at, closed_at, created_at, signal_snapshot
                 FROM trades
                 WHERE closed_at >= NOW() - INTERVAL '{days} days'
-                    AND status IN ('CLOSED', 'TP1_HIT', 'TP2_HIT', 'SL_HIT', 'MANUAL_CLOSE')
+                    AND status IN ('CLOSED', 'TP1_HIT', 'TP2_HIT', 'SL_HIT', 'BE_HIT', 'EXPIRED', 'MANUAL_CLOSE')
                 ORDER BY closed_at DESC
             """
             
