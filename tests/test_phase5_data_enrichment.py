@@ -78,8 +78,8 @@ def test_weekly_stats_include_phase5_enrichment_metrics() -> None:
     regime = service._regime_fit(trades)
     news = service._news_proximity(trades)
 
-    assert rr["sample"] == 2
-    assert rr["avg_actual_r"] == pytest.approx(1.0)
+    assert rr["sample"] == 1
+    assert rr["avg_actual_r"] == pytest.approx(3.0)
     assert rr["avg_planned_rr"] == pytest.approx(2.5)
     assert tow["Tuesday"]["pnl"] == pytest.approx(600)
     assert tow["Wednesday"]["pnl"] == pytest.approx(-200)

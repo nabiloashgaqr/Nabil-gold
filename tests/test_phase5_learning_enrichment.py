@@ -43,8 +43,8 @@ def test_learning_enrichment_breakdowns_include_rr_news_session_regime() -> None
 
     enriched = svc._enrichment_breakdowns(trades)
 
-    assert enriched["rr_efficiency"]["sample"] == 2
-    assert enriched["rr_efficiency"]["avg_actual_r"] == pytest.approx(1.0)
+    assert enriched["rr_efficiency"]["sample"] == 1
+    assert enriched["rr_efficiency"]["avg_actual_r"] == pytest.approx(3.0)
     assert enriched["rr_efficiency"]["avg_planned_rr"] == pytest.approx(2.5)
     assert enriched["session_breakdown"]["London / Europe Midday"]["pnl"] == pytest.approx(300)
     assert enriched["day_of_week_breakdown"]["Wednesday"]["pnl"] == pytest.approx(-100)

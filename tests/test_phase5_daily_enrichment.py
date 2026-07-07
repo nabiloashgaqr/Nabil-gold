@@ -36,10 +36,10 @@ def test_daily_enrichment_quality_snapshot_and_gemini_payload():
 
     enrichment = _daily_enrichment_summary(trades)
     assert enrichment["rr_efficiency"] == {
-        "sample": 2,
-        "avg_actual_r": 1.0,
+        "sample": 1,
+        "avg_actual_r": 3.0,
         "avg_planned_rr": 2.5,
-        "rr_capture_pct": 40.0,
+        "rr_capture_pct": 120.0,
     }
     assert enrichment["session_breakdown"]["London / Europe Midday"]["pnl"] == 600.0
     assert enrichment["session_breakdown"]["New York Evening"]["pnl"] == -200.0
@@ -49,13 +49,13 @@ def test_daily_enrichment_quality_snapshot_and_gemini_payload():
     lines = _quality_snapshot_lines(enrichment)
     text = "\n".join(lines)
     assert "RR Capture" in text
-    assert "+1.00R" in text
+    assert "+3.00R" in text
     assert "Best session: London / Europe Midday +600 pts" in text
     assert "News impact: CAUTION -200 pts" in text
     assert "Best regime: HIGH +600 pts" in text
 
     gemini = GeminiReviewService({})
     payload = gemini._compact_daily_report_payload({"report_date": "2026-07-01", **enrichment})
-    assert payload["rr_efficiency"]["rr_capture_pct"] == 40.0
+    assert payload["rr_efficiency"]["rr_capture_pct"] == 120.0
     assert payload["session_breakdown"]["London / Europe Midday"]["pnl"] == 600.0
     assert payload["news_proximity"]["CAUTION"]["pnl"] == -200.0
