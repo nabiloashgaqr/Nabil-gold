@@ -241,7 +241,27 @@ def main() -> int:
 
     # ── trailing_sl_hit ──
     elif action == "trailing_sl_hit":
-        cp = cur or entry
+        # Calculate close_price from the BEST price + trailing distance.
+        # SELL: close = LOW + distance, BUY: close = HIGH - distance
+        tm = cfg.get("trade_management", {}) or {}
+        ts = cfg.get("trailing_stop", {}) or {}
+        trail_pts = float(tm.get("trailing_distance_points",
+                          ts.get("trailing_distance", 150)) or 150)
+        trail_price = trail_pts / 10.0  # 150 pts = 15 USD
+
+        best_price = None
+        if side == "SELL" and lo is not None:
+            best_price = lo
+        elif side == "BUY" and hi is not None:
+            best_price = hi
+
+        if best_price is not None:
+            cp = best_price + trail_price if side == "SELL" else best_price - trail_price
+            print(f"   Trailing calc: best={'low' if side=='SELL' else 'high'}={best_price} + {trail_price} = cp={cp:.2f}")
+        else:
+            cp = cur or entry
+            print(f"   No best price provided — using current: {cp:.2f}")
+
         pnl = manual_pnl if manual_pnl is not None else _pnl(entry, cp, side, symbol)
         final_mfe = max(old_mfe, mfe_val) if mfe_val is not None else max(old_mfe, pnl)
         updates.update(status="SL_HIT", result="WIN" if pnl > 0 else "BREAKEVEN",
