@@ -50,15 +50,20 @@ def _current_price() -> float | None:
         raise SystemExit(f"Invalid CURRENT_PRICE: {raw}")
 
 
+def _action() -> str:
+    return os.environ.get("ACTION", "reopen").strip().lower()
+
+
 def main() -> int:
     cfg = load_config()
     db = DatabaseService(cfg)
     trade_id = _trade_id()
     current_price = _current_price()
+    action = _action()
     now = datetime.now(timezone.utc)
     now_iso = now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
-    # Find the trade in recent/open trades
+    # Find the trade
     all_trades = {}
     for t in db.get_recent_trades(limit=200):
         all_trades[str(t.get("id"))] = t
@@ -67,7 +72,7 @@ def main() -> int:
 
     trade = all_trades.get(trade_id)
     if not trade:
-        print(f"❌ Trade {trade_id} not found in recent or open trades!")
+        print(f"❌ Trade {trade_id} not found!")
         return 1
 
     old_status = str(trade.get("status", "UNKNOWN")).upper()
@@ -79,6 +84,7 @@ def main() -> int:
     print(f"   Symbol: {symbol}  |  Type: {trade_type}")
     print(f"   Entry: {entry_price}")
     print(f"   Old status: {old_status}")
+    print(f"   Action: {action}")
 
     # Clean updates_sent
     old_updates = trade.get("updates_sent") or []
@@ -86,13 +92,40 @@ def main() -> int:
     if len(old_updates) != len(cleaned_updates):
         print(f"   Cleaned updates_sent: {len(old_updates)} → {len(cleaned_updates)} events")
 
-    # Calculate real PnL
     pnl = 0.0
     price_to_write = current_price or float(trade.get("current_price", entry_price))
     if current_price is not None and entry_price > 0:
         pnl = calculate_pips(entry_price, current_price, trade_type, symbol)
         print(f"   Current price: {current_price} → PnL: {pnl:+.1f} pts")
 
+    if action == "be_hit":
+        # ── Close as BE_HIT: price earned +150 pts before the corrupted close,
+        #     then retraced to entry. The real outcome is breakeven. ──
+        updates = {
+            "status": "BE_HIT",
+            "result": "BREAKEVEN",
+            "sl_moved_to_entry": True,
+            "stop_loss": round(entry_price, 2),
+            "close_price": round(entry_price, 2),
+            "final_pnl": 0.0,
+            "final_pnl_points": 0.0,
+            "current_price": round(price_to_write, 2),
+            "current_pnl": round(pnl, 1),
+            "current_pnl_points": round(pnl, 1),
+            "max_favorable_excursion": max(float(trade.get("max_favorable_excursion", 0) or 0), 150.0),
+            "max_adverse_excursion": 0.0,
+            "closed_at": now_iso,
+            "close_time": now_iso,
+            "last_updated": now_iso,
+            "updates_sent": [e for e in cleaned_updates if e not in {"BE_HIT", "MOVE_SL_TO_BE"}] + ["MOVE_SL_TO_BE", "BE_HIT"],
+        }
+        if "TP2_HIT" in old_updates:
+            updates["updates_sent"] = [e for e in updates["updates_sent"] if e != "TP2_HIT"]
+        db.update_trade(trade_id, updates)
+        print(f"\n✅ Trade {trade_id} → BE_HIT (breakeven at entry {entry_price})")
+        return 0
+
+    # Default: reopen
     updates = {
         "status": "OPEN",
         "result": None,
@@ -100,13 +133,14 @@ def main() -> int:
         "close_time": None,
         "close_price": None,
         "final_pnl": None,
+        "max_favorable_excursion": round(pnl, 1),
+        "max_adverse_excursion": round(pnl, 1),
         "current_price": round(price_to_write, 2),
         "current_pnl": round(pnl, 1),
         "current_pnl_points": round(pnl, 1),
         "last_updated": now_iso,
         "updates_sent": cleaned_updates,
     }
-
     db.update_trade(trade_id, updates)
     print(f"\n✅ Trade {trade_id} restored → OPEN (PnL: {pnl:+.1f} pts)")
     return 0
