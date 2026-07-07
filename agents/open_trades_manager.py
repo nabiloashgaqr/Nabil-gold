@@ -459,9 +459,20 @@ class OpenTradesManager(BaseAgent):
                 and "EXPIRED" not in events
             ):
                 base_stop = new_stop_loss if new_stop_loss is not None else stop_loss
-                # Use the favorable candle extreme, not only the close. For SELL,
-                # trailing must follow the candle LOW; for BUY, the candle HIGH.
-                trailing_candidate = self._compute_trailing_stop(trade_type, favorable_price, base_stop, entry, symbol)
+                # Use the BEST price the trade has ever seen — all-time MFE from DB,
+                # not just the current candle. Without this, trailing only sees the
+                # current 5m candle and misses multi-candle favorable moves.
+                # SELL: best = lowest price ever   |  BUY: best = highest price ever
+                best_from_mfe = favorable_price
+                if trade_type == "SELL" and max_favorable_excursion > 0:
+                    all_time_low = entry - (max_favorable_excursion / 10.0)
+                    if best_from_mfe <= 0 or all_time_low < best_from_mfe:
+                        best_from_mfe = all_time_low
+                elif trade_type == "BUY" and max_favorable_excursion > 0:
+                    all_time_high = entry + (max_favorable_excursion / 10.0)
+                    if best_from_mfe <= 0 or all_time_high > best_from_mfe:
+                        best_from_mfe = all_time_high
+                trailing_candidate = self._compute_trailing_stop(trade_type, best_from_mfe, base_stop, entry, symbol)
                 if trailing_candidate is not None:
                     new_stop_loss = trailing_candidate
                     if "TRAILING_SL_UPDATED" not in events:
