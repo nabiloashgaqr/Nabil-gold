@@ -427,15 +427,15 @@ class LearningService:
             rr = self._planned_rr(trade)
             if rr > 0:
                 planned.append(rr)
-        if not actual_r:
-            return {"sample": 0}
         wins = [x for x in actual_r if x > 0]
+        if not wins:
+            return {"sample": 0}
         return {
-            "sample": len(actual_r),
-            "avg_actual_r": round(sum(actual_r) / len(actual_r), 2),
-            "avg_winner_r": round(sum(wins) / len(wins), 2) if wins else 0.0,
+            "sample": len(wins),
+            "avg_actual_r": round(sum(wins) / len(wins), 2),
+            "avg_winner_r": round(sum(wins) / len(wins), 2),
             "avg_planned_rr": round(sum(planned) / len(planned), 2) if planned else 0.0,
-            "rr_capture_pct": round((sum(actual_r) / len(actual_r)) / (sum(planned) / len(planned)) * 100, 1) if planned and sum(planned) else 0.0,
+            "rr_capture_pct": round((sum(wins) / len(wins)) / (sum(planned) / len(planned)) * 100, 1) if planned and sum(planned) else 0.0,
         }
 
     def _enrichment_breakdowns(self, trades: List[Dict[str, Any]]) -> Dict[str, Any]:
