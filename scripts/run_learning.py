@@ -81,7 +81,14 @@ def main() -> str | None:
             if not gemini.enabled:
                 logger.info("🧠 Gemini learning review skipped: API key not configured")
             else:
-                review = gemini.summarize_learning({
+                # Skip when no trades were analyzed this period (avoids
+                # the repetitive "1/10 — No trading activity" response).
+                if getattr(report, 'total_trades_analyzed', 0) <= 0:
+                    logger.info(
+                        "🧠 Gemini learning review skipped: 0 new trades analyzed this period"
+                    )
+                else:
+                    review = gemini.summarize_learning({
                     "report_date": report.report_date,
                     "overall_win_rate": report.overall_win_rate,
                     "total_trades_analyzed": report.total_trades_analyzed,
@@ -98,28 +105,28 @@ def main() -> str | None:
                     "missed_setups": getattr(report, "missed_setups", []),
                     "alpha_leakage_notes": getattr(report, "alpha_leakage_notes", []),
                 })
-                if review.get("available"):
-                    lines = [summary, "", "🧠 Gemini Independent Learning Review"]
-                    if review.get("execution_score") is not None:
-                        lines.append(f"• Execution Score: {review.get('execution_score')}/10")
-                    
-                    # Short bullets only
-                    key_lessons = review.get("key_lessons") or []
-                    for lesson in key_lessons[:3]:
-                        lines.append(f"• {lesson}")
-                    
-                    if review.get("adjustment"):
-                        lines.append(f"• Adjustment: {review.get('adjustment')}")
+                    if review.get("available"):
+                        lines = [summary, "", "🧠 Gemini Independent Learning Review"]
+                        if review.get("execution_score") is not None:
+                            lines.append(f"• Execution Score: {review.get('execution_score')}/10")
                         
-                    summary = "\n".join(lines)
-                    logger.info(
-                        "✅ Gemini learning review added: score=%s lessons=%d quality=%s",
-                        review.get("execution_score"), len(key_lessons), review.get("quality", "ok")
-                    )
-                elif review.get("suppressed"):
-                    logger.info("🧠 Gemini learning review suppressed: %s", review.get("suppress_reason", "generic"))
-                else:
-                    logger.warning("🧠 Gemini learning review unavailable: %s", review.get("summary") or review.get("reason"))
+                        # Short bullets only
+                        key_lessons = review.get("key_lessons") or []
+                        for lesson in key_lessons[:3]:
+                            lines.append(f"• {lesson}")
+                        
+                        if review.get("adjustment"):
+                            lines.append(f"• Adjustment: {review.get('adjustment')}")
+                            
+                        summary = "\n".join(lines)
+                        logger.info(
+                            "✅ Gemini learning review added: score=%s lessons=%d quality=%s",
+                            review.get("execution_score"), len(key_lessons), review.get("quality", "ok")
+                        )
+                    elif review.get("suppressed"):
+                        logger.info("🧠 Gemini learning review suppressed: %s", review.get("suppress_reason", "generic"))
+                    else:
+                        logger.warning("🧠 Gemini learning review unavailable: %s", review.get("summary") or review.get("reason"))
         except Exception as gemini_exc:
             logger.exception("🧠 Gemini learning review failed")
 

@@ -251,11 +251,14 @@ def _daily_enrichment_summary(closed_trades: list[dict[str, Any]]) -> dict[str, 
             planned.append(rr)
 
     rr_efficiency: dict[str, Any] = {"sample": 0}
-    if actual_r:
-        avg_actual = sum(actual_r) / len(actual_r)
+    # RR capture only on WINNING trades — losses are about stop-loss doing
+    # its job, not about capturing planned reward.
+    winners_r = [a for a in actual_r if a > 0]
+    if winners_r:
+        avg_actual = sum(winners_r) / len(winners_r)
         avg_planned = sum(planned) / len(planned) if planned else 0.0
         rr_efficiency = {
-            "sample": len(actual_r),
+            "sample": len(winners_r),
             "avg_actual_r": round(avg_actual, 2),
             "avg_planned_rr": round(avg_planned, 2),
             "rr_capture_pct": round(avg_actual / avg_planned * 100, 1) if avg_planned else 0.0,
