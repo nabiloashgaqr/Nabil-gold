@@ -107,8 +107,9 @@ function buildGeneratedDailyReports(closedTrades) {
     const wins = trades.filter(t => Number(t.pnl) > 0).length;
     const losses = trades.filter(t => Number(t.pnl) < 0).length;
     const be = trades.filter(t => Number(t.pnl) === 0).length;
+    const decisive = wins + losses;
     const net = trades.reduce((s, t) => s + (Number(t.pnl) || 0), 0);
-    const winRate = trades.length ? (wins / trades.length) * 100 : 0;
+    const winRate = decisive ? (wins / decisive) * 100 : 0;
     const lines = [
       'SmartSignal — Daily Report',
       `Date: ${period}`,
@@ -198,8 +199,9 @@ function buildGeneratedWeeklyReports(closedTrades) {
     const wins = trades.filter(t => Number(t.pnl) > 0).length;
     const losses = trades.filter(t => Number(t.pnl) < 0).length;
     const be = trades.filter(t => Number(t.pnl) === 0).length;
+    const decisive = wins + losses;
     const net = trades.reduce((s, t) => s + (Number(t.pnl) || 0), 0);
-    const winRate = trades.length ? (wins / trades.length) * 100 : 0;
+    const winRate = decisive ? (wins / decisive) * 100 : 0;
     const bySymbol = {};
     trades.forEach(t => { bySymbol[t.symbol || 'Unknown'] = (bySymbol[t.symbol || 'Unknown'] || 0) + (Number(t.pnl) || 0); });
     const lines = [
@@ -370,7 +372,9 @@ function summarize(closedTrades, liveTrades) {
     closedTrades: total,
     liveTrades: liveTrades.length,
     tp1Live: liveTrades.filter(t => t.status === 'TP1_HIT').length,
-    winRate: total ? (wins / total) * 100 : 0,
+    // Win rate excludes breakeven trades (neither win nor loss)
+    beCount: total - wins - losses,
+    winRate: (wins + losses) ? (wins / (wins + losses)) * 100 : 0,
     netPoints: net,
     profitFactor: gl > 0 ? gp / gl : gp > 0 ? null : 0,
     wins,
