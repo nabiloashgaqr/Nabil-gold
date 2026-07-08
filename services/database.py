@@ -709,6 +709,12 @@ class DatabaseService:
             "daily_bias_at_entry",
             "reasons",
             "last_updated",
+            # Price tracking columns — must persist so dashboard/SQL queries
+            # can report actual candle extremes and all-time PnL excursions.
+            "last_candle_low",
+            "last_candle_high",
+            "max_favorable_excursion",
+            "max_adverse_excursion",
         }
         return {key: value for key, value in data.items() if key in legacy_fields}
 
