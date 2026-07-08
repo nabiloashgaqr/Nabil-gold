@@ -179,7 +179,7 @@
         "description_trailing_stop": "Trailing gap 150pts متناسب مع SL=400pts. خطوة 40pts تقلل التحديثات غير الضرورية بالضوضا."
     },
     "news_feed": {
-        "enabled": false,
+        "enabled": true,
         "source": "forexfactory",
         "hours_before": 2,
         "hours_after": 1,
@@ -195,7 +195,7 @@
             "CHF"
         ],
         "allow_mock": false,
-        "note": "No live provider is configured here. Use NewsRiskAgent with NEWS_EVENTS_JSON or storage/news_events.json until a real provider is added."
+        "note": "ACTIVE — ForexFactory free auto-feed. No API key needed."
     },
     "learning": {
         "enabled": true,
