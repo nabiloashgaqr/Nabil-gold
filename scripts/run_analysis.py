@@ -720,8 +720,9 @@ def _check_and_send_post_news(
             if tier not in {"TIER_1", "TIER_2"}:
                 continue
             minutes_until = event.get("minutes_until", 0)
-            # Event was released between 5 and 30 minutes ago
-            if -30 <= minutes_until <= -5:
+            # Event was released between 3 and 60 minutes ago.
+            # Wide enough to catch it across multiple 5-min cron cycles.
+            if -60 <= minutes_until <= -3:
                 event_name = str(event.get("event", "Unknown Event"))
                 event_time = str(event.get("time", ""))
                 # Create unique key to avoid duplicate alerts
@@ -788,7 +789,24 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         has_symbol_active_trades = any(normalize_symbol(t.get("symbol") or symbol) == normalized_symbol for t in open_trades_snapshot)
         session = TradingSessionAgent(config).check()
         if not session.get("trading_allowed") and not has_symbol_active_trades:
-            if should_send_hourly_status(config):
+            # Post-news check: even outside hours, fire if a TIER_1/TIER_2
+            # event just released — subscribers need the briefing regardless.
+            post_news_was_sent = False
+            try:
+                gemini_off_hours = get_gemini_review_service(config)
+                if gemini_off_hours.enabled:
+                    news_off = NewsRiskAgent({**config, "macro_context": database.get_macro_context()}).check()
+                    _check_and_send_post_news(
+                        gemini=gemini_off_hours, telegram=telegram,
+                        news_result=news_off, symbol=symbol,
+                        current_price=None, config=config, database=database,
+                    )
+                    post_news_was_sent = any(
+                        "post-news" in str(getattr(telegram, '_last_msg', ''))
+                    )
+            except Exception: pass
+            
+            if should_send_hourly_status(config) and not post_news_was_sent:
                 telegram.send_message("🟡 <b>SmartSignal — Market Status</b>\n━━━━━━━━━━━━━━━━━━━━\n📈 Price: N/A\n🎯 Decision: WAIT\n📊 Outside trading hours\n\n<b>Reason:</b>\n• Outside trading hours\n━━━━━━━━━━━━━━━━━━━━")
             return
         market_data = MarketDataService(config)
