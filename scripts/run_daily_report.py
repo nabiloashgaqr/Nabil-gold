@@ -497,7 +497,7 @@ def main() -> None:
 
         learning_section = _read_eod_section("learning")
         if learning_section:
-            compact_learning = _compact_section(learning_section, max_lines=8)
+            compact_learning = _compact_section(learning_section, max_lines=15)
             if compact_learning.strip():
                 lines.append("🧠 <b>Learning Update</b>")
                 lines.append(compact_learning)

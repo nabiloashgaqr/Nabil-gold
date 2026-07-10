@@ -654,6 +654,24 @@ def _build_market_status_message(
         gemini_context = (
             f"🧠 <b>Gemini:</b> {html.escape(str(bias))} — {html.escape(str(reason))}\n"
         )
+    gemini_news = decision.get("gemini_news_review", {}) or {}
+    if gemini_news.get("available") and not gemini_news.get("suppressed"):
+        risk = str(gemini_news.get("risk_level") or "LOW").upper()
+        gemini_context += f"📰 <b>Gemini News:</b> {html.escape(risk)}"
+        bullets = gemini_news.get("summary_bullets") or []
+        if bullets:
+            first = str(bullets[0]).strip()
+            if first:
+                gemini_context += f" — {html.escape(first[:80])}"
+        gemini_context += "\n"
+    gemini_macro = decision.get("gemini_macro_review", {}) or {}
+    if gemini_macro.get("available") and not gemini_macro.get("suppressed"):
+        verdict = str(gemini_macro.get("macro_verdict") or "NEUTRAL")
+        driver = str(gemini_macro.get("primary_driver") or "")
+        gemini_context += f"🌍 <b>Gemini Macro:</b> {html.escape(verdict)}"
+        if driver:
+            gemini_context += f" ({html.escape(driver)})"
+        gemini_context += "\n"
 
     return (
         "🟡 <b>SmartSignal — Market Status</b>\n━━━━━━━━━━━━━━━━━━━━\n"
