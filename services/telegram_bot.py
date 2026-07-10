@@ -429,16 +429,15 @@ class TelegramService:
         gemini_news = decision.get("gemini_news_review", {}) or {}
         if gemini_news.get("available"):
             risk_level = str(gemini_news.get("risk_level") or "LOW").upper()
+            lines.append("──────────────────")
+            lines.append("📰 <b>GEMINI NEWS CHECK</b>")
+            lines.append(f"• <b>Risk:</b> {html.escape(risk_level)}")
             bullets = [str(x) for x in (gemini_news.get("summary_bullets") or []) if str(x).strip()]
+            for bullet in bullets[:2]:
+                lines.append(f"• {self._clean_text(bullet)}")
             advice = str(gemini_news.get("trading_advice") or "").strip()
-            if risk_level in {"MEDIUM", "HIGH", "EXTREME"} or bullets or advice:
-                lines.append("──────────────────")
-                lines.append("📰 <b>GEMINI NEWS CHECK</b>")
-                lines.append(f"• <b>Risk:</b> {html.escape(risk_level)}")
-                for bullet in bullets[:2]:
-                    lines.append(f"• {self._clean_text(bullet)}")
-                if advice:
-                    lines.append(f"• Advice: {self._clean_text(advice)}")
+            if advice and advice.upper() not in {"N/A", "NONE", "NOT APPLICABLE"}:
+                lines.append(f"• Advice: {self._clean_text(advice)}")
 
         lines.extend([
             "━━━━━━━━━━━━━━━━━━━━━",

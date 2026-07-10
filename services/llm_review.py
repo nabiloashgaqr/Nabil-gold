@@ -39,15 +39,12 @@ class GeminiReviewService:
         compact = self._compact_signal_payload(payload)
         prompt = (
             "You are an Independent Senior Hedge Fund Trader specialized in XAU/USD.\n"
-            "You receive: technical consensus, macro/fundamental context, daily bias, risk parameters.\n"
             "Evaluate INDEPENDENTLY — give YOUR own verdict (BUY, SELL, or WAIT).\n"
-            "You MUST explicitly consider the macro_direction block:\n"
-            "- dxy_trend / usd_strength\n"
-            "- yields_trend (us10y / real_yields)\n"
-            "- fed_tone\n"
-            "- risk_sentiment / geopolitical\n"
-            "If macro_direction conflicts with technical signal, lower confidence and explain alignment.\n"
-            "DO NOT review internal agent names, only market logic.\n"
+            "Be CONCISE. No repetition, no filler.\n"
+            "NEVER mention or explain individual agents, their names, or their votes.\n"
+            "Give YOUR OWN independent market opinion only.\n"
+            "Consider: macro_direction (DXY, yields, Fed, risk_sentiment).\n"
+            "If macro conflicts with technicals, lower confidence.\n"
             "Return STRICT JSON:\n"
             "{\n"
             "  \"verdict\": \"BUY|SELL|WAIT\",\n"
@@ -68,9 +65,11 @@ class GeminiReviewService:
         prompt = (
             "You are a Professional Institutional Analyst for Gold.\n"
             "Analyze technical + macro context independently.\n"
+            "Be CONCISE. No repetition, no filler.\n"
+            "NEVER mention or explain individual agents or their votes.\n"
+            "Give YOUR OWN independent market opinion only.\n"
             "Use macro_direction (DXY, yields, Fed, risk_sentiment) as PRIMARY filter, "
             "then confirm with technical regime.\n"
-            "DO NOT mention internal agents.\n"
             "Return STRICT JSON:\n"
             "{ \"market_bias\": \"BULLISH/BEARISH/NEUTRAL\", "
             "\"action\": \"BUY/SELL/WAIT\", "
@@ -85,7 +84,10 @@ class GeminiReviewService:
         if not self.enabled: return self._unavailable("API key missing")
         compact = self._compact_news_payload(payload)
         prompt = (
-            "Analyze news + macro context for XAU/USD. "
+            "Analyze news + macro context for XAU/USD.\n"
+            "Be CONCISE. No repetition, no filler.\n"
+            "NEVER mention or explain individual agents or their votes.\n"
+            "Give YOUR OWN independent opinion only.\n"
             "Incorporate macro_direction if present (DXY, yields, Fed).\n"
             "Return STRICT JSON:\n"
             "{ \"risk_level\": \"LOW/MEDIUM/HIGH/EXTREME\", "
@@ -102,10 +104,10 @@ class GeminiReviewService:
         compact = self._compact_macro_payload(payload)
         prompt = (
             "You are a Senior Macro Strategist for Gold (XAU/USD).\n"
-            "You receive the full MacroFundamentalAgent output: bias, confidence, score, "
-            "confidence_breakdown {dxy, yields, fed, inflation_growth, risk, commodity}, "
-            "drivers, evidence, invalidations, data_quality.\n"
-            "Give an INDEPENDENT macro verdict, do NOT just repeat the input bias.\n"
+            "Give an INDEPENDENT macro verdict — do NOT just repeat the input bias.\n"
+            "Be CONCISE. No repetition, no filler.\n"
+            "NEVER mention or explain individual agents or their votes.\n"
+            "Give YOUR OWN independent opinion only.\n"
             "Weigh DXY + real yields heaviest, then Fed tone, then risk sentiment.\n"
             "Return STRICT JSON:\n"
             "{\n"
@@ -130,11 +132,13 @@ class GeminiReviewService:
         if not self.enabled: return self._unavailable("API key missing")
         compact = self._compact_post_news_payload(payload)
         prompt = (
-            "You are a Senior Gold Market Analyst. A major economic event just released its numbers. "
-            "Analyze the IMPACT on Gold (XAU/USD) specifically. "
-            "Consider: actual vs forecast surprise, DXY/dollar strength from macro context, "
-            "and the current price reaction. "
-            "Give your RECOMMENDATION - this is NOT an entry signal, it is an informed observation. "
+            "You are a Senior Gold Market Analyst. A major economic event just released.\n"
+            "Analyze the IMPACT on Gold (XAU/USD) specifically.\n"
+            "Be CONCISE. No repetition, no filler.\n"
+            "NEVER mention or explain individual agents or their votes.\n"
+            "Give YOUR OWN independent opinion only.\n"
+            "Consider: actual vs forecast surprise, DXY/dollar strength, price reaction.\n"
+            "This is NOT an entry signal, it is an informed observation.\n"
             "Return STRICT JSON: "
             "{ 'event': 'event name', 'surprise': 'BETTER/WORSE/IN_LINE', "
             "'gold_impact': 'BULLISH/BEARISH/NEUTRAL', 'dxy_impact': 'STRENGTHENING/WEAKENING/NEUTRAL', "
@@ -149,7 +153,10 @@ class GeminiReviewService:
         if not self.enabled: return self._unavailable("API key missing")
         compact = self._compact_learning_payload(payload)
         prompt = (
-            "Summarize trading performance. Return STRICT JSON: "
+            "Summarize trading performance CONCISELY.\n"
+            "NEVER mention or explain individual agents or their votes.\n"
+            "Give YOUR OWN independent opinion only.\n"
+            "Return STRICT JSON: "
             "{ 'execution_score': 1-10, 'key_lessons': ['p1', 'p2', 'p3'], 'adjustment': 'sentence' }"
             f"\n\nDATA:\n{json.dumps(compact, ensure_ascii=False)}"
         )
@@ -160,7 +167,10 @@ class GeminiReviewService:
         if not self.enabled: return self._unavailable("API key missing")
         compact = self._compact_daily_report_payload(payload)
         prompt = (
-            "Summarize the day. Return STRICT JSON: "
+            "Summarize the day CONCISELY.\n"
+            "NEVER mention or explain individual agents or their votes.\n"
+            "Give YOUR OWN independent opinion only.\n"
+            "Return STRICT JSON: "
             "{ 'verdict': 'CLEAN/FRAGILE/NEUTRAL', 'key_points': ['p1', 'p2', 'p3'], 'summary': 'sentence' }"
             f"\n\nDATA:\n{json.dumps(compact, ensure_ascii=False)}"
         )
@@ -171,7 +181,10 @@ class GeminiReviewService:
         if not self.enabled: return self._unavailable("API key missing")
         compact = self._compact_weekly_report_payload(payload)
         prompt = (
-            "Summarize the week. Return STRICT JSON: "
+            "Summarize the week CONCISELY.\n"
+            "NEVER mention or explain individual agents or their votes.\n"
+            "Give YOUR OWN independent opinion only.\n"
+            "Return STRICT JSON: "
             "{ 'edge_efficiency': 'val', 'market_regime': 'val', 'strategic_points': ['p1', 'p2', 'p3'], 'strategic_pivot': 'sentence' }"
             f"\n\nDATA:\n{json.dumps(compact, ensure_ascii=False)}"
         )
@@ -422,16 +435,21 @@ class GeminiReviewService:
 
     def _is_generic_output(self, payload: Dict[str, Any], kind: str = "generic") -> bool:
         texts = self._quality_texts(payload)
-        combined = " ".join(texts).lower()
         if not texts:
             return True
+        # Only check texts long enough to indicate a truly generic response.
+        # Short values like "N/A", "Hold", "Neutral" are normal JSON values,
+        # not signs the entire output is generic.
+        long_texts = [t for t in texts if len(t) >= 12]
         generic_markers = (
-            "insufficient data", "not enough data", "cannot determine", "unable to determine",
-            "more data is needed", "no specific", "not available", "n/a", "none provided",
+            "insufficient data", "not enough data", "cannot determine",
+            "unable to determine", "more data is needed",
         )
-        if any(marker in combined for marker in generic_markers):
-            return True
-        meaningful = [t for t in texts if len(t) >= 18 and len(set(t.lower().split())) >= 4]
+        if long_texts:
+            combined_long = " ".join(long_texts).lower()
+            if any(marker in combined_long for marker in generic_markers):
+                return True
+        meaningful = [t for t in texts if len(t) >= 12 and len(set(t.lower().split())) >= 3]
         if kind in {"daily", "weekly", "learning", "news", "macro"} and not meaningful:
             return True
         return False
