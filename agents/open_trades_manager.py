@@ -437,12 +437,17 @@ class OpenTradesManager(BaseAgent):
 
             # 2b) EARLY BREAKEVEN: once the trade is +N points in profit, move the
             # stop to entry WITHOUT waiting for TP1. Independent of partial close.
+            # Uses favorable_points (intrabar best price: low for SELL, high for BUY)
+            # instead of pnl_points (close price) so a level touched during the 5m
+            # candle is not missed just because the candle closed back away from it.
+            # This keeps breakeven consistent with TP/SL detection, which already
+            # uses the candle high/low.
             if (
                 self.early_breakeven_points > 0
                 and not sl_moved_to_entry
                 and new_status in self.OPEN_STATUSES
                 and "EXPIRED" not in events
-                and pnl_points >= self.early_breakeven_points
+                and favorable_points >= self.early_breakeven_points
             ):
                 sl_moved_to_entry = True
                 new_stop_loss = entry  # persist the breakeven stop
