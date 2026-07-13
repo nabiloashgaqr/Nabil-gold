@@ -139,13 +139,18 @@ class TelegramService:
         two_agent = classic.get("two_agent")
         signal = str(decision.get("decision") or "").upper()
         selected = ((classic.get("consensus") or {}).get("selected") or {}) if isinstance(classic, dict) else {}
-        support = int(selected.get("support_count") or classic.get("buy_count" if signal == "BUY" else "sell_count", 0) or 0)
-        opposition = int(selected.get("opposition_count") or 0)
         total_core = 5
-        # For Path 2 entries, pull count from two_agent info
-        if isinstance(two_agent, dict) and support <= 0:
+        # For Path 2 (dual-agent) entries, two_agent is the authoritative
+        # source for support/opposition counts.  The classic consensus
+        # "selected" is None in that case (the 3-agent consensus was WAIT), so
+        # we must read BOTH counts from two_agent — not fall back to
+        # sell_count/buy_count which only give support and leave opposition at 0.
+        if isinstance(two_agent, dict) and two_agent:
             support = int(two_agent.get("support_count", 0) or 0)
             opposition = int(two_agent.get("opposition_count", 0) or 0)
+        else:
+            support = int(selected.get("support_count") or classic.get("buy_count" if signal == "BUY" else "sell_count", 0) or 0)
+            opposition = int(selected.get("opposition_count") or 0)
         if support <= 0:
             return None
         if support >= 4 and opposition == 0:
