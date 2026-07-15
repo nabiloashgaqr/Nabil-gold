@@ -460,9 +460,17 @@ class SMCAgent(BaseAgent):
             or ((market_structure.get("last_bos") or {}).get("time"))
             or ""
         )
+        zone = poi.get("zone") or {}
+        zone_top = round(self._f(zone.get("top")), 2) if zone else 0.0
+        zone_bottom = round(self._f(zone.get("bottom")), 2) if zone else 0.0
+        state_key = (
+            f"SMC_STATE::{symbol}::{timeframe}::{direction}::{setup_type}::"
+            f"{poi.get('poi_type') or 'none'}::{sweep.get('type') or 'nosweep'}::{zone_top:.2f}:{zone_bottom:.2f}"
+        )
         candidate_id = f"SMC::{symbol}::{timeframe}::{direction}::{created_at or 'now'}::{setup_type}"
         candidate = {
             "id": candidate_id,
+            "state_key": state_key,
             "symbol": symbol,
             "timeframe": timeframe,
             "direction": direction,
