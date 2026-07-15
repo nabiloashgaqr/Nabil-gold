@@ -111,3 +111,38 @@ def test_final_evaluation_positive_case_can_recommend_trial(monkeypatch) -> None
     assert report["verdict"] == "READY_FOR_STRUCTURED_TRIAL"
     assert report["scorecard"]["benchmark_score"] > 60
     assert report["recommendations"]
+
+
+def test_final_evaluation_without_labels_uses_neutral_overlap(monkeypatch) -> None:
+    import services.final_evaluation as fe
+
+    benchmark_payload = {
+        "variants": {
+            "current_engine": {"summary": {"total_trades": 9, "not_filled": 2, "total_candidates": 11, "win_rate": 44.4, "net_points": -91.0}},
+            "baseline_classic_market": {"summary": {"total_trades": 14, "not_filled": 0, "total_candidates": 14, "win_rate": 14.3, "net_points": -259.0}},
+        },
+        "comparison": {
+            "win_rate_delta": 30.1,
+            "net_points_delta": 169.0,
+            "profit_factor_delta": 0.29,
+            "filled_trades_delta": -5,
+            "not_filled_delta": 2,
+        },
+    }
+    overlap_payload = {"labels_considered": 0}
+
+    monkeypatch.setattr(fe, "benchmark_backtests", lambda *a, **k: benchmark_payload)
+
+    class _Distill:
+        def __init__(self, *_a, **_k):
+            self.enabled = True
+        def compare_recent(self, **_k):
+            return overlap_payload
+
+    monkeypatch.setattr(fe, "AnalystDistillationService", _Distill)
+    service = FinalEvaluationService(_config(), database=_DB())
+    report = service.run(candles=[{"time": "2026-07-15T00:00:00Z", "open": 1, "high": 1, "low": 1, "close": 1}], max_trades=1)
+
+    assert report["scorecard"]["overlap_available"] is False
+    assert report["scorecard"]["overlap_score"] == 50.0
+    assert "Analyst overlap is unavailable" in report["recommendations"][0]
