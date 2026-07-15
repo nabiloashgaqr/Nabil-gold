@@ -44,6 +44,9 @@ class DatabaseService:
         root = Path(__file__).resolve().parents[1]
         self.local_path = root / fallback
         self.setup_candidates_path = root / "storage" / "setup_candidates.json"
+        self.setup_state_events_path = root / "storage" / "setup_state_events.json"
+        self.analyst_labels_path = root / "storage" / "analyst_labels.json"
+        self.analyst_comparisons_path = root / "storage" / "analyst_comparisons.json"
         self.client: Client | None = None
         self.use_supabase = False
 
@@ -295,7 +298,7 @@ class DatabaseService:
             "created_at": event.get("created_at") or now_iso,
             "updated_at": now_iso,
         }
-        path = Path(__file__).resolve().parents[1] / "storage" / "setup_state_events.json"
+        path = self.setup_state_events_path
         if self.use_supabase and self.client:
             try:
                 self.client.table("setup_state_events").insert(payload).execute()
@@ -308,6 +311,108 @@ class DatabaseService:
         rows.append(payload)
         save_trades(rows, path)
         return event_id
+
+    def save_analyst_label(self, label: Dict[str, Any]) -> str:
+        """Persist a discretionary analyst label for later bot-vs-analyst comparison."""
+        label_id = str(label.get("id") or f"ANALYST_{uuid.uuid4().hex[:16]}")
+        now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        payload = {
+            "id": label_id,
+            "symbol": str(label.get("symbol") or self.config.get("symbol", "XAU/USD")),
+            "timeframe": str(label.get("timeframe") or self.config.get("entry_timeframe") or "15m"),
+            "analyst_name": str(label.get("analyst_name") or "manual"),
+            "bias": str(label.get("bias") or label.get("direction") or "WAIT").upper(),
+            "setup_type": label.get("setup_type") or "UNKNOWN",
+            "sweep_side": label.get("sweep_side"),
+            "poi_type": label.get("poi_type"),
+            "poi_quality_grade": label.get("poi_quality_grade") or label.get("quality_grade"),
+            "intended_entry": label.get("intended_entry"),
+            "invalidation": label.get("invalidation"),
+            "tp1": label.get("tp1"),
+            "tp2": label.get("tp2"),
+            "session_label": label.get("session_label") or label.get("session"),
+            "trade_decision": str(label.get("trade_decision") or "TRADE").upper(),
+            "notes": label.get("notes") or "",
+            "source": label.get("source") or "manual_label",
+            "created_at": label.get("created_at") or now_iso,
+            "updated_at": now_iso,
+        }
+        if self.use_supabase and self.client:
+            try:
+                self.client.table("analyst_labels").upsert(payload).execute()
+                return label_id
+            except Exception as exc:  # noqa: BLE001
+                if self._strict_supabase():
+                    raise RuntimeError(f"Failed to save analyst label in production: {exc}") from exc
+                self.logger.error("Failed to upsert analyst label in Supabase, falling back local: %s", exc)
+        rows = load_trades(self.analyst_labels_path)
+        replaced = False
+        for index, existing in enumerate(rows):
+            if str(existing.get("id")) == label_id:
+                merged = dict(existing)
+                merged.update(payload)
+                merged["created_at"] = existing.get("created_at") or payload["created_at"]
+                rows[index] = merged
+                replaced = True
+                break
+        if not replaced:
+            rows.append(payload)
+        save_trades(rows, self.analyst_labels_path)
+        return label_id
+
+    def get_analyst_labels(self, limit: int = 50, symbol: str | None = None) -> List[Dict[str, Any]]:
+        if self.use_supabase and self.client:
+            try:
+                query = self.client.table("analyst_labels").select("*").order("created_at", desc=True).limit(limit)
+                if symbol:
+                    query = query.eq("symbol", symbol)
+                response = query.execute()
+                return list(response.data or [])
+            except Exception as exc:  # noqa: BLE001
+                if self._strict_supabase():
+                    raise RuntimeError(f"Failed to fetch analyst labels in production: {exc}") from exc
+                self.logger.error("Failed to fetch analyst labels from Supabase: %s", exc)
+        rows = load_trades(self.analyst_labels_path)
+        if symbol:
+            rows = [row for row in rows if str(row.get("symbol", "")).upper() == str(symbol).upper()]
+        return sorted(rows, key=lambda row: str(row.get("created_at") or row.get("updated_at") or ""), reverse=True)[:limit]
+
+    def save_analyst_comparison(self, comparison: Dict[str, Any]) -> str:
+        comparison_id = str(comparison.get("id") or f"COMPARE_{uuid.uuid4().hex[:16]}")
+        now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        payload = {
+            "id": comparison_id,
+            "analyst_label_id": comparison.get("analyst_label_id"),
+            "setup_candidate_id": comparison.get("setup_candidate_id"),
+            "symbol": str(comparison.get("symbol") or self.config.get("symbol", "XAU/USD")),
+            "match_score": comparison.get("match_score"),
+            "classification": comparison.get("classification") or "UNREVIEWED",
+            "summary": comparison.get("summary") or "",
+            "payload": comparison.get("payload") or {},
+            "created_at": comparison.get("created_at") or now_iso,
+            "updated_at": now_iso,
+        }
+        if self.use_supabase and self.client:
+            try:
+                self.client.table("analyst_comparisons").upsert(payload).execute()
+                return comparison_id
+            except Exception as exc:  # noqa: BLE001
+                if self._strict_supabase():
+                    raise RuntimeError(f"Failed to save analyst comparison in production: {exc}") from exc
+                self.logger.error("Failed to upsert analyst comparison in Supabase, falling back local: %s", exc)
+        rows = load_trades(self.analyst_comparisons_path)
+        replaced = False
+        for index, existing in enumerate(rows):
+            if str(existing.get("id")) == comparison_id:
+                merged = dict(existing)
+                merged.update(payload)
+                rows[index] = merged
+                replaced = True
+                break
+        if not replaced:
+            rows.append(payload)
+        save_trades(rows, self.analyst_comparisons_path)
+        return comparison_id
 
     @staticmethod
     def _build_regime_composite(tech_regime: dict) -> str:
