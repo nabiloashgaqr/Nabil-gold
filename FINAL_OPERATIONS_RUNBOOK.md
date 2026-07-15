@@ -3,6 +3,37 @@
 ## الهدف
 هذا الملف يوضح الترتيب النهائي الموصى به لتشغيل النظام بعد اكتمال التطويرات الأساسية.
 
+## تشغيل يدوي عبر GitHub Actions (موصى به إذا كنت لا تريد cron خارجي)
+يوجد Workflow يدوي جديد:
+- `.github/workflows/manual_operator.yml`
+
+من GitHub:
+1. افتح تبويب **Actions**
+2. اختر **Manual SmartSignal Operator**
+3. اضغط **Run workflow**
+4. اختر العملية المطلوبة من `operation` مثل:
+   - `analysis`
+   - `update_trades`
+   - `daily_report`
+   - `weekly_report`
+   - `analyst_comparison`
+   - `final_evaluation`
+   - `tuning_advisor`
+   - `release_readiness`
+   - `operations_pipeline`
+   - `backtest_benchmark`
+5. عدّل المدخلات الاختيارية مثل:
+   - `timeframe`
+   - `outputsize`
+   - `window`
+   - `step`
+   - `horizon`
+   - `max_trades`
+   - `send_telegram`
+6. بعد انتهاء التشغيل ستجد artifacts مرفوعة تلقائيًا من مجلد `storage/`
+
+> ملاحظة: في التشغيل اليدوي عبر workflow لا تحتاج `load_dotenv()` لأن Secrets تُحقن مباشرة من GitHub Actions.
+
 ## المسارات الرئيسية
 ### 1) التشغيل اليومي العادي
 - `python scripts/run_analysis.py`

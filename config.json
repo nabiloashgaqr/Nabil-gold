@@ -430,6 +430,8 @@
         "description_pending_threshold_points": "حد تقريبي لتصنيف LIMIT/STOP مقابل MARKET عندما يكون الدخول بعيداً عن السعر الحالي بما يكفي.",
         "pending_order_max_cycles": 6,
         "description_pending_order_max_cycles": "في وضع hybrid: إذا بقي الأمر المعلق 6 دورات تحليل بدون fill يمكن تحويله إلى MARKET حسب منطق OpenTradesManager.",
+        "pending_expire_after_hours": 24,
+        "description_pending_expire_after_hours": "إذا بقي أمر LIMIT/STOP معلقاً أكثر من 24 ساعة بدون تفعيل يُلغى تلقائياً كـ EXPIRED بدل أن يبقى للأبد.",
         "smart_entry": {
             "enabled": true,
             "fill_at": "mid",
