@@ -82,6 +82,7 @@ class OpenTradesManager(BaseAgent):
         oe = self.config.get("order_execution", {}) or {}
         self.entry_style = str(oe.get("entry_style", "market")).lower()
         self.pending_order_max_cycles = int(oe.get("pending_order_max_cycles", 6) or 6)
+        self.pending_expire_after_hours = float(oe.get("pending_expire_after_hours", 24) or 24)
         self.profile_overrides = (self.management.get("profiles", {}) or {}) if isinstance(self.management, dict) else {}
 
     def _trade_management_profile(self, trade: Dict[str, Any]) -> str:
@@ -759,6 +760,27 @@ class OpenTradesManager(BaseAgent):
             "last_candle_low": round(low_price, 2),
             "last_updated": self._iso(now),
         }
+
+        # Hard expiry for stale pending orders.
+        hours_open = self._hours_open(trade, now)
+        if not filled and self.pending_expire_after_hours > 0 and hours_open >= self.pending_expire_after_hours:
+            base_updates.update({
+                "status": "EXPIRED",
+                "result": "EXPIRED",
+                "closed_at": self._iso(now),
+                "close_time": self._iso(now),
+            })
+            return {
+                "trade_id": trade.get("id"),
+                "old_status": "PENDING",
+                "new_status": "EXPIRED",
+                "pnl_points": 0.0,
+                "events": ["EXPIRED"],
+                "updates": base_updates,
+                "progress_to_tp1": 0.0,
+                "hours_open": hours_open,
+                "pending_distance_points": abs(calculate_pips(current_price, entry, trade_type, symbol)),
+            }
 
         # Hybrid mode: auto-convert stale PENDING to MARKET
         if not filled and self.entry_style == "hybrid" and self.pending_order_max_cycles > 0:
