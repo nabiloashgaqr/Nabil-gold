@@ -294,6 +294,13 @@
         "dashboard_compare_limit": 30,
         "description": "Phase 6 foundation: compare manual analyst labels to bot setup candidates using direction, setup type, POI, sweep side, timing, and entry proximity."
     },
+    "final_evaluation": {
+        "analyst_compare_limit": 30,
+        "min_match_rate_good": 55,
+        "max_entry_distance_good": 60,
+        "max_not_filled_ratio": 0.4,
+        "description": "Final pass combines benchmark deltas and analyst overlap into a single readiness verdict with next-step recommendations."
+    },
     "macro_data_provider": {
         "description": "Hourly macro context from Yahoo Finance (yfinance). Zero cost, no API key, no quota. Provides 6/7 macro inputs: DXY (FX basket + direct), risk sentiment (SPY + VIX), US 10Y/5Y yields, fed tone, oil. Only inflation_surprise is unknown (no free source). Cron-job.org triggers macro_context.yml every hour."
     },
