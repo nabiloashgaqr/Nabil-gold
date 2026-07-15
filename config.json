@@ -263,6 +263,14 @@
         "enabled": true,
         "description": "يعرض درجة جودة الإشارة في Telegram ولا يمنع الإشارة حالياً"
     },
+    "setup_memory": {
+        "enabled": true,
+        "arm_zone_buffer_points": 40,
+        "invalidate_buffer_points": 20,
+        "missing_cycles_before_expire": 6,
+        "expire_after_hours": 12,
+        "description": "Sprint 2 foundation: persists setup-state transitions across analysis cycles. Price near POI -> ENTRY_ARMED, breach beyond invalidation -> INVALIDATED, missing/stale setups -> EXPIRED."
+    },
     "trading_mode": "paper",
     "paper_trading": {
         "enabled": true,

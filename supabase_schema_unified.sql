@@ -584,6 +584,7 @@ CREATE TRIGGER update_macro_context_timestamp
 
 CREATE TABLE IF NOT EXISTS setup_candidates (
     id TEXT PRIMARY KEY,
+    state_key TEXT,
     symbol TEXT NOT NULL DEFAULT 'XAU/USD',
     timeframe TEXT,
     direction TEXT,
@@ -606,10 +607,14 @@ CREATE TABLE IF NOT EXISTS setup_candidates (
     is_active BOOLEAN DEFAULT TRUE,
     first_seen_at TIMESTAMPTZ DEFAULT NOW(),
     last_seen_at TIMESTAMPTZ DEFAULT NOW(),
+    last_transition_at TIMESTAMPTZ DEFAULT NOW(),
+    transition_count INTEGER DEFAULT 0,
+    missing_cycles INTEGER DEFAULT 0,
     last_trade_id TEXT,
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS state_key          TEXT;
 ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS symbol             TEXT DEFAULT 'XAU/USD';
 ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS timeframe          TEXT;
 ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS direction          TEXT;
@@ -632,9 +637,13 @@ ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS source             TEXT;
 ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS is_active          BOOLEAN DEFAULT TRUE;
 ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS first_seen_at      TIMESTAMPTZ DEFAULT NOW();
 ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS last_seen_at       TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS last_transition_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS transition_count   INTEGER DEFAULT 0;
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS missing_cycles     INTEGER DEFAULT 0;
 ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS last_trade_id      TEXT;
 ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS updated_at         TIMESTAMPTZ DEFAULT NOW();
 
+CREATE INDEX IF NOT EXISTS idx_setup_candidates_state_key ON setup_candidates(state_key);
 CREATE INDEX IF NOT EXISTS idx_setup_candidates_symbol ON setup_candidates(symbol);
 CREATE INDEX IF NOT EXISTS idx_setup_candidates_type ON setup_candidates(setup_type);
 CREATE INDEX IF NOT EXISTS idx_setup_candidates_state ON setup_candidates(setup_state);
@@ -643,6 +652,44 @@ CREATE INDEX IF NOT EXISTS idx_setup_candidates_last_seen ON setup_candidates(la
 DROP TRIGGER IF EXISTS update_setup_candidates_timestamp ON setup_candidates;
 CREATE TRIGGER update_setup_candidates_timestamp
     BEFORE UPDATE ON setup_candidates
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- =====================================================
+-- 16) Setup State Events (Sprint 2 foundation)
+-- =====================================================
+CREATE TABLE IF NOT EXISTS setup_state_events (
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    setup_id TEXT,
+    state_key TEXT,
+    symbol TEXT DEFAULT 'XAU/USD',
+    from_state TEXT,
+    to_state TEXT,
+    reason TEXT,
+    price DECIMAL(18, 6),
+    payload JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE setup_state_events ADD COLUMN IF NOT EXISTS setup_id    TEXT;
+ALTER TABLE setup_state_events ADD COLUMN IF NOT EXISTS state_key   TEXT;
+ALTER TABLE setup_state_events ADD COLUMN IF NOT EXISTS symbol      TEXT DEFAULT 'XAU/USD';
+ALTER TABLE setup_state_events ADD COLUMN IF NOT EXISTS from_state  TEXT;
+ALTER TABLE setup_state_events ADD COLUMN IF NOT EXISTS to_state    TEXT;
+ALTER TABLE setup_state_events ADD COLUMN IF NOT EXISTS reason      TEXT;
+ALTER TABLE setup_state_events ADD COLUMN IF NOT EXISTS price       DECIMAL(18, 6);
+ALTER TABLE setup_state_events ADD COLUMN IF NOT EXISTS payload     JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE setup_state_events ADD COLUMN IF NOT EXISTS created_at  TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE setup_state_events ADD COLUMN IF NOT EXISTS updated_at  TIMESTAMPTZ DEFAULT NOW();
+
+CREATE INDEX IF NOT EXISTS idx_setup_state_events_setup_id ON setup_state_events(setup_id);
+CREATE INDEX IF NOT EXISTS idx_setup_state_events_state_key ON setup_state_events(state_key);
+CREATE INDEX IF NOT EXISTS idx_setup_state_events_symbol ON setup_state_events(symbol);
+CREATE INDEX IF NOT EXISTS idx_setup_state_events_created ON setup_state_events(created_at DESC);
+
+DROP TRIGGER IF EXISTS update_setup_state_events_timestamp ON setup_state_events;
+CREATE TRIGGER update_setup_state_events_timestamp
+    BEFORE UPDATE ON setup_state_events
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- =====================================================
@@ -663,6 +710,7 @@ ALTER TABLE partial_alert_tracker ENABLE ROW LEVEL SECURITY;
 ALTER TABLE post_news_tracker ENABLE ROW LEVEL SECURITY;
 ALTER TABLE macro_context ENABLE ROW LEVEL SECURITY;
 ALTER TABLE setup_candidates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE setup_state_events ENABLE ROW LEVEL SECURITY;
 
 -- =====================================================
 -- Final: Reload PostgREST schema cache
