@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.daily_report_agent import DailyReportAgent
+from services.analyst_distillation import AnalystDistillationService
 from services.database import DatabaseService
 from services.llm_review import get_gemini_review_service
 from services.telegram_bot import TelegramService
@@ -316,6 +317,23 @@ def _quality_snapshot_lines(enrichment: dict[str, Any]) -> list[str]:
     return lines[:4]
 
 
+def _analyst_overlap_lines(summary: dict[str, Any]) -> list[str]:
+    """Compact analyst-vs-bot overlap lines for the daily report."""
+    if not summary or int(summary.get("labels_considered", 0) or 0) <= 0:
+        return []
+    lines = [
+        f"• Labels: {summary.get('labels_considered', 0)} | Matched {summary.get('matched_labels', 0)} | Partial {summary.get('partial_matches', 0)} | Missed {summary.get('missed_labels', 0)}",
+        f"• Coverage: {summary.get('coverage_rate_pct', 0)}% | Match: {summary.get('match_rate_pct', 0)}%",
+    ]
+    if summary.get("avg_entry_distance_points") is not None:
+        lines.append(f"• Avg entry distance: {summary.get('avg_entry_distance_points')} pts")
+    reasons = summary.get("top_missed_reasons") or []
+    if reasons:
+        top = ", ".join(f"{r.get('reason_code')} ({r.get('count', 0)})" for r in reasons[:2])
+        lines.append(f"• Miss reasons: {top}")
+    return lines[:4]
+
+
 def save_daily_report_to_database(
     db: DatabaseService,
     *,
@@ -466,6 +484,21 @@ def main() -> None:
         if quality_lines:
             lines.append("🧩 <b>Quality Snapshot</b>")
             lines.extend(quality_lines)
+            lines.append("")
+
+        analyst_lines: list[str] = []
+        try:
+            distill = AnalystDistillationService(database, config)
+            if distill.enabled:
+                compare_limit = int((config.get("analyst_distillation", {}) or {}).get("daily_compare_limit", 20) or 20)
+                analyst_summary = distill.compare_recent(symbol=config.get("symbol", "XAU/USD"), limit=compare_limit)
+                stats["analyst_overlap"] = analyst_summary
+                analyst_lines = _analyst_overlap_lines(analyst_summary)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Analyst overlap summary unavailable for daily report: %s", exc)
+        if analyst_lines:
+            lines.append("🧠 <b>Analyst Overlap</b>")
+            lines.extend(analyst_lines)
             lines.append("")
 
         if closed_today:
