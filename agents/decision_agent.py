@@ -23,6 +23,7 @@ import logging
 from typing import Any, Dict
 
 from agents.base_agent import BaseAgent
+from services.strategy_profiles import select_strategy_profile
 from utils.helpers import get_agent_weights
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,15 @@ class DecisionAgent(BaseAgent):
         self.default_weights = get_agent_weights(config)
         self.current_weights = self._load_weights()
         self.voting_agents = set(self.default_weights)
+        self.active_profile: Dict[str, Any] = {
+            "name": "classic_consensus",
+            "resolved_setup_type": "CLASSIC_CONSENSUS",
+            "min_agents_agree": self.min_agents_agree,
+            "min_consensus_confidence": self.min_consensus_confidence,
+            "agent_min_confidence": self.agent_min_confidence,
+            "lead_agent": None,
+            "require_lead_alignment": False,
+        }
 
     def _load_weights(self) -> Dict[str, float]:
         """Load weights with config.json as the single source of truth.
@@ -92,8 +102,10 @@ class DecisionAgent(BaseAgent):
         indicators = data.get("indicators", {})
         session_info = data.get("session", data.get("session_info", {}))
 
-        votes = self._collect_votes(agents_results)
-        classic = self._classic_decision(votes)
+        profile = self._strategy_profile(agents_results)
+        self.active_profile = profile
+        votes = self._collect_votes(agents_results, profile=profile)
+        classic = self._classic_decision(votes, profile=profile)
         final_signal, final_confidence, reasoning = self._final_decision(classic, session_info)
         result = {
             "agent": self.name,
@@ -102,8 +114,9 @@ class DecisionAgent(BaseAgent):
             "confidence": final_confidence,
             "reasoning": reasoning,
             "votes": votes,
-            "weights": self.current_weights.copy(),
+            "weights": self._weights_for_profile(profile),
             "classic": classic,
+            "strategy_profile": profile,
             "learning": self._get_learning_info(),
             "risk_assessment": self._assess_risk(final_signal, indicators),
             "entry_attribution": self._entry_attribution(final_signal, classic, agents_results),
@@ -120,7 +133,34 @@ class DecisionAgent(BaseAgent):
         # Weights come exclusively from config.json (single source of truth).
         return self.analyze({**data, "all_agents_results": agents_results})
 
-    def _collect_votes(self, agents_results: Dict[str, Any]) -> Dict[str, list]:
+    def _strategy_profile(self, agents_results: Dict[str, Any]) -> Dict[str, Any]:
+        profile = select_strategy_profile(self.config, agents_results)
+        profile.setdefault("min_agents_agree", self.min_agents_agree)
+        profile.setdefault("min_consensus_confidence", self.min_consensus_confidence)
+        profile.setdefault("agent_min_confidence", self.agent_min_confidence)
+        profile.setdefault("lead_agent", None)
+        profile.setdefault("require_lead_alignment", False)
+        return profile
+
+    def _weights_for_profile(self, profile: Dict[str, Any] | None = None) -> Dict[str, float]:
+        profile = profile or {}
+        weights = dict(self.current_weights)
+        overrides = profile.get("weight_overrides") or {}
+        if isinstance(overrides, dict) and overrides:
+            for name, value in overrides.items():
+                try:
+                    weights[name] = float(value)
+                except (TypeError, ValueError):
+                    continue
+            total = sum(v for v in weights.values() if v > 0)
+            if total > 0:
+                weights = {k: v / total for k, v in weights.items()}
+        return weights
+
+    def _collect_votes(self, agents_results: Dict[str, Any], profile: Dict[str, Any] | None = None) -> Dict[str, list]:
+        profile = profile or self.active_profile or {}
+        min_agent_conf = int(profile.get("agent_min_confidence", self.agent_min_confidence) or self.agent_min_confidence)
+        profile_weights = self._weights_for_profile(profile)
         votes = {"BUY": [], "SELL": [], "WAIT": []}
         for agent_name, result in agents_results.items():
             if agent_name not in self.voting_agents or not isinstance(result, dict):
@@ -134,9 +174,9 @@ class DecisionAgent(BaseAgent):
                 confidence = float(result.get("confidence", 0) or 0)
             except (TypeError, ValueError):
                 confidence = 0
-            if confidence < self.agent_min_confidence:
+            if confidence < min_agent_conf:
                 continue
-            weight = float(self.current_weights.get(agent_name, self.default_weights.get(agent_name, 0.15)) or 0.15)
+            weight = float(profile_weights.get(agent_name, self.default_weights.get(agent_name, 0.15)) or 0.15)
             adjusted = self.get_adjusted_confidence(agent_name, confidence)
             score = (adjusted / 100.0) * weight
             votes[signal].append({
@@ -152,15 +192,19 @@ class DecisionAgent(BaseAgent):
             })
         return votes
 
-    def _classic_decision(self, votes: Dict[str, list]) -> Dict[str, Any]:
-        buy = self._direction_metrics("BUY", votes)
-        sell = self._direction_metrics("SELL", votes)
+    def _classic_decision(self, votes: Dict[str, list], profile: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        profile = profile or self.active_profile or {}
+        buy = self._direction_metrics("BUY", votes, profile=profile)
+        sell = self._direction_metrics("SELL", votes, profile=profile)
         candidates = [("BUY", buy), ("SELL", sell)]
         valid = [(side, m) for side, m in candidates if m["valid"]]
 
         decision = "WAIT"
         confidence = 50.0
         rejection_reason = None
+        min_agents = int(profile.get("min_agents_agree", self.min_agents_agree) or self.min_agents_agree)
+        min_conf = float(profile.get("min_consensus_confidence", self.min_consensus_confidence) or self.min_consensus_confidence)
+        agent_min_conf = int(profile.get("agent_min_confidence", self.agent_min_confidence) or self.agent_min_confidence)
         if valid:
             decision, selected = max(valid, key=lambda item: (item[1]["edge"], item[1]["confidence"]))
             confidence = selected["confidence"]
@@ -168,13 +212,15 @@ class DecisionAgent(BaseAgent):
             total_voting = len(votes["BUY"]) + len(votes["SELL"])
             best = max([buy, sell], key=lambda m: (m["support_count"], m["confidence"], m["edge"]))
             if total_voting == 0:
-                rejection_reason = f"No qualified agents (need >= {self.agent_min_confidence}%)"
-            elif best["support_count"] < self.min_agents_agree:
-                rejection_reason = f"Need at least {self.min_agents_agree} agreeing agents with weighted confidence >= {self.min_consensus_confidence:.0f}%"
+                rejection_reason = f"No qualified agents (need >= {agent_min_conf}%)"
+            elif best.get("profile_block_reason"):
+                rejection_reason = best["profile_block_reason"]
+            elif best["support_count"] < min_agents:
+                rejection_reason = f"Need at least {min_agents} agreeing agents with weighted confidence >= {min_conf:.0f}%"
             elif best["edge"] <= 0:
                 rejection_reason = "Opposing agents offset the setup (weighted edge <= 0)"
-            elif best["confidence"] < self.min_consensus_confidence:
-                rejection_reason = f"Net weighted confidence {best['confidence']:.0f}% below {self.min_consensus_confidence:.0f}% after opposition penalty"
+            elif best["confidence"] < min_conf:
+                rejection_reason = f"Net weighted confidence {best['confidence']:.0f}% below {min_conf:.0f}% after opposition penalty"
             else:
                 rejection_reason = "No valid weighted consensus edge"
 
@@ -240,15 +286,21 @@ class DecisionAgent(BaseAgent):
             "supporting_evidence": supporting_evidence,
             "rejection_reason": rejection_reason,
             "two_agent": two_agent,
+            "profile": {
+                "name": profile.get("name", "classic_consensus"),
+                "resolved_setup_type": profile.get("resolved_setup_type", "CLASSIC_CONSENSUS"),
+                "lead_agent": profile.get("lead_agent"),
+                "require_lead_alignment": bool(profile.get("require_lead_alignment", False)),
+            },
             "consensus": {
                 "mode": "5_agent_weighted_consensus",
                 "selected": selected_metrics,
                 "BUY": buy,
                 "SELL": sell,
                 "rules": {
-                    "agent_min_confidence": self.agent_min_confidence,
-                    "min_agents_agree": self.min_agents_agree,
-                    "min_consensus_confidence": self.min_consensus_confidence,
+                    "agent_min_confidence": agent_min_conf,
+                    "min_agents_agree": min_agents,
+                    "min_consensus_confidence": min_conf,
                 },
             },
         }
@@ -391,7 +443,8 @@ class DecisionAgent(BaseAgent):
             evidence.append(f"Opposition check: no qualified opposing vote against {decision}")
         return evidence
 
-    def _direction_metrics(self, side: str, votes: Dict[str, list]) -> Dict[str, Any]:
+    def _direction_metrics(self, side: str, votes: Dict[str, list], profile: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        profile = profile or self.active_profile or {}
         opposite = "SELL" if side == "BUY" else "BUY"
         supporters = votes.get(side, []) or []
         opponents = votes.get(opposite, []) or []
@@ -407,13 +460,27 @@ class DecisionAgent(BaseAgent):
         opposition_ratio = opposition_score / max(support_score, 0.0001)
         opposition_penalty = min(30.0, opposition_ratio * 30.0)
         confidence = max(0.0, min(95.0, support_avg - opposition_penalty))
-        valid = bool(edge > 0 and support_count >= self.min_agents_agree and confidence >= self.min_consensus_confidence)
-        # Two-agent candidate: 2 agents meet thresholds but < min_agents_agree for full entry
+        min_agents = int(profile.get("min_agents_agree", self.min_agents_agree) or self.min_agents_agree)
+        min_conf = float(profile.get("min_consensus_confidence", self.min_consensus_confidence) or self.min_consensus_confidence)
+        lead_agent = profile.get("lead_agent")
+        require_lead = bool(profile.get("require_lead_alignment", False)) and bool(lead_agent)
+        supporters_names = [v.get("agent") for v in supporters]
+        profile_block_reason = None
+        if require_lead and lead_agent not in supporters_names:
+            profile_block_reason = f"{profile.get('name', 'profile')} requires lead agent {lead_agent} to align with {side}"
+        valid = bool(
+            edge > 0
+            and support_count >= min_agents
+            and confidence >= min_conf
+            and not profile_block_reason
+        )
+        # Two-agent candidate: 2 agents meet thresholds but < profile min_agents for full entry
         two_agent_valid = bool(
             edge > 0
             and support_count >= 2
-            and support_count < self.min_agents_agree
-            and confidence >= self.min_consensus_confidence
+            and support_count < min_agents
+            and confidence >= min_conf
+            and not profile_block_reason
         )
         return {
             "side": side,
@@ -428,8 +495,10 @@ class DecisionAgent(BaseAgent):
             "confidence": round(confidence, 1),
             "valid": valid,
             "two_agent_valid": two_agent_valid,
-            "supporters": [v.get("agent") for v in supporters],
+            "supporters": supporters_names,
             "opponents": [v.get("agent") for v in opponents],
+            "profile_block_reason": profile_block_reason,
+            "lead_agent_aligned": (lead_agent in supporters_names) if lead_agent else None,
         }
 
     def _final_decision(self, classic: Dict[str, Any], ai_or_session: Dict[str, Any], session_info: Dict[str, Any] | None = None) -> tuple[str, float, str]:
@@ -443,13 +512,16 @@ class DecisionAgent(BaseAgent):
             return "WAIT", 0, "Outside trading hours"
         final_signal = str(classic.get("decision", "WAIT")).upper()
         final_conf = float(classic.get("confidence", 0) or 0)
+        profile_name = ((classic.get("profile") or {}).get("name") or "classic_consensus")
+        setup_type = ((classic.get("profile") or {}).get("resolved_setup_type") or "CLASSIC_CONSENSUS")
+        profile_label = "Classic consensus" if profile_name == "classic_consensus" else f"Profile {profile_name}"
         if final_signal not in {"BUY", "SELL"}:
-            return "WAIT", round(final_conf, 1), f"Classic consensus WAIT: {classic.get('rejection_reason') or 'No valid weighted consensus'}"
+            return "WAIT", round(final_conf, 1), f"{profile_label} WAIT ({setup_type}): {classic.get('rejection_reason') or 'No valid weighted consensus'}"
         if final_conf < self.min_confidence:
-            return "WAIT", round(final_conf, 1), f"Classic consensus {final_signal} blocked: confidence {final_conf:.0f}% below {self.min_confidence:.0f}%"
+            return "WAIT", round(final_conf, 1), f"{profile_label} {final_signal} blocked: confidence {final_conf:.0f}% below {self.min_confidence:.0f}%"
         selected = (classic.get("consensus", {}) or {}).get("selected") or {}
         reason = (
-            f"Classic 5-agent weighted consensus = {final_signal}; confidence {final_conf:.0f}% "
+            f"{profile_label} ({setup_type}) = {final_signal}; confidence {final_conf:.0f}% "
             f"(min {self.min_confidence:.0f}%), support={selected.get('support_count', 0)} agent(s), "
             f"opposition={selected.get('opposition_count', 0)} agent(s), edge={selected.get('edge', 0)}"
         )
@@ -654,6 +726,7 @@ class DecisionAgent(BaseAgent):
             "agent_structured": analysis.get("agent_structured", {}),
             "reason_codes": analysis.get("reason_codes", []),
             "agent_context": (analysis.get("classic", {}) or {}).get("strongest_directional"),
+            "strategy_profile": analysis.get("strategy_profile", {}),
             "consensus_mode": True,
             "entry_mode": entry_mode,
             "entry_path": entry_path,
