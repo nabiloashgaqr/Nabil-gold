@@ -90,6 +90,10 @@ def _normalized_setup_type(agents_results: Dict[str, Any]) -> str:
 
 
 def select_strategy_profile(config: Dict[str, Any], agents_results: Dict[str, Any]) -> Dict[str, Any]:
+    if isinstance(config, dict) and config.get("strategy_profiles_enabled") is False:
+        fallback = dict(DEFAULT_PROFILES["classic_consensus"])
+        fallback["resolved_setup_type"] = _normalized_setup_type(agents_results)
+        return fallback
     custom = (config.get("strategy_profiles") or {}) if isinstance(config, dict) else {}
     merged: Dict[str, Dict[str, Any]] = {name: dict(profile) for name, profile in DEFAULT_PROFILES.items()}
     for name, override in custom.items():

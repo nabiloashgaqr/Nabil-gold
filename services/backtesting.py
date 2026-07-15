@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
+from utils.sessions import session_label_from_utc
+
 from agents.classical_agent import ClassicalAgent
 from agents.decision_agent import DecisionAgent
 from agents.multitimeframe_agent import MultiTimeframeAgent
@@ -28,14 +30,28 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class BacktestTrade:
-    """One simulated historical trade."""
+    """One simulated historical trade or pending candidate."""
 
     id: str
+    variant: str
     signal: str
+    profile_name: str
+    setup_type: str
+    lead_agent: str
+    management_profile: str
+    poi_type: str
+    trigger_state: str
+    trigger_score: float
+    entry_kind: str
+    order_type: str
+    filled: bool
     entry_index: int
+    fill_index: int
     exit_index: int
     entry_time: str
+    fill_time: str
     exit_time: str
+    session_label: str
     entry_price: float
     exit_price: float
     stop_loss: float
@@ -53,16 +69,21 @@ class BacktestTrade:
 class BacktestEngine:
     """Run lightweight historical simulation using existing project agents."""
 
-    def __init__(self, config: Dict[str, Any], candles: List[Dict[str, Any]]) -> None:
+    def __init__(self, config: Dict[str, Any], candles: List[Dict[str, Any]], variant_name: str = "current_engine") -> None:
         self.original_config = config
-        self.config = self._backtest_config(config)
+        self.variant_name = variant_name
+        self.config = self._backtest_config(config, variant_name=variant_name)
         self.candles = candles
         self.logger = logging.getLogger(self.__class__.__name__)
 
-    def _backtest_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+    def _backtest_config(self, config: Dict[str, Any], variant_name: str = "current_engine") -> Dict[str, Any]:
         cfg = copy.deepcopy(config)
         cfg.setdefault("trading_hours", {})["enabled"] = False
         cfg.setdefault("news_feed", {})["enabled"] = False
+        if variant_name == "baseline_classic_market":
+            cfg["strategy_profiles_enabled"] = False
+            cfg.setdefault("learning", {})["contextual_weights_enabled"] = False
+            cfg.setdefault("order_execution", {})["entry_style"] = "market"
         return cfg
 
     def run(
@@ -144,19 +165,75 @@ class BacktestEngine:
         trade_no: int,
     ) -> BacktestTrade:
         signal = str(decision["decision"]).upper()
-        entry = float((risk.get("entry", {}) or {}).get("price") or self.candles[entry_index - 1]["close"])
+        entry_info = risk.get("entry", {}) or {}
+        entry = float(entry_info.get("price") or self.candles[entry_index - 1]["close"])
+        order_type = str(entry_info.get("order_type") or f"{signal}_MARKET").upper()
+        entry_kind = str(entry_info.get("kind") or ("MARKET" if order_type.endswith("MARKET") else order_type.split("_")[-1])).upper()
         stop_loss = float((risk.get("stop_loss", {}) or {}).get("price") or 0)
         tp = risk.get("take_profit", {}) or {}
         tp1 = float((tp.get("tp1", {}) or {}).get("price") or 0)
         tp2 = float((tp.get("tp2", {}) or {}).get("price") or 0)
         rr = float((tp.get("tp2", {}) or {}).get("rr_ratio") or 0)
+        profile = (decision.get("strategy_profile") or {}).get("name") or "classic_consensus"
+        setup_context = decision.get("setup_context") or {}
+        quality = decision.get("quality", {}) or {}
 
-        exit_index = min(entry_index + horizon, len(self.candles) - 1)
+        fill_index = entry_index
+        fill_time = str(self.candles[entry_index - 1].get("time", entry_index))
+        filled = order_type.endswith("MARKET")
+        if not filled:
+            for j in range(entry_index, min(entry_index + horizon, len(self.candles))):
+                candle = self.candles[j]
+                high = float(candle["high"])
+                low = float(candle["low"])
+                if self._pending_filled(order_type, signal, entry, high, low):
+                    fill_index = j
+                    fill_time = str(candle.get("time", j))
+                    filled = True
+                    break
+        if not filled:
+            pending_exit_index = min(entry_index + horizon, len(self.candles) - 1)
+            return BacktestTrade(
+                id=f"BT_{trade_no:04d}",
+                variant=self.variant_name,
+                signal=signal,
+                profile_name=str(profile),
+                setup_type=str(setup_context.get("setup_type") or "UNKNOWN"),
+                lead_agent=str(setup_context.get("lead_agent") or ""),
+                management_profile=str(risk.get("management_profile") or "default_profile"),
+                poi_type=str(setup_context.get("poi_type") or ""),
+                trigger_state=str(setup_context.get("trigger_state") or ""),
+                trigger_score=float(setup_context.get("trigger_score") or 0),
+                entry_kind=entry_kind,
+                order_type=order_type,
+                filled=False,
+                entry_index=entry_index,
+                fill_index=-1,
+                exit_index=pending_exit_index,
+                entry_time=str(self.candles[entry_index - 1].get("time", entry_index)),
+                fill_time="",
+                exit_time=str(self.candles[pending_exit_index].get("time", pending_exit_index)),
+                session_label=session_label_from_utc(self.candles[entry_index - 1].get("time")),
+                entry_price=round(entry, 2),
+                exit_price=round(entry, 2),
+                stop_loss=round(stop_loss, 2),
+                tp1=round(tp1, 2),
+                tp2=round(tp2, 2),
+                confidence=float(decision.get("confidence") or 0),
+                quality_grade=str(quality.get("grade", "N/A")),
+                quality_score=float(quality.get("score") or 0),
+                result="NOT_FILLED",
+                pnl_points=0.0,
+                rr_ratio=round(rr, 2),
+                reason="pending_not_filled_within_horizon",
+            )
+
+        exit_index = min(fill_index + horizon, len(self.candles) - 1)
         exit_price = float(self.candles[exit_index]["close"])
         result = "EXPIRED"
         reason = "expired_before_tp_or_sl"
 
-        for j in range(entry_index, min(entry_index + horizon, len(self.candles))):
+        for j in range(fill_index, min(fill_index + horizon, len(self.candles))):
             candle = self.candles[j]
             high = float(candle["high"])
             low = float(candle["low"])
@@ -177,14 +254,27 @@ class BacktestEngine:
                     break
 
         pnl = exit_price - entry if signal == "BUY" else entry - exit_price
-        quality = decision.get("quality", {}) or {}
         return BacktestTrade(
             id=f"BT_{trade_no:04d}",
+            variant=self.variant_name,
             signal=signal,
+            profile_name=str(profile),
+            setup_type=str(setup_context.get("setup_type") or "UNKNOWN"),
+            lead_agent=str(setup_context.get("lead_agent") or ""),
+            management_profile=str(risk.get("management_profile") or "default_profile"),
+            poi_type=str(setup_context.get("poi_type") or ""),
+            trigger_state=str(setup_context.get("trigger_state") or ""),
+            trigger_score=float(setup_context.get("trigger_score") or 0),
+            entry_kind=entry_kind,
+            order_type=order_type,
+            filled=True,
             entry_index=entry_index,
+            fill_index=fill_index,
             exit_index=exit_index,
             entry_time=str(self.candles[entry_index - 1].get("time", entry_index)),
+            fill_time=fill_time,
             exit_time=str(self.candles[exit_index].get("time", exit_index)),
+            session_label=session_label_from_utc(self.candles[entry_index - 1].get("time")),
             entry_price=round(entry, 2),
             exit_price=round(exit_price, 2),
             stop_loss=round(stop_loss, 2),
@@ -199,23 +289,63 @@ class BacktestEngine:
             reason=reason,
         )
 
+    def _pending_filled(self, order_type: str, signal: str, entry: float, high: float, low: float) -> bool:
+        order_type = str(order_type or "").upper()
+        if order_type.endswith("MARKET"):
+            return True
+        if order_type == "BUY_LIMIT":
+            return low <= entry
+        if order_type == "SELL_LIMIT":
+            return high >= entry
+        if order_type == "BUY_STOP":
+            return high >= entry
+        if order_type == "SELL_STOP":
+            return low <= entry
+        if signal == "BUY":
+            return low <= entry
+        return high >= entry
+
+    def _bucket_breakdown(self, trades: List[BacktestTrade], attr: str) -> Dict[str, Dict[str, Any]]:
+        buckets: Dict[str, Dict[str, Any]] = {}
+        for trade in trades:
+            key = str(getattr(trade, attr) or "UNKNOWN")
+            bucket = buckets.setdefault(key, {"count": 0, "filled": 0, "wins": 0, "losses": 0, "not_filled": 0, "net_points": 0.0})
+            bucket["count"] += 1
+            bucket["net_points"] += float(trade.pnl_points)
+            if trade.filled:
+                bucket["filled"] += 1
+                if trade.pnl_points > 0:
+                    bucket["wins"] += 1
+                elif trade.pnl_points < 0:
+                    bucket["losses"] += 1
+            else:
+                bucket["not_filled"] += 1
+        for bucket in buckets.values():
+            decisive = bucket["wins"] + bucket["losses"]
+            bucket["win_rate"] = round((bucket["wins"] / decisive * 100) if decisive else 0.0, 2)
+            bucket["net_points"] = round(bucket["net_points"], 2)
+        return buckets
+
     def _report(self, trades: List[BacktestTrade], **params: Any) -> Dict[str, Any]:
-        wins = [t for t in trades if t.pnl_points > 0]
-        losses = [t for t in trades if t.pnl_points < 0]
+        filled = [t for t in trades if t.filled]
+        wins = [t for t in filled if t.pnl_points > 0]
+        losses = [t for t in filled if t.pnl_points < 0]
+        not_filled = [t for t in trades if not t.filled]
         gross_profit = sum(t.pnl_points for t in wins)
         gross_loss = abs(sum(t.pnl_points for t in losses))
-        net = sum(t.pnl_points for t in trades)
+        net = sum(t.pnl_points for t in filled)
         equity = 0.0
         peak = 0.0
         max_dd = 0.0
-        for trade in trades:
+        for trade in filled:
             equity += trade.pnl_points
             peak = max(peak, equity)
             max_dd = max(max_dd, peak - equity)
         by_signal = {
             side: {
                 "count": len([t for t in trades if t.signal == side]),
-                "net_points": round(sum(t.pnl_points for t in trades if t.signal == side), 2),
+                "filled": len([t for t in filled if t.signal == side]),
+                "net_points": round(sum(t.pnl_points for t in filled if t.signal == side), 2),
             }
             for side in ["BUY", "SELL"]
         }
@@ -225,30 +355,77 @@ class BacktestEngine:
             by_grade[grade] = {
                 "count": len(subset),
                 "wins": len([t for t in subset if t.pnl_points > 0]),
+                "not_filled": len([t for t in subset if not t.filled]),
                 "net_points": round(sum(t.pnl_points for t in subset), 2),
             }
         report = {
             "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            "variant": self.variant_name,
             "symbol": self.config.get("symbol", "XAU/USD"),
             "candles": len(self.candles),
             "params": params,
             "summary": {
-                "total_trades": len(trades),
+                "total_candidates": len(trades),
+                "total_trades": len(filled),
+                "not_filled": len(not_filled),
                 "wins": len(wins),
                 "losses": len(losses),
-                "win_rate": round((len(wins) / len(trades) * 100) if trades else 0, 2),
+                "win_rate": round((len(wins) / len(filled) * 100) if filled else 0, 2),
                 "net_points": round(net, 2),
                 "gross_profit": round(gross_profit, 2),
                 "gross_loss": round(gross_loss, 2),
                 "profit_factor": round((gross_profit / gross_loss) if gross_loss else 0, 2),
                 "max_drawdown_points": round(max_dd, 2),
                 "avg_quality_score": round(sum(t.quality_score for t in trades) / len(trades), 2) if trades else 0,
+                "avg_trigger_score": round(sum(t.trigger_score for t in trades) / len(trades), 2) if trades else 0,
                 "by_signal": by_signal,
                 "by_grade": by_grade,
+                "by_setup_type": self._bucket_breakdown(trades, "setup_type"),
+                "by_profile": self._bucket_breakdown(trades, "profile_name"),
+                "by_management_profile": self._bucket_breakdown(trades, "management_profile"),
+                "by_trigger_state": self._bucket_breakdown(trades, "trigger_state"),
+                "by_session": self._bucket_breakdown(trades, "session_label"),
+                "by_entry_kind": self._bucket_breakdown(trades, "entry_kind"),
             },
             "trades": [asdict(t) for t in trades],
         }
         return report
+
+
+def benchmark_backtests(
+    config: Dict[str, Any],
+    candles: List[Dict[str, Any]],
+    *,
+    window: int = 160,
+    step: int = 12,
+    horizon: int = 32,
+    max_trades: int = 60,
+) -> Dict[str, Any]:
+    """Run current engine vs a conservative baseline and compare deltas."""
+    variants = {
+        "current_engine": BacktestEngine(config, candles, variant_name="current_engine").run(
+            window=window, step=step, horizon=horizon, max_trades=max_trades
+        ),
+        "baseline_classic_market": BacktestEngine(config, candles, variant_name="baseline_classic_market").run(
+            window=window, step=step, horizon=horizon, max_trades=max_trades
+        ),
+    }
+    current = variants["current_engine"].get("summary", {})
+    baseline = variants["baseline_classic_market"].get("summary", {})
+    comparison = {
+        "win_rate_delta": round(float(current.get("win_rate", 0)) - float(baseline.get("win_rate", 0)), 2),
+        "net_points_delta": round(float(current.get("net_points", 0)) - float(baseline.get("net_points", 0)), 2),
+        "profit_factor_delta": round(float(current.get("profit_factor", 0)) - float(baseline.get("profit_factor", 0)), 2),
+        "filled_trades_delta": int(current.get("total_trades", 0) or 0) - int(baseline.get("total_trades", 0) or 0),
+        "not_filled_delta": int(current.get("not_filled", 0) or 0) - int(baseline.get("not_filled", 0) or 0),
+    }
+    return {
+        "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "symbol": config.get("symbol", "XAU/USD"),
+        "params": {"window": window, "step": step, "horizon": horizon, "max_trades": max_trades},
+        "variants": variants,
+        "comparison": comparison,
+    }
 
 
 def save_backtest_report(report: Dict[str, Any], path: str | Path = "storage/backtest_report.json") -> Path:
@@ -279,23 +456,41 @@ def save_backtest_csv(report: Dict[str, Any], path: str | Path = "storage/backte
 
 def format_backtest_telegram(report: Dict[str, Any]) -> str:
     """Format a compact Arabic Telegram summary."""
+    if report.get("variants"):
+        current = (report.get("variants", {}) or {}).get("current_engine", {}).get("summary", {})
+        baseline = (report.get("variants", {}) or {}).get("baseline_classic_market", {}).get("summary", {})
+        cmp = report.get("comparison", {}) or {}
+        return "\n".join(
+            [
+                "🧪 <b>Backtest Benchmark - XAU/USD</b>",
+                "━━━━━━━━━━━━━━━━━━━━",
+                f"Current: {current.get('total_trades', 0)} filled / {current.get('not_filled', 0)} not-filled | WR {current.get('win_rate', 0)}% | Net {float(current.get('net_points', 0)):+.0f}",
+                f"Baseline: {baseline.get('total_trades', 0)} filled / {baseline.get('not_filled', 0)} not-filled | WR {baseline.get('win_rate', 0)}% | Net {float(baseline.get('net_points', 0)):+.0f}",
+                f"Δ Win Rate: {float(cmp.get('win_rate_delta', 0)):+.2f}%",
+                f"Δ Net Points: {float(cmp.get('net_points_delta', 0)):+.0f}",
+                f"Δ Profit Factor: {float(cmp.get('profit_factor_delta', 0)):+.2f}",
+                f"Δ Filled Trades: {int(cmp.get('filled_trades_delta', 0)):+d} | Δ Not-filled: {int(cmp.get('not_filled_delta', 0)):+d}",
+                "━━━━━━━━━━━━━━━━━━━━",
+                "Baseline = classic consensus + market execution only.",
+            ]
+        )
     s = report.get("summary", {})
     by_signal = s.get("by_signal", {})
     return "\n".join(
         [
             "🧪 <b>Backtesting Report - XAU/USD</b>",
             "━━━━━━━━━━━━━━━━━━━━",
-            f"📊 Trades: {s.get('total_trades', 0)}",
+            f"📊 Filled Trades: {s.get('total_trades', 0)} | Pending Expired: {s.get('not_filled', 0)}",
             f"✅ Wins: {s.get('wins', 0)} | ❌ Losses: {s.get('losses', 0)}",
             f"📈 Win Rate: {s.get('win_rate', 0)}%",
-            f"💰 Net Points: {s.get('net_points', 0):+}",
+            f"💰 Net Points: {float(s.get('net_points', 0)):+.0f}",
             f"⚖️ Profit Factor: {s.get('profit_factor', 0)}",
             f"📉 Max DD: {s.get('max_drawdown_points', 0)} points",
-            f"⭐ Avg Quality: {s.get('avg_quality_score', 0)}%",
+            f"⭐ Avg Quality: {s.get('avg_quality_score', 0)}% | Trigger {s.get('avg_trigger_score', 0)}",
             "",
-            f"BUY: {by_signal.get('BUY', {}).get('count', 0)} | Net {by_signal.get('BUY', {}).get('net_points', 0):+}",
-            f"SELL: {by_signal.get('SELL', {}).get('count', 0)} | Net {by_signal.get('SELL', {}).get('net_points', 0):+}",
-            f"Grades: {report.get('summary', {}).get('by_grade', {})}",
+            f"BUY: {by_signal.get('BUY', {}).get('filled', 0)} filled | Net {float(by_signal.get('BUY', {}).get('net_points', 0)):+.0f}",
+            f"SELL: {by_signal.get('SELL', {}).get('filled', 0)} filled | Net {float(by_signal.get('SELL', {}).get('net_points', 0)):+.0f}",
+            f"Setups: {report.get('summary', {}).get('by_setup_type', {})}",
             "━━━━━━━━━━━━━━━━━━━━",
             "If the trade count is 0, the current conditions produced no qualified signals on the tested sample.",
         ]
