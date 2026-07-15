@@ -84,6 +84,23 @@
           <div class="edge-card"><span>🧭</span><p data-en="Best Regime" data-ar="أفضل نظام سوقي">Best Regime</p><strong id="bestRegime">--</strong><small id="bestRegimeSub">--</small></div>
         </div>
 
+        <!-- Analyst Overlap Snapshot -->
+        <div class="table-card analyst-overlap-card">
+          <div class="table-header">
+            <div>
+              <h3 data-en="Analyst Overlap" data-ar="تطابق المحلل">Analyst Overlap</h3>
+              <span id="analystOverlapCount"></span>
+            </div>
+          </div>
+          <div class="edge-grid analyst-overlap-grid">
+            <div class="edge-card"><span>🎯</span><p data-en="Match Rate" data-ar="نسبة التطابق">Match Rate</p><strong id="analystMatchRate">--</strong><small id="analystCoverage">--</small></div>
+            <div class="edge-card"><span>🧩</span><p data-en="Matched / Partial / Missed" data-ar="مطابق / جزئي / مفقود">Matched / Partial / Missed</p><strong id="analystMatchMix">--</strong><small id="analystExtraSetups">--</small></div>
+            <div class="edge-card"><span>📏</span><p data-en="Avg Entry Distance" data-ar="متوسط فرق الدخول">Avg Entry Distance</p><strong id="analystEntryDistance">--</strong><small id="analystEntryDistanceSub">--</small></div>
+            <div class="edge-card"><span>⚠️</span><p data-en="Top Miss Reason" data-ar="أهم سبب للفقد">Top Miss Reason</p><strong id="analystTopReason">--</strong><small id="analystTopReasonSub">--</small></div>
+          </div>
+          <div id="analystReasonList" class="reports-archive"></div>
+        </div>
+
         <!-- Toolbar -->
         <div class="toolbar-card">
           <div class="filter-group"><label data-en="Symbol" data-ar="الرمز">Symbol</label><select id="filterSymbol" onchange="applyFilters()"><option value="" data-en="All" data-ar="الكل">All</option><option value="XAU/USD">XAU/USD</option><option value="WTI/USD">WTI/USD</option></select></div>

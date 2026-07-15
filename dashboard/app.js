@@ -92,7 +92,8 @@ function setLang(lang) {
     if (dashboardPayload) {
         setText('lastUpdate', formatDateTime(dashboardPayload.generatedAt || Date.now()));
         renderReports(dashboardPayload);
-        }
+        renderAnalystOverlap(dashboardPayload.analystOverlap || {});
+    }
 }
 
 
@@ -403,6 +404,7 @@ async function loadDashboardData() {
         renderTradesTable(filteredTrades);
         updateOpenTrades(liveTrades);
         renderReports(payload);
+        renderAnalystOverlap(payload.analystOverlap || {});
         updateAgentPerformance();
 
         setText('lastUpdate', formatDateTime(payload.generatedAt || Date.now()));
@@ -417,6 +419,7 @@ async function loadDashboardData() {
         renderTradesTable([]);
         updateOpenTrades([]);
         renderReports({ dailyReports: [], weeklyReports: [] });
+        renderAnalystOverlap({});
         setText('dataSource', 'خطأ');
         setText('lastUpdate', formatDateTime(Date.now()));
         setError(`${tr('loadError')}: ${error.message.includes('404') ? tr('api404') : error.message}`);
@@ -871,6 +874,46 @@ function renderReports(payload) {
     setText('dailyReportsCount', daily.length ? wordReports(daily.length) : '');
     setText('weeklyReportsCount', weekly.length ? wordReports(weekly.length) : '');
     setHTML('reportsBody', '');
+}
+
+function renderAnalystOverlap(summary) {
+    const labels = num(summary.labels_considered, 0);
+    setText('analystOverlapCount', labels ? `(${labels})` : '');
+    if (!labels) {
+        setText('analystMatchRate', '--');
+        setText('analystCoverage', currentLang === 'ar' ? 'لا توجد labels بعد' : 'No analyst labels yet');
+        setText('analystMatchMix', '--');
+        setText('analystExtraSetups', '--');
+        setText('analystEntryDistance', '--');
+        setText('analystEntryDistanceSub', '--');
+        setText('analystTopReason', '--');
+        setText('analystTopReasonSub', '--');
+        setHTML('analystReasonList', `<div class="empty">${currentLang === 'ar' ? 'أضف labels للمحلل أو شغّل المقارنة أولاً' : 'Import analyst labels or run the comparison workflow first.'}</div>`);
+        return;
+    }
+    setText('analystMatchRate', `${num(summary.match_rate_pct, 0).toFixed(1)}%`);
+    setText('analystCoverage', `${currentLang === 'ar' ? 'التغطية' : 'Coverage'} ${num(summary.coverage_rate_pct, 0).toFixed(1)}%`);
+    setText('analystMatchMix', `${num(summary.matched_labels, 0)} / ${num(summary.partial_matches, 0)} / ${num(summary.missed_labels, 0)}`);
+    setText('analystExtraSetups', `${currentLang === 'ar' ? 'إضافية' : 'Extra'} ${num(summary.extra_bot_setups, 0)}`);
+    const avgDist = summary.avg_entry_distance_points;
+    setText('analystEntryDistance', avgDist == null ? '--' : `${num(avgDist, 0).toFixed(1)} pts`);
+    setText('analystEntryDistanceSub', currentLang === 'ar' ? 'بين دخول المحلل والبوت' : 'Between analyst and bot entry');
+    const topReason = (summary.top_missed_reasons || [])[0] || null;
+    setText('analystTopReason', topReason ? String(topReason.reason_code || '--') : '--');
+    setText('analystTopReasonSub', topReason ? `${currentLang === 'ar' ? 'العدد' : 'Count'} ${num(topReason.count, 0)}` : '--');
+    const reasons = summary.top_missed_reasons || [];
+    if (!reasons.length) {
+        setHTML('analystReasonList', `<div class="empty">${currentLang === 'ar' ? 'لا توجد أسباب محفوظة بعد' : 'No miss reasons yet'}</div>`);
+        return;
+    }
+    setHTML('analystReasonList', reasons.map((r, idx) => `
+      <div class="report-file">
+        <div class="report-file-head">
+          <span class="file-icon">${idx === 0 ? '🥇' : idx === 1 ? '🥈' : '•'}</span>
+          <span class="file-title">${esc(r.reason_code || 'UNKNOWN')}</span>
+          <span class="file-meta">${currentLang === 'ar' ? 'العدد' : 'Count'} ${num(r.count, 0)}</span>
+        </div>
+      </div>`).join(''));
 }
 
 function updateAgentPerformance() {
