@@ -1180,6 +1180,17 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 telegram.send_error_alert(f"Signal delivery failed: {exc}")
                 return
             if delivered:
+                cancelled_pending = 0
+                try:
+                    cancelled_pending = database.cancel_pending_orders(
+                        reason=f"Replaced by newer {decision_type} signal",
+                        symbol=symbol,
+                        direction=decision_type,
+                    )
+                    if cancelled_pending:
+                        logger.info("Cancelled %s stale pending %s order(s) for %s before saving new signal", cancelled_pending, decision_type, symbol)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed to cancel stale pending orders before saving new signal: %s", exc)
                 database.save_trade(decision)
                 if decision.get("setup_id"):
                     try:
