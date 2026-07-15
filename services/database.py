@@ -183,16 +183,20 @@ class DatabaseService:
         candidate_id = str(candidate.get("id") or f"SETUP_{uuid.uuid4().hex[:16]}")
         now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         zone = candidate.get("poi_zone") or candidate.get("zone") or {}
+        setup_quality_value = candidate.get("setup_quality")
+        setup_quality_grade = setup_quality_value.get("grade") if isinstance(setup_quality_value, dict) else setup_quality_value
+        setup_quality_score = setup_quality_value.get("score", candidate.get("quality_score", 0)) if isinstance(setup_quality_value, dict) else candidate.get("quality_score", 0)
         payload = {
             "id": candidate_id,
+            "state_key": str(candidate.get("state_key") or candidate_id),
             "symbol": str(candidate.get("symbol") or self.config.get("symbol", "XAU/USD")),
             "timeframe": str(candidate.get("timeframe") or self.config.get("entry_timeframe") or "15m"),
             "direction": str(candidate.get("direction") or "WAIT").upper(),
             "setup_type": candidate.get("setup_type") or "UNKNOWN",
             "setup_state": candidate.get("setup_state") or "DETECTED",
             "lead_agent": candidate.get("lead_agent") or "smc",
-            "setup_quality": (candidate.get("setup_quality") or {}).get("grade") if isinstance(candidate.get("setup_quality"), dict) else candidate.get("setup_quality"),
-            "quality_score": float((candidate.get("setup_quality") or {}).get("score", candidate.get("quality_score", 0)) or 0),
+            "setup_quality": setup_quality_grade,
+            "quality_score": float(setup_quality_score or 0),
             "poi_type": candidate.get("poi_type"),
             "poi_low": candidate.get("poi_low") if candidate.get("poi_low") is not None else zone.get("bottom"),
             "poi_high": candidate.get("poi_high") if candidate.get("poi_high") is not None else zone.get("top"),
@@ -206,7 +210,10 @@ class DatabaseService:
             "source": candidate.get("source") or "smc",
             "is_active": bool(candidate.get("is_active", True)),
             "first_seen_at": candidate.get("first_seen_at") or candidate.get("created_at") or now_iso,
-            "last_seen_at": now_iso,
+            "last_seen_at": candidate.get("last_seen_at") or now_iso,
+            "last_transition_at": candidate.get("last_transition_at") or now_iso,
+            "transition_count": int(candidate.get("transition_count", 0) or 0),
+            "missing_cycles": int(candidate.get("missing_cycles", 0) or 0),
             "last_trade_id": candidate.get("last_trade_id"),
             "updated_at": now_iso,
         }
@@ -221,9 +228,12 @@ class DatabaseService:
         candidates = load_trades(self.setup_candidates_path)
         replaced = False
         for index, existing in enumerate(candidates):
-            if str(existing.get("id")) == candidate_id:
+            same_id = str(existing.get("id")) == candidate_id
+            same_state_key = bool(payload.get("state_key")) and str(existing.get("state_key") or "") == str(payload.get("state_key"))
+            if same_id or same_state_key:
                 merged = dict(existing)
                 merged.update(payload)
+                merged["id"] = existing.get("id") or payload["id"]
                 merged["first_seen_at"] = existing.get("first_seen_at") or payload["first_seen_at"]
                 candidates[index] = merged
                 replaced = True
@@ -249,6 +259,55 @@ class DatabaseService:
         if symbol:
             rows = [row for row in rows if str(row.get("symbol", "")).upper() == str(symbol).upper()]
         return sorted(rows, key=lambda row: str(row.get("last_seen_at") or row.get("updated_at") or ""), reverse=True)[:limit]
+
+    def get_active_setup_candidates(self, symbol: str | None = None) -> List[Dict[str, Any]]:
+        terminal = {"ENTRY_TRIGGERED", "INVALIDATED", "EXPIRED"}
+        if self.use_supabase and self.client:
+            try:
+                query = self.client.table("setup_candidates").select("*").eq("is_active", True)
+                if symbol:
+                    query = query.eq("symbol", symbol)
+                response = query.execute()
+                rows = list(response.data or [])
+                return [row for row in rows if str(row.get("setup_state") or "").upper() not in terminal]
+            except Exception as exc:  # noqa: BLE001
+                if self._strict_supabase():
+                    raise RuntimeError(f"Failed to fetch active setup candidates in production: {exc}") from exc
+                self.logger.error("Failed to fetch active setup candidates from Supabase: %s", exc)
+        rows = load_trades(self.setup_candidates_path)
+        if symbol:
+            rows = [row for row in rows if str(row.get("symbol", "")).upper() == str(symbol).upper()]
+        return [row for row in rows if bool(row.get("is_active", True)) and str(row.get("setup_state") or "").upper() not in terminal]
+
+    def save_setup_state_event(self, event: Dict[str, Any]) -> str:
+        event_id = str(event.get("id") or f"SETUP_EVENT_{uuid.uuid4().hex[:16]}")
+        now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        payload = {
+            "id": event_id,
+            "setup_id": str(event.get("setup_id") or ""),
+            "state_key": str(event.get("state_key") or ""),
+            "symbol": str(event.get("symbol") or self.config.get("symbol", "XAU/USD")),
+            "from_state": event.get("from_state"),
+            "to_state": event.get("to_state"),
+            "reason": event.get("reason") or "state_transition",
+            "price": event.get("price"),
+            "payload": event.get("payload") or {},
+            "created_at": event.get("created_at") or now_iso,
+            "updated_at": now_iso,
+        }
+        path = Path(__file__).resolve().parents[1] / "storage" / "setup_state_events.json"
+        if self.use_supabase and self.client:
+            try:
+                self.client.table("setup_state_events").insert(payload).execute()
+                return event_id
+            except Exception as exc:  # noqa: BLE001
+                if self._strict_supabase():
+                    raise RuntimeError(f"Failed to save setup state event in production: {exc}") from exc
+                self.logger.error("Failed to insert setup state event in Supabase, falling back local: %s", exc)
+        rows = load_trades(path)
+        rows.append(payload)
+        save_trades(rows, path)
+        return event_id
 
     @staticmethod
     def _build_regime_composite(tech_regime: dict) -> str:
