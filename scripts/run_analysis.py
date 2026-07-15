@@ -700,6 +700,49 @@ def _compact_agent_details(all_results: Dict[str, Any]) -> Dict[str, Any]:
     return details
 
 
+def _select_setup_candidate(decision_type: str, all_results: Dict[str, Any]) -> Dict[str, Any]:
+    smc = all_results.get("smc", {}) or {}
+    candidates = list(smc.get("setup_candidates") or [])
+    if not candidates:
+        return {}
+    side = str(decision_type or "").upper()
+    if side in {"BUY", "SELL"}:
+        directional = [c for c in candidates if str(c.get("direction", "")).upper() == side]
+        if directional:
+            directional.sort(key=lambda c: float((c.get("setup_quality") or {}).get("score", c.get("quality_score", 0)) or 0), reverse=True)
+            return directional[0]
+    candidates.sort(key=lambda c: float((c.get("setup_quality") or {}).get("score", c.get("quality_score", 0)) or 0), reverse=True)
+    return candidates[0]
+
+
+def _setup_context_payload(decision: Dict[str, Any], all_results: Dict[str, Any]) -> Dict[str, Any]:
+    decision_type = str(decision.get("decision") or "").upper()
+    selected = _select_setup_candidate(decision_type, all_results)
+    mtf = all_results.get("multitimeframe", {}) or {}
+    quality = decision.get("quality") or {}
+    entry_attr = decision.get("entry_attribution") or {}
+    classic = decision.get("classic", {}) or {}
+    strongest = classic.get("strongest_directional") or {}
+    smc_structure = (all_results.get("smc", {}) or {}).get("setup_structure") or {}
+    quality_obj = selected.get("setup_quality") if isinstance(selected.get("setup_quality"), dict) else None
+    payload = {
+        "id": selected.get("id"),
+        "setup_type": selected.get("setup_type") or mtf.get("setup_type") or smc_structure.get("setup_type") or "CONSENSUS_GENERIC",
+        "setup_state": selected.get("setup_state") or smc_structure.get("setup_state") or ("ENTRY_TRIGGERED" if decision_type in {"BUY", "SELL"} else "DETECTED"),
+        "lead_agent": selected.get("lead_agent") or entry_attr.get("primary_entry_driver") or strongest.get("agent") or "consensus",
+        "quality_grade": (quality_obj or {}).get("grade") or selected.get("quality_grade") or quality.get("grade") or ((decision.get("trade_grade") or {}).get("grade") if isinstance(decision.get("trade_grade"), dict) else None),
+        "quality_score": (quality_obj or {}).get("score") or selected.get("quality_score") or quality.get("score"),
+        "poi_type": selected.get("poi_type") or smc_structure.get("poi_type"),
+        "poi_zone": selected.get("poi_zone"),
+        "sweep_side": selected.get("sweep_side") or smc_structure.get("sweep_side"),
+        "displacement_score": selected.get("displacement_score") or smc_structure.get("displacement_score"),
+        "target_liquidity": selected.get("target_liquidity") or smc_structure.get("target_liquidity"),
+        "entry_reason": selected.get("entry_reason"),
+        "details": selected.get("details") or {},
+    }
+    return {k: v for k, v in payload.items() if v not in (None, "", {}, [])}
+
+
 def run_agent(agent_name: str, agent: Any, data: Dict[str, Any]) -> Dict[str, Any]:
     try:
         logger.info("Running agent: %s", agent_name)
@@ -857,6 +900,14 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             news["macro_direction"] = macro.get("macro_direction")
             news["macro_agent"] = macro
         all_results = {"technical": run_agent("technical", TechnicalAgent(config), data), "classical": run_agent("classical", ClassicalAgent(config), data), "smc": run_agent("smc", SMCAgent(config), data), "price_action": run_agent("price_action", PriceActionAgent(config), data), "multitimeframe": run_agent("multitimeframe", MultiTimeframeAgent(config), data), "macro_fundamental": macro, "current_price": data["current_price"], "symbol": symbol, "session": session, "verified_snapshot": verified_snapshot, "news": news, "daily_bias": run_agent("daily_bias", DailyBiasAgent(config), data)}
+        # Sprint 1 foundation: persist structured setup candidates even before a
+        # trade is triggered, so later phases can compare analyst-vs-bot and
+        # evolve this into a richer state machine.
+        for candidate in list(((all_results.get("smc", {}) or {}).get("setup_candidates") or []))[:3]:
+            try:
+                database.save_setup_candidate(candidate)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to persist setup candidate %s: %s", candidate.get("id"), exc)
         # Inject portfolio info so RiskManagementAgent can enforce max_open_trades
         # and max_daily_signals filters. Without this, those filters see 0 and
         # never block — which caused 15 simultaneous BUY trades.
@@ -908,6 +959,13 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             "daily_bias": all_results.get("daily_bias", {}),
             "macro_direction": (all_results.get("news", {}) or {}).get("macro_direction") or (all_results.get("macro_fundamental", {}) or {}).get("macro_direction", {}),
         }
+        setup_context = _setup_context_payload(decision, all_results)
+        decision["setup_context"] = setup_context
+        decision["setup_id"] = setup_context.get("id")
+        decision["setup_type"] = setup_context.get("setup_type")
+        decision["setup_state"] = setup_context.get("setup_state")
+        decision["lead_agent"] = setup_context.get("lead_agent")
+        decision["setup_quality"] = setup_context.get("quality_grade")
         decision_type = str(decision.get("decision") or "").upper()
 
         # ═══════════════════════════════════════════════════════════════════
@@ -1109,6 +1167,24 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 return
             if delivered:
                 database.save_trade(decision)
+                if decision.get("setup_id"):
+                    try:
+                        database.save_setup_candidate({
+                            **(decision.get("setup_context") or {}),
+                            "id": decision.get("setup_id"),
+                            "symbol": symbol,
+                            "direction": decision_type,
+                            "setup_type": decision.get("setup_type"),
+                            "setup_state": "ENTRY_TRIGGERED",
+                            "lead_agent": decision.get("lead_agent"),
+                            "setup_quality": {"grade": decision.get("setup_quality"), "score": (decision.get("quality") or {}).get("score", 0)},
+                            "confidence": decision.get("confidence"),
+                            "last_trade_id": trade_id,
+                            "is_active": False,
+                            "source": "signal_commit",
+                        })
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("Failed to link setup candidate %s to trade %s: %s", decision.get("setup_id"), trade_id, exc)
             else:
                 telegram.send_error_alert("Signal delivery failed: Telegram returned False; trade was not saved.")
         elif decision_type == "WAIT":
