@@ -54,6 +54,9 @@ class LearningConfig:
     aggressive_mode: bool = True  # وضع عدواني
     streak_bonus: float = 0.10  # مكافأة التتابع
     recent_trades_weight: float = 0.6  # 60% للصفقات الأخيرة
+    contextual_weights_enabled: bool = True
+    contextual_min_sample: int = 3
+    contextual_blend: float = 0.35
 
 @dataclass
 class LearningReport:
@@ -73,6 +76,10 @@ class LearningReport:
     rr_efficiency: Dict[str, Any] = field(default_factory=dict)
     news_proximity: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     regime_fit: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    setup_breakdown: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    lead_agent_breakdown: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    management_profile_breakdown: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    contextual_weight_hints: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
 class LearningService:
     """
@@ -118,7 +125,10 @@ class LearningService:
             performance_threshold=learning.get('performance_threshold', 0.6),
             aggressive_mode=learning.get('aggressive_mode', True),
             streak_bonus=learning.get('streak_bonus', 0.10),
-            recent_trades_weight=learning.get('recent_trades_weight', 0.6)
+            recent_trades_weight=learning.get('recent_trades_weight', 0.6),
+            contextual_weights_enabled=learning.get('contextual_weights_enabled', True),
+            contextual_min_sample=learning.get('contextual_min_sample', 3),
+            contextual_blend=learning.get('contextual_blend', 0.35),
         )
     
     async def analyze_and_update_weights(self) -> LearningReport:
@@ -416,6 +426,72 @@ class LearningService:
         attr = snap.get("entry_attribution") or {}
         return str(trade.get("primary_entry_driver") or attr.get("primary_entry_driver") or "unknown")
 
+    def _trade_setup_type(self, trade: Dict[str, Any]) -> str:
+        snap = self._snapshot(trade)
+        setup = snap.get("setup_context") or {}
+        return str(trade.get("setup_type") or snap.get("setup_type") or setup.get("setup_type") or "unknown").upper()
+
+    def _trade_lead_agent(self, trade: Dict[str, Any]) -> str:
+        snap = self._snapshot(trade)
+        setup = snap.get("setup_context") or {}
+        return str(trade.get("lead_agent") or snap.get("lead_agent") or setup.get("lead_agent") or self._trade_primary_driver(trade) or "unknown")
+
+    def _trade_management_profile(self, trade: Dict[str, Any]) -> str:
+        snap = self._snapshot(trade)
+        risk = snap.get("risk") or {}
+        signal = snap.get("signal") or {}
+        return str(trade.get("management_profile") or risk.get("management_profile") or signal.get("management_profile") or "default_profile")
+
+    def _contextual_bucket_weights(self, trades: List[Dict[str, Any]], key_func) -> Dict[str, Dict[str, Any]]:
+        buckets: Dict[str, Dict[str, Any]] = {}
+        agent_names = list(self.default_weights)
+        for trade in trades:
+            label = str(key_func(trade) or "unknown")
+            pnl = self._trade_pnl(trade)
+            risk = self._planned_risk_points(trade)
+            actual_r = pnl / risk if risk > 0 else (1.0 if pnl > 0 else -1.0 if pnl < 0 else 0.0)
+            bucket = buckets.setdefault(label, {"sample": 0, "pnl": 0.0, "wins": 0, "agent_scores": {}})
+            bucket["sample"] += 1
+            bucket["pnl"] += pnl
+            if pnl > 0:
+                bucket["wins"] += 1
+            primary = self._trade_primary_driver(trade)
+            for agent in self._trade_agent_configs(trade):
+                name = str(agent.get("name"))
+                node = bucket["agent_scores"].setdefault(name, {"score": 0.0, "count": 0, "wins": 0})
+                node["count"] += 1
+                if pnl > 0:
+                    node["wins"] += 1
+                contribution = max(-2.0, min(2.0, actual_r))
+                if name == primary:
+                    contribution += 0.20 if pnl > 0 else -0.10 if pnl < 0 else 0.0
+                node["score"] += contribution
+        result: Dict[str, Dict[str, Any]] = {}
+        for label, bucket in buckets.items():
+            raw_weights: Dict[str, float] = {}
+            best_agent = None
+            best_score = -999.0
+            for name in agent_names:
+                base = float(self.default_weights.get(name, 0.15))
+                node = bucket["agent_scores"].get(name, {"score": 0.0, "count": 0, "wins": 0})
+                avg_score = float(node["score"]) / max(int(node["count"] or 0), 1)
+                if avg_score > best_score and node.get("count", 0) > 0:
+                    best_agent = name
+                    best_score = avg_score
+                multiplier = max(0.75, min(1.25, 1.0 + avg_score * 0.12))
+                raw_weights[name] = base * multiplier
+            total = sum(raw_weights.values()) or 1.0
+            normalized = {name: round(value / total, 4) for name, value in raw_weights.items()}
+            sample = int(bucket["sample"])
+            result[label] = {
+                "sample": sample,
+                "pnl": round(float(bucket["pnl"]), 1),
+                "win_rate_pct": round((bucket["wins"] / sample) * 100, 1) if sample else 0.0,
+                "best_agent": best_agent,
+                "recommended_weights": normalized,
+            }
+        return result
+
     def _rr_efficiency(self, trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         actual_r: List[float] = []
         planned: List[float] = []
@@ -447,6 +523,15 @@ class LearningService:
             "regime_fit": self._bucket_metric(trades, self._trade_regime_label),
             "macro_bias": self._bucket_metric(trades, self._trade_macro_label),
             "entry_driver": self._bucket_metric(trades, self._trade_primary_driver),
+            "setup_breakdown": self._bucket_metric(trades, self._trade_setup_type),
+            "lead_agent_breakdown": self._bucket_metric(trades, self._trade_lead_agent),
+            "management_profile_breakdown": self._bucket_metric(trades, self._trade_management_profile),
+            "contextual_weight_hints": {
+                "setup_type": self._contextual_bucket_weights(trades, self._trade_setup_type),
+                "lead_agent": self._contextual_bucket_weights(trades, self._trade_lead_agent),
+                "session": self._contextual_bucket_weights(trades, self._trade_session_label),
+                "regime": self._contextual_bucket_weights(trades, self._trade_regime_label),
+            },
         }
     
     def _calculate_trend(self, record: AgentPerformanceRecord) -> str:
@@ -628,6 +713,10 @@ class LearningService:
             rr_efficiency=enrichment.get("rr_efficiency", {}),
             news_proximity=enrichment.get("news_proximity", {}),
             regime_fit=enrichment.get("regime_fit", {}),
+            setup_breakdown=enrichment.get("setup_breakdown", {}),
+            lead_agent_breakdown=enrichment.get("lead_agent_breakdown", {}),
+            management_profile_breakdown=enrichment.get("management_profile_breakdown", {}),
+            contextual_weight_hints=enrichment.get("contextual_weight_hints", {}),
         )
     
     def _log_weight_changes(self, new_weights: Dict[str, float]):
@@ -655,6 +744,10 @@ class LearningService:
             rr_efficiency={"sample": 0},
             news_proximity={},
             regime_fit={},
+            setup_breakdown={},
+            lead_agent_breakdown={},
+            management_profile_breakdown={},
+            contextual_weight_hints={},
         )
     
     def get_learning_summary(self) -> str:
@@ -721,6 +814,63 @@ class LearningService:
         
         return "\n".join(lines)
     
+    def _blend_weight_maps(self, weight_maps: List[Dict[str, float]]) -> Dict[str, float]:
+        weights = dict(self.default_weights)
+        blend = max(0.0, min(0.9, float(self.learning_config.contextual_blend)))
+        for override in weight_maps:
+            if not isinstance(override, dict) or not override:
+                continue
+            names = set(weights) | set(override)
+            blended = {}
+            for name in names:
+                base = float(weights.get(name, self.default_weights.get(name, 0.0)) or 0.0)
+                target = float(override.get(name, base) or base)
+                blended[name] = base * (1.0 - blend) + target * blend
+            total = sum(v for v in blended.values() if v > 0) or 1.0
+            weights = {name: value / total for name, value in blended.items()}
+        return weights
+
+    def get_contextual_weight_overrides(
+        self,
+        setup_type: str | None = None,
+        lead_agent: str | None = None,
+        session_label: str | None = None,
+        regime: str | None = None,
+    ) -> Dict[str, float]:
+        """Return conservative learned weight overrides for the supplied context.
+
+        The service blends bucket-level recommendations from the latest learning
+        report. If there is no history, contextual weighting is disabled, or the
+        sample size is too small, it returns an empty dict.
+        """
+        if not self.learning_config.contextual_weights_enabled or not self.learning_history:
+            return {}
+        report = self.learning_history[-1]
+        hints = report.contextual_weight_hints or {}
+        min_sample = max(1, int(self.learning_config.contextual_min_sample))
+        selected: List[Dict[str, float]] = []
+
+        def _pick(group: str, key: str | None) -> None:
+            if not key:
+                return
+            bucket = (hints.get(group) or {}).get(str(key).upper()) or (hints.get(group) or {}).get(str(key))
+            if not isinstance(bucket, dict):
+                return
+            if int(bucket.get("sample", 0) or 0) < min_sample:
+                return
+            weights = bucket.get("recommended_weights") or {}
+            if isinstance(weights, dict) and weights:
+                selected.append({k: float(v) for k, v in weights.items()})
+
+        _pick("setup_type", str(setup_type or "").upper() if setup_type else None)
+        _pick("lead_agent", str(lead_agent or ""))
+        _pick("session", session_label)
+        _pick("regime", str(regime or "").upper() if regime else None)
+
+        if not selected:
+            return {}
+        return self._blend_weight_maps(selected)
+
     def get_agent_recommendation(self, agent_name: str) -> str:
         """توصية لوكيل معين"""
         
