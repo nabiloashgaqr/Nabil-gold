@@ -268,6 +268,9 @@
         "entry_tolerance_points": 80,
         "time_window_hours": 12,
         "match_threshold": 65,
+        "partial_match_threshold": 45,
+        "daily_compare_limit": 20,
+        "dashboard_compare_limit": 30,
         "description": "Phase 6 foundation: compare manual analyst labels to bot setup candidates using direction, setup type, POI, sweep side, timing, and entry proximity."
     },
     "macro_data_provider": {
