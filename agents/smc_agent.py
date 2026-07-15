@@ -52,12 +52,38 @@ class SMCAgent(BaseAgent):
             )
 
             direction = "BUY" if score >= 4 else "SELL" if score <= -4 else "NEUTRAL"
+            signal = direction if direction in {"BUY", "SELL"} else "WAIT"
             confidence = self._confidence(score, liquidity.get("recent_sweep", {}).get("occurred", False), direction)
             entry_suggestion = self._entry_suggestion(direction, current_price, atr, order_blocks, liquidity, dealing_range)
+            setup_candidates = self._build_setup_candidates(
+                symbol=str(market_data.get("symbol", "XAU/USD")),
+                timeframe=timeframe,
+                direction=direction,
+                current_price=current_price,
+                atr=atr,
+                confidence=confidence,
+                market_structure=market_structure,
+                order_blocks=order_blocks,
+                liquidity=liquidity,
+                fvg=fvg,
+                dealing_range=dealing_range,
+                entry_suggestion=entry_suggestion,
+            )
+            setup_structure = setup_candidates[0] if setup_candidates else {
+                "setup_type": "NONE",
+                "setup_state": "DETECTED",
+                "lead_agent": "smc",
+                "setup_quality": {"grade": "D", "score": 0},
+                "poi_type": None,
+                "sweep_side": (liquidity.get("recent_sweep", {}) or {}).get("type"),
+                "displacement_score": 0.0,
+                "target_liquidity": None,
+            }
 
             return {
                 "agent": self.name,
                 "direction": direction,
+                "signal": signal,
                 "confidence": confidence,
                 "market_structure": market_structure,
                 "order_blocks": order_blocks,
@@ -67,6 +93,8 @@ class SMCAgent(BaseAgent):
                 "dealing_range": dealing_range,
                 "signals": signals,
                 "entry_suggestion": entry_suggestion,
+                "setup_candidates": setup_candidates,
+                "setup_structure": setup_structure,
                 "summary": self._summary(direction, confidence, market_structure, liquidity, zone, signals),
             }
         except Exception as exc:  # noqa: BLE001
@@ -385,6 +413,238 @@ class SMCAgent(BaseAgent):
 
         return {"type": direction, "reason": reason, "entry": round(entry, 2), "sl": round(sl, 2), "tp": round(tp, 2)}
 
+    def _build_setup_candidates(
+        self,
+        symbol: str,
+        timeframe: str,
+        direction: str,
+        current_price: float,
+        atr: float,
+        confidence: int,
+        market_structure: Dict[str, Any],
+        order_blocks: List[Dict[str, Any]],
+        liquidity: Dict[str, Any],
+        fvg: List[Dict[str, Any]],
+        dealing_range: Dict[str, float],
+        entry_suggestion: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """Return structured SMC setup candidates for persistence and later state logic.
+
+        Sprint 1 scope: this is not a full state machine yet. It captures the
+        current best SMC narrative in a normalized candidate object so the rest
+        of the system can persist, display, and later evolve it into a richer
+        setup lifecycle (sweep -> displacement -> POI -> mitigation -> trigger).
+        """
+        if direction not in {"BUY", "SELL"}:
+            return []
+        sweep = liquidity.get("recent_sweep", {}) or {}
+        poi = self._primary_poi(direction, current_price, atr, order_blocks, fvg, dealing_range)
+        if not poi:
+            return []
+        setup_type = self._setup_type_from_context(direction, sweep, market_structure, poi)
+        setup_state = self._setup_state_from_context(current_price, atr, poi, sweep)
+        displacement_score = float(poi.get("displacement_score") or 0.0)
+        quality = self._setup_quality(
+            confidence=confidence,
+            sweep=sweep,
+            poi=poi,
+            market_structure=market_structure,
+            current_price=current_price,
+            atr=atr,
+            setup_state=setup_state,
+        )
+        target_liquidity = self._target_liquidity(direction, current_price, liquidity)
+        created_at = str(
+            poi.get("created_at")
+            or sweep.get("time")
+            or ((market_structure.get("last_bos") or {}).get("time"))
+            or ""
+        )
+        candidate_id = f"SMC::{symbol}::{timeframe}::{direction}::{created_at or 'now'}::{setup_type}"
+        candidate = {
+            "id": candidate_id,
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "direction": direction,
+            "setup_type": setup_type,
+            "setup_state": setup_state,
+            "lead_agent": "smc",
+            "setup_quality": quality,
+            "quality_grade": quality.get("grade"),
+            "quality_score": quality.get("score"),
+            "poi_type": poi.get("poi_type"),
+            "poi_zone": poi.get("zone"),
+            "poi_low": round(self._f((poi.get("zone") or {}).get("bottom")), 2) if poi.get("zone") else None,
+            "poi_high": round(self._f((poi.get("zone") or {}).get("top")), 2) if poi.get("zone") else None,
+            "entry_price": round(self._f(entry_suggestion.get("entry"), current_price), 2),
+            "stop_loss": round(self._f(entry_suggestion.get("sl")), 2) if entry_suggestion.get("sl") is not None else None,
+            "target_price": round(self._f(target_liquidity or entry_suggestion.get("tp")), 2) if (target_liquidity or entry_suggestion.get("tp")) else None,
+            "target_liquidity": round(self._f(target_liquidity), 2) if target_liquidity else None,
+            "sweep_side": sweep.get("type"),
+            "sweep_confirmation": sweep.get("confirmation"),
+            "displacement_score": round(displacement_score, 2),
+            "displacement_quality": poi.get("displacement_quality"),
+            "confidence": confidence,
+            "entry_reason": entry_suggestion.get("reason"),
+            "source": "smc",
+            "is_active": True,
+            "created_at": created_at,
+            "details": {
+                "market_trend": market_structure.get("trend"),
+                "recent_sweep": sweep,
+                "poi": poi,
+                "dealing_range": dealing_range,
+            },
+        }
+        return [candidate]
+
+    def _primary_poi(
+        self,
+        direction: str,
+        current_price: float,
+        atr: float,
+        order_blocks: List[Dict[str, Any]],
+        fvg: List[Dict[str, Any]],
+        dealing_range: Dict[str, float],
+    ) -> Dict[str, Any] | None:
+        relevant_type = "bullish" if direction == "BUY" else "bearish"
+        fresh_blocks = [
+            block for block in order_blocks
+            if block.get("type") == relevant_type and not block.get("invalidated")
+        ]
+        fresh_blocks.sort(
+            key=lambda block: (
+                0 if block.get("mitigation_status") == "FRESH" else 1,
+                0 if block.get("strength") == "strong" else 1,
+                -float(block.get("displacement_atr") or 0),
+            )
+        )
+        if fresh_blocks:
+            block = fresh_blocks[0]
+            return {
+                "poi_type": "order_block",
+                "zone": block.get("zone", {}),
+                "strength": block.get("strength"),
+                "created_at": block.get("created_at"),
+                "mitigation_status": block.get("mitigation_status"),
+                "displacement_score": float(block.get("displacement_atr") or 0) * 10.0,
+                "displacement_quality": block.get("displacement_quality"),
+                "near_price": self._price_in_or_near_zone(current_price, block.get("zone", {}), atr * 0.35),
+            }
+        active_fvg = [gap for gap in fvg if gap.get("type") == relevant_type and not gap.get("filled")]
+        active_fvg.sort(
+            key=lambda gap: (
+                0 if gap.get("strength") == "strong" else 1,
+                0 if not gap.get("partial_fill") else 1,
+                -float(gap.get("size") or 0),
+            )
+        )
+        if active_fvg:
+            gap = active_fvg[0]
+            return {
+                "poi_type": "fvg",
+                "zone": gap.get("zone", {}),
+                "strength": gap.get("strength"),
+                "created_at": gap.get("created_at"),
+                "mitigation_status": "PARTIAL" if gap.get("partial_fill") else "FRESH",
+                "displacement_score": float(gap.get("size") or 0) * 5.0,
+                "displacement_quality": str(gap.get("strength") or "medium").upper(),
+                "near_price": self._price_in_or_near_zone(current_price, gap.get("zone", {}), atr * 0.25),
+            }
+        if dealing_range.get("high") and dealing_range.get("low"):
+            midpoint = (self._f(dealing_range.get("high")) + self._f(dealing_range.get("low"))) / 2
+            zone = {
+                "top": round(midpoint + max(atr * 0.20, 0.30), 2),
+                "bottom": round(midpoint - max(atr * 0.20, 0.30), 2),
+            }
+            return {
+                "poi_type": "equilibrium",
+                "zone": zone,
+                "strength": "medium",
+                "created_at": None,
+                "mitigation_status": "FRESH",
+                "displacement_score": 0.0,
+                "displacement_quality": "NONE",
+                "near_price": self._price_in_or_near_zone(current_price, zone, atr * 0.15),
+            }
+        return None
+
+    def _setup_type_from_context(
+        self,
+        direction: str,
+        sweep: Dict[str, Any],
+        market_structure: Dict[str, Any],
+        poi: Dict[str, Any],
+    ) -> str:
+        sweep_type = str(sweep.get("type") or "")
+        if (direction == "BUY" and sweep_type == "sell_side") or (direction == "SELL" and sweep_type == "buy_side"):
+            return "LIQUIDITY_REVERSAL"
+        if poi.get("poi_type") == "order_block":
+            return "ORDER_BLOCK_PULLBACK"
+        if market_structure.get("trend") in {"BULLISH", "BEARISH"}:
+            return "STRUCTURE_CONTINUATION"
+        return "SMC_CONTEXT"
+
+    def _setup_state_from_context(
+        self,
+        current_price: float,
+        atr: float,
+        poi: Dict[str, Any],
+        sweep: Dict[str, Any],
+    ) -> str:
+        if poi.get("near_price"):
+            return "ENTRY_ARMED"
+        if sweep.get("occurred"):
+            return "SWEEP_CONFIRMED"
+        if poi.get("poi_type"):
+            return "POI_MARKED"
+        return "DETECTED"
+
+    def _setup_quality(
+        self,
+        confidence: int,
+        sweep: Dict[str, Any],
+        poi: Dict[str, Any],
+        market_structure: Dict[str, Any],
+        current_price: float,
+        atr: float,
+        setup_state: str,
+    ) -> Dict[str, Any]:
+        score = float(confidence)
+        if sweep.get("occurred"):
+            score += 10.0
+            if str(sweep.get("confirmation") or "").upper() == "STRONG":
+                score += 6.0
+        if poi.get("poi_type") == "order_block":
+            score += 10.0
+        elif poi.get("poi_type") == "fvg":
+            score += 6.0
+        if str(poi.get("strength") or "") == "strong":
+            score += 8.0
+        if market_structure.get("trend") in {"BULLISH", "BEARISH"}:
+            score += 4.0
+        if setup_state == "ENTRY_ARMED":
+            score += 6.0
+        score = max(0.0, min(100.0, score))
+        if score >= 88:
+            grade = "A+"
+        elif score >= 80:
+            grade = "A"
+        elif score >= 70:
+            grade = "B"
+        elif score >= 60:
+            grade = "C"
+        else:
+            grade = "D"
+        return {"grade": grade, "score": round(score, 1)}
+
+    def _target_liquidity(self, direction: str, current_price: float, liquidity: Dict[str, Any]) -> float | None:
+        if direction == "BUY":
+            targets = [self._f(level) for level in liquidity.get("buy_side", []) if self._f(level) > current_price]
+            return min(targets) if targets else None
+        targets = [self._f(level) for level in liquidity.get("sell_side", []) if self._f(level) < current_price]
+        return max(targets) if targets else None
+
     def _recent_sweep(self, candles: List[Candle], tolerance: float) -> Dict[str, Any]:
         """Detect whether a recent candle swept previous highs/lows and closed back inside."""
         if len(candles) < 20:
@@ -520,6 +780,7 @@ class SMCAgent(BaseAgent):
         return {
             "agent": self.name,
             "direction": "NEUTRAL",
+            "signal": "WAIT",
             "confidence": 0,
             "market_structure": {"trend": "RANGING", "last_bos": None, "last_choch": None, "structure_points": []},
             "order_blocks": [],
@@ -529,5 +790,7 @@ class SMCAgent(BaseAgent):
             "dealing_range": {"high": 0.0, "low": 0.0, "midpoint": 0.0},
             "signals": [],
             "entry_suggestion": {},
+            "setup_candidates": [],
+            "setup_structure": {"setup_type": "NONE", "setup_state": "DETECTED", "lead_agent": "smc", "setup_quality": {"grade": "D", "score": 0}},
             "summary": summary,
         }
