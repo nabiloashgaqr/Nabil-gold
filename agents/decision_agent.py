@@ -641,6 +641,12 @@ class DecisionAgent(BaseAgent):
             warnings.append(f"Risk rejected: {risk.get('rejection_reason', 'not approved')}")
             signal = "WAIT"
 
+        if signal in {"BUY", "SELL"}:
+            profile_warning = self._profile_entry_warning(result, agents_results)
+            if profile_warning:
+                warnings.append(profile_warning)
+                signal = "WAIT"
+
         if signal != result.get("signal"):
             reason = "; ".join(warnings[-3:]) or "Safety filter blocked signal"
             result["reasoning"] = f"{result.get('reasoning', '')} | {reason}".strip(" |")
@@ -649,6 +655,51 @@ class DecisionAgent(BaseAgent):
         result["decision"] = signal
         result["warnings"] = warnings
         return result
+
+    def _structure_quality_rank(self, value: str | None) -> int:
+        mapping = {"WEAK": 0, "MODERATE": 1, "STRONG": 2}
+        return mapping.get(str(value or "").upper(), -1)
+
+    def _profile_entry_warning(self, result: Dict[str, Any], agents_results: Dict[str, Any]) -> str | None:
+        profile = result.get("strategy_profile") or self.active_profile or {}
+        if not profile or str(profile.get("name", "classic_consensus")) == "classic_consensus":
+            return None
+        smc = agents_results.get("smc", {}) or {}
+        setup = smc.get("setup_structure") or {}
+        liquidity = smc.get("liquidity", {}) or {}
+        market_structure = smc.get("market_structure") or {}
+
+        required_quality = profile.get("min_structure_quality")
+        actual_quality = market_structure.get("structure_quality")
+        if required_quality and actual_quality not in {None, "", "UNKNOWN"}:
+            if self._structure_quality_rank(actual_quality) < self._structure_quality_rank(str(required_quality)):
+                return f"{profile.get('name')} blocks entry: structure quality {actual_quality or 'UNKNOWN'} below {required_quality}"
+
+        min_poi_rank = float(profile.get("min_poi_rank_score", 0) or 0)
+        poi_rank = float(setup.get("poi_rank_score") or 0)
+        if min_poi_rank > 0 and ("poi_rank_score" in setup or poi_rank > 0) and poi_rank < min_poi_rank:
+            return f"{profile.get('name')} blocks entry: POI rank {poi_rank:.0f} below {min_poi_rank:.0f}"
+
+        required_states = [str(x).upper() for x in (profile.get("required_trigger_states") or []) if x]
+        trigger_state = str(setup.get("trigger_state") or "").upper()
+        if required_states and trigger_state and trigger_state not in required_states:
+            return f"{profile.get('name')} blocks entry: trigger state {trigger_state or 'UNKNOWN'} not in {required_states}"
+
+        min_trigger = float(profile.get("min_trigger_score", 0) or 0)
+        trigger_score = float(setup.get("trigger_score") or 0)
+        if min_trigger > 0 and ("trigger_score" in setup or trigger_score > 0) and trigger_score < min_trigger:
+            return f"{profile.get('name')} blocks entry: trigger score {trigger_score:.0f} below {min_trigger:.0f}"
+
+        required_sweep = str(profile.get("require_sweep_confirmation") or "").upper()
+        if required_sweep:
+            sweep = (liquidity.get("recent_sweep") or {}) if isinstance(liquidity, dict) else {}
+            if sweep:
+                sweep_conf = str(sweep.get("confirmation") or "").upper()
+                if not sweep.get("occurred"):
+                    return f"{profile.get('name')} blocks entry: no qualifying liquidity sweep"
+                if self._structure_quality_rank(sweep_conf) < self._structure_quality_rank(required_sweep):
+                    return f"{profile.get('name')} blocks entry: sweep confirmation {sweep_conf or 'UNKNOWN'} below {required_sweep}"
+        return None
 
     def _calculate_quality_score(self, analysis: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
         confidence = float(analysis.get("confidence") or 0)
