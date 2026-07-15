@@ -68,6 +68,7 @@ class SMCAgent(BaseAgent):
                 fvg=fvg,
                 dealing_range=dealing_range,
                 entry_suggestion=entry_suggestion,
+                candles=recent,
             )
             setup_structure = setup_candidates[0] if setup_candidates else {
                 "setup_type": "NONE",
@@ -427,6 +428,7 @@ class SMCAgent(BaseAgent):
         fvg: List[Dict[str, Any]],
         dealing_range: Dict[str, float],
         entry_suggestion: Dict[str, Any],
+        candles: List[Candle],
     ) -> List[Dict[str, Any]]:
         """Return structured SMC setup candidates for persistence and later state logic.
 
@@ -438,9 +440,12 @@ class SMCAgent(BaseAgent):
         if direction not in {"BUY", "SELL"}:
             return []
         sweep = liquidity.get("recent_sweep", {}) or {}
-        poi = self._primary_poi(direction, current_price, atr, order_blocks, fvg, dealing_range)
+        recent_candles = candles or []
+        poi = self._primary_poi(direction, current_price, atr, order_blocks, fvg, dealing_range, market_structure, sweep)
         if not poi:
             return []
+        trigger = self._trigger_signal(direction, poi, recent_candles, current_price, atr)
+        poi["trigger"] = trigger
         setup_type = self._setup_type_from_context(direction, sweep, market_structure, poi)
         setup_state = self._setup_state_from_context(current_price, atr, poi, sweep)
         displacement_score = float(poi.get("displacement_score") or 0.0)
@@ -484,6 +489,13 @@ class SMCAgent(BaseAgent):
             "poi_zone": poi.get("zone"),
             "poi_low": round(self._f((poi.get("zone") or {}).get("bottom")), 2) if poi.get("zone") else None,
             "poi_high": round(self._f((poi.get("zone") or {}).get("top")), 2) if poi.get("zone") else None,
+            "poi_rank_score": round(float(poi.get("rank_score") or 0), 1),
+            "poi_rank_reasons": list(poi.get("rank_reasons") or []),
+            "trigger_state": trigger.get("state"),
+            "trigger_score": trigger.get("score"),
+            "trigger_ready": bool(trigger.get("market_ready")),
+            "entry_timing": trigger.get("timing"),
+            "execution_hint": trigger.get("execution_hint"),
             "entry_price": round(self._f(entry_suggestion.get("entry"), current_price), 2),
             "stop_loss": round(self._f(entry_suggestion.get("sl")), 2) if entry_suggestion.get("sl") is not None else None,
             "target_price": round(self._f(target_liquidity or entry_suggestion.get("tp")), 2) if (target_liquidity or entry_suggestion.get("tp")) else None,
@@ -501,6 +513,7 @@ class SMCAgent(BaseAgent):
                 "market_trend": market_structure.get("trend"),
                 "recent_sweep": sweep,
                 "poi": poi,
+                "trigger": trigger,
                 "dealing_range": dealing_range,
             },
         }
@@ -514,58 +527,81 @@ class SMCAgent(BaseAgent):
         order_blocks: List[Dict[str, Any]],
         fvg: List[Dict[str, Any]],
         dealing_range: Dict[str, float],
+        market_structure: Dict[str, Any],
+        sweep: Dict[str, Any],
     ) -> Dict[str, Any] | None:
-        relevant_type = "bullish" if direction == "BUY" else "bearish"
-        fresh_blocks = [
-            block for block in order_blocks
-            if block.get("type") == relevant_type and not block.get("invalidated")
-        ]
-        fresh_blocks.sort(
-            key=lambda block: (
-                0 if block.get("mitigation_status") == "FRESH" else 1,
-                0 if block.get("strength") == "strong" else 1,
-                -float(block.get("displacement_atr") or 0),
-            )
+        candidates = self._poi_candidates(direction, current_price, atr, order_blocks, fvg, dealing_range)
+        if not candidates:
+            return None
+        ranked = sorted(
+            [self._rank_poi_candidate(candidate, direction, current_price, atr, market_structure, sweep) for candidate in candidates],
+            key=lambda candidate: float(candidate.get("rank_score") or 0),
+            reverse=True,
         )
-        if fresh_blocks:
-            block = fresh_blocks[0]
-            return {
+        best = ranked[0]
+        best["alternatives"] = [
+            {
+                "poi_type": candidate.get("poi_type"),
+                "rank_score": round(float(candidate.get("rank_score") or 0), 1),
+                "rank_reasons": candidate.get("rank_reasons", [])[:3],
+                "zone": candidate.get("zone", {}),
+            }
+            for candidate in ranked[1:4]
+        ]
+        return best
+
+    def _poi_candidates(
+        self,
+        direction: str,
+        current_price: float,
+        atr: float,
+        order_blocks: List[Dict[str, Any]],
+        fvg: List[Dict[str, Any]],
+        dealing_range: Dict[str, float],
+    ) -> List[Dict[str, Any]]:
+        relevant_type = "bullish" if direction == "BUY" else "bearish"
+        candidates: List[Dict[str, Any]] = []
+        for block in order_blocks:
+            if block.get("type") != relevant_type:
+                continue
+            zone = block.get("zone", {}) or {}
+            if not zone:
+                continue
+            candidates.append({
                 "poi_type": "order_block",
-                "zone": block.get("zone", {}),
+                "zone": zone,
                 "strength": block.get("strength"),
                 "created_at": block.get("created_at"),
                 "mitigation_status": block.get("mitigation_status"),
                 "displacement_score": float(block.get("displacement_atr") or 0) * 10.0,
                 "displacement_quality": block.get("displacement_quality"),
-                "near_price": self._price_in_or_near_zone(current_price, block.get("zone", {}), atr * 0.35),
-            }
-        active_fvg = [gap for gap in fvg if gap.get("type") == relevant_type and not gap.get("filled")]
-        active_fvg.sort(
-            key=lambda gap: (
-                0 if gap.get("strength") == "strong" else 1,
-                0 if not gap.get("partial_fill") else 1,
-                -float(gap.get("size") or 0),
-            )
-        )
-        if active_fvg:
-            gap = active_fvg[0]
-            return {
+                "near_price": self._price_in_or_near_zone(current_price, zone, atr * 0.35),
+                "source_ref": block,
+            })
+        for gap in fvg:
+            if gap.get("type") != relevant_type or gap.get("filled"):
+                continue
+            zone = gap.get("zone", {}) or {}
+            if not zone:
+                continue
+            candidates.append({
                 "poi_type": "fvg",
-                "zone": gap.get("zone", {}),
+                "zone": zone,
                 "strength": gap.get("strength"),
                 "created_at": gap.get("created_at"),
                 "mitigation_status": "PARTIAL" if gap.get("partial_fill") else "FRESH",
                 "displacement_score": float(gap.get("size") or 0) * 5.0,
                 "displacement_quality": str(gap.get("strength") or "medium").upper(),
-                "near_price": self._price_in_or_near_zone(current_price, gap.get("zone", {}), atr * 0.25),
-            }
+                "near_price": self._price_in_or_near_zone(current_price, zone, atr * 0.25),
+                "source_ref": gap,
+            })
         if dealing_range.get("high") and dealing_range.get("low"):
             midpoint = (self._f(dealing_range.get("high")) + self._f(dealing_range.get("low"))) / 2
             zone = {
                 "top": round(midpoint + max(atr * 0.20, 0.30), 2),
                 "bottom": round(midpoint - max(atr * 0.20, 0.30), 2),
             }
-            return {
+            candidates.append({
                 "poi_type": "equilibrium",
                 "zone": zone,
                 "strength": "medium",
@@ -574,8 +610,87 @@ class SMCAgent(BaseAgent):
                 "displacement_score": 0.0,
                 "displacement_quality": "NONE",
                 "near_price": self._price_in_or_near_zone(current_price, zone, atr * 0.15),
-            }
-        return None
+                "source_ref": {},
+            })
+        return candidates
+
+    def _rank_poi_candidate(
+        self,
+        candidate: Dict[str, Any],
+        direction: str,
+        current_price: float,
+        atr: float,
+        market_structure: Dict[str, Any],
+        sweep: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        pref = (self.config.get("smc_engine", {}) or {}).get("poi_preference", {}) or {}
+        score = 0.0
+        reasons: List[str] = []
+        mitigation = str(candidate.get("mitigation_status") or "FRESH").upper()
+        if mitigation == "FRESH":
+            score += float(pref.get("fresh_bonus", 18) or 18)
+            reasons.append("fresh_poi")
+        elif mitigation == "TESTED":
+            score += float(pref.get("tested_bonus", 8) or 8)
+            reasons.append("tested_poi")
+        elif mitigation in {"MITIGATED", "PARTIAL"}:
+            score += float(pref.get("mitigated_penalty", -14) or -14)
+            reasons.append("mitigated_penalty")
+        elif mitigation == "INVALIDATED":
+            score += float(pref.get("invalidated_penalty", -60) or -60)
+            reasons.append("invalidated_penalty")
+
+        poi_type = str(candidate.get("poi_type") or "")
+        if poi_type == "order_block":
+            score += float(pref.get("order_block_bonus", 10) or 10)
+            reasons.append("order_block_preferred")
+        elif poi_type == "fvg":
+            score += float(pref.get("fvg_bonus", 6) or 6)
+            reasons.append("fvg_supported")
+        elif poi_type == "equilibrium":
+            score += float(pref.get("equilibrium_bonus", 2) or 2)
+
+        strength = str(candidate.get("strength") or "")
+        if strength == "strong":
+            score += float(pref.get("strong_bonus", 10) or 10)
+            reasons.append("strong_poi")
+        elif strength == "medium":
+            score += float(pref.get("medium_bonus", 5) or 5)
+
+        displacement = float(candidate.get("displacement_score") or 0)
+        score += min(18.0, displacement * 0.45)
+        if displacement > 0:
+            reasons.append("displacement_quality")
+
+        zone = candidate.get("zone", {}) or {}
+        top = self._f(zone.get("top"))
+        bottom = self._f(zone.get("bottom"))
+        if top > 0 and bottom > 0:
+            midpoint = (top + bottom) / 2
+            distance = abs(current_price - midpoint)
+            scale = max(atr * float(pref.get("proximity_scale_atr", 1.5) or 1.5), 0.50)
+            proximity_score = max(0.0, float(pref.get("proximity_bonus_cap", 14) or 14) * (1.0 - min(distance, scale) / scale))
+            score += proximity_score
+            if proximity_score > 0:
+                reasons.append("proximity_bonus")
+
+        trend = str(market_structure.get("trend") or "")
+        if (direction == "BUY" and trend == "BULLISH") or (direction == "SELL" and trend == "BEARISH"):
+            score += 6.0
+            reasons.append("trend_aligned")
+
+        sweep_type = str(sweep.get("type") or "")
+        if (direction == "BUY" and sweep_type == "sell_side") or (direction == "SELL" and sweep_type == "buy_side"):
+            score += 12.0
+            reasons.append("liquidity_sweep_aligned")
+            if str(sweep.get("confirmation") or "").upper() == "STRONG":
+                score += 4.0
+                reasons.append("strong_sweep")
+
+        candidate = dict(candidate)
+        candidate["rank_score"] = round(score, 1)
+        candidate["rank_reasons"] = reasons
+        return candidate
 
     def _setup_type_from_context(
         self,
@@ -633,6 +748,12 @@ class SMCAgent(BaseAgent):
             score += 4.0
         if setup_state == "ENTRY_ARMED":
             score += 6.0
+        score += min(12.0, float(poi.get("rank_score") or 0) * 0.12)
+        trigger = poi.get("trigger") or {}
+        if str(trigger.get("state") or "") == "REJECTION_CONFIRMED":
+            score += 8.0
+        elif trigger.get("market_ready"):
+            score += 4.0
         score = max(0.0, min(100.0, score))
         if score >= 88:
             grade = "A+"
@@ -652,6 +773,98 @@ class SMCAgent(BaseAgent):
             return min(targets) if targets else None
         targets = [self._f(level) for level in liquidity.get("sell_side", []) if self._f(level) < current_price]
         return max(targets) if targets else None
+
+    def _trigger_signal(
+        self,
+        direction: str,
+        poi: Dict[str, Any],
+        candles: List[Candle],
+        current_price: float,
+        atr: float,
+    ) -> Dict[str, Any]:
+        zone = poi.get("zone", {}) or {}
+        top = self._f(zone.get("top"))
+        bottom = self._f(zone.get("bottom"))
+        if not candles or top <= 0 or bottom <= 0:
+            return {"state": "AWAIT_TOUCH", "score": 0, "market_ready": False, "timing": "WAIT", "execution_hint": "LIMIT"}
+        low = min(top, bottom)
+        high = max(top, bottom)
+        last = candles[-1]
+        open_price = self._f(last.get("open"))
+        close_price = self._f(last.get("close"))
+        candle_high = self._f(last.get("high"))
+        candle_low = self._f(last.get("low"))
+        body = abs(close_price - open_price)
+        midpoint = (high + low) / 2.0
+        trigger_cfg = (self.config.get("smc_engine", {}) or {}).get("trigger_logic", {}) or {}
+        wick_body_ratio = float(trigger_cfg.get("rejection_wick_body_ratio", 0.75) or 0.75)
+        confirm_close_position = float(trigger_cfg.get("confirm_close_position", 0.55) or 0.55)
+        market_min_score = float(trigger_cfg.get("market_entry_min_trigger_score", 70) or 70)
+        touched = candle_low <= high and candle_high >= low
+        near = self._price_in_or_near_zone(current_price, zone, atr * 0.25)
+        score = 0.0
+        reasons: List[str] = []
+        if touched:
+            score += 35.0
+            reasons.append("zone_touched")
+        elif near:
+            score += 18.0
+            reasons.append("near_poi")
+        if direction == "BUY":
+            wick = min(open_price, close_price) - candle_low
+            close_position = (close_price - candle_low) / max(candle_high - candle_low, 0.0001)
+            if close_price > open_price:
+                score += 22.0
+                reasons.append("bullish_close")
+            if close_price >= midpoint:
+                score += 12.0
+                reasons.append("closed_above_midpoint")
+            if close_position >= confirm_close_position:
+                score += 8.0
+                reasons.append("strong_close_position")
+            if body > 0 and wick >= body * wick_body_ratio:
+                score += 10.0
+                reasons.append("lower_wick_rejection")
+        else:
+            wick = candle_high - max(open_price, close_price)
+            close_position = (candle_high - close_price) / max(candle_high - candle_low, 0.0001)
+            if close_price < open_price:
+                score += 22.0
+                reasons.append("bearish_close")
+            if close_price <= midpoint:
+                score += 12.0
+                reasons.append("closed_below_midpoint")
+            if close_position >= confirm_close_position:
+                score += 8.0
+                reasons.append("strong_close_position")
+            if body > 0 and wick >= body * wick_body_ratio:
+                score += 10.0
+                reasons.append("upper_wick_rejection")
+        market_ready = touched and score >= market_min_score
+        if market_ready:
+            state = "REJECTION_CONFIRMED"
+            timing = "MARKET_READY"
+            execution_hint = "MARKET"
+        elif touched:
+            state = "TOUCH_NO_REJECTION"
+            timing = "WAIT_CONFIRMATION"
+            execution_hint = "LIMIT"
+        elif near:
+            state = "AT_POI_WAIT_TRIGGER"
+            timing = "WAIT_TRIGGER"
+            execution_hint = "LIMIT"
+        else:
+            state = "AWAY_FROM_POI"
+            timing = "WAIT_PULLBACK"
+            execution_hint = "LIMIT"
+        return {
+            "state": state,
+            "score": round(score, 1),
+            "market_ready": market_ready,
+            "timing": timing,
+            "execution_hint": execution_hint,
+            "reasons": reasons,
+        }
 
     def _recent_sweep(self, candles: List[Candle], tolerance: float) -> Dict[str, Any]:
         """Detect whether a recent candle swept previous highs/lows and closed back inside."""

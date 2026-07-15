@@ -517,9 +517,22 @@ class RiskManagementAgent(BaseAgent):
                     "fill_at": fill_at, "source": source}
             return round(entry, 2), kind, basis, zone
 
+        smc = results.get("smc", {}) or {}
+        setup_structure = smc.get("setup_structure", {}) or {}
+        preferred_zone = setup_structure.get("poi_zone") or {}
+        trigger_state = str(setup_structure.get("trigger_state") or "")
+        trigger_ready = bool(setup_structure.get("trigger_ready", False))
+        trigger_score = self._f(setup_structure.get("trigger_score"), 0.0)
+        execution_hint = str(setup_structure.get("execution_hint") or "LIMIT").upper()
+
         if entry_style == "hybrid":
             market_threshold = points_to_price(self._f(oe.get("market_threshold_points", 30), 30), self.symbol)
-            smc = results.get("smc", {}) or {}
+            if preferred_zone and trigger_ready and execution_hint == "MARKET":
+                zone_mid = (self._f(preferred_zone.get("top")) + self._f(preferred_zone.get("bottom"))) / 2.0
+                if zone_mid > 0 and abs(zone_mid - current_price) <= max(market_threshold, 0.01):
+                    return _market(
+                        f"SMC trigger confirmed at ranked POI ({trigger_state}, score {trigger_score:.0f})"
+                    )
             order_blocks = smc.get("order_blocks", []) or []
             want_type = "bullish" if direction == "BUY" else "bearish"
             for ob in reversed(order_blocks):
@@ -551,8 +564,23 @@ class RiskManagementAgent(BaseAgent):
                     if 0 < proximity <= market_threshold:
                         return _market(f"Price at resistance (within {market_threshold*10:.0f}pts)")
 
+        # Preferred ranked SMC POI from setup_structure
+        if preferred_zone:
+            top = self._f(preferred_zone.get("top"))
+            bottom = self._f(preferred_zone.get("bottom"))
+            if top > 0 and bottom > 0:
+                if direction == "BUY" and top < current_price:
+                    proximal, distal = top, bottom
+                    dist = abs(proximal - current_price)
+                    if dist <= max_pts:
+                        return _build_zone(proximal, distal, "smc_ranked", f"Ranked {setup_structure.get('poi_type', 'SMC')} zone ({trigger_state or 'await trigger'})", "LIMIT")
+                elif direction == "SELL" and bottom > current_price:
+                    proximal, distal = bottom, top
+                    dist = abs(proximal - current_price)
+                    if dist <= max_pts:
+                        return _build_zone(proximal, distal, "smc_ranked", f"Ranked {setup_structure.get('poi_type', 'SMC')} zone ({trigger_state or 'await trigger'})", "LIMIT")
+
         # SMC order blocks
-        smc = results.get("smc", {}) or {}
         order_blocks = smc.get("order_blocks", []) or []
         want_type = "bullish" if direction == "BUY" else "bearish"
         obs = [ob for ob in order_blocks if str(ob.get("type", "")).lower() == want_type]
