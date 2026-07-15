@@ -140,7 +140,7 @@ jobs:
               python scripts/run_final_evaluation.py --timeframe "$TF" --outputsize "$OUTPUTSIZE" --window "$WINDOW" --step "$STEP" --horizon "$HORIZON" --max-trades "$MAX_TRADES" $TELEGRAM_FLAG
               ;;
             tuning_advisor)
-              python scripts/run_tuning_advisor.py
+              python scripts/run_tuning_advisor.py --ensure-final-evaluation --timeframe "$TF" --outputsize "$OUTPUTSIZE" --window "$WINDOW" --step "$STEP" --horizon "$HORIZON" --max-trades "$MAX_TRADES"
               ;;
             release_readiness)
               python scripts/run_release_readiness.py --timeframe "$TF" --outputsize "$OUTPUTSIZE" --window "$WINDOW" --step "$STEP" --horizon "$HORIZON" --max-trades "$MAX_TRADES" $TELEGRAM_FLAG
@@ -161,7 +161,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: manual-operator-artifacts-${{ github.run_id }}
+          name: manual-operator-${{ github.event.inputs.operation || 'operation' }}-${{ github.run_id }}
           path: |
             storage/*.json
             storage/*.csv
