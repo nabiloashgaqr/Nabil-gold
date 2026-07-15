@@ -117,3 +117,50 @@ def test_breakeven_excluded_from_win_rate_denominator(monkeypatch):
     assert "Trades: 6 (✅ 3 · ❌ 2 · ➖ 1" in text
     assert "Win rate: 60.0%" in text
     assert "Win rate: 50.0%" not in text
+
+
+def test_daily_report_includes_analyst_overlap_section(monkeypatch):
+    cap = {}
+
+    class _Tg:
+        def send_message(self, text, **k):
+            cap["t"] = text
+            return True
+        def send_error_alert(self, *a, **k):
+            return True
+
+    class _Distill:
+        enabled = True
+        def __init__(self, *a, **k):
+            pass
+        def compare_recent(self, **_k):
+            return {
+                "labels_considered": 5,
+                "matched_labels": 3,
+                "partial_matches": 1,
+                "missed_labels": 1,
+                "coverage_rate_pct": 80.0,
+                "match_rate_pct": 60.0,
+                "avg_entry_distance_points": 42.0,
+                "top_missed_reasons": [
+                    {"reason_code": "MISSED_ENTRY_TOO_FAR", "count": 1},
+                    {"reason_code": "MISSED_TIMING_WINDOW", "count": 1},
+                ],
+            }
+
+    db = MagicMock()
+    db.get_trades_for_date.return_value = []
+    db.get_open_trades.return_value = []
+    db.get_recent_trades.return_value = []
+    monkeypatch.setattr(rd, "TelegramService", lambda *a, **k: _Tg())
+    monkeypatch.setattr(rd, "DatabaseService", lambda *a, **k: db)
+    monkeypatch.setattr(rd, "AnalystDistillationService", _Distill)
+    monkeypatch.setattr(rd, "_read_eod_section", lambda name: "")
+    monkeypatch.setattr(rd, "_cleanup_eod_sections", lambda: None)
+
+    rd.main()
+
+    text = re.sub(r"</?(b|i|code)>", "", cap["t"])
+    assert "Analyst Overlap" in text
+    assert "Coverage: 80.0% | Match: 60.0%" in text
+    assert "MISSED_ENTRY_TOO_FAR" in text

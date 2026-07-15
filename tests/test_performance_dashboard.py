@@ -216,6 +216,17 @@ class TestPerformanceDashboard:
         dashboard.get_portfolio_summary = AsyncMock(return_value={
             'balance': 10500, 'total_pnl': 500, 'win_rate': 65
         })
+        dashboard._analyst_overlap_summary = MagicMock(return_value={
+            'labels_considered': 5,
+            'matched_labels': 3,
+            'partial_matches': 1,
+            'missed_labels': 1,
+            'extra_bot_setups': 2,
+            'match_rate_pct': 60.0,
+            'coverage_rate_pct': 80.0,
+            'avg_entry_distance_points': 42.0,
+            'top_missed_reasons': [{'reason_code': 'MISSED_ENTRY_TOO_FAR', 'count': 1}],
+        })
         
         report = await dashboard.generate_performance_report(days=7)
         
@@ -223,6 +234,7 @@ class TestPerformanceDashboard:
         assert 'agents' in report
         assert 'sessions' in report
         assert 'summary' in report
+        assert report['analyst_overlap']['matched_labels'] == 3
     
     def test_format_telegram_report(self, dashboard):
         """اختبار تنسيق تقرير تيليجرام"""
@@ -249,6 +261,16 @@ class TestPerformanceDashboard:
                  'signals': 15, 'win_rate': '68%', 'pnl': '$200'}
             ],
             'alerts': [],
+            'analyst_overlap': {
+                'labels_considered': 5,
+                'matched_labels': 3,
+                'partial_matches': 1,
+                'missed_labels': 1,
+                'coverage_rate_pct': 80.0,
+                'match_rate_pct': 60.0,
+                'avg_entry_distance_points': 42.0,
+                'top_missed_reasons': [{'reason_code': 'MISSED_ENTRY_TOO_FAR', 'count': 1}],
+            },
             'summary': {
                 'total_signals': 20,
                 'total_trades': 30,
@@ -262,6 +284,9 @@ class TestPerformanceDashboard:
         # التحقق من وجود المحتوى (ليس التطابق الكامل)
         assert 'technical' in formatted
         assert '$500' in formatted
+        assert 'Analyst overlap' in formatted
+        assert 'Coverage: 80.0%' in formatted
+        assert 'MISSED_ENTRY_TOO_FAR' in formatted
         assert 'المحفظة' in formatted or 'Portfolio' in formatted or '💰' in formatted
         assert 'الملخص' in formatted or 'Summary' in formatted or '📈' in formatted
 
