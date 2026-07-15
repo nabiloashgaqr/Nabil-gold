@@ -29,6 +29,16 @@ class ReleaseReadinessService:
         self.min_overlap_score_for_trial = float(cfg.get("min_overlap_score_for_trial", 45) or 45)
         self.min_execution_score_for_trial = float(cfg.get("min_execution_score_for_trial", 55) or 55)
 
+    def build_from_reports(self, final_eval: Dict[str, Any], tuning: Dict[str, Any]) -> Dict[str, Any]:
+        readiness = self._readiness_decision(final_eval, tuning)
+        return {
+            "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            "symbol": self.config.get("symbol", "XAU/USD"),
+            "final_evaluation": final_eval,
+            "tuning_advice": tuning,
+            "readiness": readiness,
+        }
+
     def run(
         self,
         candles: List[Dict[str, Any]],
@@ -46,14 +56,7 @@ class ReleaseReadinessService:
             max_trades=max_trades,
         )
         tuning = TuningAdvisor(self.config).build_advice(final_eval)
-        readiness = self._readiness_decision(final_eval, tuning)
-        return {
-            "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-            "symbol": self.config.get("symbol", "XAU/USD"),
-            "final_evaluation": final_eval,
-            "tuning_advice": tuning,
-            "readiness": readiness,
-        }
+        return self.build_from_reports(final_eval, tuning)
 
     def save(self, report: Dict[str, Any], path: str | Path = "storage/release_readiness.json") -> Path:
         target = Path(path)
