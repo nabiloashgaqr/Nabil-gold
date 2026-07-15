@@ -7,7 +7,10 @@ closely the system sees what a strong manual analyst sees.
 
 from __future__ import annotations
 
+import csv
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List
 
 from utils.instruments import price_to_points
@@ -22,36 +25,138 @@ class AnalystDistillationService:
         self.entry_tolerance_points = float(cfg.get("entry_tolerance_points", 80) or 80)
         self.time_window_hours = float(cfg.get("time_window_hours", 12) or 12)
         self.match_threshold = float(cfg.get("match_threshold", 65) or 65)
+        self.partial_match_threshold = float(cfg.get("partial_match_threshold", 45) or 45)
         self.symbol = str(self.config.get("symbol", "XAU/USD"))
 
     def save_label(self, label: Dict[str, Any]) -> str:
         return self.db.save_analyst_label(label)
 
+    def import_labels_from_file(
+        self,
+        file_path: str | Path,
+        *,
+        default_symbol: str | None = None,
+        analyst_name: str | None = None,
+    ) -> Dict[str, Any]:
+        """Import analyst labels from JSON or CSV and persist them.
+
+        JSON accepts either a list of labels or an object with a top-level
+        ``labels`` list. CSV uses the column names as label keys.
+        """
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(path)
+        suffix = path.suffix.lower()
+        rows: List[Dict[str, Any]] = []
+        if suffix == ".json":
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                raw = payload.get("labels") or []
+            elif isinstance(payload, list):
+                raw = payload
+            else:
+                raw = []
+            rows = [dict(item) for item in raw if isinstance(item, dict)]
+        elif suffix == ".csv":
+            with path.open("r", encoding="utf-8", newline="") as fh:
+                reader = csv.DictReader(fh)
+                rows = [dict(row) for row in reader]
+        else:
+            raise ValueError(f"Unsupported analyst labels format: {suffix}")
+
+        imported_ids: List[str] = []
+        for row in rows:
+            normalized = self._normalize_label(row, default_symbol=default_symbol, analyst_name=analyst_name)
+            imported_ids.append(self.save_label(normalized))
+        return {
+            "file": str(path),
+            "count": len(imported_ids),
+            "ids": imported_ids,
+            "symbol": default_symbol or self.symbol,
+        }
+
     def compare_recent(self, symbol: str | None = None, limit: int = 20) -> Dict[str, Any]:
         symbol = str(symbol or self.symbol)
         labels = self.db.get_analyst_labels(limit=limit, symbol=symbol)
-        setups = self.db.get_recent_setup_candidates(limit=100, symbol=symbol)
-        comparisons = []
+        setups = self.db.get_recent_setup_candidates(limit=max(100, limit * 5), symbol=symbol)
+        return self.compare_labels_and_setups(labels, setups, symbol=symbol, save=True)
+
+    def compare_labels_and_setups(
+        self,
+        labels: List[Dict[str, Any]],
+        setups: List[Dict[str, Any]],
+        *,
+        symbol: str | None = None,
+        save: bool = True,
+    ) -> Dict[str, Any]:
+        symbol = str(symbol or self.symbol)
+        comparisons: List[Dict[str, Any]] = []
         matched = 0
+        partial = 0
         missed = 0
+        matched_setup_ids: set[str] = set()
+        direction_matches = 0
+        setup_type_matches = 0
+        poi_matches = 0
+        entry_distances: List[float] = []
+
         for label in labels:
             comparison = self.best_match_for_label(label, setups)
             comparisons.append(comparison)
-            if comparison.get("classification") == "MATCHED":
+            classification = str(comparison.get("classification") or "MISSED_BY_BOT")
+            payload = comparison.get("payload") or {}
+            if classification == "MATCHED":
                 matched += 1
+            elif classification == "PARTIAL_MATCH":
+                partial += 1
+            else:
+                missed += 1
+            if classification in {"MATCHED", "PARTIAL_MATCH"} and comparison.get("setup_candidate_id"):
+                matched_setup_ids.add(str(comparison.get("setup_candidate_id")))
+            if payload.get("direction_match"):
+                direction_matches += 1
+            if payload.get("setup_type_match"):
+                setup_type_matches += 1
+            if payload.get("poi_type_match"):
+                poi_matches += 1
+            if payload.get("entry_distance_points") is not None:
+                entry_distances.append(float(payload.get("entry_distance_points") or 0))
+            if save:
                 try:
                     self.db.save_analyst_comparison(comparison)
                 except Exception:
                     pass
-            else:
-                missed += 1
+
+        extra_setups: List[Dict[str, Any]] = []
+        for setup in setups:
+            sid = str(setup.get("id") or "")
+            if not sid or sid in matched_setup_ids:
+                continue
+            extra = self._extra_setup_record(setup)
+            extra_setups.append(extra)
+            if save:
+                try:
+                    self.db.save_analyst_comparison(extra)
+                except Exception:
+                    pass
+
+        considered = len(labels)
+        overlap = matched + partial
         return {
             "symbol": symbol,
-            "labels_considered": len(labels),
+            "labels_considered": considered,
             "matched_labels": matched,
+            "partial_matches": partial,
             "missed_labels": missed,
-            "match_rate_pct": round((matched / len(labels) * 100), 1) if labels else 0.0,
+            "extra_bot_setups": len(extra_setups),
+            "match_rate_pct": round((matched / considered * 100), 1) if considered else 0.0,
+            "coverage_rate_pct": round((overlap / considered * 100), 1) if considered else 0.0,
+            "direction_match_rate_pct": round((direction_matches / considered * 100), 1) if considered else 0.0,
+            "setup_type_match_rate_pct": round((setup_type_matches / considered * 100), 1) if considered else 0.0,
+            "poi_type_match_rate_pct": round((poi_matches / considered * 100), 1) if considered else 0.0,
+            "avg_entry_distance_points": round(sum(entry_distances) / len(entry_distances), 1) if entry_distances else None,
             "comparisons": comparisons,
+            "extra_setup_records": extra_setups,
         }
 
     def best_match_for_label(self, label: Dict[str, Any], setup_candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -69,11 +174,16 @@ class AnalystDistillationService:
                 "setup_candidate_id": None,
                 "symbol": label.get("symbol") or self.symbol,
                 "match_score": 0.0,
-                "classification": "MISSED",
+                "classification": "MISSED_BY_BOT",
                 "summary": "No recent bot setup candidates found for this label.",
                 "payload": {"label": label},
             }
-        classification = "MATCHED" if best["score"] >= self.match_threshold else "MISSED"
+        if best["score"] >= self.match_threshold:
+            classification = "MATCHED"
+        elif best["score"] >= self.partial_match_threshold:
+            classification = "PARTIAL_MATCH"
+        else:
+            classification = "MISSED_BY_BOT"
         return {
             "id": f"COMPARE_{label.get('id', 'unknown')}_{best.get('setup_id', 'none')}",
             "analyst_label_id": label.get("id"),
@@ -154,6 +264,39 @@ class AnalystDistillationService:
             "entry_inside_poi": in_zone,
             "time_aligned": time_alignment,
         }
+
+    def _extra_setup_record(self, setup: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "id": f"EXTRA_{setup.get('id', 'unknown')}",
+            "analyst_label_id": None,
+            "setup_candidate_id": setup.get("id"),
+            "symbol": setup.get("symbol") or self.symbol,
+            "match_score": 0.0,
+            "classification": "EXTRA_BOT_SETUP",
+            "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+            "payload": {
+                "setup_type": setup.get("setup_type"),
+                "direction": setup.get("direction"),
+                "lead_agent": setup.get("lead_agent"),
+                "entry_price": setup.get("entry_price"),
+            },
+        }
+
+    def _normalize_label(
+        self,
+        label: Dict[str, Any],
+        *,
+        default_symbol: str | None = None,
+        analyst_name: str | None = None,
+    ) -> Dict[str, Any]:
+        payload = dict(label)
+        payload["symbol"] = str(payload.get("symbol") or default_symbol or self.symbol)
+        payload["timeframe"] = str(payload.get("timeframe") or self.config.get("entry_timeframe") or "15m")
+        payload["analyst_name"] = str(payload.get("analyst_name") or analyst_name or "manual")
+        payload["bias"] = str(payload.get("bias") or payload.get("direction") or "WAIT").upper()
+        if payload.get("created_at") is None:
+            payload["created_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        return payload
 
     def _within_time_window(self, left: Any, right: Any) -> bool:
         dt_left = self._parse_dt(left)
