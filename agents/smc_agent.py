@@ -7,8 +7,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from statistics import mean
 from typing import Any, Dict, List, Tuple
+from zoneinfo import ZoneInfo
 
 from agents.base_agent import BaseAgent
 from utils.indicators import calculate_atr, detect_swing_points
@@ -160,11 +162,21 @@ class SMCAgent(BaseAgent):
                 last_choch = {"type": "bearish", "level": last_bos["level"], "timeframe": timeframe}
                 trend = "BEARISH"
 
+        recent_span = self._avg_range(candles[-20:]) or max(abs(current_close - self._f(candles[max(len(candles) - 20, 0)].get("close"))), 0.5)
+        structure_strength = 0.0
+        if last_bos:
+            structure_strength = abs(current_close - float(last_bos.get("level") or current_close)) / max(recent_span, 0.01)
+        elif trend in {"BULLISH", "BEARISH"}:
+            structure_strength = abs(current_close - self._f(candles[max(len(candles) - 20, 0)].get("close"))) / max(recent_span, 0.01)
+        structure_quality = "STRONG" if structure_strength >= 1.5 else "MODERATE" if structure_strength >= 0.75 else "WEAK"
+
         return {
             "trend": trend,
             "last_bos": last_bos,
             "last_choch": last_choch,
             "structure_points": structure_points[-10:],
+            "structure_strength": round(structure_strength, 2),
+            "structure_quality": structure_quality,
         }
 
     def _detect_order_blocks(self, candles: List[Candle], atr: float, timeframe: str) -> List[Dict[str, Any]]:
@@ -225,21 +237,39 @@ class SMCAgent(BaseAgent):
         return selected
 
     def _detect_liquidity(self, candles: List[Candle], swings: Dict[str, List[Dict[str, Any]]], tolerance: float) -> Dict[str, Any]:
-        """Find equal highs/lows and recent liquidity sweeps."""
+        """Find equal highs/lows, session/day liquidity pools and recent sweeps."""
         highs = swings.get("highs", [])
         lows = swings.get("lows", [])
-        equal_highs = self._cluster_liquidity([self._f(p.get("price")) for p in highs], tolerance)
-        equal_lows = self._cluster_liquidity([self._f(p.get("price")) for p in lows], tolerance)
+        equal_highs_detail = self._cluster_liquidity_details([self._f(p.get("price")) for p in highs], tolerance)
+        equal_lows_detail = self._cluster_liquidity_details([self._f(p.get("price")) for p in lows], tolerance)
+        equal_highs = [cluster["level"] for cluster in equal_highs_detail]
+        equal_lows = [cluster["level"] for cluster in equal_lows_detail]
 
-        buy_side = self._unique_levels(equal_highs + [self._f(p.get("price")) for p in highs[-4:]])
-        sell_side = self._unique_levels(equal_lows + [self._f(p.get("price")) for p in lows[-4:]])
-        recent_sweep = self._recent_sweep(candles, tolerance)
+        previous_day_levels = self._previous_day_levels(candles)
+        session_liquidity = self._session_liquidity(candles)
+        buy_side = self._unique_levels(
+            equal_highs
+            + [self._f(p.get("price")) for p in highs[-4:]]
+            + [self._f(previous_day_levels.get("high"))]
+            + [self._f(session_liquidity.get("high"))]
+        )
+        sell_side = self._unique_levels(
+            equal_lows
+            + [self._f(p.get("price")) for p in lows[-4:]]
+            + [self._f(previous_day_levels.get("low"))]
+            + [self._f(session_liquidity.get("low"))]
+        )
+        recent_sweep = self._recent_sweep(candles, tolerance, previous_day_levels, session_liquidity)
 
         return {
-            "buy_side": buy_side[-6:],
-            "sell_side": sell_side[:6],
+            "buy_side": buy_side[-8:],
+            "sell_side": sell_side[:8],
             "equal_highs": equal_highs,
             "equal_lows": equal_lows,
+            "equal_highs_detail": equal_highs_detail,
+            "equal_lows_detail": equal_lows_detail,
+            "previous_day_levels": previous_day_levels,
+            "session_liquidity": session_liquidity,
             "recent_sweep": recent_sweep,
         }
 
@@ -293,7 +323,16 @@ class SMCAgent(BaseAgent):
             zone = "DISCOUNT"
         else:
             zone = "EQUILIBRIUM"
-        return zone, {"high": round(range_high, 2), "low": round(range_low, 2), "midpoint": round(midpoint, 2)}
+        range_span = max(range_high - range_low, 0.01)
+        position_pct = (current_price - range_low) / range_span
+        return zone, {
+            "high": round(range_high, 2),
+            "low": round(range_low, 2),
+            "midpoint": round(midpoint, 2),
+            "premium_boundary": round(midpoint + equilibrium_band, 2),
+            "discount_boundary": round(midpoint - equilibrium_band, 2),
+            "current_position_pct": round(position_pct, 3),
+        }
 
     def _score_smc(
         self,
@@ -316,15 +355,18 @@ class SMCAgent(BaseAgent):
             score -= 2.0
             signals.append("Market structure is bearish")
 
+        structure_quality = str((liquidity.get("market_structure") or {}).get("structure_quality") or "")
         sweep = liquidity.get("recent_sweep", {}) or {}
         if sweep.get("occurred") and sweep.get("type") == "sell_side":
-            add = 3.4 if sweep.get("confirmation") == "STRONG" else 2.6
+            add = 3.8 if sweep.get("confirmation") == "STRONG" else 2.8 if sweep.get("confirmation") == "MODERATE" else 1.8
             score += add
-            signals.append(f"Sweep below recent lows detected ({sweep.get('confirmation')}) - bullish reversal context")
+            source = str(sweep.get("reference_type") or "liquidity").replace("_", " ")
+            signals.append(f"Sweep below {source} detected ({sweep.get('confirmation')}) - bullish reversal context")
         elif sweep.get("occurred") and sweep.get("type") == "buy_side":
-            sub = 3.4 if sweep.get("confirmation") == "STRONG" else 2.6
+            sub = 3.8 if sweep.get("confirmation") == "STRONG" else 2.8 if sweep.get("confirmation") == "MODERATE" else 1.8
             score -= sub
-            signals.append(f"Sweep above recent highs detected ({sweep.get('confirmation')}) - bearish reversal context")
+            source = str(sweep.get("reference_type") or "liquidity").replace("_", " ")
+            signals.append(f"Sweep above {source} detected ({sweep.get('confirmation')}) - bearish reversal context")
 
         for block in order_blocks:
             zone_obj = block.get("zone", {})
@@ -357,15 +399,26 @@ class SMCAgent(BaseAgent):
                     signals.append(f"Price near {gap.get('strength')} bearish FVG")
 
         if trend == "BULLISH" and zone in {"DISCOUNT", "EQUILIBRIUM"}:
-            score += 1.0
+            score += 1.2
             signals.append("Bullish structure with discount/equilibrium pricing")
         elif trend == "BEARISH" and zone in {"PREMIUM", "EQUILIBRIUM"}:
-            score -= 1.0
+            score -= 1.2
             signals.append("Bearish structure with premium/equilibrium pricing")
         elif zone == "PREMIUM":
-            score -= 0.4
+            score -= 0.5
         elif zone == "DISCOUNT":
-            score += 0.4
+            score += 0.5
+
+        pd = liquidity.get("previous_day_levels", {}) or {}
+        if sweep.get("occurred") and sweep.get("reference_type") == "previous_day_high":
+            score -= 0.8
+            signals.append("Previous-day high liquidity was swept")
+        elif sweep.get("occurred") and sweep.get("reference_type") == "previous_day_low":
+            score += 0.8
+            signals.append("Previous-day low liquidity was swept")
+        session_ref = liquidity.get("session_liquidity", {}) or {}
+        if session_ref.get("label") and sweep.get("reference_type") in {"session_high", "session_low"}:
+            signals.append(f"Session liquidity reference: {session_ref.get('label')}")
 
         return score, signals
 
@@ -866,10 +919,18 @@ class SMCAgent(BaseAgent):
             "reasons": reasons,
         }
 
-    def _recent_sweep(self, candles: List[Candle], tolerance: float) -> Dict[str, Any]:
-        """Detect whether a recent candle swept previous highs/lows and closed back inside."""
+    def _recent_sweep(
+        self,
+        candles: List[Candle],
+        tolerance: float,
+        previous_day_levels: Dict[str, Any] | None = None,
+        session_liquidity: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """Detect recent sweeps against swing, previous-day, and session liquidity."""
         if len(candles) < 20:
             return {"occurred": False, "type": None, "level": None, "time": None}
+        previous_day_levels = previous_day_levels or {}
+        session_liquidity = session_liquidity or {}
         for offset in range(1, min(6, len(candles) - 12) + 1):
             candle = candles[-offset]
             previous = candles[-offset - 12 : -offset]
@@ -882,16 +943,55 @@ class SMCAgent(BaseAgent):
             close = self._f(candle.get("close"))
             candle_range = max(high - low, 0.0001)
             close_position = (close - low) / candle_range
-            if high > prev_high + tolerance and close < prev_high:
-                confirmation = "STRONG" if close_position <= 0.35 else "MODERATE"
-                return {"occurred": True, "type": "buy_side", "level": round(prev_high, 2), "time": candle.get("time"), "confirmation": confirmation, "sweep_distance": round(high - prev_high, 2)}
-            if low < prev_low - tolerance and close > prev_low:
-                confirmation = "STRONG" if close_position >= 0.65 else "MODERATE"
-                return {"occurred": True, "type": "sell_side", "level": round(prev_low, 2), "time": candle.get("time"), "confirmation": confirmation, "sweep_distance": round(prev_low - low, 2)}
+            reference_highs = [
+                ("recent_highs", prev_high),
+                ("previous_day_high", self._f(previous_day_levels.get("high"))),
+                ("session_high", self._f(session_liquidity.get("high"))),
+            ]
+            reference_lows = [
+                ("recent_lows", prev_low),
+                ("previous_day_low", self._f(previous_day_levels.get("low"))),
+                ("session_low", self._f(session_liquidity.get("low"))),
+            ]
+            for ref_type, level in reference_highs:
+                if level <= 0:
+                    continue
+                if high > level + tolerance and close < level:
+                    sweep_distance = high - level
+                    confirmation = "STRONG" if close_position <= 0.35 and sweep_distance >= tolerance * 1.4 else "MODERATE" if close_position <= 0.50 else "WEAK"
+                    return {
+                        "occurred": True,
+                        "type": "buy_side",
+                        "level": round(level, 2),
+                        "time": candle.get("time"),
+                        "confirmation": confirmation,
+                        "reference_type": ref_type,
+                        "reference_label": ref_type.replace("_", " "),
+                        "sweep_distance": round(sweep_distance, 2),
+                    }
+            for ref_type, level in reference_lows:
+                if level <= 0:
+                    continue
+                if low < level - tolerance and close > level:
+                    sweep_distance = level - low
+                    confirmation = "STRONG" if close_position >= 0.65 and sweep_distance >= tolerance * 1.4 else "MODERATE" if close_position >= 0.50 else "WEAK"
+                    return {
+                        "occurred": True,
+                        "type": "sell_side",
+                        "level": round(level, 2),
+                        "time": candle.get("time"),
+                        "confirmation": confirmation,
+                        "reference_type": ref_type,
+                        "reference_label": ref_type.replace("_", " "),
+                        "sweep_distance": round(sweep_distance, 2),
+                    }
         return {"occurred": False, "type": None, "level": None, "time": None}
 
     def _cluster_liquidity(self, levels: List[float], tolerance: float) -> List[float]:
         """Return clustered equal highs/lows with at least two touches."""
+        return [cluster["level"] for cluster in self._cluster_liquidity_details(levels, tolerance)]
+
+    def _cluster_liquidity_details(self, levels: List[float], tolerance: float) -> List[Dict[str, Any]]:
         if not levels:
             return []
         ordered = sorted(levels)
@@ -901,12 +1001,77 @@ class SMCAgent(BaseAgent):
                 clusters[-1].append(level)
             else:
                 clusters.append([level])
-        return [round(mean(cluster), 2) for cluster in clusters if len(cluster) >= 2]
+        details: List[Dict[str, Any]] = []
+        for cluster in clusters:
+            if len(cluster) < 2:
+                continue
+            touches = len(cluster)
+            quality = "STRONG" if touches >= 4 else "MODERATE" if touches == 3 else "WEAK"
+            details.append({"level": round(mean(cluster), 2), "touches": touches, "quality": quality})
+        return details
 
     def _unique_levels(self, levels: List[float]) -> List[float]:
         """Deduplicate rounded price levels."""
         return sorted({round(level, 2) for level in levels if level > 0})
 
+    def _previous_day_levels(self, candles: List[Candle]) -> Dict[str, Any]:
+        """Return previous local-day high/low using Asia/Jerusalem session date."""
+        if not candles:
+            return {"high": None, "low": None, "date": None}
+        buckets: Dict[str, List[Candle]] = {}
+        for candle in candles:
+            dt = self._parse_dt(candle.get("time"))
+            if dt is None:
+                continue
+            local = dt.astimezone(ZoneInfo("Asia/Jerusalem"))
+            buckets.setdefault(local.date().isoformat(), []).append(candle)
+        if len(buckets) < 2:
+            return {"high": None, "low": None, "date": None}
+        days = sorted(buckets)
+        prev_day = days[-2]
+        prev = buckets[prev_day]
+        return {
+            "date": prev_day,
+            "high": round(max(self._f(c.get("high")) for c in prev), 2),
+            "low": round(min(self._f(c.get("low")) for c in prev), 2),
+        }
+
+    def _session_liquidity(self, candles: List[Candle]) -> Dict[str, Any]:
+        """Return high/low of the current local session bucket."""
+        if not candles:
+            return {"high": None, "low": None, "label": None}
+        latest_dt = self._parse_dt(candles[-1].get("time"))
+        if latest_dt is None:
+            return {"high": None, "low": None, "label": None}
+        latest_local = latest_dt.astimezone(ZoneInfo("Asia/Jerusalem"))
+        hour = latest_local.hour
+        if 3 <= hour < 10:
+            start_h, end_h, label = 3, 10, "Asia Morning"
+        elif 10 <= hour < 15:
+            start_h, end_h, label = 10, 15, "London / Europe Midday"
+        elif 15 <= hour < 19:
+            start_h, end_h, label = 15, 19, "London + New York Afternoon"
+        elif 19 <= hour < 24:
+            start_h, end_h, label = 19, 24, "New York Evening"
+        else:
+            start_h, end_h, label = 0, 3, "Late New York Night"
+        session_candles: List[Candle] = []
+        for candle in candles:
+            dt = self._parse_dt(candle.get("time"))
+            if dt is None:
+                continue
+            local = dt.astimezone(ZoneInfo("Asia/Jerusalem"))
+            if local.date() != latest_local.date():
+                continue
+            if start_h <= local.hour < end_h:
+                session_candles.append(candle)
+        if not session_candles:
+            return {"high": None, "low": None, "label": label}
+        return {
+            "label": label,
+            "high": round(max(self._f(c.get("high")) for c in session_candles), 2),
+            "low": round(min(self._f(c.get("low")) for c in session_candles), 2),
+        }
 
     def _mitigation_status(self, future_candles: List[Candle], zone: Dict[str, float]) -> Dict[str, Any]:
         """Classify an order block as FRESH, TESTED, MITIGATED or INVALIDATED."""
@@ -985,6 +1150,18 @@ class SMCAgent(BaseAgent):
         reasons = ", ".join(signals[:3]) if signals else "No sufficient SMC signals"
         return f"SMC: structure {market_structure.get('trend')}, zone {zone}, {sweep_text}. Decision {direction} at {confidence}% — {reasons}"
 
+    def _parse_dt(self, value: Any) -> datetime | None:
+        if not value:
+            return None
+        try:
+            text = str(value).replace("Z", "+00:00")
+            dt = datetime.fromisoformat(text)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except Exception:
+            return None
+
     def _last(self, values: List[float | None], default: float) -> float:
         for value in reversed(values):
             if value is not None:
@@ -1005,7 +1182,17 @@ class SMCAgent(BaseAgent):
             "confidence": 0,
             "market_structure": {"trend": "RANGING", "last_bos": None, "last_choch": None, "structure_points": []},
             "order_blocks": [],
-            "liquidity": {"buy_side": [], "sell_side": [], "equal_highs": [], "equal_lows": [], "recent_sweep": {"occurred": False, "type": None, "level": None, "time": None}},
+            "liquidity": {
+                "buy_side": [],
+                "sell_side": [],
+                "equal_highs": [],
+                "equal_lows": [],
+                "equal_highs_detail": [],
+                "equal_lows_detail": [],
+                "previous_day_levels": {"high": None, "low": None, "date": None},
+                "session_liquidity": {"high": None, "low": None, "label": None},
+                "recent_sweep": {"occurred": False, "type": None, "level": None, "time": None},
+            },
             "fvg": [],
             "zone": "EQUILIBRIUM",
             "dealing_range": {"high": 0.0, "low": 0.0, "midpoint": 0.0},
