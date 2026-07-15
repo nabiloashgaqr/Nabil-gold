@@ -113,19 +113,20 @@ class TuningAdvisor:
         elif match_rate < 45 and coverage_rate < 60 and not_filled_ratio <= 0.40:
             current_trigger = int((((self.config.get("strategy_profiles") or {}).get("liquidity_reversal", {}) or {}).get("min_trigger_score", 70)) or 70)
             new_trigger = max(60, current_trigger - 5)
-            self._set(config_patch, ["strategy_profiles", "liquidity_reversal", "min_trigger_score"], new_trigger)
-            actions.append(
-                {
-                    "type": "trigger_relaxation",
-                    "key": "strategy_profiles.liquidity_reversal.min_trigger_score",
-                    "from": current_trigger,
-                    "to": new_trigger,
-                    "reason": "Overlap is too low and entry distance is not the main problem; allow more reversal confirmations through.",
-                }
-            )
-            recommendations.append(
-                f"Lower liquidity-reversal trigger minimum from {current_trigger} to {new_trigger} to improve overlap coverage." 
-            )
+            if new_trigger != current_trigger:
+                self._set(config_patch, ["strategy_profiles", "liquidity_reversal", "min_trigger_score"], new_trigger)
+                actions.append(
+                    {
+                        "type": "trigger_relaxation",
+                        "key": "strategy_profiles.liquidity_reversal.min_trigger_score",
+                        "from": current_trigger,
+                        "to": new_trigger,
+                        "reason": "Overlap is too low and entry distance is not the main problem; allow more reversal confirmations through.",
+                    }
+                )
+                recommendations.append(
+                    f"Lower liquidity-reversal trigger minimum from {current_trigger} to {new_trigger} to improve overlap coverage." 
+                )
 
         # ── Contextual learning blend tuning ──────────────────────────────
         if net_points_delta < 0 and float(scorecard.get("benchmark_score", 0) or 0) < 50:

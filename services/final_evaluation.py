@@ -92,6 +92,8 @@ class FinalEvaluationService:
                 f"Coverage {float(overlap.get('coverage_rate_pct', 0)):.1f}% | "
                 f"Avg entry distance {overlap.get('avg_entry_distance_points', '--')} pts"
             )
+        else:
+            lines.append("Analyst Overlap: N/A (no analyst labels in evaluation window)")
         lines.append(
             f"Scorecard: benchmark={scorecard.get('benchmark_score', 0)}/100 | overlap={scorecard.get('overlap_score', 0)}/100 | execution={scorecard.get('execution_score', 0)}/100"
         )
@@ -111,7 +113,6 @@ class FinalEvaluationService:
         benchmark_score += max(-10.0, min(10.0, float(cmp.get("profit_factor_delta", 0)) * 5.0))
         benchmark_score = max(0.0, min(100.0, benchmark_score))
 
-        overlap_score = 50.0
         labels = int(overlap.get("labels_considered", 0) or 0)
         if labels > 0:
             overlap_score = (
@@ -120,8 +121,10 @@ class FinalEvaluationService:
                 + max(0.0, 10.0 - min(float(overlap.get("avg_entry_distance_points") or 999), 100.0) / 10.0)
             )
             overlap_score = max(0.0, min(100.0, overlap_score))
+            overlap_available = True
         else:
-            overlap_score = 0.0
+            overlap_score = 50.0
+            overlap_available = False
 
         total_candidates = max(1, int(current.get("total_candidates", 0) or 0))
         not_filled = int(current.get("not_filled", 0) or 0)
@@ -131,6 +134,7 @@ class FinalEvaluationService:
         return {
             "benchmark_score": round(benchmark_score, 1),
             "overlap_score": round(overlap_score, 1),
+            "overlap_available": overlap_available,
             "execution_score": round(execution_score, 1),
             "not_filled_ratio": round(not_filled_ratio, 3),
         }
@@ -139,7 +143,11 @@ class FinalEvaluationService:
         benchmark_score = float(scorecard.get("benchmark_score", 0) or 0)
         overlap_score = float(scorecard.get("overlap_score", 0) or 0)
         execution_score = float(scorecard.get("execution_score", 0) or 0)
-        total = benchmark_score * 0.45 + overlap_score * 0.35 + execution_score * 0.20
+        overlap_available = bool(scorecard.get("overlap_available", False))
+        if overlap_available:
+            total = benchmark_score * 0.45 + overlap_score * 0.35 + execution_score * 0.20
+        else:
+            total = benchmark_score * 0.65 + execution_score * 0.35
         if total >= 75:
             return "READY_FOR_STRUCTURED_TRIAL"
         if total >= 60:
@@ -175,7 +183,7 @@ class FinalEvaluationService:
                 elif top == "MISSED_POI_MISMATCH":
                     recommendations.append("Top miss reason is POI mismatch: refine order-block/FVG ranking weights and mitigation penalties.")
         else:
-            recommendations.append("No analyst labels available in the evaluation window; import more labels before trusting overlap conclusions.")
+            recommendations.append("Analyst overlap is unavailable in this window; rely on benchmark + execution for now, and add labels later if you want bot-vs-analyst comparison.")
 
         if not recommendations:
             recommendations.append("Current engine is outperforming baseline with acceptable overlap; move to a structured forward trial and monitor drift.")

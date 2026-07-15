@@ -87,14 +87,17 @@ class ReleaseReadinessService:
         scorecard = final_eval.get("scorecard", {}) or {}
         benchmark_score = float(scorecard.get("benchmark_score", 0) or 0)
         overlap_score = float(scorecard.get("overlap_score", 0) or 0)
+        overlap_available = bool(scorecard.get("overlap_available", False))
         execution_score = float(scorecard.get("execution_score", 0) or 0)
         actions = tuning.get("actions", []) or []
         verdict = str(final_eval.get("verdict") or "REVIEW")
 
+        overlap_ok = overlap_score >= self.min_overlap_score_for_trial if overlap_available else True
+
         if (
             verdict == "READY_FOR_STRUCTURED_TRIAL"
             and benchmark_score >= self.min_benchmark_score_for_trial
-            and overlap_score >= self.min_overlap_score_for_trial
+            and overlap_ok
             and execution_score >= self.min_execution_score_for_trial
             and len(actions) <= self.max_actions_for_trial
         ):
@@ -113,5 +116,6 @@ class ReleaseReadinessService:
             "actions_count": len(actions),
             "benchmark_score": round(benchmark_score, 1),
             "overlap_score": round(overlap_score, 1),
+            "overlap_available": overlap_available,
             "execution_score": round(execution_score, 1),
         }
