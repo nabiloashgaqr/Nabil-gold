@@ -142,6 +142,9 @@ class AnalystDistillationService:
 
         considered = len(labels)
         overlap = matched + partial
+        reason_counts = self._reason_breakdown(comparisons + extra_setups)
+        setup_insights = self._setup_type_insights(comparisons)
+        insight_summary = self._insight_summary(reason_counts)
         return {
             "symbol": symbol,
             "labels_considered": considered,
@@ -155,6 +158,9 @@ class AnalystDistillationService:
             "setup_type_match_rate_pct": round((setup_type_matches / considered * 100), 1) if considered else 0.0,
             "poi_type_match_rate_pct": round((poi_matches / considered * 100), 1) if considered else 0.0,
             "avg_entry_distance_points": round(sum(entry_distances) / len(entry_distances), 1) if entry_distances else None,
+            "insight_breakdown": reason_counts,
+            "top_missed_reasons": insight_summary,
+            "setup_type_insights": setup_insights,
             "comparisons": comparisons,
             "extra_setup_records": extra_setups,
         }
@@ -175,6 +181,7 @@ class AnalystDistillationService:
                 "symbol": label.get("symbol") or self.symbol,
                 "match_score": 0.0,
                 "classification": "MISSED_BY_BOT",
+                "reason_code": "NO_BOT_SETUP_FOUND",
                 "summary": "No recent bot setup candidates found for this label.",
                 "payload": {"label": label},
             }
@@ -184,6 +191,8 @@ class AnalystDistillationService:
             classification = "PARTIAL_MATCH"
         else:
             classification = "MISSED_BY_BOT"
+        reason_code = self._comparison_reason_code(best, classification)
+        summary = self._comparison_summary(best, classification, reason_code)
         return {
             "id": f"COMPARE_{label.get('id', 'unknown')}_{best.get('setup_id', 'none')}",
             "analyst_label_id": label.get("id"),
@@ -191,7 +200,8 @@ class AnalystDistillationService:
             "symbol": label.get("symbol") or self.symbol,
             "match_score": round(best["score"], 1),
             "classification": classification,
-            "summary": best.get("summary"),
+            "reason_code": reason_code,
+            "summary": summary,
             "payload": best,
         }
 
@@ -254,6 +264,7 @@ class AnalystDistillationService:
         return {
             "label_id": label.get("id"),
             "setup_id": setup.get("id"),
+            "label_setup_type": label_setup,
             "score": score,
             "summary": summary,
             "direction_match": direction_match,
@@ -273,6 +284,7 @@ class AnalystDistillationService:
             "symbol": setup.get("symbol") or self.symbol,
             "match_score": 0.0,
             "classification": "EXTRA_BOT_SETUP",
+            "reason_code": "NO_ANALYST_LABEL",
             "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
             "payload": {
                 "setup_type": setup.get("setup_type"),
@@ -281,6 +293,91 @@ class AnalystDistillationService:
                 "entry_price": setup.get("entry_price"),
             },
         }
+
+    def _comparison_reason_code(self, payload: Dict[str, Any], classification: str) -> str:
+        if classification == "MATCHED":
+            if payload.get("entry_distance_points") is not None and float(payload.get("entry_distance_points") or 0) > self.entry_tolerance_points * 0.5:
+                return "MATCHED_WITH_ENTRY_LAG"
+            return "FULL_ALIGNMENT"
+        if classification == "PARTIAL_MATCH":
+            if not payload.get("direction_match"):
+                return "PARTIAL_DIRECTION_CONFLICT"
+            if not payload.get("setup_type_match"):
+                return "PARTIAL_SETUP_TYPE_MISMATCH"
+            if not payload.get("poi_type_match"):
+                return "PARTIAL_POI_MISMATCH"
+            if not payload.get("time_aligned"):
+                return "PARTIAL_TIMING_MISMATCH"
+            if payload.get("entry_distance_points") is not None and float(payload.get("entry_distance_points") or 0) > self.entry_tolerance_points:
+                return "PARTIAL_ENTRY_LAG"
+            return "PARTIAL_GENERIC"
+        # MISSED_BY_BOT
+        if not payload.get("direction_match"):
+            return "MISSED_DIRECTION_MISMATCH"
+        if not payload.get("setup_type_match"):
+            return "MISSED_SETUP_TYPE_MISMATCH"
+        if not payload.get("poi_type_match"):
+            return "MISSED_POI_MISMATCH"
+        if not payload.get("time_aligned"):
+            return "MISSED_TIMING_WINDOW"
+        if payload.get("entry_distance_points") is not None and float(payload.get("entry_distance_points") or 0) > self.entry_tolerance_points:
+            return "MISSED_ENTRY_TOO_FAR"
+        return "MISSED_GENERIC"
+
+    def _comparison_summary(self, payload: Dict[str, Any], classification: str, reason_code: str) -> str:
+        base = str(payload.get("summary") or "Weak or no overlap")
+        if classification == "MATCHED":
+            return f"Matched: {base}"
+        if classification == "PARTIAL_MATCH":
+            return f"Partial match ({reason_code}): {base}"
+        return f"Missed by bot ({reason_code}): {base}"
+
+    def _reason_breakdown(self, records: List[Dict[str, Any]]) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        for record in records:
+            reason = str(record.get("reason_code") or "UNKNOWN_REASON")
+            counts[reason] = counts.get(reason, 0) + 1
+        return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
+
+    def _setup_type_insights(self, comparisons: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        buckets: Dict[str, Dict[str, Any]] = {}
+        for item in comparisons:
+            payload = item.get("payload") or {}
+            setup_type = str(payload.get("label_setup_type") or "UNKNOWN")
+            bucket = buckets.setdefault(setup_type, {"count": 0, "matched": 0, "partial": 0, "missed": 0})
+            bucket["count"] += 1
+            cls = str(item.get("classification") or "MISSED_BY_BOT")
+            if cls == "MATCHED":
+                bucket["matched"] += 1
+            elif cls == "PARTIAL_MATCH":
+                bucket["partial"] += 1
+            else:
+                bucket["missed"] += 1
+        for bucket in buckets.values():
+            count = max(int(bucket.get("count", 0)), 1)
+            bucket["coverage_rate_pct"] = round(((bucket.get("matched", 0) + bucket.get("partial", 0)) / count) * 100, 1)
+        return buckets
+
+    def _insight_summary(self, reason_counts: Dict[str, int]) -> List[Dict[str, Any]]:
+        return [
+            {"reason_code": reason, "count": count}
+            for reason, count in list(reason_counts.items())[:5]
+        ]
+
+    def build_insight_lines(self, summary: Dict[str, Any]) -> List[str]:
+        lines: List[str] = []
+        if summary.get("labels_considered"):
+            lines.append(
+                f"Analyst overlap: {summary.get('matched_labels', 0)} matched, {summary.get('partial_matches', 0)} partial, "
+                f"{summary.get('missed_labels', 0)} missed, {summary.get('extra_bot_setups', 0)} extra bot setups"
+            )
+        if summary.get("avg_entry_distance_points") is not None:
+            lines.append(f"Average entry distance: {summary.get('avg_entry_distance_points')} pts")
+        reasons = summary.get("top_missed_reasons") or []
+        if reasons:
+            compact = ", ".join(f"{item.get('reason_code')} ({item.get('count')})" for item in reasons[:3])
+            lines.append(f"Top reasons: {compact}")
+        return lines[:3]
 
     def _normalize_label(
         self,
