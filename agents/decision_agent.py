@@ -114,7 +114,7 @@ class DecisionAgent(BaseAgent):
             "confidence": final_confidence,
             "reasoning": reasoning,
             "votes": votes,
-            "weights": self._weights_for_profile(profile),
+            "weights": self._weights_for_profile(profile, agents_results=agents_results),
             "classic": classic,
             "strategy_profile": profile,
             "learning": self._get_learning_info(),
@@ -142,7 +142,22 @@ class DecisionAgent(BaseAgent):
         profile.setdefault("require_lead_alignment", False)
         return profile
 
-    def _weights_for_profile(self, profile: Dict[str, Any] | None = None) -> Dict[str, float]:
+    def _learning_context(self, agents_results: Dict[str, Any], profile: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        profile = profile or {}
+        setup_context = agents_results.get("setup_context") or {}
+        smc = agents_results.get("smc", {}) or {}
+        smc_structure = smc.get("setup_structure") or {}
+        technical = agents_results.get("technical", {}) or {}
+        technical_regime = technical.get("market_regime") or ((technical.get("technical") or {}).get("market_regime") or {})
+        session = agents_results.get("session", {}) or agents_results.get("session_info", {}) or {}
+        return {
+            "setup_type": str(profile.get("resolved_setup_type") or setup_context.get("setup_type") or smc_structure.get("setup_type") or "CLASSIC_CONSENSUS"),
+            "lead_agent": str(profile.get("lead_agent") or setup_context.get("lead_agent") or smc_structure.get("lead_agent") or ""),
+            "session_label": str(session.get("current_session") or session.get("session") or session.get("session_name") or ""),
+            "regime": str((technical_regime or {}).get("volatility_regime") or "").upper(),
+        }
+
+    def _weights_for_profile(self, profile: Dict[str, Any] | None = None, agents_results: Dict[str, Any] | None = None) -> Dict[str, float]:
         profile = profile or {}
         weights = dict(self.current_weights)
         overrides = profile.get("weight_overrides") or {}
@@ -155,12 +170,29 @@ class DecisionAgent(BaseAgent):
             total = sum(v for v in weights.values() if v > 0)
             if total > 0:
                 weights = {k: v / total for k, v in weights.items()}
+        if self.learning_service and agents_results:
+            try:
+                learning_ctx = self._learning_context(agents_results, profile)
+                contextual = self.learning_service.get_contextual_weight_overrides(
+                    setup_type=learning_ctx.get("setup_type"),
+                    lead_agent=learning_ctx.get("lead_agent"),
+                    session_label=learning_ctx.get("session_label"),
+                    regime=learning_ctx.get("regime"),
+                )
+                if isinstance(contextual, dict) and contextual:
+                    names = set(weights) | set(contextual)
+                    blended = {name: (float(weights.get(name, 0.0)) * 0.65 + float(contextual.get(name, weights.get(name, 0.0))) * 0.35) for name in names}
+                    total = sum(v for v in blended.values() if v > 0)
+                    if total > 0:
+                        weights = {k: v / total for k, v in blended.items()}
+            except Exception:  # noqa: BLE001
+                logger.exception("Contextual learning weight override failed")
         return weights
 
     def _collect_votes(self, agents_results: Dict[str, Any], profile: Dict[str, Any] | None = None) -> Dict[str, list]:
         profile = profile or {}
         min_agent_conf = int(profile.get("agent_min_confidence", self.agent_min_confidence) or self.agent_min_confidence)
-        profile_weights = self._weights_for_profile(profile)
+        profile_weights = self._weights_for_profile(profile, agents_results=agents_results)
         votes = {"BUY": [], "SELL": [], "WAIT": []}
         for agent_name, result in agents_results.items():
             if agent_name not in self.voting_agents or not isinstance(result, dict):
