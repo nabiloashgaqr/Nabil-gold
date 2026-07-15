@@ -1,0 +1,170 @@
+name: 🛠️ Manual SmartSignal Operator
+
+concurrency:
+  group: manual-operator-${{ github.ref }}-${{ github.event.inputs.operation || 'op' }}
+  cancel-in-progress: false
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Which manual operation to run"
+        required: true
+        default: "operations_pipeline"
+        type: choice
+        options:
+          - analysis
+          - update_trades
+          - daily_report
+          - weekly_report
+          - analyst_comparison
+          - final_evaluation
+          - tuning_advisor
+          - release_readiness
+          - operations_pipeline
+          - backtest_benchmark
+      send_status:
+        description: "For analysis only: send WAIT / market status"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+      force_update:
+        description: "For update_trades only: force run even if no active trades"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+      report_date:
+        description: "For daily_report only: optional YYYY-MM-DD or yesterday"
+        required: false
+        default: ""
+        type: string
+      timeframe:
+        description: "For backtest/evaluation ops"
+        required: false
+        default: "15m"
+        type: string
+      outputsize:
+        description: "For backtest/evaluation ops"
+        required: false
+        default: "420"
+        type: string
+      window:
+        description: "Backtest/evaluation window"
+        required: false
+        default: "160"
+        type: string
+      step:
+        description: "Backtest/evaluation step"
+        required: false
+        default: "12"
+        type: string
+      horizon:
+        description: "Backtest/evaluation horizon"
+        required: false
+        default: "32"
+        type: string
+      max_trades:
+        description: "Backtest/evaluation max trades"
+        required: false
+        default: "60"
+        type: string
+      send_telegram:
+        description: "Send Telegram from the selected operation"
+        required: false
+        default: "true"
+        type: choice
+        options: ["false", "true"]
+
+jobs:
+  manual-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 📦 Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: 🚀 Run selected operation
+        env:
+          OPERATION: ${{ github.event.inputs.operation }}
+          SEND_STATUS_ON_MANUAL: ${{ github.event.inputs.send_status || 'false' }}
+          FORCE_TRADE_UPDATE: ${{ github.event.inputs.force_update || 'false' }}
+          REPORT_DATE: ${{ github.event.inputs.report_date }}
+          TF: ${{ github.event.inputs.timeframe || '15m' }}
+          OUTPUTSIZE: ${{ github.event.inputs.outputsize || '420' }}
+          WINDOW: ${{ github.event.inputs.window || '160' }}
+          STEP: ${{ github.event.inputs.step || '12' }}
+          HORIZON: ${{ github.event.inputs.horizon || '32' }}
+          MAX_TRADES: ${{ github.event.inputs.max_trades || '60' }}
+          SEND_TELEGRAM: ${{ github.event.inputs.send_telegram || 'true' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          TWELVEDATA_API_KEY: ${{ secrets.TWELVEDATA_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set -e
+          TELEGRAM_FLAG=""
+          if [ "${SEND_TELEGRAM}" = "true" ]; then
+            TELEGRAM_FLAG="--send-telegram"
+          fi
+          case "$OPERATION" in
+            analysis)
+              python scripts/run_analysis.py
+              ;;
+            update_trades)
+              python scripts/run_trade_updates.py
+              ;;
+            daily_report)
+              python scripts/run_daily_report.py
+              ;;
+            weekly_report)
+              python scripts/run_weekly_report.py
+              ;;
+            analyst_comparison)
+              python scripts/run_analyst_comparison.py
+              ;;
+            final_evaluation)
+              python scripts/run_final_evaluation.py --timeframe "$TF" --outputsize "$OUTPUTSIZE" --window "$WINDOW" --step "$STEP" --horizon "$HORIZON" --max-trades "$MAX_TRADES" $TELEGRAM_FLAG
+              ;;
+            tuning_advisor)
+              python scripts/run_tuning_advisor.py
+              ;;
+            release_readiness)
+              python scripts/run_release_readiness.py --timeframe "$TF" --outputsize "$OUTPUTSIZE" --window "$WINDOW" --step "$STEP" --horizon "$HORIZON" --max-trades "$MAX_TRADES" $TELEGRAM_FLAG
+              ;;
+            operations_pipeline)
+              python scripts/run_operations_pipeline.py --timeframe "$TF" --outputsize "$OUTPUTSIZE" --window "$WINDOW" --step "$STEP" --horizon "$HORIZON" --max-trades "$MAX_TRADES" $TELEGRAM_FLAG
+              ;;
+            backtest_benchmark)
+              python scripts/run_backtest.py --benchmark --timeframe "$TF" --outputsize "$OUTPUTSIZE" --window "$WINDOW" --step "$STEP" --horizon "$HORIZON" --max-trades "$MAX_TRADES" $TELEGRAM_FLAG
+              ;;
+            *)
+              echo "Unknown operation: $OPERATION"
+              exit 1
+              ;;
+          esac
+
+      - name: 📦 Upload storage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manual-operator-artifacts-${{ github.run_id }}
+          path: |
+            storage/*.json
+            storage/*.csv
+            storage/*.html
+            storage/ops_pipeline/*.json
+          if-no-files-found: ignore
