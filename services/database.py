@@ -41,7 +41,9 @@ class DatabaseService:
         if isinstance(self.key, str) and self.key.startswith("ENV:"):
             self.key = os.environ.get(self.key.replace("ENV:", "", 1))
         fallback = db_config.get("local_fallback_file", "storage/trades.json")
-        self.local_path = Path(__file__).resolve().parents[1] / fallback
+        root = Path(__file__).resolve().parents[1]
+        self.local_path = root / fallback
+        self.setup_candidates_path = root / "storage" / "setup_candidates.json"
         self.client: Client | None = None
         self.use_supabase = False
 
@@ -171,6 +173,83 @@ class DatabaseService:
         save_trades(trades, self.local_path)
         return trade_id
 
+    def save_setup_candidate(self, candidate: Dict[str, Any]) -> str:
+        """Persist or refresh a structured setup candidate.
+
+        Sprint 1 scope: this stores the best currently-known setup context so
+        later phases can evolve it into a full setup lifecycle/state machine.
+        Supabase uses upsert by id; local fallback uses a JSON file.
+        """
+        candidate_id = str(candidate.get("id") or f"SETUP_{uuid.uuid4().hex[:16]}")
+        now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        zone = candidate.get("poi_zone") or candidate.get("zone") or {}
+        payload = {
+            "id": candidate_id,
+            "symbol": str(candidate.get("symbol") or self.config.get("symbol", "XAU/USD")),
+            "timeframe": str(candidate.get("timeframe") or self.config.get("entry_timeframe") or "15m"),
+            "direction": str(candidate.get("direction") or "WAIT").upper(),
+            "setup_type": candidate.get("setup_type") or "UNKNOWN",
+            "setup_state": candidate.get("setup_state") or "DETECTED",
+            "lead_agent": candidate.get("lead_agent") or "smc",
+            "setup_quality": (candidate.get("setup_quality") or {}).get("grade") if isinstance(candidate.get("setup_quality"), dict) else candidate.get("setup_quality"),
+            "quality_score": float((candidate.get("setup_quality") or {}).get("score", candidate.get("quality_score", 0)) or 0),
+            "poi_type": candidate.get("poi_type"),
+            "poi_low": candidate.get("poi_low") if candidate.get("poi_low") is not None else zone.get("bottom"),
+            "poi_high": candidate.get("poi_high") if candidate.get("poi_high") is not None else zone.get("top"),
+            "entry_price": candidate.get("entry_price"),
+            "stop_loss": candidate.get("stop_loss"),
+            "target_price": candidate.get("target_price") or candidate.get("target_liquidity"),
+            "sweep_side": candidate.get("sweep_side"),
+            "displacement_score": candidate.get("displacement_score"),
+            "confidence": candidate.get("confidence"),
+            "details": candidate.get("details") or {},
+            "source": candidate.get("source") or "smc",
+            "is_active": bool(candidate.get("is_active", True)),
+            "first_seen_at": candidate.get("first_seen_at") or candidate.get("created_at") or now_iso,
+            "last_seen_at": now_iso,
+            "last_trade_id": candidate.get("last_trade_id"),
+            "updated_at": now_iso,
+        }
+        if self.use_supabase and self.client:
+            try:
+                self.client.table("setup_candidates").upsert(payload).execute()
+                return candidate_id
+            except Exception as exc:  # noqa: BLE001
+                if self._strict_supabase():
+                    raise RuntimeError(f"Failed to save setup candidate in production: {exc}") from exc
+                self.logger.error("Failed to upsert setup candidate in Supabase, falling back local: %s", exc)
+        candidates = load_trades(self.setup_candidates_path)
+        replaced = False
+        for index, existing in enumerate(candidates):
+            if str(existing.get("id")) == candidate_id:
+                merged = dict(existing)
+                merged.update(payload)
+                merged["first_seen_at"] = existing.get("first_seen_at") or payload["first_seen_at"]
+                candidates[index] = merged
+                replaced = True
+                break
+        if not replaced:
+            candidates.append(payload)
+        save_trades(candidates, self.setup_candidates_path)
+        return candidate_id
+
+    def get_recent_setup_candidates(self, limit: int = 20, symbol: str | None = None) -> List[Dict[str, Any]]:
+        if self.use_supabase and self.client:
+            try:
+                query = self.client.table("setup_candidates").select("*").order("last_seen_at", desc=True).limit(limit)
+                if symbol:
+                    query = query.eq("symbol", symbol)
+                response = query.execute()
+                return list(response.data or [])
+            except Exception as exc:  # noqa: BLE001
+                if self._strict_supabase():
+                    raise RuntimeError(f"Failed to fetch setup candidates in production: {exc}") from exc
+                self.logger.error("Failed to fetch setup candidates from Supabase: %s", exc)
+        rows = load_trades(self.setup_candidates_path)
+        if symbol:
+            rows = [row for row in rows if str(row.get("symbol", "")).upper() == str(symbol).upper()]
+        return sorted(rows, key=lambda row: str(row.get("last_seen_at") or row.get("updated_at") or ""), reverse=True)[:limit]
+
     @staticmethod
     def _build_regime_composite(tech_regime: dict) -> str:
         """Build a composite regime label from volatility_regime + market_phase.
@@ -240,6 +319,10 @@ class DatabaseService:
             stored_session if stored_session in SESSION_ORDER
             else session_label_from_utc(now)
         )
+        setup_context = decision.get("setup_context") or {}
+        if not isinstance(setup_context, dict):
+            setup_context = {}
+        quality = decision.get("quality") or {}
         return {
             "planned_risk_points": round(planned_risk_points, 1),
             "planned_tp2_points": round(planned_tp2_points, 1),
@@ -258,6 +341,14 @@ class DatabaseService:
             "primary_entry_driver": (decision.get("entry_attribution") or {}).get("primary_entry_driver") if isinstance(decision.get("entry_attribution"), dict) else None,
             "entry_failure_mode": (decision.get("entry_attribution") or {}).get("failure_mode") if isinstance(decision.get("entry_attribution"), dict) else None,
             "macro_bias_at_entry": ((decision.get("market_context") or {}).get("macro_direction") or {}).get("bias") if isinstance((decision.get("market_context") or {}).get("macro_direction"), dict) else None,
+            "setup_id": decision.get("setup_id") or setup_context.get("id"),
+            "setup_type": decision.get("setup_type") or setup_context.get("setup_type"),
+            "setup_state": decision.get("setup_state") or setup_context.get("setup_state"),
+            "lead_agent": decision.get("lead_agent") or setup_context.get("lead_agent") or (decision.get("entry_attribution") or {}).get("primary_entry_driver"),
+            "setup_quality": decision.get("setup_quality") or setup_context.get("quality_grade") or quality.get("grade"),
+            "poi_type": setup_context.get("poi_type"),
+            "sweep_side": setup_context.get("sweep_side"),
+            "displacement_score": setup_context.get("displacement_score"),
         }
 
     # Statuses the trade manager must still evaluate each cycle. PENDING is
@@ -707,6 +798,14 @@ class DatabaseService:
             "regime_composite",
             "trend_strength",
             "daily_bias_at_entry",
+            "setup_id",
+            "setup_type",
+            "setup_state",
+            "lead_agent",
+            "setup_quality",
+            "poi_type",
+            "sweep_side",
+            "displacement_score",
             "reasons",
             "last_updated",
             # Price tracking columns — must persist so dashboard/SQL queries

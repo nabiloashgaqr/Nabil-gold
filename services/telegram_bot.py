@@ -225,6 +225,58 @@ class TelegramService:
         block = self._macro_block(decision)
         return block[0] if block else "• Macro: Collecting hourly data"
 
+    def _setup_lines(self, decision: Dict[str, Any], signal: Dict[str, Any]) -> List[str]:
+        setup = decision.get("setup_context") or {}
+        if not isinstance(setup, dict) or not setup:
+            return []
+        lines: List[str] = []
+        setup_type = setup.get("setup_type")
+        setup_state = setup.get("setup_state")
+        lead_agent = setup.get("lead_agent")
+        quality = setup.get("quality_grade") or decision.get("setup_quality")
+        if setup_type or setup_state or lead_agent:
+            compact = []
+            if setup_type:
+                compact.append(str(setup_type).replace("_", " ").title())
+            if setup_state:
+                compact.append(f"state {setup_state}")
+            if lead_agent:
+                compact.append(f"lead {lead_agent}")
+            if quality:
+                compact.append(f"quality {quality}")
+            lines.append(f"• <b>Setup:</b> {html.escape(' · '.join(compact))}")
+        zone = signal.get("entry", {}) or {}
+        low = zone.get("low")
+        high = zone.get("high")
+        if low is not None and high is not None:
+            try:
+                low_f = float(low)
+                high_f = float(high)
+                if abs(high_f - low_f) > 0.01:
+                    lines.append(f"• <b>Entry zone:</b> {self._money(low_f, str(decision.get('symbol') or 'XAU/USD'))} → {self._money(high_f, str(decision.get('symbol') or 'XAU/USD'))}")
+            except (TypeError, ValueError):
+                pass
+        poi_type = setup.get("poi_type")
+        sweep_side = setup.get("sweep_side")
+        displacement = setup.get("displacement_score")
+        target_liquidity = setup.get("target_liquidity")
+        if poi_type or sweep_side or displacement not in {None, ""}:
+            extra = []
+            if poi_type:
+                extra.append(f"POI {str(poi_type).replace('_', ' ').title()}")
+            if sweep_side:
+                extra.append(f"sweep {sweep_side}")
+            if displacement not in {None, ""}:
+                extra.append(f"disp {displacement}")
+            lines.append(f"• <b>SMC context:</b> {html.escape(' · '.join(str(x) for x in extra))}")
+        if target_liquidity not in {None, ""}:
+            lines.append(f"• <b>Target liquidity:</b> {self._money(target_liquidity, str(decision.get('symbol') or 'XAU/USD'))}")
+        invalidation = (decision.get("ai") or {}).get("invalidation") or setup.get("invalidation") or setup.get("entry_reason")
+        if self._should_show_invalidation(invalidation, signal.get("stop_loss")):
+            label = "Invalidation" if (decision.get("ai") or {}).get("invalidation") else "Structural trigger"
+            lines.append(f"• <b>{label}:</b> {self._clean_text(invalidation)}")
+        return lines[:5]
+
     def _attribution_lines(self, decision: Dict[str, Any]) -> List[str]:
         attr = decision.get("entry_attribution") or {}
         if not isinstance(attr, dict) or not attr:
@@ -356,6 +408,9 @@ class TelegramService:
             lines.append(f"• <b>Planned RR:</b> {html.escape(str(rr))}R")
         lines.append("• <b>Protection:</b> SL → entry after +150 pts before TP1")
         lines.append("• <b>Management:</b> Trail gap 150 pts / step 40 pts · check 5m")
+        setup_lines = self._setup_lines(decision, signal)
+        if setup_lines:
+            lines.extend(setup_lines)
 
         vote_lines = self._votes_lines(decision)
         if vote_lines:
