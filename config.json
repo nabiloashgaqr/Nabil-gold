@@ -157,7 +157,48 @@
         "trailing_step_points": 40,
         "description_trailing_stop": "Trailing gap 150pts ($15) متناسب مع SL=400pts. خطوة 40pts تقلل التحديثات غير الضرورية بالضوضا.",
         "early_breakeven_points": 150,
-        "description_early_breakeven": "early_breakeven_points=150: عند وصول الصفقة إلى +150 نقطة (15$) يُنقل الستوب إلى الدخول فوراً. بعدها يبدأ Trailing بفجوة 150pts."
+        "description_early_breakeven": "early_breakeven_points=150: عند وصول الصفقة إلى +150 نقطة (15$) يُنقل الستوب إلى الدخول فوراً. بعدها يبدأ Trailing بفجوة 150pts.",
+        "profiles": {
+            "default_profile": {
+                "time_warning_hours": 4,
+                "expire_after_hours": 24,
+                "early_breakeven_points": 150,
+                "trailing_distance_points": 150,
+                "trailing_step_points": 40,
+                "partial_close_at_tp1": true,
+                "keep_protected_winners_open": true
+            },
+            "reversal_profile": {
+                "time_warning_hours": 3,
+                "expire_after_hours": 18,
+                "early_breakeven_points": 100,
+                "trailing_distance_points": 120,
+                "trailing_step_points": 30,
+                "partial_close_at_tp1": true,
+                "keep_protected_winners_open": true,
+                "description": "Faster protection for liquidity reversals: BE sooner and tighter trailing after rejection setups."
+            },
+            "continuation_profile": {
+                "time_warning_hours": 5,
+                "expire_after_hours": 30,
+                "early_breakeven_points": 170,
+                "trailing_distance_points": 170,
+                "trailing_step_points": 45,
+                "partial_close_at_tp1": true,
+                "keep_protected_winners_open": true,
+                "description": "Trend continuation profile: allow winners more room before breakeven/trailing."
+            },
+            "range_profile": {
+                "time_warning_hours": 3,
+                "expire_after_hours": 12,
+                "early_breakeven_points": 90,
+                "trailing_distance_points": 110,
+                "trailing_step_points": 25,
+                "partial_close_at_tp1": true,
+                "keep_protected_winners_open": false,
+                "description": "Range fades are shorter-lived: protect quickly and expire sooner."
+            }
+        }
     },
     "performance": {
         "track_win_rate_per_agent": true,
