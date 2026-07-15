@@ -86,6 +86,27 @@
             "description": "When only 2 agents agree (same 70% individual + 72% net thresholds), require external confirmation. Try macro first (no API cost), fall back to Gemini if needed. Macro ≥55% or Gemini ≥70% to confirm."
         }
     },
+    "smc_engine": {
+        "poi_preference": {
+            "fresh_bonus": 18,
+            "tested_bonus": 8,
+            "mitigated_penalty": -14,
+            "invalidated_penalty": -60,
+            "order_block_bonus": 10,
+            "fvg_bonus": 6,
+            "equilibrium_bonus": 2,
+            "strong_bonus": 10,
+            "medium_bonus": 5,
+            "proximity_bonus_cap": 14,
+            "proximity_scale_atr": 1.5
+        },
+        "trigger_logic": {
+            "rejection_wick_body_ratio": 0.75,
+            "confirm_close_position": 0.55,
+            "market_entry_min_trigger_score": 70,
+            "description": "Used to confirm rejection at POI before MARKET execution in hybrid mode."
+        }
+    },
     "schedule": {
         "analysis_interval_minutes": 5,
         "trade_update_interval_minutes": 5,
