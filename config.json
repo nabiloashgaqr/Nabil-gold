@@ -375,6 +375,53 @@
             "paper_only": true
         }
     },
+    "strategy_profiles": {
+        "liquidity_reversal": {
+            "description": "SMC-led reversal profile: sweep + POI + reaction can qualify with 2 strong aligned agents.",
+            "min_agents_agree": 2,
+            "min_consensus_confidence": 70,
+            "agent_min_confidence": 68,
+            "lead_agent": "smc",
+            "require_lead_alignment": true,
+            "weight_overrides": {
+                "smc": 0.35,
+                "price_action": 0.25,
+                "multitimeframe": 0.2,
+                "classical": 0.1,
+                "technical": 0.1
+            }
+        },
+        "trend_pullback": {
+            "description": "Trend continuation / pullback profile with stronger HTF alignment requirements.",
+            "min_agents_agree": 3,
+            "min_consensus_confidence": 72,
+            "agent_min_confidence": 70,
+            "lead_agent": "multitimeframe",
+            "require_lead_alignment": true,
+            "weight_overrides": {
+                "multitimeframe": 0.3,
+                "classical": 0.25,
+                "price_action": 0.2,
+                "smc": 0.15,
+                "technical": 0.1
+            }
+        },
+        "range_fade": {
+            "description": "Range/extreme reaction profile with softer lead-agent enforcement.",
+            "min_agents_agree": 2,
+            "min_consensus_confidence": 71,
+            "agent_min_confidence": 68,
+            "lead_agent": "price_action",
+            "require_lead_alignment": false,
+            "weight_overrides": {
+                "price_action": 0.3,
+                "classical": 0.25,
+                "smc": 0.2,
+                "technical": 0.15,
+                "multitimeframe": 0.1
+            }
+        }
+    },
     "weekly_report": {
         "enabled": true,
         "day_of_week": 5,
