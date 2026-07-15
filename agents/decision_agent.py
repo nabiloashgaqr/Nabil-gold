@@ -158,7 +158,7 @@ class DecisionAgent(BaseAgent):
         return weights
 
     def _collect_votes(self, agents_results: Dict[str, Any], profile: Dict[str, Any] | None = None) -> Dict[str, list]:
-        profile = profile or self.active_profile or {}
+        profile = profile or {}
         min_agent_conf = int(profile.get("agent_min_confidence", self.agent_min_confidence) or self.agent_min_confidence)
         profile_weights = self._weights_for_profile(profile)
         votes = {"BUY": [], "SELL": [], "WAIT": []}
@@ -193,7 +193,7 @@ class DecisionAgent(BaseAgent):
         return votes
 
     def _classic_decision(self, votes: Dict[str, list], profile: Dict[str, Any] | None = None) -> Dict[str, Any]:
-        profile = profile or self.active_profile or {}
+        profile = profile or {}
         buy = self._direction_metrics("BUY", votes, profile=profile)
         sell = self._direction_metrics("SELL", votes, profile=profile)
         candidates = [("BUY", buy), ("SELL", sell)]
@@ -444,7 +444,7 @@ class DecisionAgent(BaseAgent):
         return evidence
 
     def _direction_metrics(self, side: str, votes: Dict[str, list], profile: Dict[str, Any] | None = None) -> Dict[str, Any]:
-        profile = profile or self.active_profile or {}
+        profile = profile or {}
         opposite = "SELL" if side == "BUY" else "BUY"
         supporters = votes.get(side, []) or []
         opponents = votes.get(opposite, []) or []
