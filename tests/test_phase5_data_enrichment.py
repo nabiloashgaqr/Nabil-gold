@@ -17,6 +17,12 @@ def test_database_entry_enrichment_persists_context_fields() -> None:
         "daily_bias": {"bias": "BEARISH"},
         "news_context": {"rule_based": {"market_status": "CAUTION", "risk_level": "HIGH"}},
         "market_context": {"technical_regime": {"volatility_regime": "HIGH", "trend_strength": "STRONG"}},
+        "setup_id": "SETUP_XAU_SELL_1",
+        "setup_type": "LIQUIDITY_REVERSAL",
+        "setup_state": "ENTRY_ARMED",
+        "lead_agent": "smc",
+        "setup_quality": "A",
+        "setup_context": {"poi_type": "order_block", "sweep_side": "buy_side", "displacement_score": 22.5},
         "signal": {"type": "SELL", "entry": {"price": 4000.0}, "stop_loss": 4020.0, "tp2": 3940.0, "rr_ratio": 3.0},
     }
 
@@ -32,6 +38,14 @@ def test_database_entry_enrichment_persists_context_fields() -> None:
     assert enriched["volatility_regime"] == "HIGH"
     assert enriched["trend_strength"] == "STRONG"
     assert enriched["daily_bias_at_entry"] == "BEARISH"
+    assert enriched["setup_id"] == "SETUP_XAU_SELL_1"
+    assert enriched["setup_type"] == "LIQUIDITY_REVERSAL"
+    assert enriched["setup_state"] == "ENTRY_ARMED"
+    assert enriched["lead_agent"] == "smc"
+    assert enriched["setup_quality"] == "A"
+    assert enriched["poi_type"] == "order_block"
+    assert enriched["sweep_side"] == "buy_side"
+    assert enriched["displacement_score"] == pytest.approx(22.5)
     assert enriched["entry_day_of_week"]
     assert isinstance(enriched["entry_hour_local"], int)
 
