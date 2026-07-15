@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 
+from services.analyst_distillation import AnalystDistillationService
 from utils.sessions import session_label_from_trade
 
 logger = logging.getLogger(__name__)
@@ -397,6 +398,30 @@ class PerformanceDashboard:
             logger.error(f"❌ خطأ في جلب ملخص المحفظة: {e}")
             return {'balance': 10000, 'peak_balance': 10000}
     
+    def _analyst_overlap_summary(self) -> Dict[str, Any]:
+        """Best-effort analyst-vs-bot overlap snapshot for dashboard/reporting."""
+        try:
+            cfg = self.config.get("analyst_distillation", {}) or {}
+            if not bool(cfg.get("enabled", True)):
+                return {}
+            limit = int(cfg.get("dashboard_compare_limit", 30) or 30)
+            service = AnalystDistillationService(self.db, self.config)
+            summary = service.compare_recent(symbol=self.config.get("symbol", "XAU/USD"), limit=limit)
+            return {
+                "labels_considered": summary.get("labels_considered", 0),
+                "matched_labels": summary.get("matched_labels", 0),
+                "partial_matches": summary.get("partial_matches", 0),
+                "missed_labels": summary.get("missed_labels", 0),
+                "extra_bot_setups": summary.get("extra_bot_setups", 0),
+                "match_rate_pct": summary.get("match_rate_pct", 0.0),
+                "coverage_rate_pct": summary.get("coverage_rate_pct", 0.0),
+                "avg_entry_distance_points": summary.get("avg_entry_distance_points"),
+                "top_missed_reasons": summary.get("top_missed_reasons", []),
+            }
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Analyst overlap summary unavailable: %s", exc)
+            return {}
+
     async def generate_performance_report(self, days: int = 7) -> Dict[str, Any]:
         """
         📊 تقرير الأداء الشامل
@@ -408,7 +433,8 @@ class PerformanceDashboard:
             'agents': {},
             'sessions': [],
             'alerts': [],
-            'summary': {}
+            'summary': {},
+            'analyst_overlap': self._analyst_overlap_summary(),
         }
         
         # أداء الوكلاء
@@ -511,6 +537,25 @@ class PerformanceDashboard:
             ])
             for alert in report['alerts']:
                 lines.append(f"{alert['level']} {alert['message']}")
+            lines.append("")
+
+        # analyst overlap snapshot
+        overlap = report.get('analyst_overlap') or {}
+        if overlap and int(overlap.get('labels_considered', 0) or 0) > 0:
+            lines.extend([
+                "🧠 *Analyst overlap*",
+                f"├ Labels: {overlap.get('labels_considered', 0)}",
+                f"├ Matched: {overlap.get('matched_labels', 0)} · Partial: {overlap.get('partial_matches', 0)} · Missed: {overlap.get('missed_labels', 0)}",
+                f"├ Coverage: {overlap.get('coverage_rate_pct', 0)}% · Match: {overlap.get('match_rate_pct', 0)}%",
+            ])
+            if overlap.get('avg_entry_distance_points') is not None:
+                lines.append(f"├ Avg entry distance: {overlap.get('avg_entry_distance_points')} pts")
+            reasons = overlap.get('top_missed_reasons') or []
+            if reasons:
+                first = reasons[0]
+                lines.append(f"└ Top miss reason: {first.get('reason_code', 'N/A')} ({first.get('count', 0)})")
+            else:
+                lines.append("└ Top miss reason: —")
             lines.append("")
         
         # الملخص
