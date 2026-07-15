@@ -263,6 +263,13 @@
         "retry_delay_seconds": 3,
         "description": "Gemini independent review. max_retries applies to all calls (signal, news, reports, learning). retry_delay_seconds is base delay with exponential backoff."
     },
+    "analyst_distillation": {
+        "enabled": true,
+        "entry_tolerance_points": 80,
+        "time_window_hours": 12,
+        "match_threshold": 65,
+        "description": "Phase 6 foundation: compare manual analyst labels to bot setup candidates using direction, setup type, POI, sweep side, timing, and entry proximity."
+    },
     "macro_data_provider": {
         "description": "Hourly macro context from Yahoo Finance (yfinance). Zero cost, no API key, no quota. Provides 6/7 macro inputs: DXY (FX basket + direct), risk sentiment (SPY + VIX), US 10Y/5Y yields, fed tone, oil. Only inflation_surprise is unknown (no free source). Cron-job.org triggers macro_context.yml every hour."
     },
