@@ -80,6 +80,11 @@ python scripts/run_final_evaluation.py --timeframe 15m --outputsize 420 --window
 python scripts/run_tuning_advisor.py --input storage/final_evaluation.json --output storage/tuning_advice.json
 ```
 
+إذا لم يكن `storage/final_evaluation.json` موجوداً بعد (مثل التشغيل من runner جديد أو workflow يدوي منفصل)، استخدم:
+```bash
+python scripts/run_tuning_advisor.py --ensure-final-evaluation --timeframe 15m --outputsize 420 --window 160 --step 12 --horizon 32 --max-trades 60
+```
+
 الناتج الافتراضي:
 - `storage/tuning_advice.json`
 
