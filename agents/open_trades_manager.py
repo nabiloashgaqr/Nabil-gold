@@ -82,6 +82,49 @@ class OpenTradesManager(BaseAgent):
         oe = self.config.get("order_execution", {}) or {}
         self.entry_style = str(oe.get("entry_style", "market")).lower()
         self.pending_order_max_cycles = int(oe.get("pending_order_max_cycles", 6) or 6)
+        self.profile_overrides = (self.management.get("profiles", {}) or {}) if isinstance(self.management, dict) else {}
+
+    def _trade_management_profile(self, trade: Dict[str, Any]) -> str:
+        snapshot = trade.get("signal_snapshot") or {}
+        if not isinstance(snapshot, dict):
+            snapshot = {}
+        risk = snapshot.get("risk") or {}
+        if isinstance(risk, dict) and risk.get("management_profile"):
+            return str(risk.get("management_profile"))
+        signal = snapshot.get("signal") or {}
+        if isinstance(signal, dict) and signal.get("management_profile"):
+            return str(signal.get("management_profile"))
+        setup_type = str(snapshot.get("setup_type") or (snapshot.get("setup_context") or {}).get("setup_type") or "").upper()
+        if setup_type in {"LIQUIDITY_REVERSAL", "REVERSAL_ATTEMPT"}:
+            return "reversal_profile"
+        if setup_type in {"ORDER_BLOCK_PULLBACK", "STRUCTURE_CONTINUATION", "TREND_CONTINUATION", "PULLBACK_ENTRY"}:
+            return "continuation_profile"
+        if setup_type in {"RANGE_FADE", "SMC_CONTEXT", "MIXED_ALIGNMENT"}:
+            return "range_profile"
+        return "default_profile"
+
+    def _management_params(self, trade: Dict[str, Any], symbol: str | None = None) -> Dict[str, Any]:
+        profile = self._trade_management_profile(trade)
+        symbol = symbol or str(trade.get("symbol") or self.config.get("symbol", "XAU/USD"))
+        params = {
+            "profile": profile,
+            "near_tp1_progress": self.near_tp1_progress,
+            "time_warning_hours": self.time_warning_hours,
+            "expire_after_hours": self.expire_after_hours,
+            "keep_protected_winners_open": self.keep_protected_winners_open,
+            "auto_be": self.auto_be,
+            "trailing_enabled": self.trailing_enabled,
+            "trailing_distance_points": self.trailing_distance,
+            "trailing_step_points": self.trailing_step,
+            "trailing_min_profit_lock_points": self.trailing_min_profit_lock,
+            "early_breakeven_points": self.early_breakeven_points,
+        }
+        override = self.profile_overrides.get(profile) or {}
+        for key in list(params.keys()):
+            if key in override:
+                params[key] = override[key]
+        params["symbol"] = symbol
+        return params
 
     def update_trades(
         self,
@@ -171,6 +214,7 @@ class OpenTradesManager(BaseAgent):
         trade_type = str(trade.get("type", "BUY")).upper()
         symbol = str(trade.get("symbol") or self.config.get("symbol", "XAU/USD"))
         old_status = str(trade.get("status", "OPEN")).upper()
+        management = self._management_params(trade, symbol=symbol)
         entry = self._f(trade.get("entry_price"))
         stop_loss = self._f(trade.get("stop_loss"))
         tp1 = self._f(trade.get("tp1"))
@@ -281,7 +325,7 @@ class OpenTradesManager(BaseAgent):
 
         # Informational age/risk markers are still recorded even if the same
         # cycle also expires the trade.
-        if old_status == "OPEN" and hours_open >= self.time_warning_hours and "LONG_RUNNING" not in updates_sent:
+        if old_status == "OPEN" and hours_open >= float(management["time_warning_hours"]) and "LONG_RUNNING" not in updates_sent:
             events.append("LONG_RUNNING")
         if exit_warning and "EXIT_WARNING" not in updates_sent:
             events.append("EXIT_WARNING")
@@ -290,9 +334,9 @@ class OpenTradesManager(BaseAgent):
         # trailing movement. If keep_protected_winners_open=false, legacy
         # behavior is to expire even protected winners instead of extending them
         # via trailing.
-        if self.expire_after_hours > 0 and old_status == "OPEN" and hours_open >= self.expire_after_hours:
+        if float(management["expire_after_hours"]) > 0 and old_status == "OPEN" and hours_open >= float(management["expire_after_hours"]):
             protected_winner = (
-                self.keep_protected_winners_open
+                bool(management["keep_protected_winners_open"])
                 and sl_moved_to_entry
                 and self._beyond_breakeven_or_at(trade_type, stop_loss, entry)
                 and pnl_points > 0
@@ -329,13 +373,16 @@ class OpenTradesManager(BaseAgent):
                 # SL is already at entry from early BE — no need to move again.
             else:
                 effective_stop = stop_loss
-                if self.trailing_enabled and new_status in self.OPEN_STATUSES and "EXPIRED" not in events:
+                if bool(management["trailing_enabled"]) and new_status in self.OPEN_STATUSES and "EXPIRED" not in events:
                     trailing_candidate = self._compute_trailing_stop(
                         trade_type,
                         favorable_price,
                         stop_loss,
                         entry,
                         symbol,
+                        distance_points=float(management["trailing_distance_points"]),
+                        step_points=float(management["trailing_step_points"]),
+                        min_profit_lock_points=float(management["trailing_min_profit_lock_points"]),
                     )
                     if trailing_candidate is not None:
                         new_stop_loss = trailing_candidate
@@ -404,26 +451,26 @@ class OpenTradesManager(BaseAgent):
             new_status = "TP1_HIT"
             events.append("TP1_HIT")
             partial_close = True
-            if self.auto_be:
+            if bool(management["auto_be"]):
                 sl_moved_to_entry = True
                 new_stop_loss = entry  # actually persist breakeven, not just the flag
                 events.append("MOVE_SL_TO_BE")
         else:
             # 2) Informational events only if no status-changing event happened.
             progress = self._progress_to_tp1(trade_type, entry, tp1, current_price)
-            if old_status == "OPEN" and progress >= self.near_tp1_progress and "NEAR_TP1" not in updates_sent:
+            if old_status == "OPEN" and progress >= float(management["near_tp1_progress"]) and "NEAR_TP1" not in updates_sent:
                 events.append("NEAR_TP1")
-            if old_status == "OPEN" and hours_open >= self.time_warning_hours and "LONG_RUNNING" not in updates_sent and "LONG_RUNNING" not in events:
+            if old_status == "OPEN" and hours_open >= float(management["time_warning_hours"]) and "LONG_RUNNING" not in updates_sent and "LONG_RUNNING" not in events:
                 events.append("LONG_RUNNING")
             if exit_warning and "EXIT_WARNING" not in updates_sent and "EXIT_WARNING" not in events:
                 events.append("EXIT_WARNING")
-            if self.expire_after_hours > 0 and old_status == "OPEN" and hours_open >= self.expire_after_hours:
+            if float(management["expire_after_hours"]) > 0 and old_status == "OPEN" and hours_open >= float(management["expire_after_hours"]):
                 # Don't force-close a WINNING trade whose stop is already locked
                 # at/above breakeven — let the (trailing) stop ride instead of
                 # capping a runner by the clock. Only expire if it's not safely
                 # protected in profit. Controlled by keep_protected_winners_open.
                 protected_winner = (
-                    self.keep_protected_winners_open
+                    bool(management["keep_protected_winners_open"])
                     and sl_moved_to_entry
                     and self._beyond_breakeven_or_at(trade_type, stop_loss, entry)
                     and pnl_points > 0
@@ -443,11 +490,11 @@ class OpenTradesManager(BaseAgent):
             # This keeps breakeven consistent with TP/SL detection, which already
             # uses the candle high/low.
             if (
-                self.early_breakeven_points > 0
+                float(management["early_breakeven_points"]) > 0
                 and not sl_moved_to_entry
                 and new_status in self.OPEN_STATUSES
                 and "EXPIRED" not in events
-                and favorable_points >= self.early_breakeven_points
+                and favorable_points >= float(management["early_breakeven_points"])
             ):
                 sl_moved_to_entry = True
                 new_stop_loss = entry  # persist the breakeven stop
@@ -458,7 +505,7 @@ class OpenTradesManager(BaseAgent):
             # via early breakeven above), and only when nothing status-changing
             # happened this run. Works while OPEN or TP1_HIT.
             if (
-                self.trailing_enabled
+                bool(management["trailing_enabled"])
                 and sl_moved_to_entry
                 and new_status in self.OPEN_STATUSES
                 and "EXPIRED" not in events
@@ -477,7 +524,16 @@ class OpenTradesManager(BaseAgent):
                     all_time_high = entry + (max_favorable_excursion / 10.0)
                     if best_from_mfe <= 0 or all_time_high > best_from_mfe:
                         best_from_mfe = all_time_high
-                trailing_candidate = self._compute_trailing_stop(trade_type, best_from_mfe, base_stop, entry, symbol)
+                trailing_candidate = self._compute_trailing_stop(
+                    trade_type,
+                    best_from_mfe,
+                    base_stop,
+                    entry,
+                    symbol,
+                    distance_points=float(management["trailing_distance_points"]),
+                    step_points=float(management["trailing_step_points"]),
+                    min_profit_lock_points=float(management["trailing_min_profit_lock_points"]),
+                )
                 if trailing_candidate is not None:
                     new_stop_loss = trailing_candidate
                     if "TRAILING_SL_UPDATED" not in events:
@@ -805,7 +861,15 @@ class OpenTradesManager(BaseAgent):
         return stop_loss <= entry + epsilon
 
     def _compute_trailing_stop(
-        self, trade_type: str, current_price: float, current_stop_loss: float, entry: float, symbol: str | None = None
+        self,
+        trade_type: str,
+        current_price: float,
+        current_stop_loss: float,
+        entry: float,
+        symbol: str | None = None,
+        distance_points: float | None = None,
+        step_points: float | None = None,
+        min_profit_lock_points: float | None = None,
     ) -> float | None:
         """Progressive trailing stop, only ever moving in the profitable direction.
 
@@ -818,9 +882,9 @@ class OpenTradesManager(BaseAgent):
         tiny updates every run. Never moves the stop below the configured
         min_profit_lock above/below entry.
         """
-        distance = points_to_price(self.trailing_distance, symbol)
-        step = points_to_price(self.trailing_step, symbol)
-        min_lock = points_to_price(self.trailing_min_profit_lock, symbol)
+        distance = points_to_price(self.trailing_distance if distance_points is None else distance_points, symbol)
+        step = points_to_price(self.trailing_step if step_points is None else step_points, symbol)
+        min_lock = points_to_price(self.trailing_min_profit_lock if min_profit_lock_points is None else min_profit_lock_points, symbol)
         epsilon = 1e-9
         if trade_type == "BUY":
             candidate = current_price - distance

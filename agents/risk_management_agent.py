@@ -35,8 +35,11 @@ class RiskManagementAgent(BaseAgent):
 
             atr = self._extract_atr(results)
             support_levels, resistance_levels = self._collect_levels(results, current_price)
-            smc_suggestion = results.get("smc", {}).get("entry_suggestion", {}) or {}
+            smc = results.get("smc", {}) or {}
+            smc_suggestion = smc.get("entry_suggestion", {}) or {}
+            liquidity_map = smc.get("liquidity", {}) or {}
             portfolio = results.get("portfolio", {}) or {}
+            management_profile = self._infer_management_profile(results, direction)
 
             entry_price, entry_kind, entry_basis, entry_zone = self._smart_entry(
                 direction, current_price, atr, smc_suggestion, support_levels, resistance_levels,
@@ -44,7 +47,7 @@ class RiskManagementAgent(BaseAgent):
             )
             if entry_kind == "WAIT_FOR_LEVEL":
                 return self._rejected(entry_basis, current_price, direction_details=direction_details)
-            stop_loss, sl_method, buffer = self._stop_loss(direction, entry_price, atr, support_levels, resistance_levels, smc_suggestion, results)
+            stop_loss, sl_method, buffer = self._stop_loss(direction, entry_price, atr, support_levels, resistance_levels, smc_suggestion, results, management_profile)
             # When the entry is a ZONE, the stop must sit BEHIND the zone's far
             # (distal) edge + buffer — otherwise the SL could fall inside the
             # zone and get clipped by the very wick that fills the order.
@@ -57,7 +60,15 @@ class RiskManagementAgent(BaseAgent):
                     else:
                         stop_loss = max(stop_loss, distal + zone_buffer)
                     sl_method = f"{sl_method}+behind_zone"
-            tp1, tp2, tp3, target_method = self._take_profits(direction, entry_price, atr, support_levels, resistance_levels)
+            tp1, tp2, tp3, target_method, target_map = self._take_profits(
+                direction,
+                entry_price,
+                atr,
+                support_levels,
+                resistance_levels,
+                liquidity_map,
+                management_profile,
+            )
 
             # Gold can move 50-100+ points within seconds; a too-tight
             # ATR-based stop gets clipped by ordinary noise/spread rather than
@@ -176,8 +187,12 @@ class RiskManagementAgent(BaseAgent):
                     "portfolio": portfolio,
                     "trade_grade": risk_profile,
                     "risk_multiplier": risk_profile["risk_multiplier"],
+                    "management_profile": management_profile,
+                    "target_map": target_map,
                 },
                 "trade_grade": risk_profile,
+                "management_profile": management_profile,
+                "target_map": target_map,
                 "position_size": position_size,
                 "trailing_stop": {"activate_at": "TP1", "move_sl_to": "entry", "trail_distance": round(max(price_to_points(atr, self.symbol), 10), 1)},
                 "summary": self._summary(approved, rejection_reason, stop_loss, tp1, tp2, rr_tp2),
@@ -575,6 +590,27 @@ class RiskManagementAgent(BaseAgent):
                     return _build_zone(lvl - half, lvl + half, "level", "Sell zone at nearest resistance", "LIMIT")
 
         return _market("No pullback zone nearby")
+    def _infer_management_profile(self, results: Dict[str, Any], direction: str) -> str:
+        smc = results.get("smc", {}) or {}
+        smc_structure = smc.get("setup_structure") or {}
+        setup_type = str(
+            (results.get("setup_context") or {}).get("setup_type")
+            or smc_structure.get("setup_type")
+            or (results.get("multitimeframe", {}) or {}).get("setup_type")
+            or ""
+        ).upper()
+        if setup_type in {"LIQUIDITY_REVERSAL", "REVERSAL_ATTEMPT"}:
+            return "reversal_profile"
+        if setup_type in {"ORDER_BLOCK_PULLBACK", "STRUCTURE_CONTINUATION", "TREND_CONTINUATION", "PULLBACK_ENTRY"}:
+            return "continuation_profile"
+        if setup_type in {"RANGE_FADE", "SMC_CONTEXT", "MIXED_ALIGNMENT"}:
+            return "range_profile"
+        # Fallback from direction + MTF context when setup labels are absent.
+        mtf = results.get("multitimeframe", {}) or {}
+        if str(mtf.get("timing_state") or "").upper() in {"EARLY", "VALID"} and str(mtf.get("alignment") or "").upper() in {"FULL", "PARTIAL"}:
+            return "continuation_profile"
+        return "default_profile"
+
     def _stop_loss(
         self,
         direction: str,
@@ -584,9 +620,14 @@ class RiskManagementAgent(BaseAgent):
         resistances: List[float],
         smc_suggestion: Dict[str, Any],
         results: Dict[str, Any],
+        management_profile: str = "default_profile",
     ) -> Tuple[float, str, float]:
         sl_mult = self._f(self.settings.get("atr_multiplier_sl"), 2.0)
         buffer = max(0.30, atr * 0.12)
+        if management_profile == "reversal_profile":
+            buffer = max(buffer, atr * 0.18)
+        elif management_profile == "range_profile":
+            buffer = max(0.25, atr * 0.10)
         min_distance = max(atr * 0.60, 0.50)
         candidates: List[Tuple[float, str]] = []
 
@@ -603,6 +644,11 @@ class RiskManagementAgent(BaseAgent):
             logical = [(price, method) for price, method in candidates if price < entry and abs(entry - price) >= min_distance]
             if not logical:
                 return entry - atr * sl_mult, "atr_fallback", buffer
+            if management_profile == "reversal_profile":
+                preferred = [item for item in logical if item[1] in {"smc_order_block_or_sweep", "below_bullish_order_block"}]
+                if preferred:
+                    selected_price, selected_method = min(preferred, key=lambda item: item[0])
+                    return selected_price, f"{selected_method}+reversal_profile", buffer
             # Closest logical stop below entry.
             selected_price, selected_method = max(logical, key=lambda item: item[0])
             return selected_price, selected_method, buffer
@@ -619,41 +665,75 @@ class RiskManagementAgent(BaseAgent):
         logical = [(price, method) for price, method in candidates if price > entry and abs(entry - price) >= min_distance]
         if not logical:
             return entry + atr * sl_mult, "atr_fallback", buffer
+        if management_profile == "reversal_profile":
+            preferred = [item for item in logical if item[1] in {"smc_order_block_or_sweep", "above_bearish_order_block"}]
+            if preferred:
+                selected_price, selected_method = max(preferred, key=lambda item: item[0])
+                return selected_price, f"{selected_method}+reversal_profile", buffer
         # Closest logical stop above entry.
         selected_price, selected_method = min(logical, key=lambda item: item[0])
         return selected_price, selected_method, buffer
 
-    def _take_profits(self, direction: str, entry: float, atr: float, supports: List[float], resistances: List[float]) -> Tuple[float, float, float, str]:
+    def _take_profits(
+        self,
+        direction: str,
+        entry: float,
+        atr: float,
+        supports: List[float],
+        resistances: List[float],
+        liquidity_map: Dict[str, Any] | None = None,
+        management_profile: str = "default_profile",
+    ) -> Tuple[float, float, float, str, Dict[str, Any]]:
+        liquidity_map = liquidity_map or {}
         tp1_mult = self._f(self.settings.get("atr_multiplier_tp1"), 2.5)
         tp2_mult = self._f(self.settings.get("atr_multiplier_tp2"), 4.5)
         tp3_mult = 5.0
+        if management_profile == "range_profile":
+            tp1_mult = min(tp1_mult, 1.8)
+            tp2_mult = min(tp2_mult, 3.0)
         min_tp1_distance = max(atr, 0.80)
         method = "atr_targets"
+        target_map: Dict[str, Any] = {"profile": management_profile, "tp1_basis": "atr", "tp2_basis": "atr"}
         if direction == "BUY":
             atr_tp1 = entry + atr * tp1_mult
             atr_tp2 = entry + atr * tp2_mult
+            liquidity_targets = [self._f(level) for level in liquidity_map.get("buy_side", []) if self._f(level) - entry >= min_tp1_distance]
             valid_res = [level for level in resistances if level - entry >= min_tp1_distance]
-            if valid_res:
+            if management_profile == "reversal_profile" and liquidity_targets:
+                tp1 = liquidity_targets[0]
+                tp2 = liquidity_targets[1] if len(liquidity_targets) > 1 else max(atr_tp2, tp1 + atr * 1.2)
+                method = "liquidity_map_reversal"
+                target_map.update({"tp1_basis": "internal_liquidity", "tp2_basis": "external_liquidity" if len(liquidity_targets) > 1 else "atr_extension"})
+            elif valid_res:
                 tp1 = min(valid_res[0], atr_tp1) if valid_res[0] >= entry + min_tp1_distance else atr_tp1
                 tp2_candidates = [level for level in valid_res[1:] if level > tp1]
                 tp2 = tp2_candidates[0] if tp2_candidates else max(atr_tp2, tp1 + atr * 1.2)
                 method = "resistance_and_atr"
+                target_map.update({"tp1_basis": "resistance", "tp2_basis": "resistance_or_atr"})
             else:
                 tp1, tp2 = atr_tp1, atr_tp2
             tp3 = max(entry + atr * tp3_mult, tp2 + atr)
         else:
             atr_tp1 = entry - atr * tp1_mult
             atr_tp2 = entry - atr * tp2_mult
+            liquidity_targets = [self._f(level) for level in liquidity_map.get("sell_side", []) if entry - self._f(level) >= min_tp1_distance]
+            liquidity_targets = sorted(liquidity_targets, reverse=True)
             valid_sup = [level for level in supports if entry - level >= min_tp1_distance]
-            if valid_sup:
+            if management_profile == "reversal_profile" and liquidity_targets:
+                tp1 = liquidity_targets[0]
+                tp2 = liquidity_targets[1] if len(liquidity_targets) > 1 else min(atr_tp2, tp1 - atr * 1.2)
+                method = "liquidity_map_reversal"
+                target_map.update({"tp1_basis": "internal_liquidity", "tp2_basis": "external_liquidity" if len(liquidity_targets) > 1 else "atr_extension"})
+            elif valid_sup:
                 tp1 = max(valid_sup[0], atr_tp1) if valid_sup[0] <= entry - min_tp1_distance else atr_tp1
                 tp2_candidates = [level for level in valid_sup[1:] if level < tp1]
                 tp2 = tp2_candidates[0] if tp2_candidates else min(atr_tp2, tp1 - atr * 1.2)
                 method = "support_and_atr"
+                target_map.update({"tp1_basis": "support", "tp2_basis": "support_or_atr"})
             else:
                 tp1, tp2 = atr_tp1, atr_tp2
             tp3 = min(entry - atr * tp3_mult, tp2 - atr)
-        return tp1, tp2, tp3, method
+        return tp1, tp2, tp3, method, target_map
 
     def _run_filters(
         self,
