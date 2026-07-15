@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.backtesting import BacktestEngine, format_backtest_telegram, save_backtest_report, save_backtest_csv
+from services.backtesting import BacktestEngine, benchmark_backtests, format_backtest_telegram, save_backtest_report, save_backtest_csv
 from services.market_data import MarketDataService
 from services.telegram_bot import TelegramService
 from utils.helpers import load_config, setup_logging
@@ -30,8 +30,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--horizon", type=int, default=32)
     parser.add_argument("--max-trades", type=int, default=60)
     parser.add_argument("--send-telegram", action="store_true", default=False)
+    parser.add_argument("--benchmark", action="store_true", default=False, help="Run current engine vs baseline benchmark")
     parser.add_argument("--output", default="storage/backtest_report.json")
     parser.add_argument("--csv-output", default="storage/backtest_trades.csv")
+    parser.add_argument("--benchmark-output", default="storage/backtest_benchmark.json")
     return parser.parse_args()
 
 
@@ -47,15 +49,28 @@ def main() -> None:
     candles = payload.get("data", []) if payload else []
     logger.info("Backtest candles loaded: %s | source=%s", len(candles), payload.get("source") if payload else "none")
 
-    engine = BacktestEngine(config, candles)
-    report = engine.run(window=args.window, step=args.step, horizon=args.horizon, max_trades=args.max_trades)
-    report_path = save_backtest_report(report, args.output)
-    csv_path = save_backtest_csv(report, args.csv_output)
+    if args.benchmark:
+        report = benchmark_backtests(
+            config,
+            candles,
+            window=args.window,
+            step=args.step,
+            horizon=args.horizon,
+            max_trades=args.max_trades,
+        )
+        report_path = save_backtest_report(report, args.benchmark_output)
+        csv_path = Path(args.csv_output)
+    else:
+        engine = BacktestEngine(config, candles)
+        report = engine.run(window=args.window, step=args.step, horizon=args.horizon, max_trades=args.max_trades)
+        report_path = save_backtest_report(report, args.output)
+        csv_path = save_backtest_csv(report, args.csv_output)
     summary_text = format_backtest_telegram(report)
 
     print(summary_text.replace("<b>", "").replace("</b>", ""))
     print(f"Report saved to: {report_path}")
-    print(f"CSV saved to: {csv_path}")
+    if not args.benchmark:
+        print(f"CSV saved to: {csv_path}")
 
     should_send = args.send_telegram or os.environ.get("GITHUB_ACTIONS") == "true"
     if should_send:
