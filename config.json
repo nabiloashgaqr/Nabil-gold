@@ -312,6 +312,10 @@
         "min_execution_score_for_trial": 55,
         "description": "Final orchestration layer: decide whether to proceed to a structured forward trial, tune first, or hold for more refinement."
     },
+    "operations_pipeline": {
+        "output_root": "storage/ops_pipeline",
+        "description": "Final operator convenience layer: runs final evaluation, tuning advisor, and release readiness in one command."
+    },
     "macro_data_provider": {
         "description": "Hourly macro context from Yahoo Finance (yfinance). Zero cost, no API key, no quota. Provides 6/7 macro inputs: DXY (FX basket + direct), risk sentiment (SPY + VIX), US 10Y/5Y yields, fed tone, oil. Only inflation_surprise is unknown (no free source). Cron-job.org triggers macro_context.yml every hour."
     },
