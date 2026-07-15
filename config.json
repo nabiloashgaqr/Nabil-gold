@@ -315,31 +315,49 @@
     "order_execution": {
         "enabled": true,
         "mode": "paper",
-        "default_order_type": "MARKET",
-        "entry_style": "fixed_risk",
-        "description_entry_style": "fixed_risk (300pts): ينتظر أقرب مستوى قوي (دعم/مقاومة/SMC). إذا المسافة ≤ 300 نقطة → دخول MARKET فوري + SL خلف المستوى. التعزيز: حجم كامل (100%)، مسافة 50 نقطة، حد أقصى تعزيز واحد فقط.",
+        "default_order_type": "AUTO",
+        "entry_style": "hybrid",
+        "description_entry_style": "hybrid: إذا كان السعر ملاصقاً لمنطقة قوية يدخل MARKET، وإذا كانت المنطقة أعلى/أسفل بسحب منطقي يدخل LIMIT/STOP من zone حقيقية. هذا يعيد تفعيل zone execution تدريجياً بدون كسر الحماية الحالية.",
+        "market_threshold_points": 30,
+        "description_market_threshold_points": "في وضع hybrid: إذا كانت أقرب منطقة قوية ضمن 30 نقطة فقط من السعر الحالي، يدخل MARKET بدل تعليق أمر pending.",
+        "pending_threshold_points": 20,
+        "description_pending_threshold_points": "حد تقريبي لتصنيف LIMIT/STOP مقابل MARKET عندما يكون الدخول بعيداً عن السعر الحالي بما يكفي.",
+        "pending_order_max_cycles": 6,
+        "description_pending_order_max_cycles": "في وضع hybrid: إذا بقي الأمر المعلق 6 دورات تحليل بدون fill يمكن تحويله إلى MARKET حسب منطق OpenTradesManager.",
+        "smart_entry": {
+            "enabled": true,
+            "fill_at": "mid",
+            "zone_width_points": 50,
+            "min_pullback_points": 60,
+            "max_pullback_points": 350,
+            "description": "Zone execution foundation: order blocks / FVG / support-resistance pullbacks generate structured zones with proximal/distal edges. fill_at=mid starts conservatively from midpoint fills."
+        },
         "fixed_risk": {
             "max_risk_distance_points": 300,
-            "description_max_risk_distance_points": "300 نقطة (30$). إذا أقرب مستوى ضمن 300 → دخول MARKET فوراً + SL خلف المستوى.",
+            "description_max_risk_distance_points": "300 نقطة (30$). يُستخدم عندما يُفعَّل fixed_risk صراحةً أو في منطق scale-in الحالي.",
             "sl_buffer_points": 20,
-            "description_sl_buffer_points": "بفر بالأعلى (للبيع) أو الأسفل (للشراء) من المستوى لوضع الستوب. 20 نقطة = 2.00$. يضمن أن الستوب ليس بالضبط عند المستوى.",
+            "description_sl_buffer_points": "بفر بالأعلى (للبيع) أو الأسفل (للشراء) من المستوى لوضع الستوب. 20 نقطة = 2.00$.",
             "scale_in_enabled": true,
             "scale_in_max": 2,
             "description_scale_in_max": "أقصى عدد من صفقات التعزيز (بالإضافة للأصلية). 2 = يمكن الدخول 3 صفقات في نفس الاتجاه: الأصلية + تعزيز 1 + تعزيز 2. المسافة بين كل تعزيز ≥ 200pts.",
             "scale_in_trigger_points": 200,
-            "description_scale_in_trigger_points": "مسافة التعزيز: لا يُسمح بالتعزيز إلا بعد أن يبتعد السعر ≥ 200 نقطة (20$) عن دخول الصفقة الأصلية. 200pts ≈ 1 ATR(15min) يضمن تراجع حقيقي وليس ضوضا. التعزيز يعمل عند اقتراب السعر من مستوى دعم/مقاومة بعد هذه المسافة.",
+            "description_scale_in_trigger_points": "مسافة التعزيز: لا يُسمح بالتعزيز إلا بعد أن يبتعد السعر ≥ 200 نقطة (20$) عن دخول الصفقة الأصلية.",
             "scale_in_size_ratio": 0.5,
-            "description_scale_in_size_ratio": "نسبة حجم التعزيز مقارنة بالصفقة الأصلية. 0.5 = نصف الحجم. بناء هرمي: التعزيز أصغر حجماً من الأصلية يقلل الخطر التراكمي. 3 صفقات (1.0 + 0.5 + 0.5) = خطر 2.0x وليس 3.0x.",
-            "description": "fixed_risk zone logic kept for entry levels, but always MARKET execution.",
-            "note": "Zone logic kept only for SL/TP calculation. Execution always MARKET.",
-            "description_scale_in": "مفعّل: تعزيز عند اقتراب السعر من مستوى دعم/مقاومة قوي. شروط: مسافة ≥ 200pts عن الدخول السابق، حجم 0.5x، أقصى تعزيزين، SL/TP يُعاد حسابه حسب دخول التعزيز."
+            "description_scale_in_size_ratio": "نسبة حجم التعزيز مقارنة بالصفقة الأصلية. 0.5 = نصف الحجم.",
+            "description": "fixed_risk remains available for legacy/manual runs, but is no longer the default production profile.",
+            "note": "Hybrid is now the preferred execution mode for Sprint 1 immediate fixes.",
+            "description_scale_in": "مفعّل: تعزيز عند اقتراب السعر من مستوى دعم/مقاومة قوي في fixed_risk فقط."
         },
         "allowed_order_types": [
             "BUY_MARKET",
-            "SELL_MARKET"
+            "SELL_MARKET",
+            "BUY_LIMIT",
+            "SELL_LIMIT",
+            "BUY_STOP",
+            "SELL_STOP"
         ],
         "description": "Paper order classification only: market, limit, or stop based on entry vs current price.",
-        "pending_support_removed": true
+        "pending_support_removed": false
     },
     "operation_mode": "classic_consensus",
     "operation_modes": {

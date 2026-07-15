@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS trades (
     paper_balance_start DECIMAL(18, 6),
     paper_lot_size DECIMAL(18, 6),
     status VARCHAR(30) DEFAULT 'OPEN' CHECK (status IN (
-        'OPEN', 'PARTIAL', 'TP1_HIT', 'TP2_HIT', 'SL_HIT', 'BE_HIT',
+        'OPEN', 'PARTIAL', 'PENDING', 'TP1_HIT', 'TP2_HIT', 'SL_HIT', 'BE_HIT',
         'MANUAL_CLOSE', 'EXPIRED', 'CLOSED', 'CANCELLED'
     )),
 
@@ -131,6 +131,14 @@ CREATE TABLE IF NOT EXISTS trades (
     primary_entry_driver TEXT,
     entry_failure_mode TEXT,
     macro_bias_at_entry TEXT,
+    setup_id TEXT,
+    setup_type TEXT,
+    setup_state TEXT,
+    lead_agent TEXT,
+    setup_quality TEXT,
+    poi_type TEXT,
+    sweep_side TEXT,
+    displacement_score DECIMAL(10, 4),
 
     sl_moved_to_entry BOOLEAN DEFAULT FALSE,
     partial_close BOOLEAN DEFAULT FALSE,
@@ -189,6 +197,14 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS daily_bias_at_entry TEXT;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS primary_entry_driver TEXT;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS entry_failure_mode TEXT;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS macro_bias_at_entry TEXT;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS setup_id            TEXT;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS setup_type          TEXT;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS setup_state         TEXT;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS lead_agent          TEXT;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS setup_quality       TEXT;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS poi_type            TEXT;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS sweep_side          TEXT;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS displacement_score  DECIMAL(10, 4);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS sl_moved_to_entry   BOOLEAN DEFAULT FALSE;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS partial_close       BOOLEAN DEFAULT FALSE;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS updates_sent        JSONB DEFAULT '[]'::jsonb;
@@ -215,7 +231,9 @@ CREATE INDEX IF NOT EXISTS idx_trades_enrichment_dow ON trades(entry_day_of_week
 CREATE INDEX IF NOT EXISTS idx_trades_enrichment_session ON trades(session_label);
 CREATE INDEX IF NOT EXISTS idx_trades_entry_driver ON trades(primary_entry_driver);
 CREATE INDEX IF NOT EXISTS idx_trades_macro_bias ON trades(macro_bias_at_entry);
-CREATE INDEX IF NOT EXISTS idx_trades_open ON trades(status) WHERE status IN ('OPEN', 'PARTIAL', 'TP1_HIT');
+CREATE INDEX IF NOT EXISTS idx_trades_setup_type ON trades(setup_type);
+CREATE INDEX IF NOT EXISTS idx_trades_lead_agent ON trades(lead_agent);
+CREATE INDEX IF NOT EXISTS idx_trades_open ON trades(status) WHERE status IN ('OPEN', 'PARTIAL', 'PENDING', 'TP1_HIT');
 
 -- =====================================================
 -- 3) Portfolio
@@ -453,7 +471,7 @@ CREATE TRIGGER update_risk_settings_timestamp BEFORE UPDATE ON risk_settings FOR
 -- =====================================================
 DROP VIEW IF EXISTS active_trades_view;
 CREATE VIEW active_trades_view AS
-SELECT * FROM trades WHERE status IN ('OPEN', 'PARTIAL', 'TP1_HIT');
+SELECT * FROM trades WHERE status IN ('OPEN', 'PARTIAL', 'PENDING', 'TP1_HIT');
 
 DROP VIEW IF EXISTS daily_pnl_summary;
 CREATE VIEW daily_pnl_summary AS
@@ -557,6 +575,77 @@ CREATE TRIGGER update_macro_context_timestamp
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- =====================================================
+-- 15) Setup Candidates (Sprint 1 foundation)
+-- =====================================================
+-- Stores structured pre-trade setup context (setup type, POI, sweep side,
+-- state label, quality). This is the persistence layer for the future setup
+-- state machine and analyst-vs-bot comparison.
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS setup_candidates (
+    id TEXT PRIMARY KEY,
+    symbol TEXT NOT NULL DEFAULT 'XAU/USD',
+    timeframe TEXT,
+    direction TEXT,
+    setup_type TEXT,
+    setup_state TEXT,
+    lead_agent TEXT,
+    setup_quality TEXT,
+    quality_score DECIMAL(10, 4),
+    poi_type TEXT,
+    poi_low DECIMAL(18, 6),
+    poi_high DECIMAL(18, 6),
+    entry_price DECIMAL(18, 6),
+    stop_loss DECIMAL(18, 6),
+    target_price DECIMAL(18, 6),
+    sweep_side TEXT,
+    displacement_score DECIMAL(10, 4),
+    confidence DECIMAL(10, 4),
+    details JSONB DEFAULT '{}'::jsonb,
+    source TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    first_seen_at TIMESTAMPTZ DEFAULT NOW(),
+    last_seen_at TIMESTAMPTZ DEFAULT NOW(),
+    last_trade_id TEXT,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS symbol             TEXT DEFAULT 'XAU/USD';
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS timeframe          TEXT;
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS direction          TEXT;
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS setup_type         TEXT;
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS setup_state        TEXT;
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS lead_agent         TEXT;
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS setup_quality      TEXT;
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS quality_score      DECIMAL(10, 4);
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS poi_type           TEXT;
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS poi_low            DECIMAL(18, 6);
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS poi_high           DECIMAL(18, 6);
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS entry_price        DECIMAL(18, 6);
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS stop_loss          DECIMAL(18, 6);
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS target_price       DECIMAL(18, 6);
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS sweep_side         TEXT;
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS displacement_score DECIMAL(10, 4);
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS confidence         DECIMAL(10, 4);
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS details            JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS source             TEXT;
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS is_active          BOOLEAN DEFAULT TRUE;
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS first_seen_at      TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS last_seen_at       TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS last_trade_id      TEXT;
+ALTER TABLE setup_candidates ADD COLUMN IF NOT EXISTS updated_at         TIMESTAMPTZ DEFAULT NOW();
+
+CREATE INDEX IF NOT EXISTS idx_setup_candidates_symbol ON setup_candidates(symbol);
+CREATE INDEX IF NOT EXISTS idx_setup_candidates_type ON setup_candidates(setup_type);
+CREATE INDEX IF NOT EXISTS idx_setup_candidates_state ON setup_candidates(setup_state);
+CREATE INDEX IF NOT EXISTS idx_setup_candidates_last_seen ON setup_candidates(last_seen_at DESC);
+
+DROP TRIGGER IF EXISTS update_setup_candidates_timestamp ON setup_candidates;
+CREATE TRIGGER update_setup_candidates_timestamp
+    BEFORE UPDATE ON setup_candidates
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- =====================================================
 -- 12) Row Level Security (RLS)
 -- Service Role (SUPABASE_KEY) bypasses RLS automatically.
 -- ============================================================
@@ -573,6 +662,7 @@ ALTER TABLE agent_evaluations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE partial_alert_tracker ENABLE ROW LEVEL SECURITY;
 ALTER TABLE post_news_tracker ENABLE ROW LEVEL SECURITY;
 ALTER TABLE macro_context ENABLE ROW LEVEL SECURITY;
+ALTER TABLE setup_candidates ENABLE ROW LEVEL SECURITY;
 
 -- =====================================================
 -- Final: Reload PostgREST schema cache
