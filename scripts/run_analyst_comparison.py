@@ -40,6 +40,8 @@ def main() -> None:
         summary.get("missed_labels", 0),
         summary.get("extra_bot_setups", 0),
     )
+    for line in service.build_insight_lines(summary):
+        logger.info("Insight: %s", line)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
