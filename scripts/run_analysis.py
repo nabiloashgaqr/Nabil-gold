@@ -35,6 +35,7 @@ from services.market_data import MarketDataService
 from services.telegram_bot import TelegramService, post_news_alert_sent, post_news_alert_record
 from services.learning_service import get_learning_service
 from services.llm_review import get_gemini_review_service
+from services.setup_memory import SetupMemoryService
 from utils.helpers import load_config, setup_logging, get_agent_weights
 from utils.instruments import enabled_instruments, config_for_instrument, normalize_symbol, price_to_points, points_to_price
 
@@ -727,6 +728,7 @@ def _setup_context_payload(decision: Dict[str, Any], all_results: Dict[str, Any]
     quality_obj = selected.get("setup_quality") if isinstance(selected.get("setup_quality"), dict) else None
     payload = {
         "id": selected.get("id"),
+        "state_key": selected.get("state_key"),
         "setup_type": selected.get("setup_type") or mtf.get("setup_type") or smc_structure.get("setup_type") or "CONSENSUS_GENERIC",
         "setup_state": selected.get("setup_state") or smc_structure.get("setup_state") or ("ENTRY_TRIGGERED" if decision_type in {"BUY", "SELL"} else "DETECTED"),
         "lead_agent": selected.get("lead_agent") or entry_attr.get("primary_entry_driver") or strongest.get("agent") or "consensus",
@@ -900,14 +902,20 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             news["macro_direction"] = macro.get("macro_direction")
             news["macro_agent"] = macro
         all_results = {"technical": run_agent("technical", TechnicalAgent(config), data), "classical": run_agent("classical", ClassicalAgent(config), data), "smc": run_agent("smc", SMCAgent(config), data), "price_action": run_agent("price_action", PriceActionAgent(config), data), "multitimeframe": run_agent("multitimeframe", MultiTimeframeAgent(config), data), "macro_fundamental": macro, "current_price": data["current_price"], "symbol": symbol, "session": session, "verified_snapshot": verified_snapshot, "news": news, "daily_bias": run_agent("daily_bias", DailyBiasAgent(config), data)}
-        # Sprint 1 foundation: persist structured setup candidates even before a
-        # trade is triggered, so later phases can compare analyst-vs-bot and
-        # evolve this into a richer state machine.
-        for candidate in list(((all_results.get("smc", {}) or {}).get("setup_candidates") or []))[:3]:
-            try:
-                database.save_setup_candidate(candidate)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Failed to persist setup candidate %s: %s", candidate.get("id"), exc)
+        # Sprint 2 foundation: persist setup-state transitions across cycles.
+        setup_memory = SetupMemoryService(database, config)
+        try:
+            processed_candidates = setup_memory.process_candidates(
+                list(((all_results.get("smc", {}) or {}).get("setup_candidates") or []))[:3],
+                current_price=float(data.get("current_price", 0) or 0),
+                symbol=symbol,
+            )
+            if "smc" in all_results and isinstance(all_results["smc"], dict):
+                all_results["smc"]["setup_candidates"] = processed_candidates
+                if processed_candidates:
+                    all_results["smc"]["setup_structure"] = processed_candidates[0]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to process setup-memory state transitions: %s", exc)
         # Inject portfolio info so RiskManagementAgent can enforce max_open_trades
         # and max_daily_signals filters. Without this, those filters see 0 and
         # never block — which caused 15 simultaneous BUY trades.
@@ -1169,20 +1177,13 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 database.save_trade(decision)
                 if decision.get("setup_id"):
                     try:
-                        database.save_setup_candidate({
-                            **(decision.get("setup_context") or {}),
-                            "id": decision.get("setup_id"),
-                            "symbol": symbol,
-                            "direction": decision_type,
-                            "setup_type": decision.get("setup_type"),
-                            "setup_state": "ENTRY_TRIGGERED",
-                            "lead_agent": decision.get("lead_agent"),
-                            "setup_quality": {"grade": decision.get("setup_quality"), "score": (decision.get("quality") or {}).get("score", 0)},
-                            "confidence": decision.get("confidence"),
-                            "last_trade_id": trade_id,
-                            "is_active": False,
-                            "source": "signal_commit",
-                        })
+                        setup_memory.mark_entry_triggered(
+                            setup_id=str(decision.get("setup_id")),
+                            state_key=str((decision.get("setup_context") or {}).get("state_key") or ""),
+                            trade_id=trade_id,
+                            current_price=float(decision.get("current_price") or 0),
+                            symbol=symbol,
+                        )
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("Failed to link setup candidate %s to trade %s: %s", decision.get("setup_id"), trade_id, exc)
             else:
