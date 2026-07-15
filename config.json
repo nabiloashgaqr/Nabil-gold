@@ -485,7 +485,7 @@
             "require_lead_alignment": true,
             "min_structure_quality": "MODERATE",
             "min_poi_rank_score": 32,
-            "min_trigger_score": 70,
+            "min_trigger_score": 65,
             "required_trigger_states": [
                 "REJECTION_CONFIRMED"
             ],
