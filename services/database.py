@@ -651,20 +651,48 @@ class DatabaseService:
         save_trades(trades, self.local_path)
 
 
-    def cancel_pending_orders(self, reason: str = "Replaced by a newer signal") -> int:
-        """Cancel all not-yet-filled PENDING orders. Returns how many were cancelled.
+    def cancel_pending_orders(
+        self,
+        reason: str = "Replaced by a newer signal",
+        *,
+        symbol: str | None = None,
+        direction: str | None = None,
+    ) -> int:
+        """Cancel not-yet-filled PENDING orders.
 
-        Called before saving a new signal so a stale resting LIMIT/STOP order is
-        replaced by the fresh setup instead of lingering forever.
+        Optional filters let the signal pipeline replace only stale pending
+        orders for the same symbol/direction instead of cancelling every pending
+        order globally.
         """
         now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         cancelled = 0
+        norm_symbol = str(symbol or "").upper() if symbol else None
+        norm_direction = str(direction or "").upper() if direction else None
+
+        def _matches(trade: Dict[str, Any]) -> bool:
+            if str(trade.get("status", "")).upper() != "PENDING":
+                return False
+            if norm_symbol and str(trade.get("symbol") or "").upper() != norm_symbol:
+                return False
+            trade_dir = str(trade.get("type") or trade.get("side") or "").upper()
+            if norm_direction and trade_dir != norm_direction:
+                return False
+            return True
+
         if self.use_supabase and self.client:
             try:
-                resp = self.client.table("trades").select("id").eq("status", "PENDING").execute()
-                ids = [r.get("id") for r in (resp.data or []) if r.get("id")]
-                for tid in ids:
-                    self.update_trade(tid, {
+                query = self.client.table("trades").select("id,symbol,type,side,status").eq("status", "PENDING")
+                if norm_symbol:
+                    query = query.eq("symbol", norm_symbol)
+                if norm_direction:
+                    query = query.eq("type", norm_direction)
+                resp = query.execute()
+                rows = [r for r in (resp.data or []) if _matches(r)]
+                for row in rows:
+                    tid = row.get("id")
+                    if not tid:
+                        continue
+                    self.update_trade(str(tid), {
                         "status": "CANCELLED", "result": "CANCELLED",
                         "closed_at": now_iso, "close_time": now_iso,
                         "reasons": [reason], "last_updated": now_iso,
@@ -679,7 +707,7 @@ class DatabaseService:
         trades = load_trades(self.local_path)
         changed = False
         for trade in trades:
-            if str(trade.get("status", "")).upper() == "PENDING":
+            if _matches(trade):
                 trade.update({
                     "status": "CANCELLED", "result": "CANCELLED",
                     "closed_at": now_iso, "close_time": now_iso,
