@@ -251,6 +251,10 @@
         "auto_adjust_confidence": true,
         "aggressive_mode": true,
         "streak_bonus": 0.1,
+        "contextual_weights_enabled": true,
+        "contextual_min_sample": 3,
+        "contextual_blend": 0.35,
+        "description_contextual_weights": "Phase 5 foundation: when enough history exists, DecisionAgent can blend setup/session/regime-specific learned weights on top of the static strategy profile.",
         "description": "نظام التعلم الذكي لتحديث أوزان الوكلاء"
     },
     "llm_review": {
