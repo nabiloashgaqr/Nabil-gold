@@ -123,3 +123,10 @@ def test_compare_labels_and_setups_reports_partial_and_extra(tmp_path: Path) -> 
     classes = {item["classification"] for item in summary["comparisons"]}
     assert "MATCHED" in classes
     assert "PARTIAL_MATCH" in classes
+    reason_codes = {item["reason_code"] for item in summary["comparisons"]}
+    assert "FULL_ALIGNMENT" in reason_codes
+    assert any(code.startswith("PARTIAL_") for code in reason_codes)
+    assert summary["insight_breakdown"]["NO_ANALYST_LABEL"] == 1
+    assert summary["setup_type_insights"]["LIQUIDITY_REVERSAL"]["matched"] == 1
+    lines = service.build_insight_lines(summary)
+    assert lines and any("Top reasons:" in line for line in lines)
