@@ -459,6 +459,13 @@
             "agent_min_confidence": 68,
             "lead_agent": "smc",
             "require_lead_alignment": true,
+            "min_structure_quality": "MODERATE",
+            "min_poi_rank_score": 32,
+            "min_trigger_score": 70,
+            "required_trigger_states": [
+                "REJECTION_CONFIRMED"
+            ],
+            "require_sweep_confirmation": "MODERATE",
             "weight_overrides": {
                 "smc": 0.35,
                 "price_action": 0.25,
@@ -474,6 +481,11 @@
             "agent_min_confidence": 70,
             "lead_agent": "multitimeframe",
             "require_lead_alignment": true,
+            "min_structure_quality": "MODERATE",
+            "min_poi_rank_score": 24,
+            "min_trigger_score": 40,
+            "required_trigger_states": [],
+            "require_sweep_confirmation": null,
             "weight_overrides": {
                 "multitimeframe": 0.3,
                 "classical": 0.25,
@@ -489,6 +501,14 @@
             "agent_min_confidence": 68,
             "lead_agent": "price_action",
             "require_lead_alignment": false,
+            "min_structure_quality": "WEAK",
+            "min_poi_rank_score": 18,
+            "min_trigger_score": 55,
+            "required_trigger_states": [
+                "REJECTION_CONFIRMED",
+                "TOUCH_NO_REJECTION"
+            ],
+            "require_sweep_confirmation": null,
             "weight_overrides": {
                 "price_action": 0.3,
                 "classical": 0.25,
