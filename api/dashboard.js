@@ -384,6 +384,46 @@ function summarize(closedTrades, liveTrades) {
 
 function buildAnalystOverlap(comparisons) {
   const rows = Array.isArray(comparisons) ? comparisons : [];
+  const labelRows = rows.filter(r => r && r.analyst_label_id);
+  const labelIds = [...new Set(labelRows.map(r => String(r.analyst_label_id)).filter(Boolean))];
+  const matched = labelRows.filter(r => String(r.classification || '').toUpperCase() === 'MATCHED');
+  const partial = labelRows.filter(r => String(r.classification || '').toUpperCase() === 'PARTIAL_MATCH');
+  const missed = labelRows.filter(r => String(r.classification || '').toUpperCase() === 'MISSED_BY_BOT');
+  const extra = rows.filter(r => String(r.classification || '').toUpperCase() === 'EXTRA_BOT_SETUP');
+  const entryDistances = labelRows
+    .map(r => Number((r.payload || {}).entry_distance_points))
+    .filter(v => Number.isFinite(v));
+  const reasonCounts = {};
+  rows.forEach(r => {
+    const reason = String(r.reason_code || '').trim();
+    if (!reason) return;
+    reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
+  });
+  const topReasons = Object.entries(reasonCounts)
+    .sort((a, b) => (b[1] - a[1]) || String(a[0]).localeCompare(String(b[0])))
+    .slice(0, 5)
+    .map(([reason_code, count]) => ({ reason_code, count }));
+  const labelsConsidered = labelIds.length;
+  const coverage = labelsConsidered ? ((matched.length + partial.length) / labelsConsidered) * 100 : 0;
+  const match = labelsConsidered ? (matched.length / labelsConsidered) * 100 : 0;
+  return {
+    labels_considered: labelsConsidered,
+    matched_labels: matched.length,
+    partial_matches: partial.length,
+    missed_labels: missed.length,
+    extra_bot_setups: extra.length,
+    coverage_rate_pct: Number(coverage.toFixed(1)),
+    match_rate_pct: Number(match.toFixed(1)),
+    avg_entry_distance_points: entryDistances.length
+      ? Number((entryDistances.reduce((a, b) => a + b, 0) / entryDistances.length).toFixed(1))
+      : null,
+    top_missed_reasons: topReasons,
+    comparisons: rows,
+  };
+}
+
+function buildAnalystOverlap(comparisons) {
+  const rows = Array.isArray(comparisons) ? comparisons : [];
   const labelRows = rows.filter(r => r.analyst_label_id);
   const labelIds = [...new Set(labelRows.map(r => String(r.analyst_label_id)).filter(Boolean))];
   const matched = labelRows.filter(r => String(r.classification || '').toUpperCase() === 'MATCHED');
