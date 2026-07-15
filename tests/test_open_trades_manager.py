@@ -201,6 +201,21 @@ def test_pending_sell_limit_fills_from_candle_high_touch() -> None:
     assert result["events"] == ["ORDER_FILLED"]
 
 
+def test_pending_order_expires_after_hours_when_not_filled() -> None:
+    manager = OpenTradesManager({"order_execution": {"entry_style": "hybrid", "pending_expire_after_hours": 4, "pending_order_max_cycles": 99}})
+    trade = base_trade(
+        type="SELL",
+        status="PENDING",
+        order_type="SELL_LIMIT",
+        entry_price=2360.0,
+        entry_time=(datetime.now(timezone.utc) - timedelta(hours=5)).isoformat(),
+    )
+    result = manager.evaluate_trade(trade, 2352.0, candle_high=2354.0, candle_low=2350.0)
+    assert result["new_status"] == "EXPIRED"
+    assert result["events"] == ["EXPIRED"]
+    assert result["updates"]["result"] == "EXPIRED"
+
+
 def test_protected_sell_tp2_has_priority_when_candle_low_hits_tp2_then_rebounds() -> None:
     """Regression: protected SELL should not close at old trailing SL when the
     same candle low already reached TP2, even if it later rebounds above SL.
