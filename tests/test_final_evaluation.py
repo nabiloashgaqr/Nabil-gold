@@ -61,11 +61,13 @@ def test_final_evaluation_recommendations_reflect_benchmark_and_overlap(monkeypa
 
     assert report["verdict"] == "REQUIRES_MORE_REFINEMENT"
     assert report["scorecard"]["benchmark_score"] < 50
+    assert "governance_score" in report["scorecard"]
     assert any("entry lag" in rec.lower() or "entry distance" in rec.lower() for rec in report["recommendations"])
     text = service.format_telegram(report)
     assert "Final Evaluation Pass" in text
     assert "Δ Net" in text
     assert "Analyst Overlap" in text
+    assert "governance=" in text
 
 
 def test_final_evaluation_positive_case_can_recommend_trial(monkeypatch) -> None:
@@ -145,4 +147,5 @@ def test_final_evaluation_without_labels_uses_neutral_overlap(monkeypatch) -> No
 
     assert report["scorecard"]["overlap_available"] is False
     assert report["scorecard"]["overlap_score"] == 50.0
-    assert "Analyst overlap is unavailable" in report["recommendations"][0]
+    assert "Analyst overlap is unavailable" in report["recommendations"][-1]
+    assert "governance_score" in report["scorecard"]

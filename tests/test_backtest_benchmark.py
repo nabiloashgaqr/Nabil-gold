@@ -60,6 +60,10 @@ def test_backtest_report_has_setup_profile_breakdowns() -> None:
     assert "by_trigger_state" in summary
     assert "by_session" in summary
     assert "by_entry_kind" in summary
+    assert "by_selection_role" in summary
+    assert "pending_governance" in summary
+    assert "avg_return_probability_score" in summary
+    assert "avg_thesis_dominance_score" in summary
 
 
 def test_backtest_handles_unfilled_pending_orders() -> None:
@@ -77,5 +81,7 @@ def test_benchmark_backtests_returns_variant_comparison() -> None:
     assert "baseline_classic_market" in report["variants"]
     assert "comparison" in report
     assert "win_rate_delta" in report["comparison"]
+    assert "primary_fill_rate_delta" in report["comparison"]
+    assert "avg_dominance_delta" in report["comparison"]
     assert report["variants"]["current_engine"]["variant"] == "current_engine"
     assert report["variants"]["baseline_classic_market"]["variant"] == "baseline_classic_market"
