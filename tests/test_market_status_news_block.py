@@ -108,4 +108,6 @@ def test_market_status_pending_orders_are_not_shown_as_open_trades() -> None:
     assert "Open Trades" not in msg
     assert "Pending Orders (1)" in msg
     assert "SELL_LIMIT" in msg
+    assert "pts to fill" in msg
+    assert "waiting" in msg
     assert "+48pts" not in msg and "+48 pts" not in msg

@@ -120,6 +120,21 @@ def test_signal_includes_trade_management_rule():
     assert "check 5m" in text
 
 
+def test_pending_order_signal_explicitly_says_not_active_yet():
+    decision = _full_decision()
+    decision["signal"]["entry_kind"] = "LIMIT"
+    decision["signal"]["order_type"] = "SELL_LIMIT"
+    decision["signal"]["entry"]["kind"] = "LIMIT"
+    decision["signal"]["entry"]["order_type"] = "SELL_LIMIT"
+    decision["signal"]["entry"]["current_price"] = 4029.37
+    decision["signal"]["entry"]["distance_points"] = 112.3
+    decision["signal"]["entry"]["price"] = 4040.60
+    text = _capture_signal(decision)
+    assert "Pending order — not active yet" in text
+    assert "pts to activation" in text
+    assert "activates only when" in text
+
+
 def test_buy_uses_green_header_emoji():
     decision = _full_decision()
     decision["decision"] = "BUY"

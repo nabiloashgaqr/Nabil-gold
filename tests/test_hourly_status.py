@@ -59,6 +59,8 @@ def test_status_message_separates_pending_orders_from_open_trades():
     assert "1 open / 1 pending" in msg
     assert "Pending Orders (1)" in msg
     assert "SELL_LIMIT" in msg
+    assert "pts to fill" in msg
+    assert "waiting" in msg
     assert "+25 pts (+2.5$)" in msg
     assert "+0 pts" not in msg
 
