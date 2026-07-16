@@ -288,11 +288,24 @@ class TelegramService:
             lines.append(f"• <b>POI selection:</b> {html.escape(' · '.join(str(x) for x in metric_bits))}")
         if target_liquidity not in {None, ""}:
             lines.append(f"• <b>Target liquidity:</b> {self._money(target_liquidity, str(decision.get('symbol') or 'XAU/USD'))}")
+        governor = decision.get("pending_governor") or {}
+        if isinstance(governor, dict) and str(governor.get("action") or "") in {"REPLACE_PENDING", "CANCEL_PENDING_ALLOW_NEW"}:
+            old_id = str(governor.get("old_trade_id") or "")
+            short = old_id.split("_")[-1] if "_" in old_id else (old_id[-8:] if len(old_id) >= 8 else old_id)
+            old_ctx = governor.get("old_context") or {}
+            new_ctx = governor.get("new_context") or {}
+            lines.append(
+                f"• <b>Pending governance:</b> {html.escape(str(governor.get('action')).replace('_', ' ').title())} "
+                f"<code>#{html.escape(short)}</code>"
+            )
+            lines.append(
+                f"• <b>Dominance:</b> old {old_ctx.get('thesis_dominance_score', '--')} → new {new_ctx.get('thesis_dominance_score', '--')}"
+            )
         invalidation = (decision.get("ai") or {}).get("invalidation") or setup.get("invalidation") or setup.get("entry_reason")
         if self._should_show_invalidation(invalidation, signal.get("stop_loss")):
             label = "Invalidation" if (decision.get("ai") or {}).get("invalidation") else "Structural trigger"
             lines.append(f"• <b>{label}:</b> {self._clean_text(invalidation)}")
-        return lines[:5]
+        return lines[:7]
 
     def _attribution_lines(self, decision: Dict[str, Any]) -> List[str]:
         attr = decision.get("entry_attribution") or {}
@@ -678,6 +691,33 @@ class TelegramService:
         evaluation: Dict[str, Any],
     ) -> bool:
         return self.send_trade_events(trade, [event], current_price, pnl_points, evaluation)
+
+    def send_pending_governance(self, governance: Dict[str, Any], *, symbol: str, side: str) -> bool:
+        action = str(governance.get("action") or "").upper()
+        if action not in {"REPLACE_PENDING", "CANCEL_PENDING_ALLOW_NEW"}:
+            return False
+        old_id = str(governance.get("old_trade_id") or "")
+        short = old_id.split("_")[-1] if "_" in old_id else (old_id[-8:] if len(old_id) >= 8 else old_id or "?")
+        old_ctx = governance.get("old_context") or {}
+        new_ctx = governance.get("new_context") or {}
+        title = "♻️ <b>Pending Thesis Replaced</b>" if action == "REPLACE_PENDING" else "🚫 <b>Pending Thesis Cancelled</b>"
+        lines = [
+            title,
+            "━━━━━━━━━━━━━━━━━━━━━",
+            f"• <b>Symbol:</b> {html.escape(symbol)}",
+            f"• <b>Side:</b> {html.escape(side)}",
+            f"• <b>Previous Pending:</b> <code>#{html.escape(short)}</code>",
+            f"• <b>Reason:</b> {self._clean_text(governance.get('reason'))}",
+        ]
+        if old_ctx or new_ctx:
+            lines.append(
+                f"• <b>Dominance:</b> {old_ctx.get('thesis_dominance_score', '--')} → {new_ctx.get('thesis_dominance_score', '--')}"
+            )
+            lines.append(
+                f"• <b>Reach Probability:</b> {old_ctx.get('return_probability_score', '--')} → {new_ctx.get('return_probability_score', '--')}"
+            )
+        lines.append("━━━━━━━━━━━━━━━━━━━━━")
+        return self.send_message("\n".join(lines), urgent=True)
 
     def send_error_alert(self, message: str) -> bool:
         text = (
