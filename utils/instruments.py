@@ -18,7 +18,7 @@ DEFAULT_INSTRUMENTS: Dict[str, Dict[str, Any]] = {
         "symbol": "XAU/USD", "name": "Gold", "category": "metal",
         "point_size": 0.10, "price_decimals": 2,
         "min_sl_distance_points": 400, "trailing_distance": 150, "trailing_step": 40,
-        "early_breakeven_points": 200, "duplicate_zone_points": 50,
+        "early_breakeven_points": 200, "duplicate_zone_points": 200,
     },
     "WTI/USD": {
         "symbol": "WTI/USD", "name": "WTI Crude Oil", "category": "oil",
