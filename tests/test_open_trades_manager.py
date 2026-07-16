@@ -10,6 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(ROOT))
 
 from agents.open_trades_manager import OpenTradesManager
+from services.database import DatabaseService
+from utils.helpers import save_trades
 
 
 def base_trade(**overrides):
@@ -30,6 +32,12 @@ def base_trade(**overrides):
     }
     trade.update(overrides)
     return trade
+
+
+def _db(tmp_path: Path) -> DatabaseService:
+    db = DatabaseService({"database": {"url": None, "key": None, "local_fallback_file": str(tmp_path / 'trades.json')}})
+    db.local_path = tmp_path / 'trades.json'
+    return db
 
 
 def test_near_tp1_event_once() -> None:
@@ -241,6 +249,61 @@ def test_pending_news_hold_reactivates_to_market_after_block_clears() -> None:
     assert result["new_status"] == "OPEN"
     assert result["events"] == ["ORDER_FILLED"]
     assert result["updates"]["entry_price"] == 2352.5
+
+
+def test_pending_auto_market_conversion_blocked_without_new_post_exit_thesis(tmp_path: Path) -> None:
+    db = _db(tmp_path)
+    recent_closed = {
+        "id": "OLD1",
+        "symbol": "XAU/USD",
+        "type": "SELL",
+        "status": "SL_HIT",
+        "result": "WIN",
+        "entry_price": 2400.0,
+        "close_price": 2352.1,
+        "closed_at": datetime.now(timezone.utc).isoformat(),
+        "signal_snapshot": {
+            "setup_context": {
+                "state_key": "STATE::SELL::A",
+                "setup_type": "STRUCTURE_CONTINUATION",
+                "setup_state": "DETECTED",
+                "poi_type": "order_block",
+                "poi_zone": {"top": 2354.0, "bottom": 2352.0},
+                "trigger_state": "AWAY_FROM_POI",
+                "trigger_score": 42,
+                "displacement_score": 10,
+                "thesis_dominance_score": 52,
+                "details": {"recent_sweep": {"time": (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()}},
+            }
+        },
+    }
+    save_trades([recent_closed], db.local_path)
+    manager = OpenTradesManager({"order_execution": {"entry_style": "hybrid", "pending_order_max_cycles": 6}})
+    trade = base_trade(
+        type="SELL",
+        status="PENDING",
+        order_type="SELL_LIMIT",
+        entry_price=2360.0,
+        pending_cycles=5,
+        signal_snapshot={
+            "setup_context": {
+                "state_key": "STATE::SELL::A",
+                "setup_type": "STRUCTURE_CONTINUATION",
+                "setup_state": "DETECTED",
+                "poi_type": "order_block",
+                "poi_zone": {"top": 2354.2, "bottom": 2352.2},
+                "trigger_state": "AT_POI_WAIT_TRIGGER",
+                "trigger_score": 45,
+                "displacement_score": 11,
+                "thesis_dominance_score": 53,
+                "details": {"recent_sweep": {"time": (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()}},
+            }
+        },
+    )
+    result = manager.evaluate_trade(trade, 2352.0, candle_high=2354.0, candle_low=2350.0, database=db)
+    assert result["new_status"] == "CANCELLED"
+    assert result["events"] == ["PENDING_CANCELLED"]
+    assert "Auto market conversion blocked" in result["updates"]["reasons"][0]
 
 
 def test_protected_sell_tp2_has_priority_when_candle_low_hits_tp2_then_rebounds() -> None:
