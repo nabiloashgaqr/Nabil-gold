@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from agents.news_risk_agent import NewsRiskAgent
 from agents.open_trades_manager import OpenTradesManager
 from agents.trading_session_agent import TradingSessionAgent
 from services.database import DatabaseService
@@ -225,6 +226,13 @@ def main() -> None:
                 logger.error("Failed to fetch price for symbol %s", symbol)
                 continue
             current_price = float(symbol_price)
+            # Check news hard-block for pending-order activation logic.
+            try:
+                news_cfg = {**symbol_config, "macro_context": database.get_macro_context()} if hasattr(database, 'get_macro_context') else symbol_config
+                news_result = NewsRiskAgent(news_cfg).check()
+            except Exception:
+                news_result = {}
+            news_blocked = bool(news_result.get("can_trade") is False or str(news_result.get("market_status", "")).upper() in {"DANGER", "HIGH_VOLATILITY"})
             # ── Global price sanity: reject obviously corrupt ticks ──
             # XAU/USD realistic range: 2500-5500. WTI: 30-150.
             # Anything outside this is a data provider glitch.
@@ -256,6 +264,8 @@ def main() -> None:
                 database=database,
                 telegram=telegram_for_events,
                 now=datetime.now(timezone.utc),
+                news_blocked=news_blocked,
+                news_context=news_result,
             ))
         total_events = 0
         for evaluation in evaluations:

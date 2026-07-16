@@ -926,13 +926,29 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 _sym, _cp, _sane_min, _sane_max,
             )
             return
+        persisted_macro_context = database.get_macro_context()
         if has_symbol_active_trades:
             high, low = _latest_candle_extremes(data)
-            OpenTradesManager(config).update_trades(open_trades=[t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol], current_price=float(data.get("current_price", 0)), candle_high=high, candle_low=low, database=database, telegram=telegram, now=datetime.now(timezone.utc))
+            try:
+                news_pre_cfg = {**config, "macro_context": persisted_macro_context} if persisted_macro_context else config
+                news_pre = NewsRiskAgent(news_pre_cfg).check()
+            except Exception:
+                news_pre = {}
+            news_blocked_pre = bool(news_pre.get("can_trade") is False or str(news_pre.get("market_status", "")).upper() in {"DANGER", "HIGH_VOLATILITY"})
+            OpenTradesManager(config).update_trades(
+                open_trades=[t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol],
+                current_price=float(data.get("current_price", 0)),
+                candle_high=high,
+                candle_low=low,
+                database=database,
+                telegram=telegram,
+                now=datetime.now(timezone.utc),
+                news_blocked=news_blocked_pre,
+                news_context=news_pre,
+            )
         if not session.get("trading_allowed"): return
         verified_snapshot = build_market_snapshot(data, config)
         data["verified_snapshot"] = verified_snapshot
-        persisted_macro_context = database.get_macro_context()
         macro_input = {**data, "macro_context": persisted_macro_context} if persisted_macro_context else data
         macro = run_agent("macro_fundamental", MacroFundamentalAgent(config), macro_input)
         news_config = {**config, "macro_context": persisted_macro_context} if persisted_macro_context else config
