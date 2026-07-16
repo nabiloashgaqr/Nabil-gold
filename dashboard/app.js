@@ -3,12 +3,14 @@
 
 const API_URL = (window.SMARTSIGNAL_API_URL || '/api/dashboard');
 const OUTCOME_STATUSES = new Set(['TP2_HIT', 'SL_HIT', 'BE_HIT', 'EXPIRED', 'MANUAL_CLOSE', 'CLOSED']);
-const LIVE_STATUSES = new Set(['OPEN', 'TP1_HIT', 'PARTIAL', 'PENDING']);
+const LIVE_STATUSES = new Set(['OPEN', 'TP1_HIT', 'PARTIAL']);
+const PENDING_STATUSES = new Set(['PENDING']);
 const CLOSED_TRADES_TABLE_LIMIT = 50;
 
 let currentLang = 'ar';
 let closedTrades = [];
 let liveTrades = [];
+let pendingTrades = [];
 let filteredTrades = [];
 let dashboardPayload = null;
 let charts = { daily: null, cumulative: null, session: null, instrument: null, regime: null, news: null };
@@ -352,6 +354,7 @@ function sessionBucket(t) {
     return currentLang === 'ar' ? 'أمريكا متأخرة ليلاً' : 'Late New York Night';
 }
 function isLiveStatus(status) { return LIVE_STATUSES.has(String(status || '').toUpperCase()); }
+function isPendingStatus(status) { return PENDING_STATUSES.has(String(status || '').toUpperCase()); }
 function isClosedStatus(status) { return OUTCOME_STATUSES.has(String(status || '').toUpperCase()); }
 
 function normalizeTrade(t) {
@@ -396,10 +399,12 @@ async function loadDashboardData() {
 
         dashboardPayload = payload;
         closedTrades = (payload.closedTrades || []).map(normalizeTrade).filter(t => isClosedStatus(t.status));
-        liveTrades = (payload.liveTrades || []).map(normalizeTrade).filter(t => isLiveStatus(t.status));
+        const activeRows = (payload.liveTrades || payload.activeTrades || []).map(normalizeTrade);
+        liveTrades = activeRows.filter(t => isLiveStatus(t.status));
+        pendingTrades = activeRows.filter(t => isPendingStatus(t.status));
         filteredTrades = [...closedTrades];
 
-        updateStats(filteredTrades, liveTrades);
+        updateStats(filteredTrades, liveTrades, pendingTrades);
         updateCharts(filteredTrades);
         renderTradesTable(filteredTrades);
         updateOpenTrades(liveTrades);
@@ -413,8 +418,9 @@ async function loadDashboardData() {
         console.error('Dashboard load failed:', error);
         closedTrades = [];
         liveTrades = [];
+        pendingTrades = [];
         filteredTrades = [];
-        updateStats([], []);
+        updateStats([], [], []);
         updateCharts([]);
         renderTradesTable([]);
         updateOpenTrades([]);
@@ -441,7 +447,7 @@ function setChartEmpty(id, isEmpty) {
 function safeDestroyChart(name) {
     if (charts[name]) { charts[name].destroy(); charts[name] = null; }
 }
-function updateStats(trades, live) {
+function updateStats(trades, live, pending = []) {
     const total = trades.length;
     const wins = trades.filter(t => pnlOf(t) > 0 || ['TP2_HIT'].includes(t.status));
     const losses = trades.filter(t => pnlOf(t) < 0);
@@ -463,6 +469,7 @@ function updateStats(trades, live) {
     setText('netPoints', signed(netPnl));
     setText('profitFactor', profitFactor);
     setText('liveCount', live.length);
+    setText('pendingCount', pending.length);
     setText('tp1Count', live.filter(t => t.status === 'TP1_HIT').length);
     setText('bestTrade', pnls.length ? signed(best) : '--');
     setText('worstTrade', pnls.length ? signed(worst) : '--');
@@ -763,7 +770,7 @@ function applyFilters() {
         }
         return true;
     });
-    updateStats(filteredTrades, liveTrades);
+    updateStats(filteredTrades, liveTrades, pendingTrades);
     updateCharts(filteredTrades);
     renderTradesTable(filteredTrades);
 }
@@ -771,7 +778,7 @@ function applyFilters() {
 function clearFilters() {
     ['filterSymbol', 'filterResult', 'filterDateFrom', 'filterDateTo', 'searchInput'].forEach(id => { const el = $(id); if (el) el.value = ''; });
     filteredTrades = [...closedTrades];
-    updateStats(filteredTrades, liveTrades);
+    updateStats(filteredTrades, liveTrades, pendingTrades);
     updateCharts(filteredTrades);
     renderTradesTable(filteredTrades);
 }
@@ -966,7 +973,7 @@ function updateAgentPerformance() {
 }
 
 function showTradeModalById(id, live = false) {
-    const trade = (live ? liveTrades : [...closedTrades, ...liveTrades]).find(t => t.id === id);
+    const trade = (live ? [...liveTrades, ...pendingTrades] : [...closedTrades, ...liveTrades, ...pendingTrades]).find(t => t.id === id);
     if (trade) showTradeModal(trade);
 }
 
