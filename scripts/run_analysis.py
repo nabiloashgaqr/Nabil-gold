@@ -591,6 +591,13 @@ def _market_prices_text(config: Dict[str, Any] | None, current_symbol: str, curr
     return "\n".join(lines) if lines else f"• {html.escape(current_symbol)}: N/A"
 
 
+def _pending_age_hours(trade: Dict[str, Any]) -> float:
+    ref = _parse_datetime(trade.get("created_at") or trade.get("entry_time") or trade.get("opened_at"))
+    if not ref:
+        return 0.0
+    return max(0.0, (datetime.now(timezone.utc) - ref).total_seconds() / 3600.0)
+
+
 def _build_market_status_message(
     decision: Dict[str, Any],
     all_results: Dict[str, Any],
@@ -660,8 +667,10 @@ def _build_market_status_message(
                 entry = _safe_float(t.get("entry_price"), 0.0)
                 status = str(t.get("status") or "PENDING").upper()
                 order_type = str(t.get("order_type") or t.get("order_kind") or status).upper()
+                pts_to_fill = abs(price_to_points(entry - current_price, symbol=str(t.get("symbol") or current_symbol))) if entry and current_price else 0.0
+                age_h = _pending_age_hours(t)
                 pending_lines.append(
-                    f"🟡 {direction} <code>#{html.escape(short)}</code> @ {entry:.2f} [{html.escape(order_type)}]"
+                    f"🟡 {direction} <code>#{html.escape(short)}</code> @ {entry:.2f} [{html.escape(order_type)}] · {pts_to_fill:.0f} pts to fill · waiting {age_h:.1f}h"
                 )
             if len(pending_trades) > 20:
                 pending_lines.append(f"… and {len(pending_trades) - 20} more")

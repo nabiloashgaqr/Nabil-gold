@@ -22,7 +22,7 @@ from agents.trading_session_agent import TradingSessionAgent
 from services.database import DatabaseService
 from services.market_data import MarketDataService
 from services.telegram_bot import TelegramService
-from utils.helpers import load_config, setup_logging
+from utils.helpers import calculate_pips, load_config, setup_logging
 from utils.instruments import config_for_instrument, normalize_symbol
 
 setup_logging()
@@ -111,10 +111,24 @@ def _build_status_message(open_trades, evaluations, current_price: float) -> str
         lines.append(f"⏳ <b>Pending Orders ({len(pending_trades)})</b>")
         for t in pending_trades[:20]:
             tid = str(t.get("id", ""))
+            ev = by_id.get(tid, {})
             direction = str(t.get("type") or t.get("side") or "BUY").upper()
             entry = float(t.get("entry_price") or 0)
             order_type = str(t.get("order_type") or t.get("order_kind") or "PENDING").upper()
-            lines.append(f"🟡 {direction:<4} <code>{_short_id(tid)}</code>  @ {entry:.2f} [{_html.escape(order_type)}]")
+            pts_to_fill = ev.get("pending_distance_points")
+            if pts_to_fill is None:
+                pts_to_fill = abs(calculate_pips(current_price, entry, trade_type=direction, symbol=str(t.get("symbol") or "XAU/USD")))
+            hours_open = ev.get("hours_open")
+            if hours_open is None:
+                try:
+                    opened = datetime.fromisoformat(str(t.get("entry_time") or t.get("created_at") or "").replace("Z", "+00:00"))
+                    if opened.tzinfo is None:
+                        opened = opened.replace(tzinfo=timezone.utc)
+                    hours_open = max(0.0, (datetime.now(timezone.utc) - opened.astimezone(timezone.utc)).total_seconds() / 3600.0)
+                except Exception:
+                    hours_open = None
+            age_txt = f"waiting {float(hours_open):.1f}h" if hours_open is not None else "waiting"
+            lines.append(f"🟡 {direction:<4} <code>{_short_id(tid)}</code>  @ {entry:.2f} [{_html.escape(order_type)}] · {float(pts_to_fill):.0f} pts to fill · {age_txt}")
         if len(pending_trades) > 20:
             lines.append(f"… and {len(pending_trades) - 20} more")
     return "\n".join(lines)
