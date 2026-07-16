@@ -1424,10 +1424,28 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                     telegram.send_pending_governance(governance, symbol=symbol, side=decision_type)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Failed to send pending governance message: %s", exc)
+            elif action == "KEEP_EXISTING_PENDING" and "blocked" in str(governance.get("reason") or "").lower():
+                logger.info("Pending governor blocked replacement for %s %s: %s", decision_type, symbol, governance.get("reason"))
+                try:
+                    telegram.send_pending_governance(governance, symbol=symbol, side=decision_type)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed to send pending replacement-blocked message: %s", exc)
+                return
 
             duplicate_reason = duplicate_signal_reason(decision, database, config)
             if duplicate_reason:
                 logger.info("Signal blocked for %s %s: %s", decision_type, symbol, duplicate_reason)
+                if str(duplicate_reason).startswith("Post-exit revalidation blocked:"):
+                    try:
+                        signal_entry = ((decision.get("signal") or {}).get("entry") or {}).get("price") or decision.get("current_price")
+                        telegram.send_revalidation_block(
+                            symbol=symbol,
+                            side=decision_type,
+                            entry_price=signal_entry,
+                            reason=duplicate_reason,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("Failed to send re-entry blocked message: %s", exc)
                 return
             trade_id = database.new_trade_id()
             decision["trade_id"] = trade_id
