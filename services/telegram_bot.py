@@ -236,10 +236,13 @@ class TelegramService:
         setup_state = setup.get("setup_state")
         lead_agent = setup.get("lead_agent")
         quality = setup.get("quality_grade") or decision.get("setup_quality")
+        selection_role = setup.get("selection_role")
         if setup_type or setup_state or lead_agent:
             compact = []
             if setup_type:
                 compact.append(str(setup_type).replace("_", " ").title())
+            if selection_role:
+                compact.append(f"role {selection_role}")
             if setup_state:
                 compact.append(f"state {setup_state}")
             if lead_agent:
@@ -271,6 +274,18 @@ class TelegramService:
             if displacement not in {None, ""}:
                 extra.append(f"disp {displacement}")
             lines.append(f"• <b>SMC context:</b> {html.escape(' · '.join(str(x) for x in extra))}")
+        rp = setup.get("return_probability_score")
+        td = setup.get("thesis_dominance_score")
+        revisit = setup.get("expected_revisit_window")
+        if rp not in {None, ""} or td not in {None, ""} or revisit:
+            metric_bits = []
+            if rp not in {None, ""}:
+                metric_bits.append(f"reach {rp}")
+            if td not in {None, ""}:
+                metric_bits.append(f"dominance {td}")
+            if revisit:
+                metric_bits.append(f"revisit {revisit}")
+            lines.append(f"• <b>POI selection:</b> {html.escape(' · '.join(str(x) for x in metric_bits))}")
         if target_liquidity not in {None, ""}:
             lines.append(f"• <b>Target liquidity:</b> {self._money(target_liquidity, str(decision.get('symbol') or 'XAU/USD'))}")
         invalidation = (decision.get("ai") or {}).get("invalidation") or setup.get("invalidation") or setup.get("entry_reason")
