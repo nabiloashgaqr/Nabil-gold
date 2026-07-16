@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from agents.base_agent import BaseAgent
+from services.pending_governor import PendingGovernor
 from utils.helpers import calculate_pips, load_config
 from utils.instruments import points_to_price
 
@@ -97,6 +98,7 @@ class OpenTradesManager(BaseAgent):
         self.pending_news_require_spread_recheck = bool(pnh.get("require_spread_recheck", True))
         self.pending_news_cancel_if_drift_exceeds = bool(pnh.get("cancel_if_drift_exceeds", True))
         self.profile_overrides = (self.management.get("profiles", {}) or {}) if isinstance(self.management, dict) else {}
+        self.pending_governor = PendingGovernor(self.config)
 
     def _trade_management_profile(self, trade: Dict[str, Any]) -> str:
         snapshot = trade.get("signal_snapshot") or {}
@@ -170,6 +172,7 @@ class OpenTradesManager(BaseAgent):
                 candle_low=candle_low,
                 news_blocked=news_blocked,
                 news_context=news_context,
+                database=database,
             )
             evaluations.append(evaluation)
             trade_id = str(trade.get("id", ""))
@@ -222,6 +225,7 @@ class OpenTradesManager(BaseAgent):
         candle_low: float | None = None,
         news_blocked: bool = False,
         news_context: Dict[str, Any] | None = None,
+        database: Any | None = None,
     ) -> Dict[str, Any]:
         """Return updates/events for a single trade without external side effects.
 
@@ -266,6 +270,7 @@ class OpenTradesManager(BaseAgent):
                 candle_low=low_price,
                 news_blocked=news_blocked,
                 news_context=news_context,
+                database=database,
             )
 
         pnl_points = calculate_pips(entry, current_price, trade_type, symbol)
@@ -774,6 +779,7 @@ class OpenTradesManager(BaseAgent):
         candle_low: float | None = None,
         news_blocked: bool = False,
         news_context: Dict[str, Any] | None = None,
+        database: Any | None = None,
     ):
         """Activate a pending order on touch, else keep it waiting (no PnL).
 
@@ -812,6 +818,7 @@ class OpenTradesManager(BaseAgent):
         stop_loss = self._f(trade.get("stop_loss"), 0.0)
         tp2 = self._f(trade.get("tp2"), 0.0)
         min_rr_ratio = float((self.config.get("risk_settings", {}) or {}).get("min_rr_ratio", 1.5) or 1.5)
+        recent_trades = database.get_recent_trades(limit=50) if database and hasattr(database, "get_recent_trades") else []
 
         def _persist_runtime(**kwargs):
             runtime.update(kwargs)
@@ -848,6 +855,15 @@ class OpenTradesManager(BaseAgent):
                 return True
             mins = (now - touch_time).total_seconds() / 60.0
             return mins >= self.pending_news_reactivation_delay_minutes
+
+        def _conversion_allowed(market_entry: float) -> tuple[bool, str | None]:
+            review = self.pending_governor.allow_market_conversion(
+                trade,
+                recent_trades,
+                current_price=market_entry,
+                now=now,
+            )
+            return bool(review.get("allow", True)), (str(review.get("reason")) if review.get("reason") else None)
 
         # Hard expiry for stale pending orders.
         if not filled_touch and self.pending_expire_after_hours > 0 and hours_open >= self.pending_expire_after_hours:
@@ -938,6 +954,32 @@ class OpenTradesManager(BaseAgent):
                     "hours_open": hours_open,
                     "pending_distance_points": dist_pts,
                 }
+            allowed, reason = _conversion_allowed(current_price)
+            if not allowed:
+                _persist_runtime(
+                    news_hold_active=False,
+                    released_at=self._iso(now),
+                    cancelled_after_hold=True,
+                    conversion_block_reason=reason,
+                )
+                base_updates.update({
+                    "status": "CANCELLED",
+                    "result": "CANCELLED",
+                    "closed_at": self._iso(now),
+                    "close_time": self._iso(now),
+                    "reasons": [f"Market conversion blocked: {reason}"] if reason else ["Market conversion blocked"],
+                })
+                return {
+                    "trade_id": trade.get("id"),
+                    "old_status": "PENDING",
+                    "new_status": "CANCELLED",
+                    "pnl_points": 0.0,
+                    "events": ["PENDING_CANCELLED"],
+                    "updates": base_updates,
+                    "progress_to_tp1": 0.0,
+                    "hours_open": hours_open,
+                    "pending_distance_points": dist_pts,
+                }
             _persist_runtime(news_hold_active=False, released_at=self._iso(now), activated_after_hold=True)
             base_updates.update({
                 "status": "OPEN",
@@ -964,6 +1006,28 @@ class OpenTradesManager(BaseAgent):
             pending_cycles = self._f(trade.get("pending_cycles", 0))
             pending_cycles += 1
             if pending_cycles >= self.pending_order_max_cycles:
+                allowed, reason = _conversion_allowed(current_price)
+                if not allowed:
+                    _persist_runtime(auto_conversion_block_reason=reason, auto_conversion_blocked_at=self._iso(now))
+                    base_updates.update({
+                        "status": "CANCELLED",
+                        "result": "CANCELLED",
+                        "closed_at": self._iso(now),
+                        "close_time": self._iso(now),
+                        "pending_cycles": 0,
+                        "reasons": [f"Auto market conversion blocked: {reason}"] if reason else ["Auto market conversion blocked"],
+                    })
+                    return {
+                        "trade_id": trade.get("id"),
+                        "old_status": "PENDING",
+                        "new_status": "CANCELLED",
+                        "pnl_points": 0.0,
+                        "events": ["PENDING_CANCELLED"],
+                        "updates": base_updates,
+                        "progress_to_tp1": 0.0,
+                        "hours_open": hours_open,
+                        "pending_distance_points": dist_pts,
+                    }
                 base_updates.update({
                     "status": "OPEN",
                     "entry_time": self._iso(now),
