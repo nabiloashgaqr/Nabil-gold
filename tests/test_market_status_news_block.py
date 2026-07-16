@@ -27,6 +27,23 @@ class _DBWithTrade:
         ]
 
 
+class _DBWithPending:
+    def get_open_trades(self):
+        return [
+            {
+                "id": "TRADE_20260716_032617_077365_e4a0330c",
+                "type": "SELL",
+                "symbol": "XAU/USD",
+                "entry_price": 4040.60,
+                "stop_loss": 4080.60,
+                "tp1": 3990.60,
+                "tp2": 3950.60,
+                "status": "PENDING",
+                "order_type": "SELL_LIMIT",
+            }
+        ]
+
+
 def _technical_context() -> dict:
     return {
         "current_price": 4027.06,
@@ -78,3 +95,17 @@ def test_market_status_includes_prices() -> None:
     msg = _build_market_status_message(decision, _technical_context(), _DB())
     assert "XAU/USD" in msg
     assert "Next update in ~1 hour" in msg
+
+
+def test_market_status_pending_orders_are_not_shown_as_open_trades() -> None:
+    decision = {
+        "decision": "WAIT",
+        "current_price": 4035.75,
+    }
+    ctx = _technical_context()
+    ctx["news"] = {"can_trade": True, "market_status": "SAFE"}
+    msg = _build_market_status_message(decision, ctx, _DBWithPending())
+    assert "Open Trades" not in msg
+    assert "Pending Orders (1)" in msg
+    assert "SELL_LIMIT" in msg
+    assert "+48pts" not in msg and "+48 pts" not in msg

@@ -46,6 +46,23 @@ def test_status_message_no_open_trades():
     assert "No open trades" in msg
 
 
+def test_status_message_separates_pending_orders_from_open_trades():
+    trades = [
+        {"id": "TRADE_LIVE_11111111", "type": "BUY", "status": "OPEN"},
+        {"id": "TRADE_PENDING_22222222", "type": "SELL", "status": "PENDING", "order_type": "SELL_LIMIT", "entry_price": 4040.6},
+    ]
+    evals = [
+        {"trade_id": "TRADE_LIVE_11111111", "pnl_points": 25.0, "new_status": "OPEN", "progress_to_tp1": 0.2},
+        {"trade_id": "TRADE_PENDING_22222222", "pnl_points": 0.0, "new_status": "PENDING"},
+    ]
+    msg = _plain(ru._build_status_message(trades, evals, 4035.75))
+    assert "1 open / 1 pending" in msg
+    assert "Pending Orders (1)" in msg
+    assert "SELL_LIMIT" in msg
+    assert "+25 pts (+2.5$)" in msg
+    assert "+0 pts" not in msg
+
+
 def test_status_message_caps_long_lists():
     trades = [{"id": f"TRADE_{i}_abcd{i:04d}", "type": "BUY", "status": "OPEN"} for i in range(25)]
     evals = [{"trade_id": t["id"], "pnl_points": 1.0, "new_status": "OPEN"} for t in trades]
