@@ -28,6 +28,8 @@ class ReleaseReadinessService:
         self.min_benchmark_score_for_trial = float(cfg.get("min_benchmark_score_for_trial", 65) or 65)
         self.min_overlap_score_for_trial = float(cfg.get("min_overlap_score_for_trial", 45) or 45)
         self.min_execution_score_for_trial = float(cfg.get("min_execution_score_for_trial", 55) or 55)
+        self.min_governance_score_for_trial = float(cfg.get("min_governance_score_for_trial", 55) or 55)
+        self.allow_structured_trial_when_no_overlap_labels = bool(cfg.get("allow_structured_trial_when_no_overlap_labels", True))
 
     def build_from_reports(self, final_eval: Dict[str, Any], tuning: Dict[str, Any]) -> Dict[str, Any]:
         readiness = self._readiness_decision(final_eval, tuning)
@@ -68,12 +70,17 @@ class ReleaseReadinessService:
         readiness = report.get("readiness", {}) or {}
         scorecard = ((report.get("final_evaluation", {}) or {}).get("scorecard", {}) or {})
         recommendations = ((report.get("tuning_advice", {}) or {}).get("recommendations", []) or [])
+        overlap_text = (
+            f"Overlap {scorecard.get('overlap_score', 0)}/100"
+            if scorecard.get('overlap_available', False)
+            else "Overlap N/A"
+        )
         lines = [
             "🚦 <b>Release Readiness — SmartSignal</b>",
             "━━━━━━━━━━━━━━━━━━━━",
             f"Decision: <b>{readiness.get('decision', 'REVIEW')}</b>",
             f"Reason: {readiness.get('reason', 'No summary')}",
-            f"Benchmark {scorecard.get('benchmark_score', 0)}/100 | Overlap {scorecard.get('overlap_score', 0)}/100 | Execution {scorecard.get('execution_score', 0)}/100",
+            f"Benchmark {scorecard.get('benchmark_score', 0)}/100 | {overlap_text} | Execution {scorecard.get('execution_score', 0)}/100 | Governance {scorecard.get('governance_score', 0)}/100",
             f"Actions suggested: {readiness.get('actions_count', 0)}",
         ]
         if recommendations:
@@ -89,20 +96,27 @@ class ReleaseReadinessService:
         overlap_score = float(scorecard.get("overlap_score", 0) or 0)
         overlap_available = bool(scorecard.get("overlap_available", False))
         execution_score = float(scorecard.get("execution_score", 0) or 0)
+        governance_score = float(scorecard.get("governance_score", 0) or 0)
+        governance_available = bool(scorecard.get("governance_available", False))
         actions = tuning.get("actions", []) or []
         verdict = str(final_eval.get("verdict") or "REVIEW")
 
-        overlap_ok = overlap_score >= self.min_overlap_score_for_trial if overlap_available else True
+        overlap_ok = overlap_score >= self.min_overlap_score_for_trial if overlap_available else self.allow_structured_trial_when_no_overlap_labels
+        governance_ok = governance_score >= self.min_governance_score_for_trial if governance_available else True
 
         if (
             verdict == "READY_FOR_STRUCTURED_TRIAL"
             and benchmark_score >= self.min_benchmark_score_for_trial
             and overlap_ok
             and execution_score >= self.min_execution_score_for_trial
+            and governance_ok
             and len(actions) <= self.max_actions_for_trial
         ):
             decision = "PROCEED_TO_STRUCTURED_TRIAL"
             reason = "Core evaluation is strong and only minor tuning remains."
+        elif verdict == "PROMISING_BUT_NEEDS_TUNING" and len(actions) == 0 and benchmark_score >= self.min_benchmark_score_for_trial and execution_score >= self.min_execution_score_for_trial and governance_ok and overlap_ok:
+            decision = "PROCEED_TO_STRUCTURED_TRIAL"
+            reason = "Engine is promising and no urgent tuning actions remain; proceed with a tightly monitored structured trial."
         elif verdict == "PROMISING_BUT_NEEDS_TUNING":
             decision = "APPLY_TUNING_THEN_REEVALUATE"
             reason = "Engine is promising, but tuning recommendations should be applied before trial expansion."
@@ -118,4 +132,6 @@ class ReleaseReadinessService:
             "overlap_score": round(overlap_score, 1),
             "overlap_available": overlap_available,
             "execution_score": round(execution_score, 1),
+            "governance_score": round(governance_score, 1),
+            "governance_available": governance_available,
         }
