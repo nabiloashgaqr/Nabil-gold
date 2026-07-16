@@ -266,25 +266,31 @@ def test_protected_sell_tp2_has_priority_when_candle_low_hits_tp2_then_rebounds(
     assert result["updates"]["final_pnl"] == 700.0
 
 
-def test_protected_sell_trailing_uses_candle_low_before_pullback_stop_hit() -> None:
-    """Regression: trailing for SELL must use candle LOW + distance, not close +
-    distance, before checking whether the rebound hit the new stop.
+def test_protected_sell_trailing_update_is_not_executable_in_same_candle() -> None:
+    """Regression: a newly tightened trailing stop must NOT be considered hit in
+    the same OHLC candle that created it.
+
+    For SELL, the candle can print both a favorable low and a rebound high, but
+    OHLC alone cannot prove the rebound happened AFTER the new trailing stop was
+    moved. So the manager should persist the tighter stop for the next cycle,
+    not close immediately at that fresh stop.
     """
     manager = OpenTradesManager({"trailing_stop": {"enabled": True, "trailing_distance": 100.0, "trailing_step": 30.0}})
     trade = base_trade(
         type="SELL",
         status="TP1_HIT",
         entry_price=4002.03,
-        stop_loss=3971.15,
+        stop_loss=3991.15,
         tp1=3962.03,
         tp2=3932.03,
         sl_moved_to_entry=True,
         partial_close=True,
     )
     result = manager.evaluate_trade(trade, 3967.01, candle_high=3987.56, candle_low=3943.37)
-    assert result["new_status"] == "SL_HIT"
-    assert "TRAILING_SL_HIT" in result["events"]
+    assert result["new_status"] == "TP1_HIT"
+    assert "TRAILING_SL_HIT" not in result["events"]
+    assert "TRAILING_SL_UPDATED" in result["events"]
     # low 3943.37 + 100 points ($10) = 3953.37
-    assert result["updates"]["close_price"] == 3953.37
     assert result["updates"]["stop_loss"] == 3953.37
-    assert result["updates"]["final_pnl"] == 486.6
+    assert "close_price" not in result["updates"]
+    assert "final_pnl" not in result["updates"]
