@@ -42,6 +42,10 @@ class BacktestTrade:
     poi_type: str
     trigger_state: str
     trigger_score: float
+    selection_role: str
+    return_probability_score: float
+    thesis_dominance_score: float
+    expected_revisit_window: str
     entry_kind: str
     order_type: str
     filled: bool
@@ -177,6 +181,10 @@ class BacktestEngine:
         profile = (decision.get("strategy_profile") or {}).get("name") or "classic_consensus"
         setup_context = decision.get("setup_context") or {}
         quality = decision.get("quality", {}) or {}
+        selection_role = str(setup_context.get("selection_role") or "UNSPECIFIED")
+        return_probability_score = float(setup_context.get("return_probability_score") or 0)
+        thesis_dominance_score = float(setup_context.get("thesis_dominance_score") or 0)
+        expected_revisit_window = str(setup_context.get("expected_revisit_window") or "UNKNOWN")
 
         fill_index = entry_index
         fill_time = str(self.candles[entry_index - 1].get("time", entry_index))
@@ -204,6 +212,10 @@ class BacktestEngine:
                 poi_type=str(setup_context.get("poi_type") or ""),
                 trigger_state=str(setup_context.get("trigger_state") or ""),
                 trigger_score=float(setup_context.get("trigger_score") or 0),
+                selection_role=selection_role,
+                return_probability_score=return_probability_score,
+                thesis_dominance_score=thesis_dominance_score,
+                expected_revisit_window=expected_revisit_window,
                 entry_kind=entry_kind,
                 order_type=order_type,
                 filled=False,
@@ -265,6 +277,10 @@ class BacktestEngine:
             poi_type=str(setup_context.get("poi_type") or ""),
             trigger_state=str(setup_context.get("trigger_state") or ""),
             trigger_score=float(setup_context.get("trigger_score") or 0),
+            selection_role=selection_role,
+            return_probability_score=return_probability_score,
+            thesis_dominance_score=thesis_dominance_score,
+            expected_revisit_window=expected_revisit_window,
             entry_kind=entry_kind,
             order_type=order_type,
             filled=True,
@@ -358,6 +374,10 @@ class BacktestEngine:
                 "not_filled": len([t for t in subset if not t.filled]),
                 "net_points": round(sum(t.pnl_points for t in subset), 2),
             }
+        primary = [t for t in trades if str(t.selection_role).upper() == "PRIMARY"]
+        standby = [t for t in trades if str(t.selection_role).upper() == "STANDBY"]
+        primary_filled = [t for t in primary if t.filled]
+        standby_filled = [t for t in standby if t.filled]
         report = {
             "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
             "variant": self.variant_name,
@@ -378,6 +398,20 @@ class BacktestEngine:
                 "max_drawdown_points": round(max_dd, 2),
                 "avg_quality_score": round(sum(t.quality_score for t in trades) / len(trades), 2) if trades else 0,
                 "avg_trigger_score": round(sum(t.trigger_score for t in trades) / len(trades), 2) if trades else 0,
+                "avg_return_probability_score": round(sum(t.return_probability_score for t in trades) / len(trades), 2) if trades else 0,
+                "avg_thesis_dominance_score": round(sum(t.thesis_dominance_score for t in trades) / len(trades), 2) if trades else 0,
+                "primary_fill_rate_pct": round((len(primary_filled) / len(primary) * 100) if primary else 0, 2),
+                "primary_win_rate_pct": round((len([t for t in primary_filled if t.pnl_points > 0]) / len(primary_filled) * 100) if primary_filled else 0, 2),
+                "standby_fill_rate_pct": round((len(standby_filled) / len(standby) * 100) if standby else 0, 2),
+                "pending_governance": {
+                    "primary_candidates": len(primary),
+                    "standby_candidates": len(standby),
+                    "rejected_candidates": len([t for t in trades if str(t.selection_role).upper() == "REJECTED"]),
+                    "primary_fill_rate_pct": round((len(primary_filled) / len(primary) * 100) if primary else 0, 2),
+                    "standby_fill_rate_pct": round((len(standby_filled) / len(standby) * 100) if standby else 0, 2),
+                    "avg_primary_dominance": round(sum(t.thesis_dominance_score for t in primary) / len(primary), 2) if primary else 0,
+                    "avg_standby_dominance": round(sum(t.thesis_dominance_score for t in standby) / len(standby), 2) if standby else 0,
+                },
                 "by_signal": by_signal,
                 "by_grade": by_grade,
                 "by_setup_type": self._bucket_breakdown(trades, "setup_type"),
@@ -386,6 +420,8 @@ class BacktestEngine:
                 "by_trigger_state": self._bucket_breakdown(trades, "trigger_state"),
                 "by_session": self._bucket_breakdown(trades, "session_label"),
                 "by_entry_kind": self._bucket_breakdown(trades, "entry_kind"),
+                "by_selection_role": self._bucket_breakdown(trades, "selection_role"),
+                "by_revisit_window": self._bucket_breakdown(trades, "expected_revisit_window"),
             },
             "trades": [asdict(t) for t in trades],
         }
@@ -418,6 +454,8 @@ def benchmark_backtests(
         "profit_factor_delta": round(float(current.get("profit_factor", 0)) - float(baseline.get("profit_factor", 0)), 2),
         "filled_trades_delta": int(current.get("total_trades", 0) or 0) - int(baseline.get("total_trades", 0) or 0),
         "not_filled_delta": int(current.get("not_filled", 0) or 0) - int(baseline.get("not_filled", 0) or 0),
+        "primary_fill_rate_delta": round(float(current.get("primary_fill_rate_pct", 0)) - float(baseline.get("primary_fill_rate_pct", 0)), 2),
+        "avg_dominance_delta": round(float(current.get("avg_thesis_dominance_score", 0)) - float(baseline.get("avg_thesis_dominance_score", 0)), 2),
     }
     return {
         "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
@@ -470,6 +508,7 @@ def format_backtest_telegram(report: Dict[str, Any]) -> str:
                 f"Δ Net Points: {float(cmp.get('net_points_delta', 0)):+.0f}",
                 f"Δ Profit Factor: {float(cmp.get('profit_factor_delta', 0)):+.2f}",
                 f"Δ Filled Trades: {int(cmp.get('filled_trades_delta', 0)):+d} | Δ Not-filled: {int(cmp.get('not_filled_delta', 0)):+d}",
+                f"Δ Primary Fill Rate: {float(cmp.get('primary_fill_rate_delta', 0)):+.2f}% | Δ Dominance: {float(cmp.get('avg_dominance_delta', 0)):+.2f}",
                 "━━━━━━━━━━━━━━━━━━━━",
                 "Baseline = classic consensus + market execution only.",
             ]

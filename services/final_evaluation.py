@@ -95,7 +95,7 @@ class FinalEvaluationService:
         else:
             lines.append("Analyst Overlap: N/A (no analyst labels in evaluation window)")
         lines.append(
-            f"Scorecard: benchmark={scorecard.get('benchmark_score', 0)}/100 | overlap={scorecard.get('overlap_score', 0)}/100 | execution={scorecard.get('execution_score', 0)}/100"
+            f"Scorecard: benchmark={scorecard.get('benchmark_score', 0)}/100 | overlap={scorecard.get('overlap_score', 0)}/100 | execution={scorecard.get('execution_score', 0)}/100 | governance={scorecard.get('governance_score', 0)}/100"
         )
         if recommendations:
             lines.append("Recommendations:")
@@ -131,23 +131,42 @@ class FinalEvaluationService:
         not_filled_ratio = not_filled / total_candidates
         execution_score = max(0.0, min(100.0, 100.0 - (not_filled_ratio * 100.0)))
 
+        governance = current.get("pending_governance", {}) or {}
+        primary_fill = float(current.get("primary_fill_rate_pct", 0) or 0)
+        avg_dom = float(current.get("avg_thesis_dominance_score", 0) or 0)
+        if governance or primary_fill > 0 or avg_dom > 0:
+            governance_score = max(0.0, min(100.0, primary_fill * 0.6 + avg_dom * 0.4))
+            governance_available = True
+        else:
+            governance_score = 50.0
+            governance_available = False
+
         return {
             "benchmark_score": round(benchmark_score, 1),
             "overlap_score": round(overlap_score, 1),
             "overlap_available": overlap_available,
             "execution_score": round(execution_score, 1),
+            "governance_score": round(governance_score, 1),
+            "governance_available": governance_available,
             "not_filled_ratio": round(not_filled_ratio, 3),
+            "primary_fill_rate_pct": round(primary_fill, 2),
         }
 
     def _verdict(self, scorecard: Dict[str, Any]) -> str:
         benchmark_score = float(scorecard.get("benchmark_score", 0) or 0)
         overlap_score = float(scorecard.get("overlap_score", 0) or 0)
         execution_score = float(scorecard.get("execution_score", 0) or 0)
+        governance_score = float(scorecard.get("governance_score", 0) or 0)
         overlap_available = bool(scorecard.get("overlap_available", False))
-        if overlap_available:
-            total = benchmark_score * 0.45 + overlap_score * 0.35 + execution_score * 0.20
+        governance_available = bool(scorecard.get("governance_available", False))
+        if overlap_available and governance_available:
+            total = benchmark_score * 0.40 + overlap_score * 0.25 + execution_score * 0.15 + governance_score * 0.20
+        elif overlap_available and not governance_available:
+            total = benchmark_score * 0.50 + overlap_score * 0.30 + execution_score * 0.20
+        elif governance_available:
+            total = benchmark_score * 0.55 + execution_score * 0.25 + governance_score * 0.20
         else:
-            total = benchmark_score * 0.65 + execution_score * 0.35
+            total = benchmark_score * 0.70 + execution_score * 0.30
         if total >= 75:
             return "READY_FOR_STRUCTURED_TRIAL"
         if total >= 60:
@@ -165,6 +184,8 @@ class FinalEvaluationService:
             recommendations.append("Win rate fell versus baseline; inspect whether trigger gating is filtering too late or too aggressively.")
         if float(scorecard.get("not_filled_ratio", 0) or 0) > self.max_not_filled_ratio:
             recommendations.append("Too many pending setups are not filling; consider loosening market-threshold or POI distance rules.")
+        if float(scorecard.get("governance_score", 0) or 0) < 55:
+            recommendations.append("Pending governance quality is weak; review PRIMARY/STANDBY selection and thesis dominance thresholds.")
 
         labels = int(overlap.get("labels_considered", 0) or 0)
         if labels > 0:
