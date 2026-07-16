@@ -496,6 +496,14 @@
             "paper_only": true
         }
     },
+    "pending_governor": {
+        "enabled": true,
+        "replace_min_dominance_delta": 8,
+        "keep_if_return_probability_above": 45,
+        "cancel_if_return_probability_below": 25,
+        "require_quality_improvement": true,
+        "description": "Same-direction pending governance: keep dominant thesis, replace weaker pending with stronger new thesis, or cancel stale ones instead of stacking multiple pending orders."
+    },
     "strategy_profiles": {
         "liquidity_reversal": {
             "description": "SMC-led reversal profile: sweep + POI + reaction can qualify with 2 strong aligned agents.",
