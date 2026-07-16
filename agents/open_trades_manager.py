@@ -32,6 +32,8 @@ class OpenTradesManager(BaseAgent):
     # the production rule: "send only when something actually changed".
     NOTIFIABLE_EVENTS = {
         "ORDER_FILLED",
+        "NEWS_HOLD",
+        "PENDING_CANCELLED",
         "MOVE_SL_TO_BE",
         "TRAILING_SL_UPDATED",
         "TP1_HIT",
@@ -83,6 +85,17 @@ class OpenTradesManager(BaseAgent):
         self.entry_style = str(oe.get("entry_style", "market")).lower()
         self.pending_order_max_cycles = int(oe.get("pending_order_max_cycles", 6) or 6)
         self.pending_expire_after_hours = float(oe.get("pending_expire_after_hours", 24) or 24)
+        pnh = (oe.get("pending_news_hold", {}) or {}) if isinstance(oe, dict) else {}
+        self.pending_news_hold_enabled = bool(pnh.get("enabled", True))
+        _reactivation_delay = pnh.get("reactivation_delay_minutes", 3)
+        _limit_drift = pnh.get("limit_max_drift_points", 30)
+        _stop_drift = pnh.get("stop_max_drift_points", 20)
+        self.pending_news_reactivation_delay_minutes = float(3 if _reactivation_delay is None else _reactivation_delay)
+        self.pending_news_limit_max_drift_points = float(30 if _limit_drift is None else _limit_drift)
+        self.pending_news_stop_max_drift_points = float(20 if _stop_drift is None else _stop_drift)
+        self.pending_news_require_rr_recheck = bool(pnh.get("require_rr_recheck", True))
+        self.pending_news_require_spread_recheck = bool(pnh.get("require_spread_recheck", True))
+        self.pending_news_cancel_if_drift_exceeds = bool(pnh.get("cancel_if_drift_exceeds", True))
         self.profile_overrides = (self.management.get("profiles", {}) or {}) if isinstance(self.management, dict) else {}
 
     def _trade_management_profile(self, trade: Dict[str, Any]) -> str:
@@ -136,6 +149,8 @@ class OpenTradesManager(BaseAgent):
         now: datetime | None = None,
         candle_high: float | None = None,
         candle_low: float | None = None,
+        news_blocked: bool = False,
+        news_context: Dict[str, Any] | None = None,
     ) -> List[Dict[str, Any]]:
         """Evaluate all open trades, persist updates and send Telegram events.
 
@@ -153,6 +168,8 @@ class OpenTradesManager(BaseAgent):
                 now=now,
                 candle_high=candle_high,
                 candle_low=candle_low,
+                news_blocked=news_blocked,
+                news_context=news_context,
             )
             evaluations.append(evaluation)
             trade_id = str(trade.get("id", ""))
@@ -203,6 +220,8 @@ class OpenTradesManager(BaseAgent):
         now: datetime | None = None,
         candle_high: float | None = None,
         candle_low: float | None = None,
+        news_blocked: bool = False,
+        news_context: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         """Return updates/events for a single trade without external side effects.
 
@@ -245,6 +264,8 @@ class OpenTradesManager(BaseAgent):
                 symbol,
                 candle_high=high_price,
                 candle_low=low_price,
+                news_blocked=news_blocked,
+                news_context=news_context,
             )
 
         pnl_points = calculate_pips(entry, current_price, trade_type, symbol)
@@ -736,34 +757,85 @@ class OpenTradesManager(BaseAgent):
         symbol,
         candle_high: float | None = None,
         candle_low: float | None = None,
+        news_blocked: bool = False,
+        news_context: Dict[str, Any] | None = None,
     ):
         """Activate a pending order on touch, else keep it waiting (no PnL).
 
-        Cancellation of stale pending orders is handled by the signal pipeline
-        (a new signal replaces them); here we only fill-on-touch and refresh
-        the displayed market price.
-
-        Hybrid mode: if pending_order_max_cycles is exceeded (order survives
-        too long without filling), auto-convert to MARKET at current price.
-        This prevents LIMIT/STOP orders from waiting forever when the pullback
-        never materialises.
+        Extra behavior:
+        - If touched during a news blackout, do NOT activate.
+        - Freeze the order in a news-hold state and re-check it after the block.
+        - If still structurally valid and within allowed drift, convert to MARKET.
+        - Otherwise cancel it safely.
         """
         order_type = str(trade.get("order_type") or trade.get("order_kind") or "").upper()
         high_price = self._f(candle_high, current_price)
         low_price = self._f(candle_low, current_price)
         if high_price < low_price:
             high_price, low_price = low_price, high_price
-        filled = self._order_filled(order_type, trade_type, entry, current_price, high_price, low_price)
+        filled_touch = self._order_filled(order_type, trade_type, entry, current_price, high_price, low_price)
         base_updates = {
             "current_price": round(current_price, 2),
             "last_candle_high": round(high_price, 2),
             "last_candle_low": round(low_price, 2),
             "last_updated": self._iso(now),
         }
+        dist_pts = abs(calculate_pips(current_price, entry, trade_type, symbol))
+        hours_open = self._hours_open(trade, now)
+
+        snapshot = trade.get("signal_snapshot") or {}
+        if isinstance(snapshot, str):
+            try:
+                snapshot = json.loads(snapshot)
+            except Exception:
+                snapshot = {}
+        if not isinstance(snapshot, dict):
+            snapshot = {}
+        runtime = dict(snapshot.get("pending_runtime") or {})
+        hold_active = bool(runtime.get("news_hold_active", False))
+        touch_time = self._parse_dt(str(runtime.get("touch_time") or ""))
+        stop_loss = self._f(trade.get("stop_loss"), 0.0)
+        tp2 = self._f(trade.get("tp2"), 0.0)
+        min_rr_ratio = float((self.config.get("risk_settings", {}) or {}).get("min_rr_ratio", 1.5) or 1.5)
+
+        def _persist_runtime(**kwargs):
+            runtime.update(kwargs)
+            snapshot["pending_runtime"] = runtime
+            base_updates["signal_snapshot"] = snapshot
+
+        def _invalidated() -> bool:
+            if stop_loss <= 0:
+                return False
+            if trade_type == "BUY":
+                return current_price <= stop_loss
+            return current_price >= stop_loss
+
+        def _rr_ok(market_entry: float) -> bool:
+            if not self.pending_news_require_rr_recheck:
+                return True
+            if stop_loss <= 0 or tp2 <= 0:
+                return True
+            risk = abs(stop_loss - market_entry)
+            reward = abs(tp2 - market_entry)
+            if risk <= 0:
+                return False
+            return (reward / risk) >= min_rr_ratio
+
+        def _drift_limit_points() -> float:
+            if order_type.endswith("LIMIT"):
+                return self.pending_news_limit_max_drift_points
+            if order_type.endswith("STOP"):
+                return self.pending_news_stop_max_drift_points
+            return self.pending_news_limit_max_drift_points
+
+        def _delay_elapsed() -> bool:
+            if not touch_time:
+                return True
+            mins = (now - touch_time).total_seconds() / 60.0
+            return mins >= self.pending_news_reactivation_delay_minutes
 
         # Hard expiry for stale pending orders.
-        hours_open = self._hours_open(trade, now)
-        if not filled and self.pending_expire_after_hours > 0 and hours_open >= self.pending_expire_after_hours:
+        if not filled_touch and self.pending_expire_after_hours > 0 and hours_open >= self.pending_expire_after_hours:
             base_updates.update({
                 "status": "EXPIRED",
                 "result": "EXPIRED",
@@ -779,15 +851,104 @@ class OpenTradesManager(BaseAgent):
                 "updates": base_updates,
                 "progress_to_tp1": 0.0,
                 "hours_open": hours_open,
-                "pending_distance_points": abs(calculate_pips(current_price, entry, trade_type, symbol)),
+                "pending_distance_points": dist_pts,
+            }
+
+        # If the order touched during a blocked-news window, freeze it instead of activating.
+        if self.pending_news_hold_enabled and filled_touch and news_blocked:
+            if not hold_active:
+                _persist_runtime(
+                    news_hold_active=True,
+                    touch_time=self._iso(now),
+                    touch_price=round(current_price, 2),
+                    hold_reason="news_blackout_touch",
+                    blocked_context=(news_context or {}),
+                )
+                base_updates["pending_cycles"] = int(self._f(trade.get("pending_cycles", 0)))
+                return {
+                    "trade_id": trade.get("id"),
+                    "old_status": "PENDING",
+                    "new_status": "PENDING",
+                    "pnl_points": 0.0,
+                    "events": ["NEWS_HOLD"],
+                    "updates": base_updates,
+                    "progress_to_tp1": 0.0,
+                    "hours_open": hours_open,
+                    "pending_distance_points": dist_pts,
+                }
+            _persist_runtime(news_hold_active=True)
+            return {
+                "trade_id": trade.get("id"),
+                "old_status": "PENDING",
+                "new_status": "PENDING",
+                "pnl_points": 0.0,
+                "events": [],
+                "updates": base_updates,
+                "progress_to_tp1": 0.0,
+                "hours_open": hours_open,
+                "pending_distance_points": dist_pts,
+            }
+
+        # News hold release path: after the blocked window ends, light revalidation only.
+        if hold_active and not news_blocked:
+            if not _delay_elapsed():
+                _persist_runtime(news_hold_active=True)
+                return {
+                    "trade_id": trade.get("id"),
+                    "old_status": "PENDING",
+                    "new_status": "PENDING",
+                    "pnl_points": 0.0,
+                    "events": [],
+                    "updates": base_updates,
+                    "progress_to_tp1": 0.0,
+                    "hours_open": hours_open,
+                    "pending_distance_points": dist_pts,
+                }
+            if _invalidated() or (self.pending_news_cancel_if_drift_exceeds and dist_pts > _drift_limit_points()) or not _rr_ok(current_price):
+                _persist_runtime(news_hold_active=False, released_at=self._iso(now), cancelled_after_hold=True)
+                base_updates.update({
+                    "status": "CANCELLED",
+                    "result": "CANCELLED",
+                    "closed_at": self._iso(now),
+                    "close_time": self._iso(now),
+                })
+                return {
+                    "trade_id": trade.get("id"),
+                    "old_status": "PENDING",
+                    "new_status": "CANCELLED",
+                    "pnl_points": 0.0,
+                    "events": ["PENDING_CANCELLED"],
+                    "updates": base_updates,
+                    "progress_to_tp1": 0.0,
+                    "hours_open": hours_open,
+                    "pending_distance_points": dist_pts,
+                }
+            _persist_runtime(news_hold_active=False, released_at=self._iso(now), activated_after_hold=True)
+            base_updates.update({
+                "status": "OPEN",
+                "entry_time": self._iso(now),
+                "entry_price": round(current_price, 2),
+                "current_pnl": 0,
+                "current_pnl_points": 0,
+                "pending_cycles": 0,
+            })
+            return {
+                "trade_id": trade.get("id"),
+                "old_status": "PENDING",
+                "new_status": "OPEN",
+                "pnl_points": 0.0,
+                "events": ["ORDER_FILLED"],
+                "updates": base_updates,
+                "progress_to_tp1": 0.0,
+                "hours_open": 0.0,
+                "pending_distance_points": 0.0,
             }
 
         # Hybrid mode: auto-convert stale PENDING to MARKET
-        if not filled and self.entry_style == "hybrid" and self.pending_order_max_cycles > 0:
+        if not filled_touch and self.entry_style == "hybrid" and self.pending_order_max_cycles > 0:
             pending_cycles = self._f(trade.get("pending_cycles", 0))
             pending_cycles += 1
             if pending_cycles >= self.pending_order_max_cycles:
-                # Auto-convert: enter at current market price
                 base_updates.update({
                     "status": "OPEN",
                     "entry_time": self._iso(now),
@@ -806,14 +967,12 @@ class OpenTradesManager(BaseAgent):
                     "progress_to_tp1": 0.0,
                     "hours_open": 0.0,
                 }
-            # Still waiting - increment pending_cycles
             base_updates["pending_cycles"] = pending_cycles
 
-        if filled:
-            # Fill at the configured entry price (paper). Position becomes live.
+        if filled_touch:
             base_updates.update({
                 "status": "OPEN",
-                "entry_time": self._iso(now),  # clock starts at fill, not at signal
+                "entry_time": self._iso(now),
                 "current_pnl": 0,
                 "current_pnl_points": 0,
             })
@@ -827,13 +986,10 @@ class OpenTradesManager(BaseAgent):
                 "progress_to_tp1": 0.0,
                 "hours_open": 0.0,
             }
-        # Fixed-risk auto-convert: if price has reached within budget, open MARKET
-        if self.entry_style == "fixed_risk":
-            # recalc: check if price is now within risk budget from nearest level
-            pass  # Handled by the next analysis cycle via decision_agent
 
-        # Still waiting — report distance to entry, no PnL.
-        dist_pts = abs(calculate_pips(current_price, entry, trade_type, symbol))
+        if self.entry_style == "fixed_risk":
+            pass
+
         return {
             "trade_id": trade.get("id"),
             "old_status": "PENDING",
@@ -842,7 +998,7 @@ class OpenTradesManager(BaseAgent):
             "events": [],
             "updates": base_updates,
             "progress_to_tp1": 0.0,
-            "hours_open": self._hours_open(trade, now),
+            "hours_open": hours_open,
             "pending_distance_points": round(dist_pts, 1),
         }
 
