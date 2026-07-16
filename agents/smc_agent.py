@@ -483,94 +483,159 @@ class SMCAgent(BaseAgent):
         entry_suggestion: Dict[str, Any],
         candles: List[Candle],
     ) -> List[Dict[str, Any]]:
-        """Return structured SMC setup candidates for persistence and later state logic.
+        """Return ranked SMC setup candidates with PRIMARY/STANDBY roles.
 
-        Sprint 1 scope: this is not a full state machine yet. It captures the
-        current best SMC narrative in a normalized candidate object so the rest
-        of the system can persist, display, and later evolve it into a richer
-        setup lifecycle (sweep -> displacement -> POI -> mitigation -> trigger).
+        Stage A foundation:
+        - score every eligible POI by quality
+        - estimate probability that price will revisit it
+        - derive thesis dominance
+        - keep one PRIMARY pending thesis and (optionally) one STANDBY thesis
         """
         if direction not in {"BUY", "SELL"}:
             return []
         sweep = liquidity.get("recent_sweep", {}) or {}
         recent_candles = candles or []
-        poi = self._primary_poi(direction, current_price, atr, order_blocks, fvg, dealing_range, market_structure, sweep)
-        if not poi:
+        raw_candidates = self._poi_candidates(direction, current_price, atr, order_blocks, fvg, dealing_range)
+        if not raw_candidates:
             return []
-        trigger = self._trigger_signal(direction, poi, recent_candles, current_price, atr)
-        poi["trigger"] = trigger
-        setup_type = self._setup_type_from_context(direction, sweep, market_structure, poi)
-        setup_state = self._setup_state_from_context(current_price, atr, poi, sweep)
-        displacement_score = float(poi.get("displacement_score") or 0.0)
-        quality = self._setup_quality(
-            confidence=confidence,
-            sweep=sweep,
-            poi=poi,
-            market_structure=market_structure,
-            current_price=current_price,
-            atr=atr,
-            setup_state=setup_state,
-        )
+
+        selection_cfg = (self.config.get("smc_engine", {}) or {}).get("selection", {}) or {}
+        max_candidates = int(selection_cfg.get("max_candidates", 5) or 5)
         target_liquidity = self._target_liquidity(direction, current_price, liquidity)
-        created_at = str(
-            poi.get("created_at")
-            or sweep.get("time")
-            or ((market_structure.get("last_bos") or {}).get("time"))
-            or ""
-        )
-        zone = poi.get("zone") or {}
-        zone_top = round(self._f(zone.get("top")), 2) if zone else 0.0
-        zone_bottom = round(self._f(zone.get("bottom")), 2) if zone else 0.0
-        state_key = (
-            f"SMC_STATE::{symbol}::{timeframe}::{direction}::{setup_type}::"
-            f"{poi.get('poi_type') or 'none'}::{sweep.get('type') or 'nosweep'}::{zone_top:.2f}:{zone_bottom:.2f}"
-        )
-        candidate_id = f"SMC::{symbol}::{timeframe}::{direction}::{created_at or 'now'}::{setup_type}"
-        candidate = {
-            "id": candidate_id,
-            "state_key": state_key,
-            "symbol": symbol,
-            "timeframe": timeframe,
-            "direction": direction,
-            "setup_type": setup_type,
-            "setup_state": setup_state,
-            "lead_agent": "smc",
-            "setup_quality": quality,
-            "quality_grade": quality.get("grade"),
-            "quality_score": quality.get("score"),
-            "poi_type": poi.get("poi_type"),
-            "poi_zone": poi.get("zone"),
-            "poi_low": round(self._f((poi.get("zone") or {}).get("bottom")), 2) if poi.get("zone") else None,
-            "poi_high": round(self._f((poi.get("zone") or {}).get("top")), 2) if poi.get("zone") else None,
-            "poi_rank_score": round(float(poi.get("rank_score") or 0), 1),
-            "poi_rank_reasons": list(poi.get("rank_reasons") or []),
-            "trigger_state": trigger.get("state"),
-            "trigger_score": trigger.get("score"),
-            "trigger_ready": bool(trigger.get("market_ready")),
-            "entry_timing": trigger.get("timing"),
-            "execution_hint": trigger.get("execution_hint"),
-            "entry_price": round(self._f(entry_suggestion.get("entry"), current_price), 2),
-            "stop_loss": round(self._f(entry_suggestion.get("sl")), 2) if entry_suggestion.get("sl") is not None else None,
-            "target_price": round(self._f(target_liquidity or entry_suggestion.get("tp")), 2) if (target_liquidity or entry_suggestion.get("tp")) else None,
-            "target_liquidity": round(self._f(target_liquidity), 2) if target_liquidity else None,
-            "sweep_side": sweep.get("type"),
-            "sweep_confirmation": sweep.get("confirmation"),
-            "displacement_score": round(displacement_score, 2),
-            "displacement_quality": poi.get("displacement_quality"),
-            "confidence": confidence,
-            "entry_reason": entry_suggestion.get("reason"),
-            "source": "smc",
-            "is_active": True,
-            "created_at": created_at,
-            "details": {
-                "market_trend": market_structure.get("trend"),
-                "recent_sweep": sweep,
-                "poi": poi,
-                "trigger": trigger,
-                "dealing_range": dealing_range,
-            },
-        }
-        return [candidate]
+        setup_candidates: List[Dict[str, Any]] = []
+
+        for idx, poi in enumerate(raw_candidates[:max_candidates], start=1):
+            trigger = self._trigger_signal(direction, poi, recent_candles, current_price, atr)
+            poi = dict(poi)
+            poi["trigger"] = trigger
+            setup_type = self._setup_type_from_context(direction, sweep, market_structure, poi)
+            setup_state = self._setup_state_from_context(current_price, atr, poi, sweep)
+            quality = self._setup_quality(
+                confidence=confidence,
+                sweep=sweep,
+                poi=poi,
+                market_structure=market_structure,
+                current_price=current_price,
+                atr=atr,
+                setup_state=setup_state,
+            )
+            poi_quality_score = float(quality.get("score") or 0)
+            return_probability_score = self._return_probability_score(
+                poi=poi,
+                direction=direction,
+                current_price=current_price,
+                atr=atr,
+                market_structure=market_structure,
+                liquidity=liquidity,
+                all_candidates=raw_candidates,
+            )
+            thesis_dominance_score = self._thesis_dominance_score(
+                poi_quality_score=poi_quality_score,
+                return_probability_score=return_probability_score,
+                trigger_score=float(trigger.get("score") or 0),
+                trigger_ready=bool(trigger.get("market_ready")),
+                sweep=sweep,
+                poi=poi,
+            )
+            expected_revisit_window = self._expected_revisit_window(return_probability_score)
+            created_at = str(
+                poi.get("created_at")
+                or sweep.get("time")
+                or ((market_structure.get("last_bos") or {}).get("time"))
+                or ""
+            )
+            zone = poi.get("zone") or {}
+            zone_top = round(self._f(zone.get("top")), 2) if zone else 0.0
+            zone_bottom = round(self._f(zone.get("bottom")), 2) if zone else 0.0
+            state_key = (
+                f"SMC_STATE::{symbol}::{timeframe}::{direction}::{setup_type}::"
+                f"{poi.get('poi_type') or 'none'}::{sweep.get('type') or 'nosweep'}::{zone_top:.2f}:{zone_bottom:.2f}"
+            )
+            candidate_id = f"SMC::{symbol}::{timeframe}::{direction}::{created_at or 'now'}::{setup_type}::{idx}"
+            midpoint = (zone_top + zone_bottom) / 2.0 if zone_top and zone_bottom else current_price
+            candidate_entry = midpoint if midpoint > 0 else self._f(entry_suggestion.get("entry"), current_price)
+            candidate = {
+                "id": candidate_id,
+                "state_key": state_key,
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "direction": direction,
+                "setup_type": setup_type,
+                "setup_state": setup_state,
+                "lead_agent": "smc",
+                "setup_quality": quality,
+                "quality_grade": quality.get("grade"),
+                "quality_score": quality.get("score"),
+                "poi_type": poi.get("poi_type"),
+                "poi_zone": zone,
+                "poi_low": round(self._f((zone or {}).get("bottom")), 2) if zone else None,
+                "poi_high": round(self._f((zone or {}).get("top")), 2) if zone else None,
+                "poi_rank_score": round(float(poi.get("rank_score") or 0), 1),
+                "poi_rank_reasons": list(poi.get("rank_reasons") or []),
+                "poi_quality_score": round(poi_quality_score, 1),
+                "return_probability_score": round(return_probability_score, 1),
+                "thesis_dominance_score": round(thesis_dominance_score, 1),
+                "expected_revisit_window": expected_revisit_window,
+                "trigger_state": trigger.get("state"),
+                "trigger_score": trigger.get("score"),
+                "trigger_ready": bool(trigger.get("market_ready")),
+                "entry_timing": trigger.get("timing"),
+                "execution_hint": trigger.get("execution_hint"),
+                "entry_price": round(candidate_entry, 2),
+                "stop_loss": round(self._candidate_stop_loss(direction, poi, atr, entry_suggestion), 2),
+                "target_price": round(self._f(target_liquidity or entry_suggestion.get("tp")), 2) if (target_liquidity or entry_suggestion.get("tp")) else None,
+                "target_liquidity": round(self._f(target_liquidity), 2) if target_liquidity else None,
+                "sweep_side": sweep.get("type"),
+                "sweep_confirmation": sweep.get("confirmation"),
+                "displacement_score": round(float(poi.get("displacement_score") or 0.0), 2),
+                "displacement_quality": poi.get("displacement_quality"),
+                "confidence": confidence,
+                "entry_reason": entry_suggestion.get("reason"),
+                "source": "smc",
+                "is_active": True,
+                "created_at": created_at,
+                "details": {
+                    "market_trend": market_structure.get("trend"),
+                    "structure_quality": market_structure.get("structure_quality"),
+                    "recent_sweep": sweep,
+                    "poi": poi,
+                    "trigger": trigger,
+                    "dealing_range": dealing_range,
+                    "selection": {
+                        "poi_quality_score": round(poi_quality_score, 1),
+                        "return_probability_score": round(return_probability_score, 1),
+                        "thesis_dominance_score": round(thesis_dominance_score, 1),
+                        "expected_revisit_window": expected_revisit_window,
+                    },
+                },
+            }
+            setup_candidates.append(candidate)
+
+        setup_candidates.sort(key=lambda c: float(c.get("thesis_dominance_score") or 0), reverse=True)
+        primary = setup_candidates[0] if setup_candidates else None
+        standby_min = float(selection_cfg.get("standby_min_dominance_score", 42) or 42)
+        standby_rel = float(selection_cfg.get("standby_min_relative_to_primary", 0.72) or 0.72)
+        primary_score = float(primary.get("thesis_dominance_score") or 0) if primary else 0.0
+
+        for rank, candidate in enumerate(setup_candidates, start=1):
+            role = "REJECTED"
+            if rank == 1:
+                role = "PRIMARY"
+            elif rank == 2:
+                score = float(candidate.get("thesis_dominance_score") or 0)
+                if score >= standby_min and (primary_score <= 0 or score >= primary_score * standby_rel):
+                    role = "STANDBY"
+            candidate["selection_rank"] = rank
+            candidate["selection_role"] = role
+            candidate["details"] = dict(candidate.get("details") or {})
+            candidate["details"]["selection"] = {
+                **(candidate["details"].get("selection") or {}),
+                "selection_rank": rank,
+                "selection_role": role,
+                "primary_score": round(primary_score, 1),
+                "standby_min_dominance_score": standby_min,
+            }
+        return setup_candidates
 
     def _primary_poi(
         self,
@@ -744,6 +809,109 @@ class SMCAgent(BaseAgent):
         candidate["rank_score"] = round(score, 1)
         candidate["rank_reasons"] = reasons
         return candidate
+
+    def _return_probability_score(
+        self,
+        poi: Dict[str, Any],
+        direction: str,
+        current_price: float,
+        atr: float,
+        market_structure: Dict[str, Any],
+        liquidity: Dict[str, Any],
+        all_candidates: List[Dict[str, Any]],
+    ) -> float:
+        cfg = (self.config.get("smc_engine", {}) or {}).get("selection", {}) or {}
+        zone = poi.get("zone", {}) or {}
+        top = self._f(zone.get("top"))
+        bottom = self._f(zone.get("bottom"))
+        if top <= 0 or bottom <= 0:
+            return 0.0
+        midpoint = (top + bottom) / 2.0
+        distance = abs(current_price - midpoint)
+        scale = max(atr * float(cfg.get("return_probability_distance_scale_atr", 2.5) or 2.5), 0.50)
+        score = max(0.0, 65.0 * (1.0 - min(distance, scale * 2.0) / (scale * 2.0)))
+
+        # Penalize if there are stronger/closer intermediate POIs in the path.
+        direction_sign = -1 if direction == "SELL" else 1
+        intermediate_count = 0
+        for other in all_candidates:
+            if other is poi:
+                continue
+            other_zone = other.get("zone", {}) or {}
+            other_top = self._f(other_zone.get("top"))
+            other_bottom = self._f(other_zone.get("bottom"))
+            if other_top <= 0 or other_bottom <= 0:
+                continue
+            other_mid = (other_top + other_bottom) / 2.0
+            if direction == "SELL" and current_price < other_mid < midpoint:
+                intermediate_count += 1
+            elif direction == "BUY" and current_price > other_mid > midpoint:
+                intermediate_count += 1
+        score -= intermediate_count * float(cfg.get("intermediate_poi_penalty", 10) or 10)
+
+        # Session / previous-day liquidity relevance.
+        sweep = liquidity.get("recent_sweep", {}) or {}
+        if sweep.get("occurred"):
+            ref_type = str(sweep.get("reference_type") or "")
+            if ref_type.startswith("previous_day_"):
+                score += float(cfg.get("previous_day_liquidity_bonus", 8) or 8)
+            elif ref_type.startswith("session_"):
+                score += float(cfg.get("session_liquidity_bonus", 6) or 6)
+        session_label = str((liquidity.get("session_liquidity") or {}).get("label") or "")
+        if session_label in {"London / Europe Midday", "London + New York Afternoon", "New York Evening"}:
+            score += float(cfg.get("session_bonus", 6) or 6)
+
+        structure_quality = str(market_structure.get("structure_quality") or "")
+        if structure_quality == "STRONG":
+            score += 8.0
+        elif structure_quality == "MODERATE":
+            score += 4.0
+
+        mitigation = str(poi.get("mitigation_status") or "").upper()
+        if mitigation == "FRESH":
+            score += 8.0
+        elif mitigation == "TESTED":
+            score += 3.0
+        elif mitigation in {"MITIGATED", "PARTIAL"}:
+            score -= 8.0
+        return round(max(0.0, min(100.0, score)), 1)
+
+    def _thesis_dominance_score(
+        self,
+        *,
+        poi_quality_score: float,
+        return_probability_score: float,
+        trigger_score: float,
+        trigger_ready: bool,
+        sweep: Dict[str, Any],
+        poi: Dict[str, Any],
+    ) -> float:
+        score = poi_quality_score * 0.45 + return_probability_score * 0.35 + float(trigger_score or 0) * 0.20
+        if trigger_ready:
+            score += 6.0
+        if str((sweep or {}).get("confirmation") or "").upper() == "STRONG":
+            score += 4.0
+        if str(poi.get("strength") or "") == "strong":
+            score += 3.0
+        return round(max(0.0, min(100.0, score)), 1)
+
+    def _expected_revisit_window(self, return_probability_score: float) -> str:
+        if return_probability_score >= 70:
+            return "NEAR"
+        if return_probability_score >= 45:
+            return "MEDIUM"
+        return "LOW"
+
+    def _candidate_stop_loss(self, direction: str, poi: Dict[str, Any], atr: float, entry_suggestion: Dict[str, Any]) -> float:
+        zone = poi.get("zone", {}) or {}
+        top = self._f(zone.get("top"))
+        bottom = self._f(zone.get("bottom"))
+        buffer = max(atr * 0.25, 0.50)
+        if direction == "BUY" and bottom > 0:
+            return bottom - buffer
+        if direction == "SELL" and top > 0:
+            return top + buffer
+        return self._f(entry_suggestion.get("sl"), 0.0)
 
     def _setup_type_from_context(
         self,
