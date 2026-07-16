@@ -413,6 +413,7 @@ async function loadDashboardData() {
         updateOpenTrades(liveTrades);
         renderReports(payload);
         renderAnalystOverlap(payload.analystOverlap || {});
+        renderPendingGovernance(pendingTrades);
         updateAgentPerformance();
 
         setText('lastUpdate', formatDateTime(payload.generatedAt || Date.now()));
@@ -429,6 +430,7 @@ async function loadDashboardData() {
         updateOpenTrades([]);
         renderReports({ dailyReports: [], weeklyReports: [] });
         renderAnalystOverlap({});
+        renderPendingGovernance([]);
         setText('dataSource', 'خطأ');
         setText('lastUpdate', formatDateTime(Date.now()));
         setError(`${tr('loadError')}: ${error.message.includes('404') ? tr('api404') : error.message}`);
@@ -924,6 +926,41 @@ function renderAnalystOverlap(summary) {
           <span class="file-meta">${currentLang === 'ar' ? 'العدد' : 'Count'} ${num(r.count, 0)}</span>
         </div>
       </div>`).join(''));
+}
+
+function renderPendingGovernance(pending) {
+    const rows = Array.isArray(pending) ? pending : [];
+    setText('pendingGovernanceCount', rows.length ? `(${rows.length})` : '');
+    if (!rows.length) {
+        setHTML('pendingGovernanceList', `<div class="empty">${currentLang === 'ar' ? 'لا توجد أوامر معلقة حالياً' : 'No pending orders right now'}</div>`);
+        return;
+    }
+    setHTML('pendingGovernanceList', rows.map((trade, idx) => {
+        const snap = snapshotOf(trade);
+        const setup = snap.setup_context || {};
+        const current = num(trade.current_price, 0);
+        const entry = num(trade.entry_price, 0);
+        const points = entry && current ? Math.abs((entry - current) / 0.1) : 0;
+        const role = setup.selection_role || '--';
+        const dominance = setup.thesis_dominance_score ?? '--';
+        const reach = setup.return_probability_score ?? '--';
+        const revisit = setup.expected_revisit_window || '--';
+        const orderType = trade.order_type || trade.order_kind || 'PENDING';
+        return `
+          <div class="report-file">
+            <div class="report-file-head">
+              <span class="file-icon">${idx === 0 ? '🎯' : '•'}</span>
+              <span class="file-title">${esc(trade.type || '')} ${esc(trade.symbol || '')} @ ${entry ? entry.toFixed(2) : '--'} [${esc(orderType)}]</span>
+              <span class="file-meta">${currentLang === 'ar' ? 'المتبقي' : 'To fill'} ${points.toFixed(0)} pts</span>
+            </div>
+            <div class="report-file-body open" style="display:block; white-space:normal;">
+              <div><b>${currentLang === 'ar' ? 'الدور' : 'Role'}:</b> ${esc(role)}</div>
+              <div><b>${currentLang === 'ar' ? 'الهيمنة' : 'Dominance'}:</b> ${esc(String(dominance))}</div>
+              <div><b>${currentLang === 'ar' ? 'احتمال الرجوع' : 'Reach Probability'}:</b> ${esc(String(reach))}</div>
+              <div><b>${currentLang === 'ar' ? 'نافذة اللمس' : 'Expected Revisit'}:</b> ${esc(String(revisit))}</div>
+            </div>
+          </div>`;
+    }).join(''));
 }
 
 function updateAgentPerformance() {
