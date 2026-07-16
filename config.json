@@ -352,8 +352,8 @@
     },
     "duplicate_signal_filter": {
         "enabled": true,
-        "price_zone_points": 50,
-        "description_price_zone_points": "نطاق السعر الذي يُعتبر فيه دخولان 'نفس المنطقة' (نقاط الذهب: 1$=10 نقاط، أي 50 نقطة=5$). خارج هذا النطاق يُعد إعداداً جديداً مشروعاً ولا يُحجب.",
+        "price_zone_points": 200,
+        "description_price_zone_points": "نطاق السعر الذي يُعتبر فيه دخولان 'نفس المنطقة' (نقاط الذهب: 1$=10 نقاط، أي 200 نقطة=20$). خارج هذا النطاق يُعد إعداداً جديداً مشروعاً ولا يُحجب.",
         "open_trade": {
             "block_same_direction_in_zone": true,
             "block_same_direction_any_price": false,
@@ -616,7 +616,7 @@
             "trailing_distance": 150,
             "trailing_step": 40,
             "early_breakeven_points": 150,
-            "duplicate_zone_points": 50,
+            "duplicate_zone_points": 200,
             "description_early_breakeven": "early_breakeven_points=150: عند وصول الصفقة إلى +150 نقطة (15$) يُنقل الستوب إلى الدخول فوراً. متناسب مع SL=400pts و trailing gap=150pts."
         },
         {
