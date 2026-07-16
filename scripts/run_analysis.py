@@ -106,7 +106,18 @@ def _trade_direction(trade: Dict[str, Any]) -> str:
 
 
 def _trade_entry_price(trade: Dict[str, Any]) -> float | None:
-    for key in ('entry_price', 'current_price'):
+    """Reference price for duplicate/cooldown logic.
+
+    - OPEN trades should be compared by their original entry zone.
+    - RECENTLY CLOSED trades should be compared by their close/exit zone first,
+      because an immediate re-entry near the fresh exit area is the real
+      duplicate/revenge-risk case. Using the old entry price let a trade entered
+      at 4040 and trailed out at 3993 re-enter immediately at 3992 without any
+      cooldown block, simply because 3992 was far from the original 4040 entry.
+    """
+    outcome = _trade_outcome(trade)
+    keys = ('entry_price', 'current_price') if outcome == 'OPEN' else ('close_price', 'entry_price', 'current_price')
+    for key in keys:
         value = trade.get(key)
         try:
             if value is not None:
@@ -149,6 +160,167 @@ def _trade_reference_time(trade: Dict[str, Any], now: datetime) -> datetime:
     if closed: return closed
     opened = _parse_datetime(trade.get("created_at") or trade.get("entry_time") or trade.get("opened_at"))
     return opened or now
+
+
+_SETUP_STATE_RANK = {
+    "DETECTED": 0,
+    "SWEEP_CONFIRMED": 1,
+    "POI_MARKED": 2,
+    "ENTRY_ARMED": 3,
+    "ENTRY_TRIGGERED": 4,
+    "INVALIDATED": 5,
+    "EXPIRED": 5,
+}
+
+
+def _trade_setup_context(trade: Dict[str, Any]) -> Dict[str, Any]:
+    snap = trade.get("signal_snapshot") or {}
+    if isinstance(snap, str):
+        try:
+            import json
+            snap = json.loads(snap)
+        except Exception:
+            snap = {}
+    if not isinstance(snap, dict):
+        snap = {}
+    setup = snap.get("setup_context") or trade.get("setup_context") or {}
+    return dict(setup) if isinstance(setup, dict) else {}
+
+
+def _setup_state_rank(value: Any) -> int:
+    return _SETUP_STATE_RANK.get(str(value or "").upper(), -1)
+
+
+def _setup_zone_midpoint(setup: Dict[str, Any]) -> float | None:
+    zone = setup.get("poi_zone") or {}
+    try:
+        top = float(zone.get("top"))
+        bottom = float(zone.get("bottom"))
+        if top > 0 and bottom > 0:
+            return (top + bottom) / 2.0
+    except (TypeError, ValueError, AttributeError):
+        pass
+    try:
+        high = float(setup.get("poi_high"))
+        low = float(setup.get("poi_low"))
+        if high > 0 and low > 0:
+            return (high + low) / 2.0
+    except (TypeError, ValueError):
+        pass
+    return None
+
+
+def _setup_sweep_time(setup: Dict[str, Any]) -> datetime | None:
+    details = setup.get("details") or {}
+    if isinstance(details, dict):
+        sweep = details.get("recent_sweep") or {}
+        if isinstance(sweep, dict):
+            return _parse_datetime(sweep.get("time"))
+    return None
+
+
+def _post_exit_revalidation_review(
+    decision: Dict[str, Any],
+    closed_trade: Dict[str, Any],
+    config: Dict[str, Any],
+    *,
+    now: datetime,
+    symbol: str,
+) -> Dict[str, Any]:
+    """Allow same-zone re-entry only when a materially new thesis appears.
+
+    Manual-analyst intent:
+    - do NOT re-enter just because the previous trade closed;
+    - do allow a fresh same-direction entry when there is genuinely new setup
+      evidence: a different POI, a stronger setup-state progression, or a fresh
+      sweep/displacement event after the previous exit.
+    """
+    cfg = (config.get("post_exit_revalidation") or {}) if isinstance(config, dict) else {}
+    if cfg.get("enabled", True) is False:
+        return {"allow": False, "reason": "post-exit revalidation is disabled"}
+
+    new_setup = decision.get("setup_context") or {}
+    old_setup = _trade_setup_context(closed_trade)
+    if not isinstance(new_setup, dict) or not new_setup:
+        return {"allow": False, "reason": "new signal has no rich setup context"}
+    if not old_setup:
+        return {"allow": False, "reason": "previous trade has no setup context to prove a new thesis"}
+
+    new_key = str(new_setup.get("state_key") or "")
+    old_key = str(old_setup.get("state_key") or "")
+    new_type = str(new_setup.get("setup_type") or "")
+    old_type = str(old_setup.get("setup_type") or "")
+    new_poi = str(new_setup.get("poi_type") or "")
+    old_poi = str(old_setup.get("poi_type") or "")
+
+    zone_shift_pts = 0.0
+    new_mid = _setup_zone_midpoint(new_setup)
+    old_mid = _setup_zone_midpoint(old_setup)
+    if new_mid is not None and old_mid is not None:
+        zone_shift_pts = abs(price_to_points(new_mid - old_mid, symbol=symbol))
+    new_poi_min_distance_points = float(cfg.get("new_poi_min_distance_points", 80) or 80)
+    different_poi = bool(
+        new_key and old_key and new_key != old_key and (
+            zone_shift_pts >= new_poi_min_distance_points or new_type != old_type or new_poi != old_poi
+        )
+    )
+
+    old_state_rank = _setup_state_rank(old_setup.get("setup_state"))
+    new_state_rank = _setup_state_rank(new_setup.get("setup_state"))
+    min_state_progress_steps = int(cfg.get("min_state_progress_steps", 1) or 1)
+    state_progressed = new_state_rank >= old_state_rank + min_state_progress_steps
+
+    old_trigger_score = _safe_float(old_setup.get("trigger_score"), 0.0)
+    new_trigger_score = _safe_float(new_setup.get("trigger_score"), 0.0)
+    min_trigger_score_improvement = float(cfg.get("min_trigger_score_improvement", 8) or 8)
+    trigger_improved = new_trigger_score >= old_trigger_score + min_trigger_score_improvement
+    new_trigger_state = str(new_setup.get("trigger_state") or "").upper()
+    old_trigger_state = str(old_setup.get("trigger_state") or "").upper()
+    rejection_upgrade = new_trigger_state == "REJECTION_CONFIRMED" and old_trigger_state != "REJECTION_CONFIRMED"
+
+    old_disp = _safe_float(old_setup.get("displacement_score"), 0.0)
+    new_disp = _safe_float(new_setup.get("displacement_score"), 0.0)
+    min_displacement_improvement = float(cfg.get("min_displacement_improvement", 5) or 5)
+    displacement_improved = new_disp >= old_disp + min_displacement_improvement
+
+    exit_time = _trade_reference_time(closed_trade, now)
+    new_sweep_time = _setup_sweep_time(new_setup)
+    old_sweep_time = _setup_sweep_time(old_setup)
+    fresh_sweep_after_exit = bool(new_sweep_time and new_sweep_time > exit_time and (old_sweep_time is None or new_sweep_time > old_sweep_time))
+
+    old_dom = _safe_float(old_setup.get("thesis_dominance_score"), 0.0)
+    new_dom = _safe_float(new_setup.get("thesis_dominance_score"), 0.0)
+    min_dominance_improvement = float(cfg.get("min_dominance_improvement", 6) or 6)
+    dominance_improved = new_dom >= old_dom + min_dominance_improvement
+
+    if different_poi:
+        return {
+            "allow": True,
+            "reason": f"new POI / state_key detected (zone shift {zone_shift_pts:.0f} pts)",
+        }
+    if state_progressed and (trigger_improved or rejection_upgrade or dominance_improved):
+        return {
+            "allow": True,
+            "reason": "setup state progressed with stronger trigger / thesis quality",
+        }
+    if fresh_sweep_after_exit and (displacement_improved or rejection_upgrade or dominance_improved):
+        return {
+            "allow": True,
+            "reason": "fresh post-exit sweep / displacement created a new same-direction thesis",
+        }
+
+    blockers = []
+    if not different_poi:
+        blockers.append("no materially new POI")
+    if not state_progressed:
+        blockers.append("no stronger setup-state progression")
+    if not fresh_sweep_after_exit:
+        blockers.append("no fresh sweep after the previous exit")
+    if not (trigger_improved or rejection_upgrade):
+        blockers.append("trigger did not improve enough")
+    if not dominance_improved:
+        blockers.append("thesis dominance did not improve enough")
+    return {"allow": False, "reason": "; ".join(blockers[:3])}
 
 
 def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService, config: Dict[str, Any]) -> str | None:
@@ -219,7 +391,13 @@ def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService,
             pts = _points_away(prev_entry)
             if pts > price_zone_points: continue
             cooldown = {"LOSS": cooldown_after_loss, "WIN": cooldown_after_win}.get(outcome, cooldown_after_breakeven)
-            if age_minutes <= cooldown: return f"Duplicate {direction} blocked: recently closed {outcome} trade in same zone."
+            if age_minutes <= cooldown:
+                review = _post_exit_revalidation_review(decision, trade, config, now=now, symbol=symbol)
+                if review.get("allow"):
+                    continue
+                detail = str(review.get("reason") or "").strip()
+                suffix = f" Revalidation: {detail}." if detail else ""
+                return f"Post-exit revalidation blocked: recently closed {outcome} trade in same zone.{suffix}"
     return None
 
 
@@ -1247,7 +1425,9 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Failed to send pending governance message: %s", exc)
 
-            if duplicate_signal_reason(decision, database, config):
+            duplicate_reason = duplicate_signal_reason(decision, database, config)
+            if duplicate_reason:
+                logger.info("Signal blocked for %s %s: %s", decision_type, symbol, duplicate_reason)
                 return
             trade_id = database.new_trade_id()
             decision["trade_id"] = trade_id
