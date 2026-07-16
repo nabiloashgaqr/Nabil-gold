@@ -370,6 +370,15 @@
         },
         "description": "فلتر تكرار احترافي بمفهومين منفصلين: (1) حماية تكديس الصفقات المفتوحة في نفس المنطقة، (2) تبريد واعٍ بالنتيجة للصفقات المغلقة حديثاً في نفس المنطقة. دخول في منطقة سعر مختلفة لا يُحجب. مفاتيح legacy (lookback_minutes/same_direction_price_zone_points) ما زالت مدعومة كـ fallback."
     },
+    "post_exit_revalidation": {
+        "enabled": true,
+        "new_poi_min_distance_points": 80,
+        "min_state_progress_steps": 1,
+        "min_trigger_score_improvement": 8,
+        "min_displacement_improvement": 5,
+        "min_dominance_improvement": 6,
+        "description": "بعد إغلاق صفقة، يُمنع إعادة الدخول سريعاً من نفس المنطقة إلا إذا ظهر Thesis جديد فعلاً: POI/state_key جديد، أو sweep/displacement جديد بعد الخروج، أو تطور setup_state مع trigger أقوى."
+    },
     "quality_score": {
         "enabled": true,
         "description": "يعرض درجة جودة الإشارة في Telegram ولا يمنع الإشارة حالياً"
