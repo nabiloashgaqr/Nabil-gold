@@ -17,7 +17,7 @@ class TelegramService:
     API_BASE = "https://api.telegram.org/bot{token}/{method}"
 
     EVENT_LABELS = {
-        "ORDER_FILLED": "Order Filled",
+        "ORDER_FILLED": "Pending Order Activated",
         "NEAR_TP1": "Near TP1",
         "TP1_HIT": "Take Profit 1 Hit",
         "TP2_HIT": "Take Profit 2 Hit",
@@ -395,15 +395,38 @@ class TelegramService:
             lines.append(strength_line)
         order_kind = str(signal.get("entry_kind") or signal.get("order_type") or entry.get("kind") or "MARKET").upper()
         rr = signal.get("rr_ratio") or signal.get("tp2_rr") or decision.get("planned_rr")
+        entry_price = entry.get('price') or decision.get('current_price')
         lines.extend([
             "──────────────────",
             "🎯 <b>TRADE PLAN</b>",
             f"• <b>Order:</b> {html.escape(trade_type)} {html.escape(order_kind)}",
-            f"• <b>Entry:</b> {self._money(entry.get('price') or decision.get('current_price'), symbol)}",
+            f"• <b>Entry:</b> {self._money(entry_price, symbol)}",
             f"• <b>Stop Loss:</b> {self._money(signal.get('stop_loss'), symbol)}",
             f"• <b>TP1:</b> {self._money(signal.get('tp1'), symbol)}",
             f"• <b>TP2:</b> {self._money(signal.get('tp2'), symbol)}",
         ])
+        if order_kind.endswith("LIMIT") or order_kind.endswith("STOP"):
+            try:
+                curr = float(entry.get('current_price') or decision.get('current_price') or 0)
+                ent = float(entry_price or 0)
+                pts = float(entry.get('distance_points') or 0)
+            except (TypeError, ValueError):
+                curr = 0.0
+                ent = 0.0
+                pts = 0.0
+            activation = "price reaches the entry level"
+            if order_kind == "SELL_LIMIT":
+                activation = f"price rallies up to {ent:.2f}"
+            elif order_kind == "BUY_LIMIT":
+                activation = f"price pulls back down to {ent:.2f}"
+            elif order_kind == "SELL_STOP":
+                activation = f"price breaks down to {ent:.2f}"
+            elif order_kind == "BUY_STOP":
+                activation = f"price breaks up to {ent:.2f}"
+            lines.append("• <b>Status:</b> Pending order — not active yet")
+            if curr > 0:
+                lines.append(f"• <b>Current price:</b> {curr:.2f} · {pts:.0f} pts to activation")
+            lines.append(f"• <b>Activation:</b> This trade activates only when {html.escape(activation)}")
         if rr:
             lines.append(f"• <b>Planned RR:</b> {html.escape(str(rr))}R")
         lines.append("• <b>Protection:</b> SL → entry after +150 pts before TP1")
@@ -536,7 +559,7 @@ class TelegramService:
         if "BE_HIT" in events:
             notes.append("Breakeven stop was hit.")
         if "ORDER_FILLED" in events:
-            notes.append("Pending order filled and is now active.")
+            notes.append("Pending order was activated and is now a live trade.")
         if "EXPIRED" in events:
             notes.append("Trade/order expired by time rule.")
         return notes
