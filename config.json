@@ -100,6 +100,17 @@
             "proximity_bonus_cap": 14,
             "proximity_scale_atr": 1.5
         },
+        "selection": {
+            "max_candidates": 5,
+            "standby_min_dominance_score": 42,
+            "standby_min_relative_to_primary": 0.72,
+            "return_probability_distance_scale_atr": 2.5,
+            "intermediate_poi_penalty": 10,
+            "session_bonus": 6,
+            "previous_day_liquidity_bonus": 8,
+            "session_liquidity_bonus": 6,
+            "description": "Select primary and standby pending thesis by combining POI quality, return probability, and thesis dominance."
+        },
         "trigger_logic": {
             "rejection_wick_body_ratio": 0.75,
             "confirm_close_position": 0.55,
