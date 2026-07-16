@@ -399,7 +399,10 @@ async function loadDashboardData() {
 
         dashboardPayload = payload;
         closedTrades = (payload.closedTrades || []).map(normalizeTrade).filter(t => isClosedStatus(t.status));
-        const activeRows = (payload.liveTrades || payload.activeTrades || []).map(normalizeTrade);
+        // IMPORTANT: [] is truthy in JS. We must prefer activeTrades explicitly,
+        // otherwise an empty liveTrades array would hide pending orders entirely.
+        const rawActive = Array.isArray(payload.activeTrades) ? payload.activeTrades : (payload.liveTrades || []);
+        const activeRows = rawActive.map(normalizeTrade);
         liveTrades = activeRows.filter(t => isLiveStatus(t.status));
         pendingTrades = activeRows.filter(t => isPendingStatus(t.status));
         filteredTrades = [...closedTrades];
