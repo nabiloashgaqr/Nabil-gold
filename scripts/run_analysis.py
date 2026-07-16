@@ -1232,6 +1232,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 [t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol],
                 database=database,
             )
+            decision["pending_governor"] = governance
             action = str(governance.get("action") or "ALLOW_NEW")
             if action == "KEEP_EXISTING_PENDING":
                 logger.info("Pending governor blocked new %s for %s: %s", decision_type, symbol, governance.get("reason"))
@@ -1241,6 +1242,10 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 existing_reasons = list(decision.get("reasons", []))
                 existing_reasons.append(f"Pending governor: {governance.get('reason')}")
                 decision["reasons"] = existing_reasons
+                try:
+                    telegram.send_pending_governance(governance, symbol=symbol, side=decision_type)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed to send pending governance message: %s", exc)
 
             if duplicate_signal_reason(decision, database, config):
                 return
