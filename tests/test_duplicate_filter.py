@@ -162,6 +162,91 @@ def test_closed_out_of_zone_allowed_even_if_recent():
     assert ra.duplicate_signal_reason(_decision("SELL", 4130.0), db, CONFIG) is None
 
 
+def test_recent_closed_trade_uses_close_price_not_old_entry_for_cooldown_zone():
+    # Regression: a trade may have entered far away, then trail out near the
+    # current market. The cooldown must compare against the fresh close area,
+    # not the original far entry, otherwise immediate re-entry slips through.
+    recent = _closed("SL_HIT", 5, price=4040.60, result="WIN")
+    recent["close_price"] = 3992.99
+    db = _FakeDB(recent_trades=[recent])
+    reason = ra.duplicate_signal_reason(_decision("SELL", 3992.76), db, CONFIG)
+    assert reason and "recently closed WIN trade in same zone" in reason
+
+
+def test_post_exit_revalidation_blocks_same_zone_same_thesis_reentry():
+    recent = _closed("SL_HIT", 5, price=4040.60, result="WIN")
+    recent["close_price"] = 3992.99
+    recent["signal_snapshot"] = {
+        "setup_context": {
+            "state_key": "STATE::SELL::A",
+            "setup_type": "STRUCTURE_CONTINUATION",
+            "setup_state": "DETECTED",
+            "poi_type": "order_block",
+            "trigger_state": "AWAY_FROM_POI",
+            "trigger_score": 42,
+            "displacement_score": 10,
+            "thesis_dominance_score": 52,
+            "details": {
+                "recent_sweep": {"time": _iso(_now() - timedelta(minutes=20))}
+            },
+        }
+    }
+    decision = _decision("SELL", 3992.76)
+    decision["setup_context"] = {
+        "state_key": "STATE::SELL::A",
+        "setup_type": "STRUCTURE_CONTINUATION",
+        "setup_state": "DETECTED",
+        "poi_type": "order_block",
+        "trigger_state": "AWAY_FROM_POI",
+        "trigger_score": 44,
+        "displacement_score": 11,
+        "thesis_dominance_score": 53,
+        "details": {
+            "recent_sweep": {"time": _iso(_now() - timedelta(minutes=10))}
+        },
+    }
+    db = _FakeDB(recent_trades=[recent])
+    reason = ra.duplicate_signal_reason(decision, db, CONFIG)
+    assert reason and "Post-exit revalidation blocked" in reason
+
+
+def test_post_exit_revalidation_allows_new_poi_or_stronger_rebuilt_thesis():
+    recent = _closed("SL_HIT", 5, price=4040.60, result="WIN")
+    recent["close_price"] = 3992.99
+    recent["signal_snapshot"] = {
+        "setup_context": {
+            "state_key": "STATE::SELL::A",
+            "setup_type": "STRUCTURE_CONTINUATION",
+            "setup_state": "DETECTED",
+            "poi_type": "order_block",
+            "trigger_state": "AWAY_FROM_POI",
+            "trigger_score": 42,
+            "displacement_score": 10,
+            "thesis_dominance_score": 52,
+            "details": {
+                "recent_sweep": {"time": _iso(_now() - timedelta(minutes=20))}
+            },
+        }
+    }
+    decision = _decision("SELL", 3992.76)
+    decision["setup_context"] = {
+        "state_key": "STATE::SELL::B",
+        "setup_type": "LIQUIDITY_REVERSAL",
+        "setup_state": "ENTRY_ARMED",
+        "poi_type": "fvg",
+        "poi_zone": {"top": 3996.00, "bottom": 3994.00},
+        "trigger_state": "REJECTION_CONFIRMED",
+        "trigger_score": 74,
+        "displacement_score": 22,
+        "thesis_dominance_score": 64,
+        "details": {
+            "recent_sweep": {"time": _iso(_now())}
+        },
+    }
+    db = _FakeDB(recent_trades=[recent])
+    assert ra.duplicate_signal_reason(decision, db, CONFIG) is None
+
+
 def test_closed_beyond_lookback_hours_ignored():
     # Loss in zone but 7 hours ago -> beyond 6-hour lookback -> allowed
     db = _FakeDB(recent_trades=[_closed("SL_HIT", 7 * 60)])
