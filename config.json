@@ -432,6 +432,16 @@
         "description_pending_order_max_cycles": "في وضع hybrid: إذا بقي الأمر المعلق 6 دورات تحليل بدون fill يمكن تحويله إلى MARKET حسب منطق OpenTradesManager.",
         "pending_expire_after_hours": 24,
         "description_pending_expire_after_hours": "إذا بقي أمر LIMIT/STOP معلقاً أكثر من 24 ساعة بدون تفعيل يُلغى تلقائياً كـ EXPIRED بدل أن يبقى للأبد.",
+        "pending_news_hold": {
+            "enabled": true,
+            "reactivation_delay_minutes": 3,
+            "limit_max_drift_points": 30,
+            "stop_max_drift_points": 20,
+            "require_rr_recheck": true,
+            "require_spread_recheck": true,
+            "cancel_if_drift_exceeds": true,
+            "description": "إذا لُمس الأمر المعلق أثناء نافذة منع الأخبار لا يتفعل. يتحول إلى News Hold ثم يُعاد فحص الخبر والـ drift والـ RR بعد انتهاء المنع. إذا بقي صالحاً يدخل MARKET، وإلا يُلغى بأمان."
+        },
         "smart_entry": {
             "enabled": true,
             "fill_at": "mid",
