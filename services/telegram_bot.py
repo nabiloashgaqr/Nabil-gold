@@ -19,6 +19,8 @@ class TelegramService:
     EVENT_LABELS = {
         "ORDER_FILLED": "Pending Order Activated",
         "NEAR_TP1": "Near TP1",
+        "NEWS_HOLD": "Pending Order Paused by News",
+        "PENDING_CANCELLED": "Pending Order Cancelled",
         "TP1_HIT": "Take Profit 1 Hit",
         "TP2_HIT": "Take Profit 2 Hit",
         "SL_HIT": "Stop Loss Hit",
@@ -33,7 +35,7 @@ class TelegramService:
     }
     EVENT_PRIORITY = [
         "TP2_HIT", "TRAILING_SL_HIT", "SL_HIT", "BE_HIT", "TP1_HIT",
-        "MOVE_SL_TO_BE", "TRAILING_SL_UPDATED", "ORDER_FILLED", "EXIT_WARNING",
+        "MOVE_SL_TO_BE", "TRAILING_SL_UPDATED", "ORDER_FILLED", "NEWS_HOLD", "PENDING_CANCELLED", "EXIT_WARNING",
         "LONG_RUNNING", "NEAR_TP1", "EXPIRED", "MANUAL_CLOSE",
     ]
 
@@ -540,6 +542,10 @@ class TelegramService:
 
     def _event_notes(self, events: List[str]) -> List[str]:
         notes = []
+        if "NEWS_HOLD" in events:
+            notes.append("Pending order touched during a blocked news window; activation was paused until post-news recheck.")
+        if "PENDING_CANCELLED" in events:
+            notes.append("Pending order was cancelled after post-news revalidation failed (invalidated, drift too large, or RR degraded).")
         if "EXIT_WARNING" in events:
             notes.append("Exit/risk warning: trade is moving adversely or risk conditions changed.")
         if "LONG_RUNNING" in events:
@@ -609,6 +615,17 @@ class TelegramService:
             actual = updates.get("final_pnl", pnl_points)
             lines.append(f"• <b>Exit Price:</b> {self._money(close_price, symbol)}")
             lines.append(f"• <b>Actual PnL:</b> {self._fmt_points(actual)}")
+        elif "NEWS_HOLD" in events or old_status == "PENDING" or new_status == "PENDING":
+            pts_to_fill = evaluation.get("pending_distance_points")
+            if pts_to_fill is not None:
+                lines.append(f"• <b>Distance to activation:</b> {float(pts_to_fill):.0f} pts")
+            hours_open = evaluation.get("hours_open")
+            if hours_open is not None:
+                lines.append(f"• <b>Waiting:</b> {float(hours_open):.1f}h")
+            if "NEWS_HOLD" in events:
+                lines.append("• <b>Activation:</b> Paused — touched during news blackout")
+            elif "ORDER_FILLED" in events and old_status == "PENDING":
+                lines.append("• <b>Activation:</b> Pending order triggered and is now live")
         else:
             lines.append(f"• <b>Current PnL:</b> {self._fmt_points(pnl_points)}")
 
