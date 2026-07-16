@@ -24,7 +24,7 @@ def test_release_readiness_can_proceed_to_structured_trial(monkeypatch) -> None:
 
     final_eval = {
         "verdict": "READY_FOR_STRUCTURED_TRIAL",
-        "scorecard": {"benchmark_score": 78, "overlap_score": 64, "execution_score": 84},
+        "scorecard": {"benchmark_score": 78, "overlap_score": 64, "overlap_available": True, "execution_score": 84, "governance_score": 68, "governance_available": True},
     }
     tuning = {"actions": [{"key": "minor_1"}], "recommendations": ["minor tune"]}
 
@@ -52,7 +52,7 @@ def test_release_readiness_can_require_tuning(monkeypatch) -> None:
 
     final_eval = {
         "verdict": "PROMISING_BUT_NEEDS_TUNING",
-        "scorecard": {"benchmark_score": 62, "overlap_score": 48, "execution_score": 70},
+        "scorecard": {"benchmark_score": 62, "overlap_score": 48, "overlap_available": True, "execution_score": 70, "governance_score": 60, "governance_available": True},
     }
     tuning = {"actions": [{"key": "a"}, {"key": "b"}, {"key": "c"}], "recommendations": ["fix things"]}
 
@@ -80,7 +80,7 @@ def test_release_readiness_can_hold_for_more_refinement(monkeypatch) -> None:
 
     final_eval = {
         "verdict": "REQUIRES_MORE_REFINEMENT",
-        "scorecard": {"benchmark_score": 35, "overlap_score": 20, "execution_score": 30},
+        "scorecard": {"benchmark_score": 35, "overlap_score": 20, "overlap_available": True, "execution_score": 30, "governance_score": 20, "governance_available": True},
     }
     tuning = {"actions": [{"key": "a"}], "recommendations": ["more work"]}
 
