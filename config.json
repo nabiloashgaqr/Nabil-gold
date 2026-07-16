@@ -321,6 +321,8 @@
         "min_benchmark_score_for_trial": 65,
         "min_overlap_score_for_trial": 45,
         "min_execution_score_for_trial": 55,
+        "min_governance_score_for_trial": 55,
+        "allow_structured_trial_when_no_overlap_labels": true,
         "description": "Final orchestration layer: decide whether to proceed to a structured forward trial, tune first, or hold for more refinement."
     },
     "operations_pipeline": {
