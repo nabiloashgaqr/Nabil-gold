@@ -53,6 +53,45 @@ async function supabaseGet(path, params = {}) {
   return response.json();
 }
 
+async function fetchActiveTrades(limit = 50) {
+  const activeStatuses = [...LIVE_STATUSES, ...PENDING_STATUSES];
+  let lastError = null;
+  try {
+    const rows = await supabaseGet('trades', {
+      select: '*',
+      status: `in.(${activeStatuses.join(',')})`,
+      order: 'created_at.desc',
+      limit,
+    });
+    return Array.isArray(rows) ? rows : [];
+  } catch (err) {
+    lastError = err;
+  }
+  try {
+    const rows = await supabaseGet('active_trades_view', {
+      select: '*',
+      order: 'created_at.desc',
+      limit,
+    });
+    return Array.isArray(rows) ? rows : [];
+  } catch (err) {
+    lastError = err;
+  }
+  try {
+    const rows = await supabaseGet('trades', {
+      select: '*',
+      order: 'created_at.desc',
+      limit: Math.max(limit * 4, 200),
+    });
+    const arr = Array.isArray(rows) ? rows : [];
+    return arr.filter(r => activeStatuses.includes(String(r.status || '').toUpperCase())).slice(0, limit);
+  } catch (err) {
+    lastError = err;
+  }
+  if (lastError) throw lastError;
+  return [];
+}
+
 function normalizePnlByStatus(_status, rawPnl) {
   // Important: SL_HIT is not always a loss.
   // If SL was moved to breakeven/trailing profit, SL_HIT can be BE or SL+.
@@ -435,12 +474,7 @@ module.exports = async function handler(req, res) {
         order: 'closed_at.desc.nullslast,created_at.desc',
         limit,
       }),
-      supabaseGet('trades', {
-        select: '*',
-        status: liveFilter,
-        order: 'created_at.desc',
-        limit: 50,
-      }).catch(() => []),
+      fetchActiveTrades(50).catch(() => []),
       supabaseGet('daily_reports', {
         select: '*',
         order: 'report_date.desc',
