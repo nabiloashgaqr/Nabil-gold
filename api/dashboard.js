@@ -3,7 +3,8 @@
 // Required env in Vercel: SUPABASE_URL and SUPABASE_SERVICE_KEY (or SUPABASE_KEY).
 
 const OUTCOME_STATUSES = ['TP2_HIT', 'SL_HIT', 'BE_HIT', 'EXPIRED', 'MANUAL_CLOSE', 'CLOSED'];
-const LIVE_STATUSES = ['OPEN', 'TP1_HIT', 'PARTIAL', 'PENDING'];
+const LIVE_STATUSES = ['OPEN', 'TP1_HIT', 'PARTIAL'];
+const PENDING_STATUSES = ['PENDING'];
 
 function json(res, status, body) {
   res.statusCode = status;
@@ -361,7 +362,7 @@ function computeAgentPerformance(closedTrades, agentWeights = []) {
   }).sort((a, b) => (b.predictions - a.predictions) || String(a.agent_name).localeCompare(String(b.agent_name)));
 }
 
-function summarize(closedTrades, liveTrades) {
+function summarize(closedTrades, liveTrades, pendingOrders = []) {
   const total = closedTrades.length;
   const wins = closedTrades.filter(t => Number(t.pnl) > 0).length;
   const losses = closedTrades.filter(t => Number(t.pnl) < 0).length;
@@ -371,6 +372,7 @@ function summarize(closedTrades, liveTrades) {
   return {
     closedTrades: total,
     liveTrades: liveTrades.length,
+    pendingOrders: pendingOrders.length,
     tp1Live: liveTrades.filter(t => t.status === 'TP1_HIT').length,
     // Win rate excludes breakeven trades (neither win nor loss)
     beCount: total - wins - losses,
@@ -502,7 +504,9 @@ module.exports = async function handler(req, res) {
     ]);
 
     const closedTrades = (closedRaw || []).map(normalizeTrade);
-    const liveTrades = (liveRaw || []).map(normalizeTrade);
+    const activeRows = (liveRaw || []).map(normalizeTrade);
+    const liveTrades = activeRows.filter(t => LIVE_STATUSES.includes(String(t.status || '').toUpperCase()));
+    const pendingOrders = activeRows.filter(t => PENDING_STATUSES.includes(String(t.status || '').toUpperCase()));
     const agentPerformance = computeAgentPerformance(closedTrades, agentWeights || []);
     const analystOverlap = buildAnalystOverlap(analystComparisons || []);
 
@@ -510,9 +514,11 @@ module.exports = async function handler(req, res) {
       ok: true,
       source: 'supabase',
       generatedAt: new Date().toISOString(),
-      summary: summarize(closedTrades, liveTrades),
+      summary: summarize(closedTrades, liveTrades, pendingOrders),
       closedTrades,
       liveTrades,
+      pendingOrders,
+      activeTrades: activeRows,
       dailyReports: (dailyReports && dailyReports.length ? dailyReports.map(r => ({ ...r, report_type: 'daily', month: String(r.report_date || r.created_at || '').slice(0, 7), report_text: r.report_text || buildDailyReport(r) })) : buildGeneratedDailyReports(closedTrades)),
       weeklyReports: (weeklyReports && weeklyReports.length ? weeklyReports.map(r => ({ ...r, report_type: 'weekly', month: String(r.week_start || r.created_at || '').slice(0, 7) })) : buildGeneratedWeeklyReports(closedTrades)),
       agentPerformance,
