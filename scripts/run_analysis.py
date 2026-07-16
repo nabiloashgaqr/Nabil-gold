@@ -601,50 +601,74 @@ def _build_market_status_message(
     current_price = _safe_float(decision.get("current_price", all_results.get("current_price", 0)), 0.0)
     prices_text = _market_prices_text(config, current_symbol, current_price)
 
-    # ── Open trades summary ──────────────────────────────────────────────
-    open_trades = database.get_open_trades()
+    # ── Open trades / pending orders summary ─────────────────────────────
+    tracked_trades = database.get_open_trades()
     trades_section = ""
-    if open_trades:
+    if tracked_trades:
         from utils.instruments import price_to_points
-        trade_lines: List[str] = []
-        net_pts = 0.0
-        for t in open_trades[:20]:
-            tid = str(t.get("id", ""))
-            short = tid.split("_")[-1] if "_" in tid else (tid[-8:] if len(tid) >= 8 else tid)
-            direction = str(t.get("type") or t.get("side") or "BUY").upper()
-            entry = _safe_float(t.get("entry_price"), 0.0)
-            tp1 = _safe_float(t.get("tp1"), 0.0)
-            pnl_pts = _safe_float(t.get("current_pnl_points"), 0.0)
-            if pnl_pts == 0 and entry > 0 and current_price > 0:
-                raw = (current_price - entry) if direction == "BUY" else (entry - current_price)
-                pnl_pts = price_to_points(raw, symbol=str(t.get("symbol") or current_symbol))
-            net_pts += pnl_pts
-            usd = pnl_pts / 10.0
-            status = str(t.get("status") or "OPEN").upper()
-            marker = "🟢" if pnl_pts > 0 else "🔴" if pnl_pts < 0 else "➖"
-            # TP1 progress
-            prog_txt = ""
-            tp1_dist = abs(price_to_points(tp1 - entry, symbol=str(t.get("symbol") or current_symbol))) if tp1 and entry else 0
-            if tp1_dist > 0 and pnl_pts > 0:
-                pct = min(pnl_pts / tp1_dist * 100, 100)
-                prog_txt = f" · {pct:.0f}%➜TP1"
-            elif tp1 and entry and ((direction == "BUY" and current_price >= tp1) or (direction == "SELL" and current_price <= tp1)):
-                prog_txt = " · ✅TP1"
-            status_txt = "" if status == "OPEN" else f" [{html.escape(status)}]"
-            trade_lines.append(
-                f"{marker} {direction} <code>#{html.escape(short)}</code>  "
-                f"{pnl_pts:+.0f}pts ({usd:+.1f}$){prog_txt}{status_txt}"
-            )
-        if len(open_trades) > 20:
-            trade_lines.append(f"… and {len(open_trades) - 20} more")
-        net_usd = net_pts / 10.0
-        net_marker = "🟢" if net_pts > 0 else "🔴" if net_pts < 0 else "➖"
-        trades_section = (
-            f"──────────────────\n"
-            f"📊 <b>Open Trades ({len(open_trades)})</b>\n"
-            + "\n".join(trade_lines) + "\n"
-            f"{net_marker} <b>Net:</b> {net_pts:+.0f}pts ({net_usd:+.1f}$)\n"
-        )
+        live_statuses = {"OPEN", "PARTIAL", "TP1_HIT"}
+        pending_statuses = {"PENDING"}
+        live_trades = [t for t in tracked_trades if str(t.get("status") or "OPEN").upper() in live_statuses]
+        pending_trades = [t for t in tracked_trades if str(t.get("status") or "").upper() in pending_statuses]
+        parts: List[str] = ["──────────────────"]
+
+        if live_trades:
+            trade_lines: List[str] = []
+            net_pts = 0.0
+            for t in live_trades[:20]:
+                tid = str(t.get("id", ""))
+                short = tid.split("_")[-1] if "_" in tid else (tid[-8:] if len(tid) >= 8 else tid)
+                direction = str(t.get("type") or t.get("side") or "BUY").upper()
+                entry = _safe_float(t.get("entry_price"), 0.0)
+                tp1 = _safe_float(t.get("tp1"), 0.0)
+                pnl_pts = _safe_float(t.get("current_pnl_points"), 0.0)
+                if pnl_pts == 0 and entry > 0 and current_price > 0:
+                    raw = (current_price - entry) if direction == "BUY" else (entry - current_price)
+                    pnl_pts = price_to_points(raw, symbol=str(t.get("symbol") or current_symbol))
+                net_pts += pnl_pts
+                usd = pnl_pts / 10.0
+                status = str(t.get("status") or "OPEN").upper()
+                marker = "🟢" if pnl_pts > 0 else "🔴" if pnl_pts < 0 else "➖"
+                prog_txt = ""
+                tp1_dist = abs(price_to_points(tp1 - entry, symbol=str(t.get("symbol") or current_symbol))) if tp1 and entry else 0
+                if tp1_dist > 0 and pnl_pts > 0:
+                    pct = min(pnl_pts / tp1_dist * 100, 100)
+                    prog_txt = f" · {pct:.0f}%➜TP1"
+                elif tp1 and entry and ((direction == "BUY" and current_price >= tp1) or (direction == "SELL" and current_price <= tp1)):
+                    prog_txt = " · ✅TP1"
+                status_txt = "" if status == "OPEN" else f" [{html.escape(status)}]"
+                trade_lines.append(
+                    f"{marker} {direction} <code>#{html.escape(short)}</code>  "
+                    f"{pnl_pts:+.0f}pts ({usd:+.1f}$){prog_txt}{status_txt}"
+                )
+            if len(live_trades) > 20:
+                trade_lines.append(f"… and {len(live_trades) - 20} more")
+            net_usd = net_pts / 10.0
+            net_marker = "🟢" if net_pts > 0 else "🔴" if net_pts < 0 else "➖"
+            parts.append(f"📊 <b>Open Trades ({len(live_trades)})</b>")
+            parts.extend(trade_lines)
+            parts.append(f"{net_marker} <b>Net:</b> {net_pts:+.0f}pts ({net_usd:+.1f}$)")
+
+        if pending_trades:
+            if live_trades:
+                parts.append("──────────────────")
+            pending_lines: List[str] = []
+            for t in pending_trades[:20]:
+                tid = str(t.get("id", ""))
+                short = tid.split("_")[-1] if "_" in tid else (tid[-8:] if len(tid) >= 8 else tid)
+                direction = str(t.get("type") or t.get("side") or "BUY").upper()
+                entry = _safe_float(t.get("entry_price"), 0.0)
+                status = str(t.get("status") or "PENDING").upper()
+                order_type = str(t.get("order_type") or t.get("order_kind") or status).upper()
+                pending_lines.append(
+                    f"🟡 {direction} <code>#{html.escape(short)}</code> @ {entry:.2f} [{html.escape(order_type)}]"
+                )
+            if len(pending_trades) > 20:
+                pending_lines.append(f"… and {len(pending_trades) - 20} more")
+            parts.append(f"⏳ <b>Pending Orders ({len(pending_trades)})</b>")
+            parts.extend(pending_lines)
+
+        trades_section = "\n".join(parts) + "\n"
 
     # ── Gemini review (keep concise) ─────────────────────────────────────
     gemini_context = ""

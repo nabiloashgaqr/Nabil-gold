@@ -47,17 +47,7 @@ def _short_id(trade_id: str) -> str:
 
 
 def _build_status_message(open_trades, evaluations, current_price: float) -> str:
-    """Build a SHORT hourly status: one line per trade with P/L, plus a total.
-
-    Example:
-        🔄 Trades Update · 14:00 UTC
-        Price 4136.12 · 2 open
-        ───────────────
-        🔴 SELL #7cf3f415  -113 pts (-11.3$) · 0%➜TP1
-        🟢 BUY  #a1b2c3d4  +48 pts (+4.8$) · 36%➜TP1
-        ───────────────
-        Net: -65 pts (-6.5$)
-    """
+    """Build a SHORT hourly status with live trades separated from pending orders."""
     import html as _html
 
     now_txt = datetime.now(timezone.utc).strftime("%H:%M UTC")
@@ -68,24 +58,32 @@ def _build_status_message(open_trades, evaluations, current_price: float) -> str
             "📭 No open trades."
         )
 
-    # Index evaluations by trade id for quick lookup of pnl/progress.
     by_id = {str(ev.get("trade_id")): ev for ev in (evaluations or [])}
+    live_statuses = {"OPEN", "PARTIAL", "TP1_HIT"}
+    pending_statuses = {"PENDING"}
+    live_trades = [t for t in open_trades if str(t.get("status") or "OPEN").upper() in live_statuses]
+    pending_trades = [t for t in open_trades if str(t.get("status") or "").upper() in pending_statuses]
 
+    headline_parts = []
+    if live_trades:
+        headline_parts.append(f"{len(live_trades)} open")
+    if pending_trades:
+        headline_parts.append(f"{len(pending_trades)} pending")
     lines = [
         f"🔄 <b>Trade Update</b> · {now_txt}",
-        f"Price {current_price:.2f} · {len(open_trades)} open",
+        f"Price {current_price:.2f} · {' / '.join(headline_parts) if headline_parts else '0 active'}",
         "───────────────",
     ]
+
     net_points = 0.0
-    for t in open_trades[:20]:
+    for t in live_trades[:20]:
         tid = str(t.get("id", ""))
         ev = by_id.get(tid, {})
         direction = str(t.get("type") or t.get("side") or "BUY").upper()
         pnl = float(ev.get("pnl_points", 0) or 0)
         net_points += pnl
-        usd = pnl / 10.0  # 10 points = 1 USD on gold
+        usd = pnl / 10.0
         sign = "🟢" if pnl > 0 else "🔴" if pnl < 0 else "➖"
-        # Progress toward TP1 (0..100). Show only when meaningful.
         prog = ev.get("progress_to_tp1")
         prog_txt = ""
         if prog is not None:
@@ -99,13 +97,26 @@ def _build_status_message(open_trades, evaluations, current_price: float) -> str
             f"{sign} {direction:<4} <code>{_short_id(tid)}</code>  "
             f"{pnl:+.0f} pts ({usd:+.1f}$){prog_txt}{status_txt}"
         )
-    if len(open_trades) > 20:
-        lines.append(f"… and {len(open_trades) - 20} more")
+    if len(live_trades) > 20:
+        lines.append(f"… and {len(live_trades) - 20} more")
+    if live_trades:
+        net_usd = net_points / 10.0
+        net_emoji = "🟢" if net_points > 0 else "🔴" if net_points < 0 else "➖"
+        lines.append("───────────────")
+        lines.append(f"{net_emoji} <b>Net:</b> {net_points:+.0f} pts ({net_usd:+.1f}$)")
 
-    net_usd = net_points / 10.0
-    net_emoji = "🟢" if net_points > 0 else "🔴" if net_points < 0 else "➖"
-    lines.append("───────────────")
-    lines.append(f"{net_emoji} <b>Net:</b> {net_points:+.0f} pts ({net_usd:+.1f}$)")
+    if pending_trades:
+        if live_trades:
+            lines.append("───────────────")
+        lines.append(f"⏳ <b>Pending Orders ({len(pending_trades)})</b>")
+        for t in pending_trades[:20]:
+            tid = str(t.get("id", ""))
+            direction = str(t.get("type") or t.get("side") or "BUY").upper()
+            entry = float(t.get("entry_price") or 0)
+            order_type = str(t.get("order_type") or t.get("order_kind") or "PENDING").upper()
+            lines.append(f"🟡 {direction:<4} <code>{_short_id(tid)}</code>  @ {entry:.2f} [{_html.escape(order_type)}]")
+        if len(pending_trades) > 20:
+            lines.append(f"… and {len(pending_trades) - 20} more")
     return "\n".join(lines)
 
 
