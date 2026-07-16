@@ -216,6 +216,33 @@ def test_pending_order_expires_after_hours_when_not_filled() -> None:
     assert result["updates"]["result"] == "EXPIRED"
 
 
+def test_pending_touched_during_news_blackout_enters_news_hold() -> None:
+    manager = OpenTradesManager({"order_execution": {"entry_style": "hybrid", "pending_news_hold": {"enabled": True, "reactivation_delay_minutes": 3}}})
+    trade = base_trade(type="SELL", status="PENDING", order_type="SELL_LIMIT", entry_price=2355.0)
+    result = manager.evaluate_trade(trade, 2352.0, candle_high=2355.1, candle_low=2350.0, news_blocked=True, news_context={"market_status": "DANGER"})
+    assert result["new_status"] == "PENDING"
+    assert result["events"] == ["NEWS_HOLD"]
+    runtime = result["updates"]["signal_snapshot"]["pending_runtime"]
+    assert runtime["news_hold_active"] is True
+
+
+def test_pending_news_hold_reactivates_to_market_after_block_clears() -> None:
+    manager = OpenTradesManager({"order_execution": {"entry_style": "hybrid", "pending_news_hold": {"enabled": True, "reactivation_delay_minutes": 0, "limit_max_drift_points": 40}}})
+    trade = base_trade(
+        type="SELL",
+        status="PENDING",
+        order_type="SELL_LIMIT",
+        entry_price=2355.0,
+        stop_loss=2365.0,
+        tp2=2330.0,
+        signal_snapshot={"pending_runtime": {"news_hold_active": True, "touch_time": datetime.now(timezone.utc).isoformat()}},
+    )
+    result = manager.evaluate_trade(trade, 2352.5, candle_high=2354.0, candle_low=2351.0, news_blocked=False)
+    assert result["new_status"] == "OPEN"
+    assert result["events"] == ["ORDER_FILLED"]
+    assert result["updates"]["entry_price"] == 2352.5
+
+
 def test_protected_sell_tp2_has_priority_when_candle_low_hits_tp2_then_rebounds() -> None:
     """Regression: protected SELL should not close at old trailing SL when the
     same candle low already reached TP2, even if it later rebounds above SL.
