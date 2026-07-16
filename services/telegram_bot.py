@@ -605,6 +605,17 @@ class TelegramService:
         except (TypeError, ValueError):
             return "+0.0 pts"
 
+    @staticmethod
+    def _first_reason(*sources: Any) -> str | None:
+        for source in sources:
+            if isinstance(source, list) and source:
+                text = str(source[0]).strip()
+                if text:
+                    return text
+            if isinstance(source, str) and source.strip():
+                return source.strip()
+        return None
+
     def send_trade_events(
         self,
         trade: Dict[str, Any],
@@ -674,6 +685,10 @@ class TelegramService:
                 except (TypeError, ValueError):
                     lines.append(f"• <b>New SL:</b> {self._money(new_sl, symbol)}")
             lines.append("• <b>Trailing rule:</b> 150-point gap / 40-point step")
+        if "PENDING_CANCELLED" in events:
+            cancel_reason = self._first_reason(updates.get("reasons"), trade.get("reasons"))
+            if cancel_reason:
+                lines.append(f"• <b>Cancellation reason:</b> {self._clean_text(cancel_reason)}")
         notes = self._event_notes(events)
         if notes:
             lines.append("──────────────────")
@@ -694,21 +709,30 @@ class TelegramService:
 
     def send_pending_governance(self, governance: Dict[str, Any], *, symbol: str, side: str) -> bool:
         action = str(governance.get("action") or "").upper()
-        if action not in {"REPLACE_PENDING", "CANCEL_PENDING_ALLOW_NEW"}:
+        if action not in {"REPLACE_PENDING", "CANCEL_PENDING_ALLOW_NEW", "KEEP_EXISTING_PENDING"}:
+            return False
+        reason = self._clean_text(governance.get('reason'))
+        if action == "KEEP_EXISTING_PENDING" and "blocked" not in reason.lower():
             return False
         old_id = str(governance.get("old_trade_id") or "")
         short = old_id.split("_")[-1] if "_" in old_id else (old_id[-8:] if len(old_id) >= 8 else old_id or "?")
         old_ctx = governance.get("old_context") or {}
         new_ctx = governance.get("new_context") or {}
-        title = "♻️ <b>Pending Thesis Replaced</b>" if action == "REPLACE_PENDING" else "🚫 <b>Pending Thesis Cancelled</b>"
+        if action == "REPLACE_PENDING":
+            title = "♻️ <b>Pending Thesis Replaced</b>"
+        elif action == "CANCEL_PENDING_ALLOW_NEW":
+            title = "🚫 <b>Pending Thesis Cancelled</b>"
+        else:
+            title = "🛡️ <b>Pending Replacement Blocked</b>"
         lines = [
             title,
             "━━━━━━━━━━━━━━━━━━━━━",
             f"• <b>Symbol:</b> {html.escape(symbol)}",
             f"• <b>Side:</b> {html.escape(side)}",
-            f"• <b>Previous Pending:</b> <code>#{html.escape(short)}</code>",
-            f"• <b>Reason:</b> {self._clean_text(governance.get('reason'))}",
         ]
+        if old_id:
+            lines.append(f"• <b>Previous Pending:</b> <code>#{html.escape(short)}</code>")
+        lines.append(f"• <b>Reason:</b> {reason}")
         if old_ctx or new_ctx:
             lines.append(
                 f"• <b>Dominance:</b> {old_ctx.get('thesis_dominance_score', '--')} → {new_ctx.get('thesis_dominance_score', '--')}"
@@ -717,6 +741,19 @@ class TelegramService:
                 f"• <b>Reach Probability:</b> {old_ctx.get('return_probability_score', '--')} → {new_ctx.get('return_probability_score', '--')}"
             )
         lines.append("━━━━━━━━━━━━━━━━━━━━━")
+        return self.send_message("\n".join(lines), urgent=True)
+
+    def send_revalidation_block(self, *, symbol: str, side: str, entry_price: Any, reason: str) -> bool:
+        lines = [
+            "🛑 <b>Re-entry Blocked</b>",
+            "━━━━━━━━━━━━━━━━━━━━━",
+            f"• <b>Symbol:</b> {html.escape(symbol)}",
+            f"• <b>Side:</b> {html.escape(side)}",
+            f"• <b>Requested Entry:</b> {self._money(entry_price, symbol)}",
+            f"• <b>Reason:</b> {self._clean_text(reason)}",
+            "• <b>Guard:</b> Post-exit revalidation requires a materially new thesis before re-entry.",
+            "━━━━━━━━━━━━━━━━━━━━━",
+        ]
         return self.send_message("\n".join(lines), urgent=True)
 
     def send_error_alert(self, message: str) -> bool:
