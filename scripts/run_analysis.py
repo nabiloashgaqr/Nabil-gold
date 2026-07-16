@@ -35,6 +35,7 @@ from services.market_data import MarketDataService
 from services.telegram_bot import TelegramService, post_news_alert_sent, post_news_alert_record
 from services.learning_service import get_learning_service
 from services.llm_review import get_gemini_review_service
+from services.pending_governor import PendingGovernor
 from services.setup_memory import SetupMemoryService
 from utils.helpers import load_config, setup_logging, get_agent_weights
 from utils.instruments import enabled_instruments, config_for_instrument, normalize_symbol, price_to_points, points_to_price
@@ -1225,7 +1226,24 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             if _cross_block:
                 logger.info("Cross-path distance blocked: %s", _cross_block)
                 return
-            if duplicate_signal_reason(decision, database, config): return
+
+            governance = PendingGovernor(config).review(
+                decision,
+                [t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol],
+                database=database,
+            )
+            action = str(governance.get("action") or "ALLOW_NEW")
+            if action == "KEEP_EXISTING_PENDING":
+                logger.info("Pending governor blocked new %s for %s: %s", decision_type, symbol, governance.get("reason"))
+                return
+            if action in {"REPLACE_PENDING", "CANCEL_PENDING_ALLOW_NEW"}:
+                logger.info("Pending governor action for %s %s: %s", decision_type, symbol, governance.get("reason"))
+                existing_reasons = list(decision.get("reasons", []))
+                existing_reasons.append(f"Pending governor: {governance.get('reason')}")
+                decision["reasons"] = existing_reasons
+
+            if duplicate_signal_reason(decision, database, config):
+                return
             trade_id = database.new_trade_id()
             decision["trade_id"] = trade_id
             delivered = False
