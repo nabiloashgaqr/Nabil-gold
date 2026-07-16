@@ -14,7 +14,7 @@ from typing import Any, Dict
 from services.telegram_bot import TelegramService
 
 
-def _capture_signal(decision: Dict[str, Any]) -> str:
+def _capture_text(callable_name: str, *args, **kwargs) -> str:
     service = TelegramService({"telegram": {"bot_token": None, "chat_id": None}})
     captured: Dict[str, str] = {}
 
@@ -23,8 +23,12 @@ def _capture_signal(decision: Dict[str, Any]) -> str:
         return True
 
     service.send_message = _fake_send  # type: ignore[assignment]
-    service.send_signal(decision)
+    getattr(service, callable_name)(*args, **kwargs)
     return captured["text"]
+
+
+def _capture_signal(decision: Dict[str, Any]) -> str:
+    return _capture_text("send_signal", decision)
 
 
 def _full_decision() -> Dict[str, Any]:
@@ -143,6 +147,58 @@ def test_buy_uses_green_header_emoji():
     decision["ai"] = {"available": True, "signal": "BUY", "confidence": 70}
     text = _capture_signal(decision)
     assert "XAU/USD — BUY" in text and "🟢" in text
+
+
+def test_pending_cancelled_event_surfaces_specific_reason():
+    trade = {
+        "id": "TRADE_PENDING_X",
+        "symbol": "XAU/USD",
+        "type": "SELL",
+        "status": "PENDING",
+        "entry_price": 4040.60,
+    }
+    evaluation = {
+        "old_status": "PENDING",
+        "new_status": "CANCELLED",
+        "hours_open": 0.5,
+        "pending_distance_points": 12.0,
+        "updates": {
+            "reasons": ["Auto market conversion blocked: recent closed WIN trade in same zone; no materially new POI"],
+        },
+    }
+    text = _capture_text("send_trade_events", trade, ["PENDING_CANCELLED"], 3992.76, 0.0, evaluation)
+    assert "Cancellation reason:" in text
+    assert "Auto market conversion blocked" in text
+
+
+def test_pending_governance_can_announce_replacement_blocked():
+    text = _capture_text(
+        "send_pending_governance",
+        {
+            "action": "KEEP_EXISTING_PENDING",
+            "reason": "replacement blocked: no materially new POI",
+            "old_trade_id": "TRADE_OLD_12345678",
+            "old_context": {"thesis_dominance_score": 61, "return_probability_score": 54},
+            "new_context": {"thesis_dominance_score": 70, "return_probability_score": 63},
+        },
+        symbol="XAU/USD",
+        side="SELL",
+    )
+    assert "Pending Replacement Blocked" in text
+    assert "no materially new POI" in text
+
+
+def test_revalidation_block_message_is_clear():
+    text = _capture_text(
+        "send_revalidation_block",
+        symbol="XAU/USD",
+        side="SELL",
+        entry_price=3992.76,
+        reason="Post-exit revalidation blocked: recently closed WIN trade in same zone. Revalidation: no materially new POI.",
+    )
+    assert "Re-entry Blocked" in text
+    assert "Post-exit revalidation blocked" in text
+    assert "materially new thesis" in text
 
 
 # ── Invalidation deduplication (must not just repeat the stop loss) ─────────
