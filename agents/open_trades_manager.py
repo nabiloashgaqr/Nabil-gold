@@ -371,11 +371,15 @@ class OpenTradesManager(BaseAgent):
                 final_pnl = pnl_points
 
         # If a trade is already protected (TP1/BE/trailing phase), use the
-        # candle's favorable extreme to advance TP2/trailing BEFORE checking the
-        # pullback stop. Example for SELL: if the 5m/15m candle first traded down
-        # to 3943 and later rebounded to 3970, the trailing stop must be based on
-        # the 3943 low (low + trailing distance), not on the closing price.
-        # This fixes missed TP2/under-trailed exits when only close was used.
+        # candle's favorable extreme to ADVANCE TP2/trailing, but do NOT allow a
+        # newly tightened trailing stop to be considered "hit" inside the SAME
+        # OHLC candle that created it. With candle data we do not know whether
+        # the rebound/high happened before or after the new favorable low/high.
+        # Using the fresh stop immediately can therefore create false trailing
+        # exits (exactly the "SL hit even though price never came back after the
+        # stop moved" problem). So this cycle may close only on the PERSISTED
+        # stop that already existed before the candle began; any tighter stop is
+        # applied for the next cycle.
         protected_branch_handled = False
         protected_trade = bool(sl_moved_to_entry) and old_status in {"OPEN", "PARTIAL", "TP1_HIT"}
         if protected_trade and new_status in self.OPEN_STATUSES and "EXPIRED" not in events:
@@ -394,12 +398,21 @@ class OpenTradesManager(BaseAgent):
                 partial_close = True
                 # SL is already at entry from early BE — no need to move again.
             else:
-                effective_stop = stop_loss
+                # Legacy compatibility: older rows may have sl_moved_to_entry=True
+                # while stop_loss still shows the original wider SL. In that case
+                # the active protective stop that existed before this candle is
+                # entry, not the stale stored SL value.
+                active_protective_stop = stop_loss
+                if sl_moved_to_entry and not self._beyond_breakeven_or_at(trade_type, stop_loss, entry):
+                    active_protective_stop = entry
+                active_stop_touched = _stop_touched(active_protective_stop)
+
+                trailing_candidate = None
                 if bool(management["trailing_enabled"]) and new_status in self.OPEN_STATUSES and "EXPIRED" not in events:
                     trailing_candidate = self._compute_trailing_stop(
                         trade_type,
                         favorable_price,
-                        stop_loss,
+                        active_protective_stop,
                         entry,
                         symbol,
                         distance_points=float(management["trailing_distance_points"]),
@@ -408,17 +421,19 @@ class OpenTradesManager(BaseAgent):
                     )
                     if trailing_candidate is not None:
                         new_stop_loss = trailing_candidate
-                        effective_stop = trailing_candidate
 
-                effective_sl_touched = _stop_touched(effective_stop)
-                if self._beyond_breakeven(trade_type, effective_stop, entry) and effective_sl_touched:
+                # IMPORTANT: only the stop that was already active before this
+                # candle may close the trade this cycle. The freshly computed
+                # trailing_candidate is just a next-cycle update, not a same-
+                # candle executable stop.
+                if self._beyond_breakeven(trade_type, active_protective_stop, entry) and active_stop_touched:
                     new_status = "SL_HIT"
                     events.append("TRAILING_SL_HIT")
-                    trailing_exit_pnl = calculate_pips(entry, effective_stop, trade_type, symbol)
+                    trailing_exit_pnl = calculate_pips(entry, active_protective_stop, trade_type, symbol)
                     result = "WIN" if trailing_exit_pnl > 0 else "BREAKEVEN"
-                    close_price = effective_stop
+                    close_price = active_protective_stop
                     final_pnl = round(trailing_exit_pnl, 1)
-                elif effective_sl_touched and not self._beyond_breakeven(trade_type, effective_stop, entry):
+                elif active_stop_touched and not self._beyond_breakeven(trade_type, active_protective_stop, entry):
                     new_status = "BE_HIT"
                     events.append("BE_HIT")
                     result = "BREAKEVEN"
