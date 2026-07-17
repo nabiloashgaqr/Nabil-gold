@@ -431,6 +431,67 @@ function summarize(closedTrades, liveTrades, pendingOrders = []) {
   };
 }
 
+function snapshotOfTrade(trade) {
+  const snap = trade.signal_snapshot || {};
+  if (typeof snap === 'string') {
+    try { return JSON.parse(snap); } catch { return {}; }
+  }
+  return snap && typeof snap === 'object' ? snap : {};
+}
+
+function buildScenarioFamilies(activeTrades) {
+  const families = {};
+  (activeTrades || []).forEach(trade => {
+    const snap = snapshotOfTrade(trade);
+    const plan = snap.session_plan || {};
+    const setup = snap.setup_context || {};
+    const runtime = snap.pending_runtime || {};
+    const scenarioId = String(plan.scenario_id || setup.scenario_id || '').trim();
+    if (!scenarioId) return;
+    const family = families[scenarioId] || {
+      scenario_id: scenarioId,
+      symbol: trade.symbol || 'XAU/USD',
+      side: String(trade.type || trade.side || '').toUpperCase(),
+      scenario_type: plan.scenario_type || setup.setup_type || null,
+      planner_confidence: Number(plan.planner_confidence || 0) || 0,
+      live_count: 0,
+      pending_count: 0,
+      stale_pending_count: 0,
+      revalidation_required_count: 0,
+      unreliable_touch_count: 0,
+      roles: [],
+      statuses: [],
+      members: [],
+    };
+    const status = String(trade.status || '').toUpperCase();
+    if (LIVE_STATUSES.includes(status)) family.live_count += 1;
+    if (PENDING_STATUSES.includes(status)) family.pending_count += 1;
+    const freshness = String(runtime.freshness_state || '').toUpperCase();
+    if (freshness === 'STALE') family.stale_pending_count += 1;
+    if (runtime.revalidation_required) family.revalidation_required_count += 1;
+    if (runtime.touch_detection_source_reliable === false) family.unreliable_touch_count += 1;
+    const role = String(setup.pending_plan_role || setup.selection_role || '').toUpperCase();
+    if (role && !family.roles.includes(role)) family.roles.push(role);
+    if (status && !family.statuses.includes(status)) family.statuses.push(status);
+    family.members.push({
+      id: trade.id,
+      role: role || null,
+      status,
+      entry_price: trade.entry_price,
+      freshness_state: freshness || null,
+      revalidation_required: Boolean(runtime.revalidation_required),
+      activation_reason: trade.activation_reason || runtime.activation_reason || null,
+      freshness_reasons: runtime.freshness_reasons || [],
+    });
+    families[scenarioId] = family;
+  });
+  return Object.values(families).sort((a, b) => {
+    if (b.live_count !== a.live_count) return b.live_count - a.live_count;
+    if (b.pending_count !== a.pending_count) return b.pending_count - a.pending_count;
+    return String(a.scenario_id).localeCompare(String(b.scenario_id));
+  });
+}
+
 function buildAnalystOverlap(comparisons) {
   const rows = Array.isArray(comparisons) ? comparisons : [];
   const labelRows = rows.filter(r => r && r.analyst_label_id);
@@ -549,6 +610,7 @@ module.exports = async function handler(req, res) {
     const activeRows = (liveRaw || []).map(normalizeTrade);
     const liveTrades = activeRows.filter(t => LIVE_STATUSES.includes(String(t.status || '').toUpperCase()));
     const pendingOrders = activeRows.filter(t => PENDING_STATUSES.includes(String(t.status || '').toUpperCase()));
+    const scenarioFamilies = buildScenarioFamilies(activeRows);
     const agentPerformance = computeAgentPerformance(closedTrades, agentWeights || []);
     const analystOverlap = buildAnalystOverlap(analystComparisons || []);
 
@@ -561,6 +623,7 @@ module.exports = async function handler(req, res) {
       liveTrades,
       pendingOrders,
       activeTrades: activeRows,
+      scenarioFamilies,
       dailyReports: (dailyReports && dailyReports.length ? dailyReports.map(r => ({ ...r, report_type: 'daily', month: String(r.report_date || r.created_at || '').slice(0, 7), report_text: r.report_text || buildDailyReport(r) })) : buildGeneratedDailyReports(closedTrades)),
       weeklyReports: (weeklyReports && weeklyReports.length ? weeklyReports.map(r => ({ ...r, report_type: 'weekly', month: String(r.week_start || r.created_at || '').slice(0, 7) })) : buildGeneratedWeeklyReports(closedTrades)),
       agentPerformance,
