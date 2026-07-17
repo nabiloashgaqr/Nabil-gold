@@ -149,6 +149,19 @@ def test_buy_uses_green_header_emoji():
     assert "XAU/USD — BUY" in text and "🟢" in text
 
 
+def test_signal_can_show_execution_switch_reason():
+    decision = _full_decision()
+    decision["setup_context"] = {"setup_type": "STRUCTURE_CONTINUATION"}
+    decision["adaptive_execution"] = {
+        "action": "PROMOTE_TO_MARKET",
+        "reason": "market moved 100 pts without fill; promote to market while remaining RR 1.60 is still acceptable",
+    }
+    text = _capture_signal(decision)
+    assert "Execution switch:" in text
+    assert "Promote To Market" in text
+    assert "Execution reason:" in text
+
+
 def test_pending_cancelled_event_surfaces_specific_reason():
     trade = {
         "id": "TRADE_PENDING_X",
