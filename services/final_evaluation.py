@@ -95,7 +95,7 @@ class FinalEvaluationService:
         else:
             lines.append("Analyst Overlap: N/A (no analyst labels in evaluation window)")
         lines.append(
-            f"Scorecard: benchmark={scorecard.get('benchmark_score', 0)}/100 | overlap={scorecard.get('overlap_score', 0)}/100 | execution={scorecard.get('execution_score', 0)}/100 | governance={scorecard.get('governance_score', 0)}/100"
+            f"Scorecard: benchmark={scorecard.get('benchmark_score', 0)}/100 | overlap={scorecard.get('overlap_score', 0)}/100 | execution={scorecard.get('execution_score', 0)}/100 | governance={scorecard.get('governance_score', 0)}/100 | planner={scorecard.get('planner_score', 0)}/100"
         )
         if recommendations:
             lines.append("Recommendations:")
@@ -141,6 +141,17 @@ class FinalEvaluationService:
             governance_score = 50.0
             governance_available = False
 
+        planning = current.get("planning", {}) or {}
+        plan_ready_rate = float(current.get("plan_ready_rate_pct", 0) or planning.get("plan_ready_rate_pct", 0) or 0)
+        standby_ready_rate = float(current.get("standby_ready_rate_pct", 0) or planning.get("standby_ready_rate_pct", 0) or 0)
+        primary_overlap = float((((overlap.get("selection_role_insights") or {}).get("PRIMARY") or {}).get("coverage_rate_pct", 0)) or 0)
+        if planning or plan_ready_rate > 0 or standby_ready_rate > 0:
+            planner_score = max(0.0, min(100.0, plan_ready_rate * 0.55 + standby_ready_rate * 0.20 + primary_overlap * 0.25))
+            planner_available = True
+        else:
+            planner_score = 50.0
+            planner_available = False
+
         return {
             "benchmark_score": round(benchmark_score, 1),
             "overlap_score": round(overlap_score, 1),
@@ -148,6 +159,10 @@ class FinalEvaluationService:
             "execution_score": round(execution_score, 1),
             "governance_score": round(governance_score, 1),
             "governance_available": governance_available,
+            "planner_score": round(planner_score, 1),
+            "planner_available": planner_available,
+            "plan_ready_rate_pct": round(plan_ready_rate, 2),
+            "standby_ready_rate_pct": round(standby_ready_rate, 2),
             "not_filled_ratio": round(not_filled_ratio, 3),
             "primary_fill_rate_pct": round(primary_fill, 2),
         }
@@ -203,7 +218,14 @@ class FinalEvaluationService:
                     recommendations.append("Top miss reason is timing window: refine session-aware trigger logic and setup expiry handling.")
                 elif top == "MISSED_POI_MISMATCH":
                     recommendations.append("Top miss reason is POI mismatch: refine order-block/FVG ranking weights and mitigation penalties.")
+            primary_role = ((overlap.get("selection_role_insights") or {}).get("PRIMARY") or {})
+            if primary_role and float(primary_role.get("coverage_rate_pct", 0) or 0) < 50:
+                recommendations.append("Primary planner zones still miss many analyst ideas; improve morning PRIMARY zone selection before relying on standby ladders.")
+            if bool(scorecard.get("planner_available", False)) and float(scorecard.get("planner_score", 0) or 0) < 55:
+                recommendations.append("Session planner quality is weak; improve morning plan readiness, standby coverage, and early-session scenario mapping.")
         else:
+            if bool(scorecard.get("planner_available", False)) and float(scorecard.get("planner_score", 0) or 0) < 55:
+                recommendations.append("Session planner quality is weak; improve morning plan readiness, standby coverage, and early-session scenario mapping.")
             recommendations.append("Analyst overlap is unavailable in this window; rely on benchmark + execution for now, and add labels later if you want bot-vs-analyst comparison.")
 
         if not recommendations:

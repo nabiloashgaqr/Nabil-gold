@@ -144,6 +144,7 @@ class AnalystDistillationService:
         overlap = matched + partial
         reason_counts = self._reason_breakdown(comparisons + extra_setups)
         setup_insights = self._setup_type_insights(comparisons)
+        selection_role_insights = self._selection_role_insights(comparisons)
         insight_summary = self._insight_summary(reason_counts)
         return {
             "symbol": symbol,
@@ -161,6 +162,7 @@ class AnalystDistillationService:
             "insight_breakdown": reason_counts,
             "top_missed_reasons": insight_summary,
             "setup_type_insights": setup_insights,
+            "selection_role_insights": selection_role_insights,
             "comparisons": comparisons,
             "extra_setup_records": extra_setups,
         }
@@ -261,6 +263,9 @@ class AnalystDistillationService:
             reasons.append("time-window aligned")
 
         summary = ", ".join(reasons) if reasons else "Weak or no overlap"
+        details = setup.get("details") or {}
+        selection = details.get("selection") if isinstance(details, dict) else {}
+        selection_role = str(setup.get("selection_role") or (selection.get("selection_role") if isinstance(selection, dict) else "") or "UNSPECIFIED")
         return {
             "label_id": label.get("id"),
             "setup_id": setup.get("id"),
@@ -274,6 +279,8 @@ class AnalystDistillationService:
             "entry_distance_points": round(entry_distance_points, 1) if entry_distance_points is not None else None,
             "entry_inside_poi": in_zone,
             "time_aligned": time_alignment,
+            "selection_role": selection_role,
+            "setup_state": str(setup.get("setup_state") or "DETECTED"),
         }
 
     def _extra_setup_record(self, setup: Dict[str, Any]) -> Dict[str, Any]:
@@ -358,6 +365,26 @@ class AnalystDistillationService:
             bucket["coverage_rate_pct"] = round(((bucket.get("matched", 0) + bucket.get("partial", 0)) / count) * 100, 1)
         return buckets
 
+    def _selection_role_insights(self, comparisons: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        buckets: Dict[str, Dict[str, Any]] = {}
+        for item in comparisons:
+            payload = item.get("payload") or {}
+            role = str(payload.get("selection_role") or "UNSPECIFIED")
+            bucket = buckets.setdefault(role, {"count": 0, "matched": 0, "partial": 0, "missed": 0})
+            bucket["count"] += 1
+            cls = str(item.get("classification") or "MISSED_BY_BOT")
+            if cls == "MATCHED":
+                bucket["matched"] += 1
+            elif cls == "PARTIAL_MATCH":
+                bucket["partial"] += 1
+            else:
+                bucket["missed"] += 1
+        for bucket in buckets.values():
+            count = max(int(bucket.get("count", 0)), 1)
+            bucket["coverage_rate_pct"] = round(((bucket.get("matched", 0) + bucket.get("partial", 0)) / count) * 100, 1)
+            bucket["match_rate_pct"] = round((bucket.get("matched", 0) / count) * 100, 1)
+        return buckets
+
     def _insight_summary(self, reason_counts: Dict[str, int]) -> List[Dict[str, Any]]:
         return [
             {"reason_code": reason, "count": count}
@@ -377,7 +404,13 @@ class AnalystDistillationService:
         if reasons:
             compact = ", ".join(f"{item.get('reason_code')} ({item.get('count')})" for item in reasons[:3])
             lines.append(f"Top reasons: {compact}")
-        return lines[:3]
+        role_insights = summary.get("selection_role_insights") or {}
+        primary = role_insights.get("PRIMARY") or {}
+        if primary:
+            lines.append(
+                f"Primary planner overlap: match {primary.get('match_rate_pct', 0)}% | coverage {primary.get('coverage_rate_pct', 0)}%"
+            )
+        return lines[:4]
 
     def _normalize_label(
         self,

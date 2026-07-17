@@ -665,6 +665,13 @@ class TelegramService:
                 lines.append("• <b>Activation:</b> Paused — touched during news blackout")
             elif "ORDER_FILLED" in events and old_status == "PENDING":
                 lines.append("• <b>Activation:</b> Pending order triggered and is now live")
+                activation_reason = updates.get("activation_reason")
+                if activation_reason:
+                    lines.append(f"• <b>Activation review:</b> {self._clean_text(activation_reason)}")
+                scenario_gov = evaluation.get("scenario_governor") or {}
+                cancelled_siblings = scenario_gov.get("cancelled_ids") or []
+                if cancelled_siblings:
+                    lines.append(f"• <b>Scenario family:</b> {len(cancelled_siblings)} sibling pending order(s) cancelled")
         else:
             lines.append(f"• <b>Current PnL:</b> {self._fmt_points(pnl_points)}")
 
@@ -740,6 +747,39 @@ class TelegramService:
             lines.append(
                 f"• <b>Reach Probability:</b> {old_ctx.get('return_probability_score', '--')} → {new_ctx.get('return_probability_score', '--')}"
             )
+        lines.append("━━━━━━━━━━━━━━━━━━━━━")
+        return self.send_message("\n".join(lines), urgent=True)
+
+    def send_scenario_governance(self, governance: Dict[str, Any], *, symbol: str, side: str) -> bool:
+        action = str(governance.get("action") or "").upper()
+        if action not in {"REPLACE_PENDING_FAMILY", "CANCELLED_SIBLINGS_ON_ACTIVATION", "KEEP_EXISTING_FAMILY"}:
+            return False
+        reason = self._clean_text(governance.get("reason"))
+        if action == "KEEP_EXISTING_FAMILY" and not reason:
+            return False
+        if action == "REPLACE_PENDING_FAMILY":
+            title = "🧭 <b>Scenario Family Replaced</b>"
+        elif action == "CANCELLED_SIBLINGS_ON_ACTIVATION":
+            title = "🪄 <b>Scenario Siblings Cancelled</b>"
+        else:
+            title = "🛡️ <b>Scenario Family Kept</b>"
+        lines = [
+            title,
+            "━━━━━━━━━━━━━━━━━━━━━",
+            f"• <b>Symbol:</b> {html.escape(symbol)}",
+            f"• <b>Side:</b> {html.escape(side)}",
+        ]
+        if governance.get("old_scenario_id") or governance.get("scenario_id"):
+            lines.append(
+                f"• <b>Scenario:</b> {self._clean_text(governance.get('old_scenario_id') or governance.get('scenario_id'))}"
+            )
+        if governance.get("new_scenario_id"):
+            lines.append(f"• <b>New Scenario:</b> {self._clean_text(governance.get('new_scenario_id'))}")
+        if reason:
+            lines.append(f"• <b>Reason:</b> {reason}")
+        cancelled = governance.get("cancelled_ids") or []
+        if cancelled:
+            lines.append(f"• <b>Pending Orders Cancelled:</b> {len(cancelled)}")
         lines.append("━━━━━━━━━━━━━━━━━━━━━")
         return self.send_message("\n".join(lines), urgent=True)
 

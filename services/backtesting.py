@@ -24,6 +24,7 @@ from agents.price_action_agent import PriceActionAgent
 from agents.risk_management_agent import RiskManagementAgent
 from agents.smc_agent import SMCAgent
 from agents.technical_agent import TechnicalAgent
+from services.session_planner import SessionPlannerService
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,10 @@ class BacktestTrade:
     trigger_state: str
     trigger_score: float
     selection_role: str
+    session_plan_ready: bool
+    planner_confidence: float
+    scenario_id: str
+    standby_available: bool
     return_probability_score: float
     thesis_dominance_score: float
     expected_revisit_window: str
@@ -102,10 +107,18 @@ class BacktestEngine:
             raise ValueError(f"Not enough candles for backtest: {len(self.candles)}")
 
         trades: List[BacktestTrade] = []
+        plan_stats: Dict[str, Any] = {
+            "windows_analyzed": 0,
+            "plans_ready": 0,
+            "standby_ready": 0,
+            "blocked_reasons": {},
+            "scenario_types": {},
+        }
         i = window
         while i < len(self.candles) - horizon and len(trades) < max_trades:
             try:
                 context = self._build_context(i, window)
+                self._observe_plan(context.get("session_plan", {}), plan_stats)
                 decision = self._make_decision(context)
                 signal = str(decision.get("decision", "WAIT")).upper()
                 risk = context.get("risk", {}) or {}
@@ -121,7 +134,7 @@ class BacktestEngine:
                 self.logger.debug("Backtest step failed at index %s: %s", i, exc)
                 i += step
 
-        return self._report(trades, window=window, step=step, horizon=horizon, max_trades=max_trades)
+        return self._report(trades, planning=plan_stats, window=window, step=step, horizon=horizon, max_trades=max_trades)
 
     def _build_context(self, end_index: int, window: int) -> Dict[str, Any]:
         sample = self.candles[end_index - window : end_index]
@@ -152,13 +165,19 @@ class BacktestEngine:
             "session": {"trading_allowed": True, "allow_signals": True, "session_quality": "HIGH", "current_session": "Backtest"},
             "news": {"market_status": "SAFE", "can_trade": True, "summary": "backtest_no_news"},
         }
+        try:
+            results["session_plan"] = SessionPlannerService(self.config).build_plan(results, persist=False)
+        except Exception:  # noqa: BLE001
+            results["session_plan"] = {"enabled": True, "plan_ready": False, "plan_status": "ERROR", "plan_reason": "planner_failed"}
         results["risk"] = RiskManagementAgent(self.config).evaluate(results)
         return results
 
     def _make_decision(self, context: Dict[str, Any]) -> Dict[str, Any]:
         agent = DecisionAgent(self.config)
         analysis = agent.analyze(context)
-        return agent._to_trade_decision(analysis, context)  # Internal formatter reused intentionally.
+        decision = agent._to_trade_decision(analysis, context)  # Internal formatter reused intentionally.
+        decision["session_plan"] = context.get("session_plan", {})
+        return decision
 
     def _simulate_trade(
         self,
@@ -181,7 +200,12 @@ class BacktestEngine:
         profile = (decision.get("strategy_profile") or {}).get("name") or "classic_consensus"
         setup_context = decision.get("setup_context") or {}
         quality = decision.get("quality", {}) or {}
+        plan = decision.get("session_plan") or {}
         selection_role = str(setup_context.get("selection_role") or "UNSPECIFIED")
+        session_plan_ready = bool(plan.get("plan_ready", False))
+        planner_confidence = float(plan.get("planner_confidence") or 0)
+        scenario_id = str(plan.get("scenario_id") or setup_context.get("scenario_id") or "")
+        standby_available = bool((plan.get("standby_poi") if isinstance(plan, dict) else None))
         return_probability_score = float(setup_context.get("return_probability_score") or 0)
         thesis_dominance_score = float(setup_context.get("thesis_dominance_score") or 0)
         expected_revisit_window = str(setup_context.get("expected_revisit_window") or "UNKNOWN")
@@ -213,6 +237,10 @@ class BacktestEngine:
                 trigger_state=str(setup_context.get("trigger_state") or ""),
                 trigger_score=float(setup_context.get("trigger_score") or 0),
                 selection_role=selection_role,
+                session_plan_ready=session_plan_ready,
+                planner_confidence=planner_confidence,
+                scenario_id=scenario_id,
+                standby_available=standby_available,
                 return_probability_score=return_probability_score,
                 thesis_dominance_score=thesis_dominance_score,
                 expected_revisit_window=expected_revisit_window,
@@ -278,6 +306,10 @@ class BacktestEngine:
             trigger_state=str(setup_context.get("trigger_state") or ""),
             trigger_score=float(setup_context.get("trigger_score") or 0),
             selection_role=selection_role,
+            session_plan_ready=session_plan_ready,
+            planner_confidence=planner_confidence,
+            scenario_id=scenario_id,
+            standby_available=standby_available,
             return_probability_score=return_probability_score,
             thesis_dominance_score=thesis_dominance_score,
             expected_revisit_window=expected_revisit_window,
@@ -320,6 +352,22 @@ class BacktestEngine:
         if signal == "BUY":
             return low <= entry
         return high >= entry
+
+    def _observe_plan(self, plan: Dict[str, Any], stats: Dict[str, Any]) -> None:
+        stats["windows_analyzed"] = int(stats.get("windows_analyzed", 0) or 0) + 1
+        if not isinstance(plan, dict):
+            reason = "planner_missing"
+            stats.setdefault("blocked_reasons", {})[reason] = stats.setdefault("blocked_reasons", {}).get(reason, 0) + 1
+            return
+        if plan.get("plan_ready"):
+            stats["plans_ready"] = int(stats.get("plans_ready", 0) or 0) + 1
+            if plan.get("standby_poi"):
+                stats["standby_ready"] = int(stats.get("standby_ready", 0) or 0) + 1
+            scenario = str(plan.get("scenario_type") or "UNKNOWN")
+            stats.setdefault("scenario_types", {})[scenario] = stats.setdefault("scenario_types", {}).get(scenario, 0) + 1
+            return
+        reason = str(plan.get("plan_reason") or plan.get("plan_status") or "not_ready")
+        stats.setdefault("blocked_reasons", {})[reason] = stats.setdefault("blocked_reasons", {}).get(reason, 0) + 1
 
     def _bucket_breakdown(self, trades: List[BacktestTrade], attr: str) -> Dict[str, Dict[str, Any]]:
         buckets: Dict[str, Dict[str, Any]] = {}
@@ -378,6 +426,12 @@ class BacktestEngine:
         standby = [t for t in trades if str(t.selection_role).upper() == "STANDBY"]
         primary_filled = [t for t in primary if t.filled]
         standby_filled = [t for t in standby if t.filled]
+        planning = dict(params.get("planning") or {})
+        windows_analyzed = int(planning.get("windows_analyzed", 0) or 0)
+        plans_ready = int(planning.get("plans_ready", 0) or 0)
+        standby_ready = int(planning.get("standby_ready", 0) or 0)
+        plan_ready_rate_pct = round((plans_ready / windows_analyzed * 100) if windows_analyzed else 0, 2)
+        standby_ready_rate_pct = round((standby_ready / plans_ready * 100) if plans_ready else 0, 2)
         report = {
             "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
             "variant": self.variant_name,
@@ -400,9 +454,20 @@ class BacktestEngine:
                 "avg_trigger_score": round(sum(t.trigger_score for t in trades) / len(trades), 2) if trades else 0,
                 "avg_return_probability_score": round(sum(t.return_probability_score for t in trades) / len(trades), 2) if trades else 0,
                 "avg_thesis_dominance_score": round(sum(t.thesis_dominance_score for t in trades) / len(trades), 2) if trades else 0,
+                "plan_ready_rate_pct": plan_ready_rate_pct,
+                "standby_ready_rate_pct": standby_ready_rate_pct,
                 "primary_fill_rate_pct": round((len(primary_filled) / len(primary) * 100) if primary else 0, 2),
                 "primary_win_rate_pct": round((len([t for t in primary_filled if t.pnl_points > 0]) / len(primary_filled) * 100) if primary_filled else 0, 2),
                 "standby_fill_rate_pct": round((len(standby_filled) / len(standby) * 100) if standby else 0, 2),
+                "planning": {
+                    "windows_analyzed": windows_analyzed,
+                    "plans_ready": plans_ready,
+                    "standby_ready": standby_ready,
+                    "plan_ready_rate_pct": plan_ready_rate_pct,
+                    "standby_ready_rate_pct": standby_ready_rate_pct,
+                    "blocked_reasons": planning.get("blocked_reasons", {}),
+                    "scenario_types": planning.get("scenario_types", {}),
+                },
                 "pending_governance": {
                     "primary_candidates": len(primary),
                     "standby_candidates": len(standby),
@@ -456,6 +521,8 @@ def benchmark_backtests(
         "not_filled_delta": int(current.get("not_filled", 0) or 0) - int(baseline.get("not_filled", 0) or 0),
         "primary_fill_rate_delta": round(float(current.get("primary_fill_rate_pct", 0)) - float(baseline.get("primary_fill_rate_pct", 0)), 2),
         "avg_dominance_delta": round(float(current.get("avg_thesis_dominance_score", 0)) - float(baseline.get("avg_thesis_dominance_score", 0)), 2),
+        "plan_ready_rate_delta": round(float(current.get("plan_ready_rate_pct", 0)) - float(baseline.get("plan_ready_rate_pct", 0)), 2),
+        "standby_ready_rate_delta": round(float(current.get("standby_ready_rate_pct", 0)) - float(baseline.get("standby_ready_rate_pct", 0)), 2),
     }
     return {
         "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
@@ -509,6 +576,7 @@ def format_backtest_telegram(report: Dict[str, Any]) -> str:
                 f"Δ Profit Factor: {float(cmp.get('profit_factor_delta', 0)):+.2f}",
                 f"Δ Filled Trades: {int(cmp.get('filled_trades_delta', 0)):+d} | Δ Not-filled: {int(cmp.get('not_filled_delta', 0)):+d}",
                 f"Δ Primary Fill Rate: {float(cmp.get('primary_fill_rate_delta', 0)):+.2f}% | Δ Dominance: {float(cmp.get('avg_dominance_delta', 0)):+.2f}",
+                f"Δ Plan Ready: {float(cmp.get('plan_ready_rate_delta', 0)):+.2f}% | Δ Standby Ready: {float(cmp.get('standby_ready_rate_delta', 0)):+.2f}%",
                 "━━━━━━━━━━━━━━━━━━━━",
                 "Baseline = classic consensus + market execution only.",
             ]
@@ -526,6 +594,7 @@ def format_backtest_telegram(report: Dict[str, Any]) -> str:
             f"⚖️ Profit Factor: {s.get('profit_factor', 0)}",
             f"📉 Max DD: {s.get('max_drawdown_points', 0)} points",
             f"⭐ Avg Quality: {s.get('avg_quality_score', 0)}% | Trigger {s.get('avg_trigger_score', 0)}",
+            f"🗺️ Plan Ready: {s.get('plan_ready_rate_pct', 0)}% | Standby Ready: {s.get('standby_ready_rate_pct', 0)}%",
             "",
             f"BUY: {by_signal.get('BUY', {}).get('filled', 0)} filled | Net {float(by_signal.get('BUY', {}).get('net_points', 0)):+.0f}",
             f"SELL: {by_signal.get('SELL', {}).get('filled', 0)} filled | Net {float(by_signal.get('SELL', {}).get('net_points', 0)):+.0f}",
