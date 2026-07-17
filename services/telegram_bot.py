@@ -229,8 +229,8 @@ class TelegramService:
 
     def _setup_lines(self, decision: Dict[str, Any], signal: Dict[str, Any]) -> List[str]:
         setup = decision.get("setup_context") or {}
-        if not isinstance(setup, dict) or not setup:
-            return []
+        if not isinstance(setup, dict):
+            setup = {}
         lines: List[str] = []
         setup_type = setup.get("setup_type")
         setup_state = setup.get("setup_state")
@@ -301,6 +301,13 @@ class TelegramService:
             lines.append(
                 f"• <b>Dominance:</b> old {old_ctx.get('thesis_dominance_score', '--')} → new {new_ctx.get('thesis_dominance_score', '--')}"
             )
+        adaptive = decision.get("adaptive_execution") or {}
+        if isinstance(adaptive, dict) and adaptive.get("action"):
+            lines.append(
+                f"• <b>Execution switch:</b> {html.escape(str(adaptive.get('action')).replace('_', ' ').title())}"
+            )
+            if adaptive.get("reason"):
+                lines.append(f"• <b>Execution reason:</b> {self._clean_text(adaptive.get('reason'))}")
         invalidation = (decision.get("ai") or {}).get("invalidation") or setup.get("invalidation") or setup.get("entry_reason")
         if self._should_show_invalidation(invalidation, signal.get("stop_loss")):
             label = "Invalidation" if (decision.get("ai") or {}).get("invalidation") else "Structural trigger"
