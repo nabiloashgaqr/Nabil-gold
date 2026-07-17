@@ -11,7 +11,7 @@ sys.path.append(str(ROOT))
 
 from agents.open_trades_manager import OpenTradesManager
 from services.database import DatabaseService
-from utils.helpers import save_trades
+from utils.helpers import load_trades, save_trades
 
 
 def base_trade(**overrides):
@@ -201,12 +201,68 @@ def test_same_candle_touching_tp_and_sl_uses_conservative_stop_priority() -> Non
 
 
 def test_pending_sell_limit_fills_from_candle_high_touch() -> None:
-    manager = OpenTradesManager({"order_execution": {"entry_style": "market"}})
-    trade = base_trade(type="SELL", status="PENDING", order_type="SELL_LIMIT", entry_price=2355.0)
+    manager = OpenTradesManager({"pending_freshness": {"enabled": False}, "order_execution": {"entry_style": "market"}})
+    trade = base_trade(type="SELL", status="PENDING", order_type="SELL_LIMIT", entry_price=2355.0, tp1=2350.0, tp2=2345.0)
     # Close is below entry, but high touched the pending sell limit.
     result = manager.evaluate_trade(trade, 2352.0, candle_high=2355.1, candle_low=2350.0)
     assert result["new_status"] == "OPEN"
     assert result["events"] == ["ORDER_FILLED"]
+
+
+def test_scenario_governor_cancels_pending_sibling_after_fill(tmp_path: Path) -> None:
+    db = _db(tmp_path)
+    manager = OpenTradesManager({"pending_freshness": {"enabled": False}, "order_execution": {"entry_style": "market"}})
+    primary = base_trade(
+        id="P1",
+        symbol="XAU/USD",
+        type="SELL",
+        status="PENDING",
+        order_type="SELL_LIMIT",
+        entry_price=2355.0,
+        tp1=2350.0,
+        tp2=2345.0,
+        signal_snapshot={
+            "session_plan": {"scenario_id": "SCENARIO::A"},
+            "setup_context": {"scenario_id": "SCENARIO::A", "pending_plan_role": "PRIMARY"},
+        },
+    )
+    standby = base_trade(
+        id="P2",
+        symbol="XAU/USD",
+        type="SELL",
+        status="PENDING",
+        order_type="SELL_LIMIT",
+        entry_price=2360.0,
+        tp1=2355.0,
+        tp2=2350.0,
+        signal_snapshot={
+            "session_plan": {"scenario_id": "SCENARIO::A"},
+            "setup_context": {"scenario_id": "SCENARIO::A", "pending_plan_role": "STANDBY"},
+        },
+    )
+    save_trades([primary, standby], db.local_path)
+    evaluations = manager.update_trades([primary, standby], 2352.0, candle_high=2355.1, candle_low=2350.0, database=db)
+    statuses = {t["id"]: t["status"] for t in load_trades(db.local_path)}
+    assert statuses["P1"] == "OPEN"
+    assert statuses["P2"] == "CANCELLED"
+    filled_eval = next(ev for ev in evaluations if ev["trade_id"] == "P1")
+    assert filled_eval["scenario_governor"]["action"] == "CANCELLED_SIBLINGS_ON_ACTIVATION"
+
+
+def test_pending_touch_not_activated_from_quote_fallback_source() -> None:
+    manager = OpenTradesManager({"pending_freshness": {"enabled": False}, "order_execution": {"entry_style": "market"}})
+    trade = base_trade(type="SELL", status="PENDING", order_type="SELL_LIMIT", entry_price=2355.0, tp1=2350.0, tp2=2345.0)
+    result = manager.evaluate_trade(
+        trade,
+        2352.0,
+        candle_high=2355.1,
+        candle_low=2350.0,
+        market_data_source="swissquote_spot_quote_fallback",
+    )
+    assert result["new_status"] == "PENDING"
+    runtime = result["updates"]["signal_snapshot"]["pending_runtime"]
+    assert runtime["touch_detection_source_reliable"] is False
+    assert runtime["touch_detection_waiting_for_reliable_ohlc"] is True
 
 
 def test_pending_order_expires_after_hours_when_not_filled() -> None:
@@ -222,6 +278,63 @@ def test_pending_order_expires_after_hours_when_not_filled() -> None:
     assert result["new_status"] == "EXPIRED"
     assert result["events"] == ["EXPIRED"]
     assert result["updates"]["result"] == "EXPIRED"
+
+
+def test_pending_freshness_marks_stale_after_large_excursion_without_fill() -> None:
+    manager = OpenTradesManager({
+        "schedule": {"timezone": "Asia/Hebron"},
+        "pending_freshness": {
+            "enabled": True,
+            "aging_after_hours": 2,
+            "stale_after_hours": 6,
+            "stale_after_excursion_points": 250,
+            "stale_after_target_progress_pct": 60,
+            "mark_revalidation_required_on_session_change": False,
+        },
+        "order_execution": {"entry_style": "hybrid", "pending_order_max_cycles": 99, "pending_expire_after_hours": 24},
+    })
+    trade = base_trade(
+        type="SELL",
+        status="PENDING",
+        order_type="SELL_LIMIT",
+        entry_price=4006.0,
+        tp1=3990.0,
+        tp2=3965.0,
+        signal_snapshot={"session_info": {"current_session": "London + New York Afternoon"}},
+    )
+    result = manager.evaluate_trade(trade, 3960.0, candle_high=3965.0, candle_low=3958.0)
+    runtime = result["updates"]["signal_snapshot"]["pending_runtime"]
+    assert result["new_status"] == "PENDING"
+    assert runtime["freshness_state"] == "STALE"
+    assert runtime["revalidation_required"] is True
+    assert runtime["max_excursion_points"] >= 460.0
+    assert runtime["target_progress_pct"] >= 60.0
+
+
+def test_pending_freshness_marks_revalidation_required_after_plan_expiry() -> None:
+    manager = OpenTradesManager({
+        "schedule": {"timezone": "Asia/Hebron"},
+        "pending_freshness": {"enabled": True},
+        "order_execution": {"entry_style": "hybrid", "pending_order_max_cycles": 99, "pending_expire_after_hours": 24},
+    })
+    expired = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    trade = base_trade(
+        type="SELL",
+        status="PENDING",
+        order_type="SELL_LIMIT",
+        entry_price=4006.0,
+        tp1=3990.0,
+        tp2=3965.0,
+        signal_snapshot={
+            "session_info": {"current_session": "London + New York Afternoon"},
+            "session_plan": {"plan_expires_at": expired},
+        },
+    )
+    result = manager.evaluate_trade(trade, 3998.0, candle_high=4000.0, candle_low=3997.0)
+    runtime = result["updates"]["signal_snapshot"]["pending_runtime"]
+    assert runtime["freshness_state"] == "REVALIDATION_REQUIRED"
+    assert runtime["revalidation_required"] is True
+    assert any("expired" in str(x).lower() for x in runtime["freshness_reasons"])
 
 
 def test_pending_touched_during_news_blackout_enters_news_hold() -> None:
@@ -249,6 +362,66 @@ def test_pending_news_hold_reactivates_to_market_after_block_clears() -> None:
     assert result["new_status"] == "OPEN"
     assert result["events"] == ["ORDER_FILLED"]
     assert result["updates"]["entry_price"] == 2352.5
+
+
+def test_stale_pending_touch_is_cancelled_without_fresh_confirmation() -> None:
+    manager = OpenTradesManager({
+        "pending_freshness": {
+            "enabled": True,
+            "stale_after_excursion_points": 250,
+            "touch_revalidation": {
+                "enabled": True,
+                "min_confirmation_points": 15,
+                "limit_max_drift_points": 40,
+            },
+        },
+        "order_execution": {"entry_style": "hybrid", "pending_order_max_cycles": 99, "pending_expire_after_hours": 24},
+    })
+    trade = base_trade(
+        type="SELL",
+        status="PENDING",
+        order_type="SELL_LIMIT",
+        entry_price=4006.0,
+        stop_loss=4022.0,
+        tp1=3990.0,
+        tp2=3960.0,
+        signal_snapshot={"pending_runtime": {"max_excursion_points": 460.0}},
+    )
+    result = manager.evaluate_trade(trade, 4005.8, candle_high=4006.3, candle_low=4002.0)
+    assert result["new_status"] == "CANCELLED"
+    assert result["events"] == ["PENDING_CANCELLED"]
+    assert "Delayed touch revalidation failed" in result["updates"]["reasons"][0]
+
+
+def test_stale_pending_touch_can_activate_after_successful_revalidation() -> None:
+    manager = OpenTradesManager({
+        "pending_freshness": {
+            "enabled": True,
+            "stale_after_excursion_points": 250,
+            "touch_revalidation": {
+                "enabled": True,
+                "min_confirmation_points": 15,
+                "limit_max_drift_points": 40,
+            },
+        },
+        "risk_settings": {"min_rr_ratio": 1.5},
+        "order_execution": {"entry_style": "hybrid", "pending_order_max_cycles": 99, "pending_expire_after_hours": 24},
+    })
+    trade = base_trade(
+        type="SELL",
+        status="PENDING",
+        order_type="SELL_LIMIT",
+        entry_price=4006.0,
+        stop_loss=4022.0,
+        tp1=3990.0,
+        tp2=3960.0,
+        signal_snapshot={"pending_runtime": {"max_excursion_points": 300.0}},
+    )
+    result = manager.evaluate_trade(trade, 4003.0, candle_high=4006.2, candle_low=3998.0)
+    assert result["new_status"] == "OPEN"
+    assert result["events"] == ["ORDER_FILLED"]
+    assert result["updates"]["entry_price"] == 4003.0
+    assert "Delayed touch revalidated" in result["updates"]["activation_reason"]
 
 
 def test_pending_auto_market_conversion_blocked_without_new_post_exit_thesis(tmp_path: Path) -> None:

@@ -62,6 +62,9 @@ def test_backtest_report_has_setup_profile_breakdowns() -> None:
     assert "by_entry_kind" in summary
     assert "by_selection_role" in summary
     assert "pending_governance" in summary
+    assert "planning" in summary
+    assert "plan_ready_rate_pct" in summary
+    assert "standby_ready_rate_pct" in summary
     assert "avg_return_probability_score" in summary
     assert "avg_thesis_dominance_score" in summary
 
@@ -83,5 +86,7 @@ def test_benchmark_backtests_returns_variant_comparison() -> None:
     assert "win_rate_delta" in report["comparison"]
     assert "primary_fill_rate_delta" in report["comparison"]
     assert "avg_dominance_delta" in report["comparison"]
+    assert "plan_ready_rate_delta" in report["comparison"]
+    assert "standby_ready_rate_delta" in report["comparison"]
     assert report["variants"]["current_engine"]["variant"] == "current_engine"
     assert report["variants"]["baseline_classic_market"]["variant"] == "baseline_classic_market"

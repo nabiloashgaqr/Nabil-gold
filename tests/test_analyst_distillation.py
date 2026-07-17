@@ -54,6 +54,7 @@ def test_best_match_scores_direction_setup_and_entry_proximity(tmp_path: Path) -
         "setup_type": "LIQUIDITY_REVERSAL",
         "poi_type": "order_block",
         "sweep_side": "buy_side",
+        "selection_role": "PRIMARY",
         "entry_price": 4065.4,
         "poi_low": 4063.4,
         "poi_high": 4066.2,
@@ -63,6 +64,7 @@ def test_best_match_scores_direction_setup_and_entry_proximity(tmp_path: Path) -
     assert comparison["classification"] == "MATCHED"
     assert comparison["match_score"] >= 65
     assert comparison["payload"]["entry_inside_poi"] is True
+    assert comparison["payload"]["selection_role"] == "PRIMARY"
 
 
 def test_compare_recent_counts_missed_labels(tmp_path: Path) -> None:
@@ -99,13 +101,17 @@ def test_compare_recent_counts_missed_labels(tmp_path: Path) -> None:
             "setup_type": "LIQUIDITY_REVERSAL",
             "poi_type": "order_block",
             "sweep_side": "buy_side",
+            "selection_role": "PRIMARY",
             "entry_price": 4065.3,
             "poi_low": 4063.4,
             "poi_high": 4066.2,
             "created_at": "2026-07-15T09:30:00+00:00",
+            "details": {"selection": {"selection_role": "PRIMARY"}},
         }
     )
     summary = service.compare_recent(symbol="XAU/USD", limit=10)
     assert summary["labels_considered"] == 2
     assert summary["matched_labels"] == 1
     assert summary["missed_labels"] == 1
+    assert "selection_role_insights" in summary
+    assert summary["selection_role_insights"]["PRIMARY"]["count"] >= 1

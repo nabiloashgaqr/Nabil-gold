@@ -171,6 +171,32 @@ def test_pending_cancelled_event_surfaces_specific_reason():
     assert "Auto market conversion blocked" in text
 
 
+def test_pending_activation_can_show_delayed_touch_revalidation_reason():
+    trade = {
+        "id": "TRADE_PENDING_Y",
+        "symbol": "XAU/USD",
+        "type": "SELL",
+        "status": "PENDING",
+        "entry_price": 4006.00,
+    }
+    evaluation = {
+        "old_status": "PENDING",
+        "new_status": "OPEN",
+        "hours_open": 4.0,
+        "pending_distance_points": 0.0,
+        "updates": {
+            "entry_price": 4003.00,
+            "activation_reason": "Delayed touch revalidated (STALE)",
+        },
+        "scenario_governor": {"action": "CANCELLED_SIBLINGS_ON_ACTIVATION", "cancelled_ids": ["P2"]},
+    }
+    text = _capture_text("send_trade_events", trade, ["ORDER_FILLED"], 4003.00, 0.0, evaluation)
+    assert "Activation review:" in text
+    assert "Delayed touch revalidated" in text
+    assert "Scenario family:" in text
+    assert "1 sibling pending order(s) cancelled" in text
+
+
 def test_pending_governance_can_announce_replacement_blocked():
     text = _capture_text(
         "send_pending_governance",
@@ -199,6 +225,25 @@ def test_revalidation_block_message_is_clear():
     assert "Re-entry Blocked" in text
     assert "Post-exit revalidation blocked" in text
     assert "materially new thesis" in text
+
+
+def test_scenario_governance_message_for_family_replacement_is_clear():
+    text = _capture_text(
+        "send_scenario_governance",
+        {
+            "action": "REPLACE_PENDING_FAMILY",
+            "reason": "new session-plan family is stronger or the old family is stale",
+            "old_scenario_id": "SCENARIO::OLD",
+            "new_scenario_id": "SCENARIO::NEW",
+            "cancelled_ids": ["P1", "P2"],
+        },
+        symbol="XAU/USD",
+        side="SELL",
+    )
+    assert "Scenario Family Replaced" in text
+    assert "SCENARIO::OLD" in text
+    assert "SCENARIO::NEW" in text
+    assert "Pending Orders Cancelled" in text
 
 
 # ── Invalidation deduplication (must not just repeat the stop loss) ─────────
