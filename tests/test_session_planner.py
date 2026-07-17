@@ -50,17 +50,27 @@ def _candidate(
         "displacement_score": 12.0,
         "quality_score": quality_score,
         "quality_grade": "B",
+        "details": {"poi": {"mitigation_status": "FRESH"}},
     }
 
 
 def _results() -> dict:
     return {
         "symbol": "XAU/USD",
+        "current_price": 4012.0,
         "session": {"trading_allowed": True, "allow_signals": True, "current_session": "London + New York Afternoon", "session_quality": "HIGH"},
         "news": {"can_trade": True, "market_status": "SAFE", "macro_direction": {"bias": "BEARISH_GOLD", "confidence": 64}},
         "macro_fundamental": {"macro_direction": {"bias": "BEARISH_GOLD", "confidence": 64}},
         "daily_bias": {"bias": "BEARISH", "confidence": 95},
         "smc": {
+            "zone": "PREMIUM",
+            "dealing_range": {"high": 4048.0, "low": 3970.0, "midpoint": 4009.0, "current_position_pct": 0.72},
+            "market_structure": {"trend": "BEARISH", "structure_quality": "STRONG"},
+            "liquidity": {
+                "recent_sweep": {"occurred": True, "type": "buy_side", "reference_type": "session_high", "confirmation": "STRONG"},
+                "previous_day_levels": {"high": 4046.0, "low": 3984.0},
+                "session_liquidity": {"label": "London + New York Afternoon", "high": 4038.0, "low": 3992.0},
+            },
             "setup_candidates": [
                 _candidate("PRIMARY", entry_price=4020.0, stop_loss=4044.0, target_price=3965.0, setup_state="ENTRY_ARMED"),
                 _candidate("STANDBY", entry_price=4009.0, stop_loss=4030.0, target_price=3950.0, dominance=60, return_probability=54, quality_score=74),
@@ -81,6 +91,12 @@ def test_session_planner_builds_ready_primary_and_standby_plan(tmp_path: Path) -
     assert plan["standby_entry_price"] == 4009.0
     assert plan["max_pending_orders_allowed"] == 2
     assert plan["planner_confidence"] >= 62
+    assert plan["bias_sources"]
+    assert plan["directional_alignment_count"] >= 2
+    assert plan["expected_path"]
+    assert plan["execution_preference"] in {"LADDER_PENDING", "SINGLE_PENDING", "NEAR_MARKET_WATCH"}
+    assert plan["plan_narrative"]
+    assert plan["primary_rationale"]
     assert service.latest_plan("XAU/USD")["plan_id"] == plan["plan_id"]
 
 
@@ -114,4 +130,18 @@ def test_session_planner_rejects_weak_primary_thesis(tmp_path: Path) -> None:
     ]
     plan = service.build_plan(results)
     assert plan["plan_ready"] is False
-    assert "too weak" in str(plan["plan_reason"]).lower()
+    assert "too weak" in str(plan["plan_reason"]).lower() or "below planner floor" in str(plan["plan_reason"]).lower()
+
+
+def test_session_planner_blocks_when_bias_alignment_is_missing(tmp_path: Path) -> None:
+    service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True}})
+    service.storage_path = tmp_path / "session_plans.json"
+    results = _results()
+    results["daily_bias"] = {"bias": "BULLISH", "confidence": 91}
+    results["news"]["macro_direction"] = {"bias": "BULLISH_GOLD", "confidence": 70}
+    results["macro_fundamental"]["macro_direction"] = {"bias": "BULLISH_GOLD", "confidence": 70}
+    results["smc"]["market_structure"] = {"trend": "BULLISH", "structure_quality": "STRONG"}
+    results["smc"]["liquidity"]["recent_sweep"] = {"occurred": False, "type": None}
+    plan = service.build_plan(results)
+    assert plan["plan_ready"] is False
+    assert "alignment" in str(plan["plan_reason"]).lower()

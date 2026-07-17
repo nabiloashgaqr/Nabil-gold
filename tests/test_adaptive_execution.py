@@ -66,15 +66,20 @@ def _decision(
     dominance: float = 74.0,
     tp2: float = 3950.0,
     stop_loss: float = 4030.0,
+    session_label: str = "London + New York Afternoon",
+    execution_preference: str = "LADDER_PENDING",
 ) -> dict:
     return {
         "decision": "SELL",
         "symbol": "XAU/USD",
         "current_price": current_price,
+        "session_info": {"current_session": session_label},
         "session_plan": {
             "scenario_id": scenario_id,
             "planner_confidence": 82.0,
             "standby_poi": {"entry_price": 4009.0},
+            "session_label": session_label,
+            "execution_preference": execution_preference,
         },
         "setup_context": {
             "scenario_id": scenario_id,
@@ -123,6 +128,43 @@ def _config() -> dict:
             "promote_to_market_max_move_points": 220,
             "max_target_progress_for_market_promotion_pct": 55,
             "min_remaining_rr_for_market_promotion": 1.5,
+            "profiles": {
+                "continuation": {
+                    "keep_pending_max_move_points": 140,
+                    "keep_pending_max_target_progress_pct": 35,
+                    "promote_to_market_min_move_points": 70,
+                    "promote_to_market_max_move_points": 240,
+                    "max_target_progress_for_market_promotion_pct": 60,
+                    "min_remaining_rr_for_market_promotion": 1.35,
+                },
+                "reversal": {
+                    "keep_pending_max_move_points": 90,
+                    "keep_pending_max_target_progress_pct": 20,
+                    "promote_to_market_min_move_points": 45,
+                    "promote_to_market_max_move_points": 150,
+                    "max_target_progress_for_market_promotion_pct": 38,
+                    "min_remaining_rr_for_market_promotion": 1.8,
+                },
+                "range": {
+                    "keep_pending_max_move_points": 80,
+                    "keep_pending_max_target_progress_pct": 18,
+                    "promote_to_market_min_move_points": 35,
+                    "promote_to_market_max_move_points": 120,
+                    "max_target_progress_for_market_promotion_pct": 35,
+                    "min_remaining_rr_for_market_promotion": 1.8,
+                },
+            },
+            "session_adjustments": {
+                "LONDON + NEW YORK AFTERNOON": {
+                    "promote_to_market_max_move_points": 250,
+                    "max_target_progress_for_market_promotion_pct": 62,
+                },
+                "LATE NEW YORK NIGHT": {
+                    "promote_to_market_max_move_points": 180,
+                    "max_target_progress_for_market_promotion_pct": 40,
+                    "min_remaining_rr_for_market_promotion": 1.7,
+                },
+            },
         },
         "post_exit_revalidation": {
             "enabled": True,
@@ -137,26 +179,50 @@ def _config() -> dict:
 
 def test_adaptive_execution_keeps_pending_when_move_is_small() -> None:
     service = AdaptiveExecutionService(_config())
-    decision = _decision(current_price=4014.0)
-    review = service.review(decision, [_pending_trade()])
+    decision = _decision(current_price=4014.0, setup_type="STRUCTURE_CONTINUATION")
+    review = service.review(decision, [_pending_trade(setup_type="STRUCTURE_CONTINUATION")])
     assert review["action"] == "KEEP_PENDING"
+    assert review["calibration"]["profile"] == "continuation"
 
 
 def test_adaptive_execution_promotes_to_market_when_move_is_confirmed_and_rr_remains_good() -> None:
     service = AdaptiveExecutionService(_config())
-    pending = _pending_trade(entry_price=4009.0, stop_loss=4022.0, tp1=3990.0, tp2=3950.0)
-    decision = _decision(current_price=3996.0, tp2=3950.0, stop_loss=4022.0)
+    pending = _pending_trade(entry_price=4009.0, stop_loss=4022.0, tp1=3990.0, tp2=3950.0, setup_type="STRUCTURE_CONTINUATION")
+    decision = _decision(current_price=3992.0, tp2=3950.0, stop_loss=4022.0, setup_type="STRUCTURE_CONTINUATION")
     review = service.review(decision, [pending])
     assert review["action"] == "PROMOTE_TO_MARKET"
+    assert review["calibration"]["profile"] == "continuation"
     adapted = review["decision"]
     assert adapted["signal"]["entry"]["kind"] == "MARKET"
     assert adapted["entry_mode"] == "adaptive_market_promotion"
 
 
+def test_adaptive_execution_reversal_profile_is_stricter_than_continuation() -> None:
+    service = AdaptiveExecutionService(_config())
+    pending = _pending_trade(entry_price=4009.0, stop_loss=4022.0, tp1=3990.0, tp2=3950.0, setup_type="LIQUIDITY_REVERSAL")
+    decision = _decision(current_price=3996.0, tp2=3950.0, stop_loss=4022.0, setup_type="LIQUIDITY_REVERSAL")
+    review = service.review(decision, [pending])
+    assert review["calibration"]["profile"] == "reversal"
+    assert review["action"] in {"KEEP_PENDING", "NO_TRADE_MISSED_MOVE"}
+    assert review["action"] != "PROMOTE_TO_MARKET"
+
+
+def test_adaptive_execution_session_adjustment_changes_market_promotion_window() -> None:
+    service = AdaptiveExecutionService(_config())
+    pending = _pending_trade(entry_price=4018.0, stop_loss=4032.0, tp1=4000.0, tp2=3968.0, setup_type="STRUCTURE_CONTINUATION")
+    decision_london = _decision(current_price=3998.0, tp2=3968.0, stop_loss=4032.0, setup_type="STRUCTURE_CONTINUATION", session_label="London + New York Afternoon")
+    decision_late = _decision(current_price=3998.0, tp2=3968.0, stop_loss=4032.0, setup_type="STRUCTURE_CONTINUATION", session_label="Late New York Night")
+    review_london = service.review(decision_london, [pending])
+    review_late = service.review(decision_late, [pending])
+    assert review_london["calibration"]["session_label"] == "London + New York Afternoon"
+    assert review_late["calibration"]["session_label"] == "Late New York Night"
+    assert review_london["calibration"]["promote_to_market_max_move_points"] > review_late["calibration"]["promote_to_market_max_move_points"]
+
+
 def test_adaptive_execution_marks_missed_move_when_price_has_traveled_too_far() -> None:
     service = AdaptiveExecutionService(_config())
-    decision = _decision(current_price=3970.0, tp2=3950.0, stop_loss=4030.0)
-    review = service.review(decision, [_pending_trade(entry_price=4020.0, stop_loss=4044.0, tp1=4000.0, tp2=3950.0)])
+    decision = _decision(current_price=3970.0, tp2=3950.0, stop_loss=4030.0, setup_type="STRUCTURE_CONTINUATION")
+    review = service.review(decision, [_pending_trade(entry_price=4020.0, stop_loss=4044.0, tp1=4000.0, tp2=3950.0, setup_type="STRUCTURE_CONTINUATION")])
     assert review["action"] == "NO_TRADE_MISSED_MOVE"
 
 

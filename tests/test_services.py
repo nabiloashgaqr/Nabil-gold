@@ -46,6 +46,7 @@ def test_market_data_all_timeframes():
     data = service.get_gold_data(outputsize=30)
     assert data is not None
     assert "timeframes" in data
+    assert "source_integrity" in data
     assert "5m" in data["timeframes"]
     assert "15m" in data["timeframes"]
     assert "1H" in data["timeframes"]
@@ -312,6 +313,20 @@ def test_telegram_daily_report():
     result = service.send_daily_report("📋 Daily Report\nTotal: 5\nWins: 3")
     assert result is False
 
+def test_market_data_source_integrity_helper_flags_sources():
+    td = MarketDataService.enrich_payload_integrity({"source": "twelvedata", "timeframe": "5m"})
+    quote = MarketDataService.enrich_payload_integrity({"source": "swissquote_spot_quote_fallback", "timeframe": "quote"})
+    synthetic = MarketDataService.enrich_payload_integrity({"source": "synthetic_demo", "timeframe": "15m"})
+
+    assert td["source_integrity"]["reliability_grade"] == "HIGH"
+    assert td["supports_signal_generation"] is True
+    assert td["supports_pending_activation"] is True
+    assert quote["source_integrity"]["source_type"] == "quote_only"
+    assert quote["supports_signal_generation"] is False
+    assert quote["supports_pending_activation"] is False
+    assert synthetic["source_integrity"]["reliability_grade"] == "UNSAFE"
+
+
 def test_swissquote_spot_quote_payload_for_xau(monkeypatch):
     service = MarketDataService({"symbol": "XAU/USD"})
 
@@ -336,6 +351,8 @@ def test_swissquote_spot_quote_payload_for_xau(monkeypatch):
     assert payload is not None
     assert payload["source"] == "swissquote_spot_quote_fallback"
     assert payload["current_price"] == 4039.8
+    assert payload["source_integrity"]["reliability_grade"] == "LOW"
+    assert payload["supports_pending_activation"] is False
     candle = payload["data"][0]
     assert candle["high"] == candle["low"] == candle["close"] == 4039.8
 
