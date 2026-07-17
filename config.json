@@ -413,12 +413,16 @@
         "min_plan_score": 62,
         "min_primary_dominance": 50,
         "min_return_probability": 42,
+        "min_primary_quality_score": 70,
+        "min_trigger_score": 40,
         "require_session_quality": "HIGH",
+        "require_structure_quality": "MODERATE",
         "allow_caution_news": true,
         "expire_after_hours": 8,
         "default_pending_slots": 2,
+        "standby_min_distance_points": 60,
         "create_pending_orders_from_plan": true,
-        "description": "Phase 2 foundation: build a morning/session thesis before the move and allow PRIMARY + STANDBY ladder pending orders when the plan is ready and there are no active same-symbol trades yet."
+        "description": "Planner Quality upgrade: build a sharper morning/session thesis with directional alignment, structure quality, liquidity-path reasoning, and clearer PRIMARY/STANDBY rationale before execution starts."
     },
     "trading_mode": "paper",
     "paper_trading": {
@@ -560,7 +564,57 @@
         "promote_to_market_max_move_points": 220,
         "max_target_progress_for_market_promotion_pct": 55,
         "min_remaining_rr_for_market_promotion": 1.5,
-        "description": "Phase 9 foundation: when a morning pending family already exists, later 3-agent or 2-agent+confirmation signals should choose the best execution now — keep pending, promote to market, replace with a continuation thesis, or skip as a missed move — instead of just being blocked as duplicates."
+        "profiles": {
+            "default": {
+                "keep_pending_max_move_points": 120,
+                "keep_pending_max_target_progress_pct": 30,
+                "promote_to_market_min_move_points": 60,
+                "promote_to_market_max_move_points": 220,
+                "max_target_progress_for_market_promotion_pct": 55,
+                "min_remaining_rr_for_market_promotion": 1.5
+            },
+            "continuation": {
+                "keep_pending_max_move_points": 140,
+                "keep_pending_max_target_progress_pct": 35,
+                "promote_to_market_min_move_points": 70,
+                "promote_to_market_max_move_points": 240,
+                "max_target_progress_for_market_promotion_pct": 60,
+                "min_remaining_rr_for_market_promotion": 1.35,
+                "description": "Trend / continuation setups may allow a wider move-before-fill and slightly lower remaining RR before market promotion."
+            },
+            "reversal": {
+                "keep_pending_max_move_points": 90,
+                "keep_pending_max_target_progress_pct": 20,
+                "promote_to_market_min_move_points": 45,
+                "promote_to_market_max_move_points": 150,
+                "max_target_progress_for_market_promotion_pct": 38,
+                "min_remaining_rr_for_market_promotion": 1.8,
+                "description": "Liquidity reversals need tighter move control and stronger remaining RR before market promotion."
+            },
+            "range": {
+                "keep_pending_max_move_points": 80,
+                "keep_pending_max_target_progress_pct": 18,
+                "promote_to_market_min_move_points": 35,
+                "promote_to_market_max_move_points": 120,
+                "max_target_progress_for_market_promotion_pct": 35,
+                "min_remaining_rr_for_market_promotion": 1.8,
+                "description": "Range fades are short-lived, so promotion/chasing must stay strict."
+            }
+        },
+        "session_adjustments": {
+            "LONDON + NEW YORK AFTERNOON": {
+                "promote_to_market_max_move_points": 250,
+                "max_target_progress_for_market_promotion_pct": 62,
+                "description": "Most liquid session: allow slightly more room before calling the move missed."
+            },
+            "LATE NEW YORK NIGHT": {
+                "promote_to_market_max_move_points": 180,
+                "max_target_progress_for_market_promotion_pct": 40,
+                "min_remaining_rr_for_market_promotion": 1.7,
+                "description": "Late-session promotions should be stricter because follow-through quality often degrades."
+            }
+        },
+        "description": "Adaptive Execution Calibration: when a morning pending family already exists, later 3-agent or 2-agent+confirmation signals choose the best execution now using setup-type and session-aware thresholds — keep pending, promote to market, replace with a continuation thesis, or skip as a missed move."
     },
     "strategy_profiles": {
         "liquidity_reversal": {
