@@ -13,7 +13,8 @@ from typing import Any, Dict, List
 
 from agents.base_agent import BaseAgent
 from services.pending_governor import PendingGovernor
-from utils.helpers import calculate_pips, load_config
+from services.scenario_governor import ScenarioGovernor
+from utils.helpers import calculate_pips, canonical_session_label, load_config
 from utils.instruments import points_to_price
 
 
@@ -97,8 +98,22 @@ class OpenTradesManager(BaseAgent):
         self.pending_news_require_rr_recheck = bool(pnh.get("require_rr_recheck", True))
         self.pending_news_require_spread_recheck = bool(pnh.get("require_spread_recheck", True))
         self.pending_news_cancel_if_drift_exceeds = bool(pnh.get("cancel_if_drift_exceeds", True))
+        pf = (self.config.get("pending_freshness", {}) or {}) if isinstance(self.config, dict) else {}
+        self.pending_freshness_enabled = bool(pf.get("enabled", True))
+        self.pending_freshness_aging_after_hours = float(pf.get("aging_after_hours", 2) or 2)
+        self.pending_freshness_stale_after_hours = float(pf.get("stale_after_hours", 6) or 6)
+        self.pending_freshness_stale_after_excursion_points = float(pf.get("stale_after_excursion_points", 250) or 250)
+        self.pending_freshness_stale_after_target_progress_pct = float(pf.get("stale_after_target_progress_pct", 60) or 60)
+        self.pending_freshness_revalidation_on_session_change = bool(pf.get("mark_revalidation_required_on_session_change", True))
+        ptr = (pf.get("touch_revalidation") or {}) if isinstance(pf, dict) else {}
+        self.pending_touch_revalidation_enabled = bool(ptr.get("enabled", True))
+        self.pending_touch_revalidation_min_confirmation_points = float(ptr.get("min_confirmation_points", 15) or 15)
+        self.pending_touch_revalidation_limit_max_drift_points = float(ptr.get("limit_max_drift_points", 40) or 40)
+        self.pending_touch_revalidation_stop_max_drift_points = float(ptr.get("stop_max_drift_points", 25) or 25)
+        self.pending_touch_revalidation_cancel_on_failed = bool(ptr.get("cancel_on_failed_revalidation", True))
         self.profile_overrides = (self.management.get("profiles", {}) or {}) if isinstance(self.management, dict) else {}
         self.pending_governor = PendingGovernor(self.config)
+        self.scenario_governor = ScenarioGovernor(self.config)
 
     def _trade_management_profile(self, trade: Dict[str, Any]) -> str:
         snapshot = trade.get("signal_snapshot") or {}
@@ -153,6 +168,7 @@ class OpenTradesManager(BaseAgent):
         candle_low: float | None = None,
         news_blocked: bool = False,
         news_context: Dict[str, Any] | None = None,
+        market_data_source: str | None = None,
     ) -> List[Dict[str, Any]]:
         """Evaluate all open trades, persist updates and send Telegram events.
 
@@ -173,6 +189,7 @@ class OpenTradesManager(BaseAgent):
                 news_blocked=news_blocked,
                 news_context=news_context,
                 database=database,
+                market_data_source=market_data_source,
             )
             evaluations.append(evaluation)
             trade_id = str(trade.get("id", ""))
@@ -214,6 +231,26 @@ class OpenTradesManager(BaseAgent):
 
             if trade_id and database and evaluation.get("updates"):
                 database.update_trade(trade_id, evaluation["updates"])
+                if (
+                    evaluation.get("old_status") == "PENDING"
+                    and evaluation.get("new_status") == "OPEN"
+                    and "ORDER_FILLED" in (evaluation.get("events") or [])
+                ):
+                    try:
+                        family_action = self.scenario_governor.handle_activation(
+                            trade,
+                            database=database,
+                            open_trades=open_trades,
+                        )
+                        if family_action.get("cancelled_ids"):
+                            evaluation["scenario_governor"] = family_action
+                            cancelled_ids = {str(tid) for tid in (family_action.get("cancelled_ids") or [])}
+                            for sibling in open_trades:
+                                if str(sibling.get("id") or "") in cancelled_ids:
+                                    sibling["status"] = "CANCELLED"
+                                    sibling["result"] = "CANCELLED"
+                    except Exception as exc:  # noqa: BLE001
+                        self.logger.warning("Scenario governor activation handling failed for %s: %s", trade_id, exc)
         return evaluations
 
     def evaluate_trade(
@@ -226,6 +263,7 @@ class OpenTradesManager(BaseAgent):
         news_blocked: bool = False,
         news_context: Dict[str, Any] | None = None,
         database: Any | None = None,
+        market_data_source: str | None = None,
     ) -> Dict[str, Any]:
         """Return updates/events for a single trade without external side effects.
 
@@ -271,6 +309,7 @@ class OpenTradesManager(BaseAgent):
                 news_blocked=news_blocked,
                 news_context=news_context,
                 database=database,
+                market_data_source=market_data_source,
             )
 
         pnl_points = calculate_pips(entry, current_price, trade_type, symbol)
@@ -780,6 +819,7 @@ class OpenTradesManager(BaseAgent):
         news_blocked: bool = False,
         news_context: Dict[str, Any] | None = None,
         database: Any | None = None,
+        market_data_source: str | None = None,
     ):
         """Activate a pending order on touch, else keep it waiting (no PnL).
 
@@ -794,12 +834,16 @@ class OpenTradesManager(BaseAgent):
         low_price = self._f(candle_low, current_price)
         if high_price < low_price:
             high_price, low_price = low_price, high_price
-        filled_touch = self._order_filled(order_type, trade_type, entry, current_price, high_price, low_price)
+        market_source = str(market_data_source or trade.get("market_data_source") or "")
+        touch_source_reliable = market_source not in {"swissquote_spot_quote_fallback", "synthetic_demo", "quote"}
+        theoretical_touch = self._order_filled(order_type, trade_type, entry, current_price, high_price, low_price)
+        filled_touch = theoretical_touch if touch_source_reliable else False
         base_updates = {
             "current_price": round(current_price, 2),
             "last_candle_high": round(high_price, 2),
             "last_candle_low": round(low_price, 2),
             "last_updated": self._iso(now),
+            "market_data_source": market_source or None,
         }
         dist_pts = abs(calculate_pips(current_price, entry, trade_type, symbol))
         hours_open = self._hours_open(trade, now)
@@ -816,6 +860,7 @@ class OpenTradesManager(BaseAgent):
         hold_active = bool(runtime.get("news_hold_active", False))
         touch_time = self._parse_dt(str(runtime.get("touch_time") or ""))
         stop_loss = self._f(trade.get("stop_loss"), 0.0)
+        tp1_price = self._f(trade.get("tp1"), 0.0)
         tp2 = self._f(trade.get("tp2"), 0.0)
         min_rr_ratio = float((self.config.get("risk_settings", {}) or {}).get("min_rr_ratio", 1.5) or 1.5)
         recent_trades = database.get_recent_trades(limit=50) if database and hasattr(database, "get_recent_trades") else []
@@ -824,6 +869,12 @@ class OpenTradesManager(BaseAgent):
             runtime.update(kwargs)
             snapshot["pending_runtime"] = runtime
             base_updates["signal_snapshot"] = snapshot
+
+        _persist_runtime(
+            touch_detection_source=market_source or None,
+            touch_detection_source_reliable=touch_source_reliable,
+            touch_detection_waiting_for_reliable_ohlc=bool(theoretical_touch and not touch_source_reliable),
+        )
 
         def _invalidated() -> bool:
             if stop_loss <= 0:
@@ -864,6 +915,109 @@ class OpenTradesManager(BaseAgent):
                 now=now,
             )
             return bool(review.get("allow", True)), (str(review.get("reason")) if review.get("reason") else None)
+
+        def _pending_freshness() -> tuple[str, bool, list[str], float, float, str]:
+            tz_name = str((self.config.get("schedule", {}) or {}).get("timezone") or (self.config.get("trading_hours", {}) or {}).get("timezone") or "Asia/Hebron")
+            if not self.pending_freshness_enabled:
+                return "FRESH", False, [], 0.0, 0.0, canonical_session_label(now, tz_name)
+            created_session = str(
+                runtime.get("created_session_label")
+                or ((snapshot.get("session_info") or {}).get("current_session"))
+                or canonical_session_label(self._parse_dt(str(trade.get("entry_time") or trade.get("created_at") or "")) or now, tz_name)
+            )
+            current_session = canonical_session_label(now, tz_name)
+            favorable_excursion_points = max(0.0, calculate_pips(entry, current_price, trade_type, symbol))
+            max_excursion_points = max(self._f(runtime.get("max_excursion_points"), 0.0), favorable_excursion_points)
+            planned_target_points = 0.0
+            for target in (tp1_price, tp2):
+                if target > 0:
+                    planned_target_points = abs(calculate_pips(entry, target, trade_type, symbol))
+                    if planned_target_points > 0:
+                        break
+            progress_pct = (max_excursion_points / planned_target_points * 100.0) if planned_target_points > 0 else 0.0
+            plan = snapshot.get("session_plan") or {}
+            plan_expiry = self._parse_dt(str((plan.get("plan_expires_at") if isinstance(plan, dict) else None) or runtime.get("plan_expires_at") or ""))
+            reasons: List[str] = []
+            state = "FRESH"
+            revalidation_required = False
+            if plan_expiry and now >= plan_expiry:
+                state = "REVALIDATION_REQUIRED"
+                revalidation_required = True
+                reasons.append("session plan expired")
+            elif self.pending_freshness_revalidation_on_session_change and created_session and current_session != created_session:
+                state = "REVALIDATION_REQUIRED"
+                revalidation_required = True
+                reasons.append(f"session changed: {created_session} -> {current_session}")
+            elif hours_open >= self.pending_freshness_stale_after_hours:
+                state = "STALE"
+                revalidation_required = True
+                reasons.append(f"waiting too long ({hours_open:.1f}h)")
+            elif max_excursion_points >= self.pending_freshness_stale_after_excursion_points:
+                state = "STALE"
+                revalidation_required = True
+                reasons.append(f"market moved {max_excursion_points:.0f} pts without fill")
+            elif progress_pct >= self.pending_freshness_stale_after_target_progress_pct:
+                state = "STALE"
+                revalidation_required = True
+                reasons.append(f"market covered {progress_pct:.0f}% of target path without fill")
+            elif (
+                hours_open >= self.pending_freshness_aging_after_hours
+                or max_excursion_points >= self.pending_freshness_stale_after_excursion_points * 0.5
+                or progress_pct >= self.pending_freshness_stale_after_target_progress_pct * 0.5
+            ):
+                state = "AGING"
+                if hours_open >= self.pending_freshness_aging_after_hours:
+                    reasons.append(f"waiting {hours_open:.1f}h")
+                if max_excursion_points >= self.pending_freshness_stale_after_excursion_points * 0.5:
+                    reasons.append(f"market already moved {max_excursion_points:.0f} pts")
+                if progress_pct >= self.pending_freshness_stale_after_target_progress_pct * 0.5:
+                    reasons.append(f"market covered {progress_pct:.0f}% of target path")
+            return state, revalidation_required, reasons, round(max_excursion_points, 1), round(min(progress_pct, 999.0), 1), current_session
+
+        freshness_state, revalidation_required, freshness_reasons, max_excursion_points, target_progress_pct, current_session_label = _pending_freshness()
+        _persist_runtime(
+            created_session_label=str(
+                runtime.get("created_session_label")
+                or ((snapshot.get("session_info") or {}).get("current_session"))
+                or current_session_label
+            ),
+            last_session_label=current_session_label,
+            freshness_state=freshness_state,
+            revalidation_required=revalidation_required,
+            freshness_reasons=freshness_reasons,
+            max_excursion_points=max_excursion_points,
+            target_progress_pct=target_progress_pct,
+            plan_expires_at=str(((snapshot.get("session_plan") or {}).get("plan_expires_at")) or runtime.get("plan_expires_at") or ""),
+        )
+
+        def _late_touch_required() -> bool:
+            return self.pending_touch_revalidation_enabled and freshness_state in {"STALE", "REVALIDATION_REQUIRED"}
+
+        def _late_touch_review(market_entry: float) -> tuple[bool, str | None]:
+            if not _late_touch_required():
+                return True, None
+            reasons: List[str] = []
+            drift_pts = abs(calculate_pips(market_entry, entry, trade_type, symbol))
+            confirm_threshold = points_to_price(self.pending_touch_revalidation_min_confirmation_points, symbol)
+            if order_type.endswith("STOP"):
+                drift_limit = self.pending_touch_revalidation_stop_max_drift_points
+            else:
+                drift_limit = self.pending_touch_revalidation_limit_max_drift_points
+            if trade_type == "SELL":
+                confirmed = market_entry <= entry - confirm_threshold
+            else:
+                confirmed = market_entry >= entry + confirm_threshold
+            if not confirmed:
+                reasons.append("late touch lacked fresh confirmation")
+            if drift_pts > drift_limit:
+                reasons.append(f"late touch drift {drift_pts:.0f} pts exceeded {drift_limit:.0f} pts")
+            if _invalidated():
+                reasons.append("structure invalidated before delayed activation")
+            if not _rr_ok(market_entry):
+                reasons.append("RR degraded after delayed touch")
+            if reasons:
+                return False, "; ".join(reasons)
+            return True, f"Delayed touch revalidated ({freshness_state})"
 
         # Hard expiry for stale pending orders.
         if not filled_touch and self.pending_expire_after_hours > 0 and hours_open >= self.pending_expire_after_hours:
@@ -954,6 +1108,34 @@ class OpenTradesManager(BaseAgent):
                     "hours_open": hours_open,
                     "pending_distance_points": dist_pts,
                 }
+            if _late_touch_required():
+                ok, late_reason = _late_touch_review(current_price)
+                if not ok and self.pending_touch_revalidation_cancel_on_failed:
+                    _persist_runtime(
+                        news_hold_active=False,
+                        released_at=self._iso(now),
+                        cancelled_after_hold=True,
+                        conversion_block_reason=late_reason,
+                        delayed_touch_revalidation_passed=False,
+                    )
+                    base_updates.update({
+                        "status": "CANCELLED",
+                        "result": "CANCELLED",
+                        "closed_at": self._iso(now),
+                        "close_time": self._iso(now),
+                        "reasons": [f"Delayed touch revalidation failed: {late_reason}"] if late_reason else ["Delayed touch revalidation failed"],
+                    })
+                    return {
+                        "trade_id": trade.get("id"),
+                        "old_status": "PENDING",
+                        "new_status": "CANCELLED",
+                        "pnl_points": 0.0,
+                        "events": ["PENDING_CANCELLED"],
+                        "updates": base_updates,
+                        "progress_to_tp1": 0.0,
+                        "hours_open": hours_open,
+                        "pending_distance_points": dist_pts,
+                    }
             allowed, reason = _conversion_allowed(current_price)
             if not allowed:
                 _persist_runtime(
@@ -980,7 +1162,13 @@ class OpenTradesManager(BaseAgent):
                     "hours_open": hours_open,
                     "pending_distance_points": dist_pts,
                 }
-            _persist_runtime(news_hold_active=False, released_at=self._iso(now), activated_after_hold=True)
+            _persist_runtime(
+                news_hold_active=False,
+                released_at=self._iso(now),
+                activated_after_hold=True,
+                delayed_touch_revalidation_passed=(not _late_touch_required()) or True,
+                activation_reason=(late_reason if _late_touch_required() else "Post-news controlled market conversion"),
+            )
             base_updates.update({
                 "status": "OPEN",
                 "entry_time": self._iso(now),
@@ -989,6 +1177,8 @@ class OpenTradesManager(BaseAgent):
                 "current_pnl_points": 0,
                 "pending_cycles": 0,
             })
+            if _late_touch_required() and late_reason:
+                base_updates["activation_reason"] = late_reason
             return {
                 "trade_id": trade.get("id"),
                 "old_status": "PENDING",
@@ -1006,6 +1196,28 @@ class OpenTradesManager(BaseAgent):
             pending_cycles = self._f(trade.get("pending_cycles", 0))
             pending_cycles += 1
             if pending_cycles >= self.pending_order_max_cycles:
+                if _late_touch_required() or freshness_state in {"STALE", "REVALIDATION_REQUIRED"}:
+                    reason = "; ".join(freshness_reasons) if freshness_reasons else f"pending classified as {freshness_state}"
+                    _persist_runtime(auto_conversion_block_reason=reason, auto_conversion_blocked_at=self._iso(now))
+                    base_updates.update({
+                        "status": "CANCELLED",
+                        "result": "CANCELLED",
+                        "closed_at": self._iso(now),
+                        "close_time": self._iso(now),
+                        "pending_cycles": 0,
+                        "reasons": [f"Auto market conversion blocked: {reason}"],
+                    })
+                    return {
+                        "trade_id": trade.get("id"),
+                        "old_status": "PENDING",
+                        "new_status": "CANCELLED",
+                        "pnl_points": 0.0,
+                        "events": ["PENDING_CANCELLED"],
+                        "updates": base_updates,
+                        "progress_to_tp1": 0.0,
+                        "hours_open": hours_open,
+                        "pending_distance_points": dist_pts,
+                    }
                 allowed, reason = _conversion_allowed(current_price)
                 if not allowed:
                     _persist_runtime(auto_conversion_block_reason=reason, auto_conversion_blocked_at=self._iso(now))
@@ -1049,12 +1261,46 @@ class OpenTradesManager(BaseAgent):
             base_updates["pending_cycles"] = pending_cycles
 
         if filled_touch:
+            if _late_touch_required():
+                ok, late_reason = _late_touch_review(current_price)
+                if not ok and self.pending_touch_revalidation_cancel_on_failed:
+                    _persist_runtime(
+                        delayed_touch_revalidation_passed=False,
+                        delayed_touch_revalidation_reason=late_reason,
+                        cancelled_on_touch=True,
+                    )
+                    base_updates.update({
+                        "status": "CANCELLED",
+                        "result": "CANCELLED",
+                        "closed_at": self._iso(now),
+                        "close_time": self._iso(now),
+                        "reasons": [f"Delayed touch revalidation failed: {late_reason}"] if late_reason else ["Delayed touch revalidation failed"],
+                    })
+                    return {
+                        "trade_id": trade.get("id"),
+                        "old_status": "PENDING",
+                        "new_status": "CANCELLED",
+                        "pnl_points": 0.0,
+                        "events": ["PENDING_CANCELLED"],
+                        "updates": base_updates,
+                        "progress_to_tp1": 0.0,
+                        "hours_open": hours_open,
+                        "pending_distance_points": dist_pts,
+                    }
+                _persist_runtime(
+                    delayed_touch_revalidation_passed=True,
+                    delayed_touch_revalidation_reason=late_reason,
+                    activated_after_touch_revalidation=True,
+                )
             base_updates.update({
                 "status": "OPEN",
                 "entry_time": self._iso(now),
+                "entry_price": round(current_price, 2) if _late_touch_required() else round(entry, 2),
                 "current_pnl": 0,
                 "current_pnl_points": 0,
             })
+            if _late_touch_required() and late_reason:
+                base_updates["activation_reason"] = late_reason
             return {
                 "trade_id": trade.get("id"),
                 "old_status": "PENDING",
