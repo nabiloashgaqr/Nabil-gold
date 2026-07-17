@@ -552,6 +552,16 @@
         "min_primary_dominance_improvement": 5,
         "description": "Phase 6 foundation: manage PRIMARY/STANDBY pending ladders as one scenario family. When one family member activates, sibling pending orders are cancelled. A newer stronger session-plan family may replace an older pending family for the same symbol/direction."
     },
+    "adaptive_execution": {
+        "enabled": true,
+        "keep_pending_max_move_points": 120,
+        "keep_pending_max_target_progress_pct": 30,
+        "promote_to_market_min_move_points": 60,
+        "promote_to_market_max_move_points": 220,
+        "max_target_progress_for_market_promotion_pct": 55,
+        "min_remaining_rr_for_market_promotion": 1.5,
+        "description": "Phase 9 foundation: when a morning pending family already exists, later 3-agent or 2-agent+confirmation signals should choose the best execution now — keep pending, promote to market, replace with a continuation thesis, or skip as a missed move — instead of just being blocked as duplicates."
+    },
     "strategy_profiles": {
         "liquidity_reversal": {
             "description": "SMC-led reversal profile: sweep + POI + reaction can qualify with 2 strong aligned agents.",
