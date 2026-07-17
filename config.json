@@ -379,6 +379,23 @@
         "min_dominance_improvement": 6,
         "description": "بعد إغلاق صفقة، يُمنع إعادة الدخول سريعاً من نفس المنطقة إلا إذا ظهر Thesis جديد فعلاً: POI/state_key جديد، أو sweep/displacement جديد بعد الخروج، أو تطور setup_state مع trigger أقوى."
     },
+    "pending_freshness": {
+        "enabled": true,
+        "aging_after_hours": 2,
+        "stale_after_hours": 6,
+        "stale_after_excursion_points": 250,
+        "stale_after_target_progress_pct": 60,
+        "mark_revalidation_required_on_session_change": true,
+        "touch_revalidation": {
+            "enabled": true,
+            "min_confirmation_points": 15,
+            "limit_max_drift_points": 40,
+            "stop_max_drift_points": 25,
+            "cancel_on_failed_revalidation": true,
+            "description": "Phase 4 foundation: if a stale / revalidation-required pending order is touched late, do not activate blindly. Require fresh confirmation plus acceptable drift and RR, otherwise cancel it safely."
+        },
+        "description": "Phase 3/4 foundation: classify waiting pending orders as FRESH / AGING / STALE / REVALIDATION_REQUIRED based on time, excursion without fill, target-path progress, and session/plan decay."
+    },
     "quality_score": {
         "enabled": true,
         "description": "يعرض درجة جودة الإشارة في Telegram ولا يمنع الإشارة حالياً"
@@ -390,6 +407,18 @@
         "missing_cycles_before_expire": 6,
         "expire_after_hours": 12,
         "description": "Sprint 2 foundation: persists setup-state transitions across analysis cycles. Price near POI -> ENTRY_ARMED, breach beyond invalidation -> INVALIDATED, missing/stale setups -> EXPIRED."
+    },
+    "session_planner": {
+        "enabled": true,
+        "min_plan_score": 62,
+        "min_primary_dominance": 50,
+        "min_return_probability": 42,
+        "require_session_quality": "HIGH",
+        "allow_caution_news": true,
+        "expire_after_hours": 8,
+        "default_pending_slots": 2,
+        "create_pending_orders_from_plan": true,
+        "description": "Phase 2 foundation: build a morning/session thesis before the move and allow PRIMARY + STANDBY ladder pending orders when the plan is ready and there are no active same-symbol trades yet."
     },
     "trading_mode": "paper",
     "paper_trading": {
@@ -514,6 +543,14 @@
         "cancel_if_return_probability_below": 25,
         "require_quality_improvement": true,
         "description": "Same-direction pending governance: keep dominant thesis, replace weaker pending with stronger new thesis, or cancel stale ones instead of stacking multiple pending orders."
+    },
+    "scenario_governor": {
+        "enabled": true,
+        "cancel_siblings_on_activation": true,
+        "allow_replace_older_pending_scenarios": true,
+        "min_plan_score_improvement": 4,
+        "min_primary_dominance_improvement": 5,
+        "description": "Phase 6 foundation: manage PRIMARY/STANDBY pending ladders as one scenario family. When one family member activates, sibling pending orders are cancelled. A newer stronger session-plan family may replace an older pending family for the same symbol/direction."
     },
     "strategy_profiles": {
         "liquidity_reversal": {
