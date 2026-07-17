@@ -37,6 +37,8 @@ class AdaptiveExecutionService:
             cfg.get("min_remaining_rr_for_market_promotion", (self.config.get("risk_settings", {}) or {}).get("min_rr_ratio", 1.5))
             or (self.config.get("risk_settings", {}) or {}).get("min_rr_ratio", 1.5)
         )
+        self.profile_overrides = (cfg.get("profiles") or {}) if isinstance(cfg, dict) else {}
+        self.session_adjustments = (cfg.get("session_adjustments") or {}) if isinstance(cfg, dict) else {}
         self.pending_governor = PendingGovernor(self.config)
         self.scenario_governor = ScenarioGovernor(self.config)
 
@@ -71,9 +73,10 @@ class AdaptiveExecutionService:
         move_points = self._favorable_move_points(side, self._f(anchor.get("entry_price"), 0.0), current_price, symbol)
         target_progress_pct = self._target_progress_pct(anchor, current_price, side, symbol)
         remaining_rr = self._remaining_rr(decision, anchor, current_price)
+        rules = self._effective_rules(decision, anchor)
 
         if same_family or not material.get("allow"):
-            if move_points <= self.keep_pending_max_move_points and target_progress_pct <= self.keep_pending_max_target_progress_pct:
+            if move_points <= rules["keep_pending_max_move_points"] and target_progress_pct <= rules["keep_pending_max_target_progress_pct"]:
                 return {
                     "action": "KEEP_PENDING",
                     "reason": (
@@ -81,13 +84,15 @@ class AdaptiveExecutionService:
                     ),
                     "decision": decision,
                     "anchor_trade_id": anchor.get("id"),
+                    "calibration": rules,
                 }
             if (
-                self.promote_to_market_min_move_points <= move_points <= self.promote_to_market_max_move_points
-                and target_progress_pct <= self.max_target_progress_for_market_promotion_pct
-                and remaining_rr >= self.min_remaining_rr_for_market_promotion
+                rules["promote_to_market_min_move_points"] <= move_points <= rules["promote_to_market_max_move_points"]
+                and target_progress_pct <= rules["max_target_progress_for_market_promotion_pct"]
+                and remaining_rr >= rules["min_remaining_rr_for_market_promotion"]
             ):
                 adapted = self._promote_to_market(decision, current_price)
+                adapted["adaptive_execution"]["calibration"] = rules
                 return {
                     "action": "PROMOTE_TO_MARKET",
                     "reason": (
@@ -98,6 +103,7 @@ class AdaptiveExecutionService:
                     "remaining_rr": round(remaining_rr, 2),
                     "move_points": round(move_points, 1),
                     "target_progress_pct": round(target_progress_pct, 1),
+                    "calibration": rules,
                 }
             return {
                 "action": "NO_TRADE_MISSED_MOVE",
@@ -106,6 +112,7 @@ class AdaptiveExecutionService:
                 ),
                 "decision": decision,
                 "anchor_trade_id": anchor.get("id"),
+                "calibration": rules,
             }
 
         adapted = deepcopy(decision)
@@ -154,6 +161,98 @@ class AdaptiveExecutionService:
             "reason": "confirmed move without fill",
         }
         return adapted
+
+    def _effective_rules(self, decision: Dict[str, Any], anchor: Dict[str, Any]) -> Dict[str, float | str]:
+        rules: Dict[str, float | str] = {
+            "keep_pending_max_move_points": self.keep_pending_max_move_points,
+            "keep_pending_max_target_progress_pct": self.keep_pending_max_target_progress_pct,
+            "promote_to_market_min_move_points": self.promote_to_market_min_move_points,
+            "promote_to_market_max_move_points": self.promote_to_market_max_move_points,
+            "max_target_progress_for_market_promotion_pct": self.max_target_progress_for_market_promotion_pct,
+            "min_remaining_rr_for_market_promotion": self.min_remaining_rr_for_market_promotion,
+            "profile": "default",
+            "session_label": self._session_label(decision, anchor),
+        }
+        profile = self._profile_key(decision, anchor)
+        rules["profile"] = profile
+        override = self.profile_overrides.get(profile) or {}
+        for key in [
+            "keep_pending_max_move_points",
+            "keep_pending_max_target_progress_pct",
+            "promote_to_market_min_move_points",
+            "promote_to_market_max_move_points",
+            "max_target_progress_for_market_promotion_pct",
+            "min_remaining_rr_for_market_promotion",
+        ]:
+            if key in override:
+                try:
+                    rules[key] = float(override[key])
+                except (TypeError, ValueError):
+                    pass
+
+        session_key = str(rules["session_label"] or "").upper()
+        adjustment = (self.session_adjustments.get(session_key) or self.session_adjustments.get(str(rules["session_label"]) or "") or {})
+        for key in [
+            "keep_pending_max_move_points",
+            "keep_pending_max_target_progress_pct",
+            "promote_to_market_min_move_points",
+            "promote_to_market_max_move_points",
+            "max_target_progress_for_market_promotion_pct",
+            "min_remaining_rr_for_market_promotion",
+        ]:
+            if key in adjustment:
+                try:
+                    rules[key] = float(adjustment[key])
+                except (TypeError, ValueError):
+                    pass
+
+        preference = self._execution_preference(decision, anchor)
+        if preference == "NEAR_MARKET_WATCH":
+            rules["promote_to_market_min_move_points"] = max(0.0, float(rules["promote_to_market_min_move_points"]) - 15.0)
+            rules["promote_to_market_max_move_points"] = float(rules["promote_to_market_max_move_points"]) + 20.0
+            rules["max_target_progress_for_market_promotion_pct"] = float(rules["max_target_progress_for_market_promotion_pct"]) + 5.0
+        elif preference == "LADDER_PENDING":
+            rules["keep_pending_max_move_points"] = float(rules["keep_pending_max_move_points"]) + 10.0
+        rules["execution_preference"] = preference
+        return rules
+
+    def _profile_key(self, decision: Dict[str, Any], anchor: Dict[str, Any]) -> str:
+        setup = decision.get("setup_context") or {}
+        if not isinstance(setup, dict):
+            setup = {}
+        old = self.pending_governor._setup_context_from_trade(anchor)
+        setup_type = str(setup.get("setup_type") or old.get("setup_type") or "").upper()
+        if setup_type in {"LIQUIDITY_REVERSAL", "REVERSAL_ATTEMPT"}:
+            return "reversal"
+        if setup_type in {"STRUCTURE_CONTINUATION", "TREND_CONTINUATION", "ORDER_BLOCK_PULLBACK", "PULLBACK_ENTRY", "TREND_PULLBACK"}:
+            return "continuation"
+        if setup_type in {"RANGE_FADE", "SMC_CONTEXT", "MIXED_ALIGNMENT"}:
+            return "range"
+        return "default"
+
+    def _session_label(self, decision: Dict[str, Any], anchor: Dict[str, Any]) -> str:
+        session = decision.get("session_info") or {}
+        if isinstance(session, dict) and session.get("current_session"):
+            return str(session.get("current_session"))
+        plan = decision.get("session_plan") or {}
+        if isinstance(plan, dict) and plan.get("session_label"):
+            return str(plan.get("session_label"))
+        snap = anchor.get("signal_snapshot") or {}
+        if isinstance(snap, dict):
+            if isinstance(snap.get("session_plan"), dict) and snap.get("session_plan", {}).get("session_label"):
+                return str(snap.get("session_plan", {}).get("session_label"))
+            if isinstance(snap.get("session_info"), dict) and snap.get("session_info", {}).get("current_session"):
+                return str(snap.get("session_info", {}).get("current_session"))
+        return "Unknown Session"
+
+    def _execution_preference(self, decision: Dict[str, Any], anchor: Dict[str, Any]) -> str:
+        plan = decision.get("session_plan") or {}
+        if isinstance(plan, dict) and plan.get("execution_preference"):
+            return str(plan.get("execution_preference"))
+        snap = anchor.get("signal_snapshot") or {}
+        if isinstance(snap, dict) and isinstance(snap.get("session_plan"), dict) and snap.get("session_plan", {}).get("execution_preference"):
+            return str(snap.get("session_plan", {}).get("execution_preference"))
+        return "UNKNOWN"
 
     def _select_family(self, decision: Dict[str, Any], trades: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         desired_sid = self._scenario_id_from_decision(decision)

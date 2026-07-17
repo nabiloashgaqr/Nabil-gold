@@ -20,6 +20,7 @@ from typing import Any, Dict, List
 from zoneinfo import ZoneInfo
 
 from utils.helpers import load_trades, save_trades
+from utils.instruments import price_to_points
 
 
 class SessionPlannerService:
@@ -30,10 +31,14 @@ class SessionPlannerService:
         self.min_plan_score = float(cfg.get("min_plan_score", 62) or 62)
         self.min_primary_dominance = float(cfg.get("min_primary_dominance", 50) or 50)
         self.min_return_probability = float(cfg.get("min_return_probability", 42) or 42)
+        self.min_primary_quality_score = float(cfg.get("min_primary_quality_score", 70) or 70)
+        self.min_trigger_score = float(cfg.get("min_trigger_score", 40) or 40)
         self.require_session_quality = str(cfg.get("require_session_quality", "HIGH") or "HIGH").upper()
+        self.require_structure_quality = str(cfg.get("require_structure_quality", "MODERATE") or "MODERATE").upper()
         self.allow_caution_news = bool(cfg.get("allow_caution_news", True))
         self.expire_after_hours = float(cfg.get("expire_after_hours", 8) or 8)
         self.default_pending_slots = int(cfg.get("default_pending_slots", 2) or 2)
+        self.standby_min_distance_points = float(cfg.get("standby_min_distance_points", 60) or 60)
         self.symbol = str(self.config.get("symbol", "XAU/USD"))
         root = Path(__file__).resolve().parents[1]
         self.storage_path = root / "storage" / "session_plans.json"
@@ -49,10 +54,19 @@ class SessionPlannerService:
         macro = ((all_results.get("news", {}) or {}).get("macro_direction") or ((all_results.get("macro_fundamental", {}) or {}).get("macro_direction") or {}))
         smc = all_results.get("smc", {}) or {}
         candidates = list(smc.get("setup_candidates") or [])
+        market_structure = smc.get("market_structure", {}) or {}
+        liquidity = smc.get("liquidity", {}) or {}
+        dealing_range = smc.get("dealing_range", {}) or {}
+        zone_context = str(smc.get("zone") or "")
+        current_price = self._f(all_results.get("current_price"), 0.0)
 
         now = datetime.now(timezone.utc)
         session_label = str(session.get("current_session") or session.get("session") or "Unknown Session")
         session_quality = str(session.get("session_quality") or session.get("quality") or "LOW").upper()
+
+        structure_trend = str(market_structure.get("trend") or "RANGING").upper()
+        structure_quality = str(market_structure.get("structure_quality") or "WEAK").upper()
+        recent_sweep = (liquidity.get("recent_sweep") or {}) if isinstance(liquidity, dict) else {}
 
         base = {
             "enabled": True,
@@ -81,6 +95,28 @@ class SessionPlannerService:
             "planner_grade": "D",
             "max_pending_orders_allowed": 0,
             "notes": [],
+            "bias_sources": [],
+            "directional_alignment_count": 0,
+            "structure_trend": structure_trend,
+            "structure_quality": structure_quality,
+            "market_zone_context": zone_context,
+            "recent_sweep": {
+                "type": recent_sweep.get("type"),
+                "reference_type": recent_sweep.get("reference_type"),
+                "confirmation": recent_sweep.get("confirmation"),
+            },
+            "expected_path": None,
+            "execution_preference": None,
+            "primary_rationale": [],
+            "standby_rationale": [],
+            "plan_narrative": None,
+            "liquidity_map": {
+                "previous_day_high": (liquidity.get("previous_day_levels") or {}).get("high") if isinstance(liquidity, dict) else None,
+                "previous_day_low": (liquidity.get("previous_day_levels") or {}).get("low") if isinstance(liquidity, dict) else None,
+                "session_high": (liquidity.get("session_liquidity") or {}).get("high") if isinstance(liquidity, dict) else None,
+                "session_low": (liquidity.get("session_liquidity") or {}).get("low") if isinstance(liquidity, dict) else None,
+                "session_reference": (liquidity.get("session_liquidity") or {}).get("label") if isinstance(liquidity, dict) else None,
+            },
             "daily_bias": {
                 "bias": daily_bias.get("bias"),
                 "confidence": daily_bias.get("confidence"),
@@ -121,10 +157,18 @@ class SessionPlannerService:
 
         primary_dom = self._f(primary.get("thesis_dominance_score"), 0.0)
         primary_rp = self._f(primary.get("return_probability_score"), 0.0)
+        primary_quality = self._f(primary.get("quality_score"), self._f((primary.get("setup_quality") or {}).get("score"), 0.0))
+        primary_trigger = self._f(primary.get("trigger_score"), 0.0)
         if primary_dom < self.min_primary_dominance or primary_rp < self.min_return_probability:
             base["plan_reason"] = (
                 f"primary thesis too weak for planning (dominance {primary_dom:.1f}, return probability {primary_rp:.1f})"
             )
+            return base
+        if primary_quality < self.min_primary_quality_score:
+            base["plan_reason"] = f"primary quality {primary_quality:.1f} below planner floor {self.min_primary_quality_score:.1f}"
+            return base
+        if primary_trigger < self.min_trigger_score and str(primary.get("setup_state") or "").upper() == "DETECTED":
+            base["plan_reason"] = f"primary trigger score {primary_trigger:.1f} still too early for a morning plan"
             return base
 
         direction = str(primary.get("direction") or "").upper()
@@ -132,6 +176,17 @@ class SessionPlannerService:
             base["plan_reason"] = "primary candidate has no directional thesis"
             return base
 
+        alignment = self._directional_alignment(direction, daily_bias, macro if isinstance(macro, dict) else {}, structure_trend)
+        base["bias_sources"] = alignment["sources"]
+        base["directional_alignment_count"] = alignment["count"]
+        if alignment["count"] == 0 and not self._aligned_sweep(direction, recent_sweep):
+            base["plan_reason"] = "no strong bias alignment for a morning plan"
+            return base
+        if not self._structure_quality_ok(structure_quality, str(primary.get("setup_type") or ""), recent_sweep):
+            base["plan_reason"] = f"structure quality {structure_quality} is too weak for this plan type"
+            return base
+
+        standby = self._validated_standby(primary, standby, symbol=symbol)
         planner_score, planner_notes = self._planner_score(
             direction=direction,
             primary=primary,
@@ -140,6 +195,9 @@ class SessionPlannerService:
             daily_bias=daily_bias,
             macro=macro if isinstance(macro, dict) else {},
             news=news,
+            market_structure=market_structure,
+            recent_sweep=recent_sweep,
+            zone_context=zone_context,
         )
         if planner_score < self.min_plan_score:
             base["plan_reason"] = f"planner score {planner_score:.1f} below {self.min_plan_score:.1f}"
@@ -149,6 +207,12 @@ class SessionPlannerService:
         scenario_type = str(primary.get("setup_type") or "SCENARIO")
         scenario_id = self._scenario_id(symbol, direction, scenario_type, session_label, now)
         plan_id = f"PLAN::{scenario_id}"
+        expected_path = self._expected_path(direction, primary, liquidity, dealing_range, current_price)
+        primary_rationale = self._candidate_rationale(primary, direction, structure_trend, structure_quality, recent_sweep, rank_label="PRIMARY")
+        standby_rationale = self._candidate_rationale(standby, direction, structure_trend, structure_quality, recent_sweep, rank_label="STANDBY") if standby else []
+        execution_preference = self._execution_preference(primary, standby, current_price)
+        plan_narrative = self._plan_narrative(direction, scenario_type, primary, alignment["sources"], expected_path, execution_preference)
+
         base.update(
             {
                 "plan_ready": True,
@@ -171,6 +235,11 @@ class SessionPlannerService:
                 "max_pending_orders_allowed": min(self.default_pending_slots, 2 if standby else 1),
                 "plan_reason": "session plan ready",
                 "notes": planner_notes,
+                "expected_path": expected_path,
+                "execution_preference": execution_preference,
+                "primary_rationale": primary_rationale,
+                "standby_rationale": standby_rationale,
+                "plan_narrative": plan_narrative,
             }
         )
         if persist:
@@ -214,6 +283,9 @@ class SessionPlannerService:
         daily_bias: Dict[str, Any],
         macro: Dict[str, Any],
         news: Dict[str, Any],
+        market_structure: Dict[str, Any],
+        recent_sweep: Dict[str, Any],
+        zone_context: str,
     ) -> tuple[float, List[str]]:
         score = 0.0
         notes: List[str] = []
@@ -223,10 +295,10 @@ class SessionPlannerService:
         quality_score = self._f(primary.get("quality_score"), self._f((primary.get("setup_quality") or {}).get("score"), 0.0))
         trigger_score = self._f(primary.get("trigger_score"), 0.0)
 
-        score += dominance * 0.35
-        score += return_prob * 0.25
-        score += quality_score * 0.20
-        score += min(trigger_score, 100.0) * 0.10
+        score += dominance * 0.28
+        score += return_prob * 0.20
+        score += quality_score * 0.16
+        score += min(trigger_score, 100.0) * 0.08
 
         if str(primary.get("selection_role") or "").upper() == "PRIMARY":
             score += 4.0
@@ -237,10 +309,10 @@ class SessionPlannerService:
 
         setup_state = str(primary.get("setup_state") or "").upper()
         if setup_state == "ENTRY_ARMED":
-            score += 6.0
+            score += 8.0
             notes.append("price already near primary POI")
         elif setup_state == "POI_MARKED":
-            score += 3.0
+            score += 4.0
             notes.append("POI already defined")
 
         daily_dir = self._bias_to_direction(daily_bias.get("bias"))
@@ -259,6 +331,28 @@ class SessionPlannerService:
             score -= 6.0
             notes.append("macro bias opposes thesis")
 
+        structure_trend = str(market_structure.get("trend") or "RANGING").upper()
+        structure_quality = str(market_structure.get("structure_quality") or "WEAK").upper()
+        if structure_trend == ("BULLISH" if direction == "BUY" else "BEARISH"):
+            score += 7.0
+            notes.append("structure trend aligned")
+        elif structure_trend in {"BULLISH", "BEARISH"}:
+            score -= 6.0
+            notes.append("structure trend opposes thesis")
+        if structure_quality == "STRONG":
+            score += 5.0
+            notes.append("strong structure quality")
+        elif structure_quality == "MODERATE":
+            score += 2.0
+            notes.append("moderate structure quality")
+        else:
+            score -= 4.0
+            notes.append("weak structure quality")
+
+        score += self._mitigation_bonus(primary, notes)
+        score += self._zone_context_bonus(direction, zone_context, notes)
+        score += self._sweep_bonus(direction, recent_sweep, notes)
+
         session_quality = str(session.get("session_quality") or session.get("quality") or "LOW").upper()
         session_bonus = {"BEST": 6.0, "HIGH": 5.0, "MEDIUM": 2.0, "LOW": 0.0}.get(session_quality, 0.0)
         score += session_bonus
@@ -273,6 +367,159 @@ class SessionPlannerService:
             notes.append("news caution")
 
         return round(max(0.0, min(100.0, score)), 1), notes
+
+    def _directional_alignment(
+        self,
+        direction: str,
+        daily_bias: Dict[str, Any],
+        macro: Dict[str, Any],
+        structure_trend: str,
+    ) -> Dict[str, Any]:
+        sources: List[str] = []
+        if self._bias_to_direction(daily_bias.get("bias")) == direction:
+            sources.append("daily_bias")
+        if self._macro_to_direction(macro.get("bias") if isinstance(macro, dict) else None) == direction:
+            sources.append("macro")
+        if structure_trend == ("BULLISH" if direction == "BUY" else "BEARISH"):
+            sources.append("structure")
+        return {"count": len(sources), "sources": sources}
+
+    def _validated_standby(self, primary: Dict[str, Any], standby: Dict[str, Any] | None, *, symbol: str) -> Dict[str, Any] | None:
+        if not isinstance(standby, dict) or not standby:
+            return None
+        primary_entry = self._f(primary.get("entry_price"), 0.0)
+        standby_entry = self._f(standby.get("entry_price"), 0.0)
+        if primary_entry > 0 and standby_entry > 0:
+            distance_points = abs(self._price_to_points(standby_entry - primary_entry, symbol=symbol))
+            if distance_points < self.standby_min_distance_points:
+                return None
+        return standby
+
+    def _mitigation_bonus(self, candidate: Dict[str, Any], notes: List[str]) -> float:
+        details = candidate.get("details") or {}
+        poi = details.get("poi") if isinstance(details, dict) else {}
+        mitigation = str((poi or {}).get("mitigation_status") or "").upper()
+        if mitigation == "FRESH":
+            notes.append("fresh POI")
+            return 6.0
+        if mitigation == "TESTED":
+            notes.append("tested POI")
+            return 2.0
+        if mitigation in {"MITIGATED", "PARTIAL"}:
+            notes.append("mitigated POI")
+            return -6.0
+        if mitigation == "INVALIDATED":
+            notes.append("invalidated POI")
+            return -20.0
+        return 0.0
+
+    def _zone_context_bonus(self, direction: str, zone_context: str, notes: List[str]) -> float:
+        zone_context = str(zone_context or "").upper()
+        if direction == "SELL" and zone_context in {"PREMIUM", "EQUILIBRIUM"}:
+            notes.append(f"{zone_context.lower()} sell map")
+            return 5.0 if zone_context == "PREMIUM" else 2.5
+        if direction == "BUY" and zone_context in {"DISCOUNT", "EQUILIBRIUM"}:
+            notes.append(f"{zone_context.lower()} buy map")
+            return 5.0 if zone_context == "DISCOUNT" else 2.5
+        if zone_context:
+            notes.append(f"zone context {zone_context.lower()} opposes thesis")
+            return -4.0
+        return 0.0
+
+    def _aligned_sweep(self, direction: str, recent_sweep: Dict[str, Any]) -> bool:
+        sweep_type = str((recent_sweep or {}).get("type") or "")
+        return (direction == "BUY" and sweep_type == "sell_side") or (direction == "SELL" and sweep_type == "buy_side")
+
+    def _sweep_bonus(self, direction: str, recent_sweep: Dict[str, Any], notes: List[str]) -> float:
+        if not isinstance(recent_sweep, dict) or not recent_sweep.get("occurred"):
+            return 0.0
+        if not self._aligned_sweep(direction, recent_sweep):
+            notes.append("recent sweep opposes thesis")
+            return -4.0
+        confirmation = str(recent_sweep.get("confirmation") or "").upper()
+        reference_type = str(recent_sweep.get("reference_type") or "liquidity").replace("_", " ")
+        notes.append(f"aligned {reference_type} sweep ({confirmation or 'UNKNOWN'})")
+        if confirmation == "STRONG":
+            return 8.0
+        if confirmation == "MODERATE":
+            return 5.0
+        return 2.0
+
+    def _structure_quality_ok(self, structure_quality: str, setup_type: str, recent_sweep: Dict[str, Any]) -> bool:
+        ranks = {"WEAK": 0, "MODERATE": 1, "STRONG": 2}
+        actual = ranks.get(str(structure_quality or "WEAK").upper(), 0)
+        required = ranks.get(self.require_structure_quality, 1)
+        if str(setup_type or "").upper() == "LIQUIDITY_REVERSAL" and recent_sweep.get("occurred"):
+            return actual >= 0
+        return actual >= required
+
+    def _expected_path(
+        self,
+        direction: str,
+        primary: Dict[str, Any],
+        liquidity: Dict[str, Any],
+        dealing_range: Dict[str, Any],
+        current_price: float,
+    ) -> str:
+        target = primary.get("target_liquidity") or primary.get("target_price")
+        sweep = (liquidity.get("recent_sweep") or {}) if isinstance(liquidity, dict) else {}
+        ref = str(sweep.get("reference_type") or "liquidity").replace("_", " ")
+        if direction == "SELL":
+            high_ref = (liquidity.get("previous_day_levels") or {}).get("high") if isinstance(liquidity, dict) else None
+            return f"Premium-to-discount sell path: reject after {ref} sweep, hold below {primary.get('stop_loss')} and target {target or dealing_range.get('midpoint') or current_price}."
+        low_ref = (liquidity.get("previous_day_levels") or {}).get("low") if isinstance(liquidity, dict) else None
+        return f"Discount-to-premium buy path: react after {ref} sweep, hold above {primary.get('stop_loss')} and target {target or dealing_range.get('midpoint') or current_price}."
+
+    def _execution_preference(self, primary: Dict[str, Any], standby: Dict[str, Any] | None, current_price: float) -> str:
+        trigger_state = str(primary.get("trigger_state") or "").upper()
+        setup_state = str(primary.get("setup_state") or "").upper()
+        entry_price = self._f(primary.get("entry_price"), 0.0)
+        if setup_state == "ENTRY_ARMED" and trigger_state == "REJECTION_CONFIRMED":
+            return "NEAR_MARKET_WATCH"
+        if setup_state == "ENTRY_ARMED" and entry_price > 0 and abs(entry_price - current_price) <= 3.0:
+            return "NEAR_MARKET_WATCH"
+        if standby:
+            return "LADDER_PENDING"
+        return "SINGLE_PENDING"
+
+    def _candidate_rationale(
+        self,
+        candidate: Dict[str, Any] | None,
+        direction: str,
+        structure_trend: str,
+        structure_quality: str,
+        recent_sweep: Dict[str, Any],
+        *,
+        rank_label: str,
+    ) -> List[str]:
+        if not isinstance(candidate, dict) or not candidate:
+            return []
+        reasons: List[str] = []
+        if candidate.get("poi_type"):
+            reasons.append(f"{rank_label.lower()} uses {candidate.get('poi_type')} POI")
+        if candidate.get("expected_revisit_window"):
+            reasons.append(f"revisit window {candidate.get('expected_revisit_window')}")
+        if candidate.get("trigger_state"):
+            reasons.append(f"trigger {candidate.get('trigger_state')}")
+        if self._aligned_sweep(direction, recent_sweep):
+            reasons.append("liquidity sweep supports the path")
+        reasons.append(f"structure {structure_trend.lower()} / {structure_quality.lower()}")
+        return reasons[:4]
+
+    def _plan_narrative(
+        self,
+        direction: str,
+        scenario_type: str,
+        primary: Dict[str, Any],
+        bias_sources: List[str],
+        expected_path: str,
+        execution_preference: str,
+    ) -> str:
+        bias_txt = ", ".join(bias_sources) if bias_sources else "internal setup context"
+        return (
+            f"{direction} {scenario_type}: bias supported by {bias_txt}; primary focus at {primary.get('entry_price')} with {execution_preference.lower()} execution. "
+            f"{expected_path}"
+        )
 
     def _scenario_id(self, symbol: str, direction: str, scenario_type: str, session_label: str, now: datetime) -> str:
         local_now = self._local_now(now)
@@ -390,6 +637,12 @@ class SessionPlannerService:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+
+    def _price_to_points(self, price_delta: float, *, symbol: str) -> float:
+        try:
+            return float(price_to_points(price_delta, symbol=symbol))
+        except Exception:
+            return 0.0
 
     @staticmethod
     def _f(value: Any, default: float = 0.0) -> float:

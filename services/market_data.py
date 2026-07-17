@@ -78,6 +78,90 @@ class MarketDataService:
             return os.environ.get(val.replace("ENV:", "", 1))
         return val if isinstance(val, str) else None
 
+    @staticmethod
+    def _source_integrity(source: str | None, *, timeframe: str | None = None, resampled_from: str | None = None) -> Dict[str, Any]:
+        src = str(source or "unknown")
+        tf = str(timeframe or "")
+        resampled = str(resampled_from or "")
+        if src == "twelvedata":
+            return {
+                "source": src,
+                "source_type": "historical_ohlc",
+                "reliability_grade": "HIGH",
+                "supports_signal_generation": True,
+                "supports_pending_activation": True,
+                "supports_intrabar_levels": True,
+                "timeframe": tf,
+                "resampled_from": resampled or None,
+            }
+        if src == "swissquote_spot_quote_fallback":
+            return {
+                "source": src,
+                "source_type": "quote_only",
+                "reliability_grade": "LOW",
+                "supports_signal_generation": False,
+                "supports_pending_activation": False,
+                "supports_intrabar_levels": False,
+                "timeframe": tf,
+                "resampled_from": resampled or None,
+            }
+        if src == "synthetic_demo":
+            return {
+                "source": src,
+                "source_type": "synthetic",
+                "reliability_grade": "UNSAFE",
+                "supports_signal_generation": False,
+                "supports_pending_activation": False,
+                "supports_intrabar_levels": False,
+                "timeframe": tf,
+                "resampled_from": resampled or None,
+            }
+        return {
+            "source": src,
+            "source_type": "unknown",
+            "reliability_grade": "UNKNOWN",
+            "supports_signal_generation": False,
+            "supports_pending_activation": False,
+            "supports_intrabar_levels": False,
+            "timeframe": tf,
+            "resampled_from": resampled or None,
+        }
+
+    @classmethod
+    def enrich_payload_integrity(cls, payload: Dict[str, Any]) -> Dict[str, Any]:
+        enriched = dict(payload or {})
+        integrity = cls._source_integrity(
+            enriched.get("source"),
+            timeframe=str(enriched.get("timeframe") or ""),
+            resampled_from=str(enriched.get("resampled_from") or ""),
+        )
+        enriched["source_integrity"] = integrity
+        enriched["supports_signal_generation"] = bool(integrity.get("supports_signal_generation"))
+        enriched["supports_pending_activation"] = bool(integrity.get("supports_pending_activation"))
+        return enriched
+
+    @classmethod
+    def payload_supports_signal_generation(cls, payload: Dict[str, Any] | None) -> bool:
+        if not payload:
+            return False
+        integrity = (payload.get("source_integrity") if isinstance(payload, dict) else None) or cls._source_integrity(
+            (payload or {}).get("source") if isinstance(payload, dict) else None,
+            timeframe=str((payload or {}).get("timeframe") or "") if isinstance(payload, dict) else None,
+            resampled_from=str((payload or {}).get("resampled_from") or "") if isinstance(payload, dict) else None,
+        )
+        return bool(integrity.get("supports_signal_generation"))
+
+    @classmethod
+    def payload_supports_pending_activation(cls, payload: Dict[str, Any] | None) -> bool:
+        if not payload:
+            return False
+        integrity = (payload.get("source_integrity") if isinstance(payload, dict) else None) or cls._source_integrity(
+            (payload or {}).get("source") if isinstance(payload, dict) else None,
+            timeframe=str((payload or {}).get("timeframe") or "") if isinstance(payload, dict) else None,
+            resampled_from=str((payload or {}).get("resampled_from") or "") if isinstance(payload, dict) else None,
+        )
+        return bool(integrity.get("supports_pending_activation"))
+
     def get_gold_data(self, outputsize: int = 220) -> Dict[str, Any] | None:
         timeframes = self.config.get("timeframes", ["5m", "15m", "1H", "4H"])
         primary_tf = self.config.get("primary_timeframe", "15m")
@@ -96,7 +180,7 @@ class MarketDataService:
         primary_payload = tf_payloads.get(primary_tf) or next(iter(tf_payloads.values()), None)
         if not primary_payload:
             return None
-        return {
+        return self.enrich_payload_integrity({
             "symbol": self.symbol,
             "timeframe": primary_tf,
             "data": primary_payload["data"],
@@ -105,7 +189,8 @@ class MarketDataService:
             "spread_points": primary_payload.get("spread_points"),
             "last_updated": primary_payload["last_updated"],
             "source": primary_payload.get("source", "unknown"),
-        }
+            "resampled_from": primary_payload.get("resampled_from"),
+        })
 
     def get_ohlcv(self, timeframe: str = "15m", outputsize: int = 220) -> Dict[str, Any]:
         cache_key = f"{self.symbol}:{timeframe}:{outputsize}"
@@ -140,6 +225,7 @@ class MarketDataService:
             )
             payload = self._generate_synthetic_data(timeframe, outputsize)
 
+        payload = self.enrich_payload_integrity(payload)
         self._cache[cache_key] = {"cached_at": time.time(), "payload": payload}
         return payload
 
@@ -235,7 +321,7 @@ class MarketDataService:
                 candles = self._resample_candles(base_data, tf_minutes)
             if not candles:
                 candles = base_data[-1:] if base_data else []
-            payloads[tf] = {
+            payloads[tf] = self.enrich_payload_integrity({
                 "symbol": self.symbol,
                 "timeframe": tf,
                 "data": candles,
@@ -244,7 +330,7 @@ class MarketDataService:
                 "last_updated": base_payload.get("last_updated"),
                 "source": base_payload.get("source", "unknown"),
                 "resampled_from": base_tf if tf != base_tf else None,
-            }
+            })
         return payloads
 
     def _resample_candles(self, candles: List[Dict[str, Any]], timeframe_minutes: int) -> List[Dict[str, Any]]:
@@ -320,7 +406,7 @@ class MarketDataService:
                 "close": round(price, decimals),
                 "volume": 0.0,
             }
-            return {
+            return self.enrich_payload_integrity({
                 "symbol": self.symbol,
                 "timeframe": "quote",
                 "data": [candle],
@@ -328,7 +414,7 @@ class MarketDataService:
                 "spread_points": None,
                 "last_updated": candle["time"],
                 "source": "swissquote_spot_quote_fallback",
-            }
+            })
         except Exception as exc:  # noqa: BLE001
             self.logger.warning("Swissquote spot quote fallback failed for %s: %s", self.symbol, exc)
             return None
@@ -368,7 +454,7 @@ class MarketDataService:
             high = max(open_price, close) + rng.uniform(0.2, 2.2) * scale
             low = min(open_price, close) - rng.uniform(0.2, 2.2) * scale
             candles.append({"time": dt.isoformat().replace("+00:00", "Z"), "open": round(open_price, decimals), "high": round(high, decimals), "low": round(low, decimals), "close": round(close, decimals), "volume": int(1000 + rng.random() * 1200)})
-        return {"symbol": self.symbol, "timeframe": timeframe, "data": candles, "current_price": float(candles[-1]["close"]), "spread_points": 2.0, "last_updated": now.isoformat().replace("+00:00", "Z"), "source": "synthetic_demo"}
+        return self.enrich_payload_integrity({"symbol": self.symbol, "timeframe": timeframe, "data": candles, "current_price": float(candles[-1]["close"]), "spread_points": 2.0, "last_updated": now.isoformat().replace("+00:00", "Z"), "source": "synthetic_demo"})
 
     def _rate_limit(self) -> None:
         elapsed = time.time() - self._last_request_at
