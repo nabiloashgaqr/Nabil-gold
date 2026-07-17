@@ -256,6 +256,11 @@ def main() -> None:
             except (TypeError, ValueError):
                 candle_high = current_price
                 candle_low = current_price
+            if price_payload.get("source") == "swissquote_spot_quote_fallback" and any(str(t.get("status") or "").upper() == "PENDING" for t in symbol_trades):
+                logger.warning(
+                    "Pending touch detection degraded for %s: using Swissquote quote fallback without reliable intrabar OHLC. Pending orders will wait for a real candle source before activation.",
+                    symbol,
+                )
             evaluations.extend(manager.update_trades(
                 open_trades=symbol_trades,
                 current_price=current_price,
@@ -266,6 +271,7 @@ def main() -> None:
                 now=datetime.now(timezone.utc),
                 news_blocked=news_blocked,
                 news_context=news_result,
+                market_data_source=str(price_payload.get("source") or ""),
             ))
         total_events = 0
         for evaluation in evaluations:

@@ -10,6 +10,7 @@ import logging
 import os
 import sys
 import html
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
@@ -36,7 +37,9 @@ from services.telegram_bot import TelegramService, post_news_alert_sent, post_ne
 from services.learning_service import get_learning_service
 from services.llm_review import get_gemini_review_service
 from services.pending_governor import PendingGovernor
+from services.scenario_governor import ScenarioGovernor
 from services.setup_memory import SetupMemoryService
+from services.session_planner import SessionPlannerService
 from utils.helpers import load_config, setup_logging, get_agent_weights
 from utils.instruments import enabled_instruments, config_for_instrument, normalize_symbol, price_to_points, points_to_price
 
@@ -219,6 +222,296 @@ def _setup_sweep_time(setup: Dict[str, Any]) -> datetime | None:
     return None
 
 
+def _decision_scenario_id(decision: Dict[str, Any]) -> str:
+    plan = decision.get("session_plan") or {}
+    if isinstance(plan, dict) and plan.get("scenario_id"):
+        return str(plan.get("scenario_id"))
+    setup = decision.get("setup_context") or {}
+    if isinstance(setup, dict) and setup.get("scenario_id"):
+        return str(setup.get("scenario_id"))
+    return ""
+
+
+
+def _decision_ladder_role(decision: Dict[str, Any]) -> str:
+    setup = decision.get("setup_context") or {}
+    if isinstance(setup, dict) and setup.get("pending_plan_role"):
+        return str(setup.get("pending_plan_role")).upper()
+    if isinstance(setup, dict) and setup.get("selection_role"):
+        return str(setup.get("selection_role")).upper()
+    return ""
+
+
+
+def _trade_session_plan(trade: Dict[str, Any]) -> Dict[str, Any]:
+    snap = trade.get("signal_snapshot") or {}
+    if isinstance(snap, str):
+        try:
+            import json
+            snap = json.loads(snap)
+        except Exception:
+            snap = {}
+    if not isinstance(snap, dict):
+        snap = {}
+    plan = snap.get("session_plan") or trade.get("session_plan") or {}
+    return dict(plan) if isinstance(plan, dict) else {}
+
+
+
+def _trade_scenario_id(trade: Dict[str, Any]) -> str:
+    plan = _trade_session_plan(trade)
+    if plan.get("scenario_id"):
+        return str(plan.get("scenario_id"))
+    setup = _trade_setup_context(trade)
+    if setup.get("scenario_id"):
+        return str(setup.get("scenario_id"))
+    return ""
+
+
+
+def _trade_ladder_role(trade: Dict[str, Any]) -> str:
+    setup = _trade_setup_context(trade)
+    if setup.get("pending_plan_role"):
+        return str(setup.get("pending_plan_role")).upper()
+    if setup.get("selection_role"):
+        return str(setup.get("selection_role")).upper()
+    return ""
+
+
+
+def _ladder_sibling_allowed(decision: Dict[str, Any], trade: Dict[str, Any]) -> bool:
+    current_sid = _decision_scenario_id(decision)
+    existing_sid = _trade_scenario_id(trade)
+    if not current_sid or current_sid != existing_sid:
+        return False
+    current_role = _decision_ladder_role(decision)
+    existing_role = _trade_ladder_role(trade)
+    if current_role not in {"PRIMARY", "STANDBY"} or existing_role not in {"PRIMARY", "STANDBY"}:
+        return False
+    return current_role != existing_role
+
+
+
+def _planned_order_type(config: Dict[str, Any], direction: str, entry: float, current_price: float, symbol: str) -> str:
+    oe = config.get("order_execution", {}) or {}
+    entry_style = str(oe.get("entry_style", "market")).lower()
+    if entry_style in {"market", "fixed_risk"}:
+        return f"{direction}_MARKET"
+    if entry_style == "hybrid":
+        threshold = points_to_price(_safe_float(oe.get("market_threshold_points"), 30), symbol=symbol)
+    else:
+        threshold = points_to_price(_safe_float(oe.get("pending_threshold_points"), 20), symbol=symbol)
+    if abs(entry - current_price) <= max(threshold, 0.01):
+        return f"{direction}_MARKET"
+    if direction == "BUY":
+        return "BUY_LIMIT" if entry < current_price else "BUY_STOP"
+    if direction == "SELL":
+        return "SELL_LIMIT" if entry > current_price else "SELL_STOP"
+    return "UNKNOWN"
+
+
+
+def _plan_targets(direction: str, entry_price: float, stop_loss: float, target_price: float) -> tuple[float, float, float]:
+    risk = abs(stop_loss - entry_price)
+    reward = abs(target_price - entry_price)
+    if risk <= 0 or reward <= 0:
+        tp1 = target_price
+        tp2 = target_price
+        rr = 0.0
+        return round(tp1, 2), round(tp2, 2), rr
+    one_r = risk
+    half_reward = reward * 0.5
+    tp1_dist = min(max(one_r, reward * 0.35), half_reward if half_reward > 0 else one_r)
+    if direction == "BUY":
+        tp1 = entry_price + tp1_dist
+        tp2 = target_price
+    else:
+        tp1 = entry_price - tp1_dist
+        tp2 = target_price
+    rr = reward / risk if risk > 0 else 0.0
+    return round(tp1, 2), round(tp2, 2), round(rr, 2)
+
+
+
+def _build_plan_ladder_decision(
+    base_decision: Dict[str, Any],
+    plan: Dict[str, Any],
+    candidate: Dict[str, Any],
+    config: Dict[str, Any],
+) -> Dict[str, Any] | None:
+    direction = str(plan.get("session_bias") or candidate.get("direction") or "").upper()
+    symbol = str(plan.get("symbol") or base_decision.get("symbol") or config.get("symbol", "XAU/USD"))
+    if direction not in {"BUY", "SELL"}:
+        return None
+    entry_price = _safe_float(candidate.get("entry_price"), 0.0)
+    stop_loss = _safe_float(candidate.get("stop_loss"), 0.0)
+    target_price = _safe_float(candidate.get("target_price") or candidate.get("target_liquidity"), 0.0)
+    current_price = _safe_float(base_decision.get("current_price"), 0.0)
+    if entry_price <= 0 or stop_loss <= 0 or target_price <= 0 or current_price <= 0:
+        return None
+
+    order_type = _planned_order_type(config, direction, entry_price, current_price, symbol)
+    if order_type.endswith("MARKET"):
+        return None
+    entry_kind = order_type.split("_")[-1]
+    zone = candidate.get("poi_zone") or {}
+    if isinstance(zone, dict) and zone.get("top") is not None and zone.get("bottom") is not None:
+        low = min(_safe_float(zone.get("top"), entry_price), _safe_float(zone.get("bottom"), entry_price))
+        high = max(_safe_float(zone.get("top"), entry_price), _safe_float(zone.get("bottom"), entry_price))
+    else:
+        low = _safe_float(candidate.get("poi_low"), entry_price)
+        high = _safe_float(candidate.get("poi_high"), entry_price)
+        if low <= 0 or high <= 0:
+            low = high = entry_price
+    tp1, tp2, rr = _plan_targets(direction, entry_price, stop_loss, target_price)
+    role = str(candidate.get("selection_role") or "PRIMARY").upper()
+
+    decision = deepcopy(base_decision)
+    decision.update(
+        {
+            "decision": direction,
+            "symbol": symbol,
+            "confidence": max(_safe_float(plan.get("planner_confidence"), 0.0), _safe_float(candidate.get("thesis_dominance_score"), 0.0)),
+            "entry_mode": "session_plan_ladder",
+            "entry_path": 3,
+            "reasons": [
+                f"Session plan {plan.get('scenario_type')} ({role})",
+                f"Morning/session planner prepared this pending thesis before the move.",
+            ],
+            "quality": {
+                "grade": plan.get("planner_grade") or candidate.get("quality_grade") or "B",
+                "score": max(_safe_float(plan.get("planner_confidence"), 0.0), _safe_float(candidate.get("quality_score"), 0.0)),
+            },
+            "session_plan": deepcopy(plan),
+        }
+    )
+    setup_context = deepcopy(candidate)
+    setup_context.update(
+        {
+            "scenario_id": plan.get("scenario_id"),
+            "plan_id": plan.get("plan_id"),
+            "pending_plan_role": role,
+            "selection_role": role,
+        }
+    )
+    decision["setup_context"] = setup_context
+    decision["setup_id"] = setup_context.get("id")
+    decision["setup_type"] = setup_context.get("setup_type")
+    decision["setup_state"] = setup_context.get("setup_state")
+    decision["lead_agent"] = setup_context.get("lead_agent")
+    decision["setup_quality"] = setup_context.get("quality_grade") or candidate.get("quality_grade")
+    decision["signal"] = {
+        "type": direction,
+        "entry": {
+            "price": round(entry_price, 2),
+            "low": round(low, 2),
+            "high": round(high, 2),
+            "kind": entry_kind,
+            "order_type": order_type,
+            "basis": f"Session plan {role.lower()} POI",
+            "current_price": round(current_price, 2),
+            "distance_points": abs(price_to_points(entry_price - current_price, symbol=symbol)),
+        },
+        "stop_loss": round(stop_loss, 2),
+        "tp1": round(tp1, 2),
+        "tp2": round(tp2, 2),
+        "rr_ratio": rr,
+        "tp1_rr": round(abs(tp1 - entry_price) / max(abs(stop_loss - entry_price), 0.01), 2),
+        "tp2_rr": rr,
+        "order_type": order_type,
+        "entry_kind": entry_kind,
+        "position_size": {},
+        "risk_summary": f"Session planner {role.lower()} ladder pending",
+    }
+    return decision
+
+
+
+def _execute_session_plan_ladder(
+    base_decision: Dict[str, Any],
+    all_results: Dict[str, Any],
+    open_trades: List[Dict[str, Any]],
+    database: DatabaseService,
+    telegram: TelegramService,
+    config: Dict[str, Any],
+) -> int:
+    planner_cfg = (config.get("session_planner") or {}) if isinstance(config, dict) else {}
+    if not bool(planner_cfg.get("create_pending_orders_from_plan", True)):
+        return 0
+    plan = base_decision.get("session_plan") or {}
+    if not isinstance(plan, dict) or not plan.get("plan_ready"):
+        return 0
+    symbol = str(base_decision.get("symbol") or plan.get("symbol") or config.get("symbol", "XAU/USD"))
+    normalized_symbol = normalize_symbol(symbol)
+    symbol_open_trades = [t for t in (open_trades or []) if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol]
+    scenario_review = ScenarioGovernor(config).review_new_plan(plan, symbol_open_trades, database=database)
+    if scenario_review.get("action") == "KEEP_EXISTING_FAMILY":
+        logger.info("Session-plan family kept for %s: %s", symbol, scenario_review.get("reason"))
+        return 0
+    if scenario_review.get("action") == "REPLACE_PENDING_FAMILY":
+        logger.info("Session-plan family replaced for %s: %s", symbol, scenario_review.get("reason"))
+        try:
+            telegram.send_scenario_governance(scenario_review, symbol=symbol, side=str(plan.get("session_bias") or ""))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to send scenario family replacement message: %s", exc)
+        symbol_open_trades = [
+            t for t in symbol_open_trades
+            if str(t.get("status") or "").upper() != "PENDING"
+        ]
+    if any(str(t.get("status") or "").upper() in {"OPEN", "PARTIAL", "TP1_HIT"} for t in symbol_open_trades):
+        return 0
+
+    primary = plan.get("primary_poi") or {}
+    standby = plan.get("standby_poi") or {}
+    if not isinstance(primary, dict) or not primary:
+        return 0
+
+    primary_decision = _build_plan_ladder_decision(base_decision, plan, primary, config)
+    if not primary_decision:
+        return 0
+
+    created = 0
+    staged_trades = list(symbol_open_trades)
+    for ladder_decision in [primary_decision] + ([ _build_plan_ladder_decision(base_decision, plan, standby, config) ] if isinstance(standby, dict) and standby else []):
+        if not ladder_decision:
+            continue
+        role = _decision_ladder_role(ladder_decision)
+        if any(_trade_scenario_id(t) == _decision_scenario_id(ladder_decision) and _trade_ladder_role(t) == role for t in staged_trades):
+            continue
+        duplicate_reason = duplicate_signal_reason(ladder_decision, database, config)
+        if duplicate_reason:
+            logger.info("Session-plan ladder %s blocked for %s: %s", role, symbol, duplicate_reason)
+            if role == "PRIMARY":
+                return created
+            continue
+        trade_id = database.new_trade_id()
+        ladder_decision["trade_id"] = trade_id
+        delivered = False
+        try:
+            delivered = bool(telegram.send_signal(ladder_decision))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to send session-plan ladder signal (%s) for %s: %s", role, symbol, exc)
+            delivered = False
+        if not delivered:
+            if role == "PRIMARY":
+                return created
+            continue
+        database.save_trade(ladder_decision)
+        staged_trades.append(
+            {
+                "id": trade_id,
+                "symbol": symbol,
+                "type": ladder_decision.get("decision"),
+                "status": "PENDING",
+                "entry_price": ((ladder_decision.get("signal") or {}).get("entry") or {}).get("price"),
+                "signal_snapshot": ladder_decision,
+            }
+        )
+        created += 1
+    return created
+
+
+
 def _post_exit_revalidation_review(
     decision: Dict[str, Any],
     closed_trade: Dict[str, Any],
@@ -377,6 +670,8 @@ def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService,
         if _trade_outcome(trade) == "OPEN":
             prev_entry = _trade_entry_price(trade)
             if prev_entry is None: continue
+            if _ladder_sibling_allowed(decision, trade):
+                continue
             if block_open_any_price: return f"Duplicate {direction} blocked: one position per direction."
             if block_open_in_zone:
                 pts = _points_away(prev_entry)
@@ -1130,6 +1425,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 now=datetime.now(timezone.utc),
                 news_blocked=news_blocked_pre,
                 news_context=news_pre,
+                market_data_source=str(data.get("source") or ""),
             )
         if not session.get("trading_allowed"): return
         verified_snapshot = build_market_snapshot(data, config)
@@ -1156,6 +1452,28 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                     all_results["smc"]["setup_structure"] = processed_candidates[0]
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to process setup-memory state transitions: %s", exc)
+
+        # Phase 1 foundation: build a morning/session plan BEFORE the move.
+        # This is planning-only for now; later phases can translate PRIMARY /
+        # STANDBY plan objects into live laddered pending orders.
+        try:
+            session_plan = SessionPlannerService(config).build_plan(all_results)
+            all_results["session_plan"] = session_plan
+            if session_plan.get("plan_ready"):
+                logger.info(
+                    "Session plan ready for %s: %s %s | primary=%s | standby=%s | score=%s",
+                    symbol,
+                    session_plan.get("session_bias"),
+                    session_plan.get("scenario_type"),
+                    ((session_plan.get("primary_poi") or {}).get("entry_price")),
+                    ((session_plan.get("standby_poi") or {}).get("entry_price")) if session_plan.get("standby_poi") else None,
+                    session_plan.get("planner_confidence"),
+                )
+            else:
+                logger.info("Session plan not ready for %s: %s", symbol, session_plan.get("plan_reason"))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to build session plan: %s", exc)
+            all_results["session_plan"] = {"enabled": True, "plan_ready": False, "plan_status": "ERROR", "plan_reason": str(exc)}
         # Inject portfolio info so RiskManagementAgent can enforce max_open_trades
         # and max_daily_signals filters. Without this, those filters see 0 and
         # never block — which caused 15 simultaneous BUY trades.
@@ -1188,6 +1506,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         decision = await DecisionAgent(config, learning_service=learning_service).decide_async(all_results)
         decision["agent_details"] = _compact_agent_details(all_results)
         decision["symbol"] = symbol
+        decision["session_plan"] = all_results.get("session_plan", {})
         # Phase 5 data-enrichment: persist compact context with each trade so
         # learning/weekly reports can reason about sessions, news proximity,
         # volatility regime, and planned-vs-actual R:R without reconstructing
@@ -1396,6 +1715,22 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 logger.exception("🧠 Gemini analysis block failed")
         elif decision_type == "WAIT":
             logger.info("🧠 Gemini skipped: normal WAIT without hourly status")
+
+        # Phase 2: if the morning/session planner already prepared a strong
+        # PRIMARY / STANDBY thesis before the move, publish those pending ladder
+        # orders now instead of waiting for a late one-off signal after price has
+        # already traveled.
+        ladder_created = _execute_session_plan_ladder(
+            decision,
+            all_results,
+            [t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol],
+            database,
+            telegram,
+            config,
+        )
+        if ladder_created:
+            logger.info("Session-plan ladder created %s pending order(s) for %s", ladder_created, symbol)
+            return
         if decision_type in {"BUY", "SELL"}:
             # Cross-path distance check (applies to BOTH Path 1 and Path 2)
             _tae_cfg_cross = (config.get("signal_requirements") or {}).get("two_agent_entry") or {}
