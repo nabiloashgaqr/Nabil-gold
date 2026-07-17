@@ -38,6 +38,7 @@ from services.learning_service import get_learning_service
 from services.llm_review import get_gemini_review_service
 from services.pending_governor import PendingGovernor
 from services.scenario_governor import ScenarioGovernor
+from services.adaptive_execution import AdaptiveExecutionService
 from services.setup_memory import SetupMemoryService
 from services.session_planner import SessionPlannerService
 from utils.helpers import load_config, setup_logging, get_agent_weights
@@ -1732,19 +1733,46 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             logger.info("Session-plan ladder created %s pending order(s) for %s", ladder_created, symbol)
             return
         if decision_type in {"BUY", "SELL"}:
-            # Cross-path distance check (applies to BOTH Path 1 and Path 2)
+            symbol_trades = [t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol]
+            adaptive = AdaptiveExecutionService(config).review(decision, symbol_trades)
+            adaptive_action = str(adaptive.get("action") or "ALLOW_NEW")
+            if adaptive_action == "KEEP_PENDING":
+                logger.info("Adaptive execution kept pending for %s %s: %s", decision_type, symbol, adaptive.get("reason"))
+                return
+            if adaptive_action == "NO_TRADE_MISSED_MOVE":
+                logger.info("Adaptive execution skipped %s %s as missed move: %s", decision_type, symbol, adaptive.get("reason"))
+                return
+            if adaptive_action in {"PROMOTE_TO_MARKET", "REPLACE_WITH_CONTINUATION"}:
+                decision = adaptive.get("decision") or decision
+                decision["adaptive_execution"] = {
+                    "action": adaptive_action,
+                    "reason": adaptive.get("reason"),
+                }
+                logger.info("Adaptive execution %s for %s %s: %s", adaptive_action, decision_type, symbol, adaptive.get("reason"))
+
+            # Cross-path distance check (applies to BOTH Path 1 and Path 2),
+            # except when we're intentionally promoting/replacing an existing
+            # morning-plan family rather than opening an unrelated duplicate.
             _tae_cfg_cross = (config.get("signal_requirements") or {}).get("two_agent_entry") or {}
             _cross_pts = int(_tae_cfg_cross.get("cross_entry_distance_points", 200) or 200)
-            _cross_block = _cross_path_distance_check(decision, database, config, cross_distance_points=_cross_pts)
-            if _cross_block:
-                logger.info("Cross-path distance blocked: %s", _cross_block)
-                return
+            if adaptive_action not in {"PROMOTE_TO_MARKET", "REPLACE_WITH_CONTINUATION"}:
+                _cross_block = _cross_path_distance_check(decision, database, config, cross_distance_points=_cross_pts)
+                if _cross_block:
+                    logger.info("Cross-path distance blocked: %s", _cross_block)
+                    return
 
-            governance = PendingGovernor(config).review(
-                decision,
-                [t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol],
-                database=database,
-            )
+            if adaptive_action in {"PROMOTE_TO_MARKET", "REPLACE_WITH_CONTINUATION"}:
+                governance = {
+                    "action": "ALLOW_NEW",
+                    "reason": f"adaptive execution {adaptive_action.lower()} bypassed normal pending duplication gate",
+                    "cancelled_ids": [],
+                }
+            else:
+                governance = PendingGovernor(config).review(
+                    decision,
+                    symbol_trades,
+                    database=database,
+                )
             decision["pending_governor"] = governance
             action = str(governance.get("action") or "ALLOW_NEW")
             if action == "KEEP_EXISTING_PENDING":
@@ -1767,7 +1795,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                     logger.warning("Failed to send pending replacement-blocked message: %s", exc)
                 return
 
-            duplicate_reason = duplicate_signal_reason(decision, database, config)
+            duplicate_reason = None if adaptive_action in {"PROMOTE_TO_MARKET", "REPLACE_WITH_CONTINUATION"} else duplicate_signal_reason(decision, database, config)
             if duplicate_reason:
                 logger.info("Signal blocked for %s %s: %s", decision_type, symbol, duplicate_reason)
                 if str(duplicate_reason).startswith("Post-exit revalidation blocked:"):
