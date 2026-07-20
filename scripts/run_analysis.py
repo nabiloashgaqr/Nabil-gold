@@ -1150,6 +1150,24 @@ def _append_unique_reason(lines: List[str], text: str) -> None:
         lines.append(f"• {clean}")
 
 
+def _payload_supports_signal_generation(payload: Dict[str, Any] | None) -> bool:
+    if not payload:
+        return False
+    if isinstance(payload, dict) and payload.get("supports_signal_generation") is not None:
+        return bool(payload.get("supports_signal_generation"))
+    source = str((payload or {}).get("source") or "") if isinstance(payload, dict) else ""
+    return source == "twelvedata"
+
+
+def _payload_supports_pending_activation(payload: Dict[str, Any] | None) -> bool:
+    if not payload:
+        return False
+    if isinstance(payload, dict) and payload.get("supports_pending_activation") is not None:
+        return bool(payload.get("supports_pending_activation"))
+    source = str((payload or {}).get("source") or "") if isinstance(payload, dict) else ""
+    return source == "twelvedata"
+
+
 def _market_prices_text(config: Dict[str, Any] | None, current_symbol: str, current_price: float) -> str:
     try:
         base_config = config or load_config()
@@ -1515,7 +1533,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             integrity.get("supports_signal_generation"),
             integrity.get("supports_pending_activation"),
         )
-        if not MarketDataService.payload_supports_signal_generation(data):
+        if not _payload_supports_signal_generation(data):
             logger.error(
                 "Analysis stopped for %s: source %s is not reliable enough for signal generation.",
                 symbol,

@@ -30,6 +30,22 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 
+def _payload_supports_signal_generation(payload) -> bool:
+    if not payload:
+        return False
+    if isinstance(payload, dict) and payload.get("supports_signal_generation") is not None:
+        return bool(payload.get("supports_signal_generation"))
+    return str((payload or {}).get("source") or "") == "twelvedata"
+
+
+def _payload_supports_pending_activation(payload) -> bool:
+    if not payload:
+        return False
+    if isinstance(payload, dict) and payload.get("supports_pending_activation") is not None:
+        return bool(payload.get("supports_pending_activation"))
+    return str((payload or {}).get("source") or "") == "twelvedata"
+
+
 def _short_id(trade_id: str) -> str:
     """Compact, readable trade id: keep the date + last hex chunk.
 
@@ -205,7 +221,7 @@ def main() -> None:
             base_tf = symbol_config.get("data_source", {}).get("base_timeframe", "5m")
             price_payload = market_data.get_ohlcv(base_tf, outputsize=5)
             allow_synthetic = bool(symbol_config.get("data_source", {}).get("allow_synthetic_in_production", False))
-            if os.environ.get("GITHUB_ACTIONS") == "true" and not MarketDataService.payload_supports_signal_generation(price_payload) and price_payload.get("source") == "synthetic_demo" and not allow_synthetic:
+            if os.environ.get("GITHUB_ACTIONS") == "true" and not _payload_supports_signal_generation(price_payload) and price_payload.get("source") == "synthetic_demo" and not allow_synthetic:
                 # For trade management only, try a live XAU/USD spot quote before
                 # giving up. This does not provide historical candles for
                 # analysis, but it is safer than stopping SL/TP management and
@@ -256,7 +272,7 @@ def main() -> None:
             except (TypeError, ValueError):
                 candle_high = current_price
                 candle_low = current_price
-            if not MarketDataService.payload_supports_pending_activation(price_payload) and any(str(t.get("status") or "").upper() == "PENDING" for t in symbol_trades):
+            if not _payload_supports_pending_activation(price_payload) and any(str(t.get("status") or "").upper() == "PENDING" for t in symbol_trades):
                 integrity = price_payload.get("source_integrity") or {}
                 logger.warning(
                     "Pending touch detection degraded for %s: source=%s type=%s grade=%s. Pending orders will wait for a real candle source before activation.",
