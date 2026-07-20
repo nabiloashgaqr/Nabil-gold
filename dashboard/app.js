@@ -11,7 +11,6 @@ let currentLang = 'ar';
 let closedTrades = [];
 let liveTrades = [];
 let pendingTrades = [];
-let scenarioFamilies = [];
 let filteredTrades = [];
 let dashboardPayload = null;
 let charts = { daily: null, cumulative: null, session: null, instrument: null, regime: null, news: null };
@@ -95,7 +94,6 @@ function setLang(lang) {
     if (dashboardPayload) {
         setText('lastUpdate', formatDateTime(dashboardPayload.generatedAt || Date.now()));
         renderReports(dashboardPayload);
-        renderAnalystOverlap(dashboardPayload.analystOverlap || {});
     }
 }
 
@@ -406,7 +404,6 @@ async function loadDashboardData() {
         const activeRows = rawActive.map(normalizeTrade);
         liveTrades = activeRows.filter(t => isLiveStatus(t.status));
         pendingTrades = activeRows.filter(t => isPendingStatus(t.status));
-        scenarioFamilies = Array.isArray(payload.scenarioFamilies) ? payload.scenarioFamilies : [];
         filteredTrades = [...closedTrades];
 
         updateStats(filteredTrades, liveTrades, pendingTrades);
@@ -414,9 +411,6 @@ async function loadDashboardData() {
         renderTradesTable(filteredTrades);
         updateOpenTrades(liveTrades);
         renderReports(payload);
-        renderAnalystOverlap(payload.analystOverlap || {});
-        renderPendingGovernance(pendingTrades);
-        renderScenarioFamilies(scenarioFamilies);
         updateAgentPerformance();
 
         setText('lastUpdate', formatDateTime(payload.generatedAt || Date.now()));
@@ -432,9 +426,6 @@ async function loadDashboardData() {
         renderTradesTable([]);
         updateOpenTrades([]);
         renderReports({ dailyReports: [], weeklyReports: [] });
-        renderAnalystOverlap({});
-        renderPendingGovernance([]);
-        renderScenarioFamilies([]);
         setText('dataSource', 'خطأ');
         setText('lastUpdate', formatDateTime(Date.now()));
         setError(`${tr('loadError')}: ${error.message.includes('404') ? tr('api404') : error.message}`);
@@ -890,126 +881,6 @@ function renderReports(payload) {
     setText('dailyReportsCount', daily.length ? wordReports(daily.length) : '');
     setText('weeklyReportsCount', weekly.length ? wordReports(weekly.length) : '');
     setHTML('reportsBody', '');
-}
-
-function renderAnalystOverlap(summary) {
-    const labels = num(summary.labels_considered, 0);
-    setText('analystOverlapCount', labels ? `(${labels})` : '');
-    if (!labels) {
-        setText('analystMatchRate', '--');
-        setText('analystCoverage', currentLang === 'ar' ? 'لا توجد labels بعد' : 'No analyst labels yet');
-        setText('analystMatchMix', '--');
-        setText('analystExtraSetups', '--');
-        setText('analystEntryDistance', '--');
-        setText('analystEntryDistanceSub', '--');
-        setText('analystTopReason', '--');
-        setText('analystTopReasonSub', '--');
-        setHTML('analystReasonList', `<div class="empty">${currentLang === 'ar' ? 'أضف labels للمحلل أو شغّل المقارنة أولاً' : 'Import analyst labels or run the comparison workflow first.'}</div>`);
-        return;
-    }
-    setText('analystMatchRate', `${num(summary.match_rate_pct, 0).toFixed(1)}%`);
-    setText('analystCoverage', `${currentLang === 'ar' ? 'التغطية' : 'Coverage'} ${num(summary.coverage_rate_pct, 0).toFixed(1)}%`);
-    setText('analystMatchMix', `${num(summary.matched_labels, 0)} / ${num(summary.partial_matches, 0)} / ${num(summary.missed_labels, 0)}`);
-    setText('analystExtraSetups', `${currentLang === 'ar' ? 'إضافية' : 'Extra'} ${num(summary.extra_bot_setups, 0)}`);
-    const avgDist = summary.avg_entry_distance_points;
-    setText('analystEntryDistance', avgDist == null ? '--' : `${num(avgDist, 0).toFixed(1)} pts`);
-    setText('analystEntryDistanceSub', currentLang === 'ar' ? 'بين دخول المحلل والبوت' : 'Between analyst and bot entry');
-    const topReason = (summary.top_missed_reasons || [])[0] || null;
-    setText('analystTopReason', topReason ? String(topReason.reason_code || '--') : '--');
-    setText('analystTopReasonSub', topReason ? `${currentLang === 'ar' ? 'العدد' : 'Count'} ${num(topReason.count, 0)}` : '--');
-    const reasons = summary.top_missed_reasons || [];
-    if (!reasons.length) {
-        setHTML('analystReasonList', `<div class="empty">${currentLang === 'ar' ? 'لا توجد أسباب محفوظة بعد' : 'No miss reasons yet'}</div>`);
-        return;
-    }
-    setHTML('analystReasonList', reasons.map((r, idx) => `
-      <div class="report-file">
-        <div class="report-file-head">
-          <span class="file-icon">${idx === 0 ? '🥇' : idx === 1 ? '🥈' : '•'}</span>
-          <span class="file-title">${esc(r.reason_code || 'UNKNOWN')}</span>
-          <span class="file-meta">${currentLang === 'ar' ? 'العدد' : 'Count'} ${num(r.count, 0)}</span>
-        </div>
-      </div>`).join(''));
-}
-
-function renderPendingGovernance(pending) {
-    const rows = Array.isArray(pending) ? pending : [];
-    setText('pendingGovernanceCount', rows.length ? `(${rows.length})` : '');
-    if (!rows.length) {
-        setHTML('pendingGovernanceList', `<div class="empty">${currentLang === 'ar' ? 'لا توجد أوامر معلقة حالياً' : 'No pending orders right now'}</div>`);
-        return;
-    }
-    setHTML('pendingGovernanceList', rows.map((trade, idx) => {
-        const snap = snapshotOf(trade);
-        const setup = snap.setup_context || {};
-        const runtime = snap.pending_runtime || {};
-        const current = num(trade.current_price, 0);
-        const entry = num(trade.entry_price, 0);
-        const points = entry && current ? Math.abs((entry - current) / 0.1) : 0;
-        const role = setup.pending_plan_role || setup.selection_role || '--';
-        const dominance = setup.thesis_dominance_score ?? '--';
-        const reach = setup.return_probability_score ?? '--';
-        const revisit = setup.expected_revisit_window || '--';
-        const orderType = trade.order_type || trade.order_kind || 'PENDING';
-        const freshness = runtime.freshness_state || (currentLang === 'ar' ? 'غير معروف' : 'UNKNOWN');
-        const revalidation = runtime.revalidation_required ? (currentLang === 'ar' ? 'نعم' : 'Yes') : (currentLang === 'ar' ? 'لا' : 'No');
-        const source = runtime.touch_detection_source || trade.market_data_source || '--';
-        const unreliable = runtime.touch_detection_source_reliable === false;
-        const waitingReliable = runtime.touch_detection_waiting_for_reliable_ohlc === true;
-        const scenarioId = (snap.session_plan || {}).scenario_id || setup.scenario_id || '--';
-        const freshnessReasons = Array.isArray(runtime.freshness_reasons) ? runtime.freshness_reasons : [];
-        return `
-          <div class="report-file">
-            <div class="report-file-head">
-              <span class="file-icon">${idx === 0 ? '🎯' : '•'}</span>
-              <span class="file-title">${esc(trade.type || '')} ${esc(trade.symbol || '')} @ ${entry ? entry.toFixed(2) : '--'} [${esc(orderType)}]</span>
-              <span class="file-meta">${currentLang === 'ar' ? 'المتبقي' : 'To fill'} ${points.toFixed(0)} pts · ${esc(String(freshness))}</span>
-            </div>
-            <div class="report-file-body open" style="display:block; white-space:normal;">
-              <div><b>${currentLang === 'ar' ? 'السيناريو' : 'Scenario'}:</b> <code>${esc(String(scenarioId))}</code></div>
-              <div><b>${currentLang === 'ar' ? 'الدور' : 'Role'}:</b> ${esc(String(role))}</div>
-              <div><b>${currentLang === 'ar' ? 'الحيوية' : 'Freshness'}:</b> ${esc(String(freshness))}</div>
-              <div><b>${currentLang === 'ar' ? 'إعادة التحقق مطلوبة' : 'Revalidation Required'}:</b> ${revalidation}</div>
-              <div><b>${currentLang === 'ar' ? 'الهيمنة' : 'Dominance'}:</b> ${esc(String(dominance))}</div>
-              <div><b>${currentLang === 'ar' ? 'احتمال الرجوع' : 'Reach Probability'}:</b> ${esc(String(reach))}</div>
-              <div><b>${currentLang === 'ar' ? 'نافذة اللمس' : 'Expected Revisit'}:</b> ${esc(String(revisit))}</div>
-              <div><b>${currentLang === 'ar' ? 'مصدر التفعيل' : 'Touch Source'}:</b> ${esc(String(source))}${unreliable ? ` · ${currentLang === 'ar' ? 'غير موثوق للتفعيل' : 'not reliable for activation'}` : ''}</div>
-              ${waitingReliable ? `<div><b>${currentLang === 'ar' ? 'الحالة' : 'Status'}:</b> ${currentLang === 'ar' ? 'بانتظار شمعة OHLC موثوقة قبل التفعيل' : 'Waiting for reliable OHLC before activation'}</div>` : ''}
-              ${freshnessReasons.length ? `<div><b>${currentLang === 'ar' ? 'أسباب الحالة' : 'Freshness Reasons'}:</b> ${esc(freshnessReasons.join(' | '))}</div>` : ''}
-            </div>
-          </div>`;
-    }).join(''));
-}
-
-function renderScenarioFamilies(families) {
-    const rows = Array.isArray(families) ? families : [];
-    setText('scenarioFamilyCount', rows.length ? `(${rows.length})` : '');
-    if (!rows.length) {
-        setHTML('scenarioFamilyList', `<div class="empty">${currentLang === 'ar' ? 'لا توجد عائلات سيناريو نشطة حالياً' : 'No active scenario families right now'}</div>`);
-        return;
-    }
-    setHTML('scenarioFamilyList', rows.map((family, idx) => {
-        const members = Array.isArray(family.members) ? family.members : [];
-        const roles = Array.isArray(family.roles) ? family.roles.join(' / ') : '--';
-        const statusMix = Array.isArray(family.statuses) ? family.statuses.join(' / ') : '--';
-        return `
-          <div class="report-file">
-            <div class="report-file-head">
-              <span class="file-icon">${idx === 0 ? '🧭' : '•'}</span>
-              <span class="file-title">${esc(family.side || '')} ${esc(family.symbol || '')} · ${esc(family.scenario_type || 'SCENARIO')}</span>
-              <span class="file-meta">${currentLang === 'ar' ? 'حية' : 'Live'} ${num(family.live_count)} · ${currentLang === 'ar' ? 'معلقة' : 'Pending'} ${num(family.pending_count)}</span>
-            </div>
-            <div class="report-file-body open" style="display:block; white-space:normal;">
-              <div><b>${currentLang === 'ar' ? 'معرف السيناريو' : 'Scenario ID'}:</b> <code>${esc(String(family.scenario_id || '--'))}</code></div>
-              <div><b>${currentLang === 'ar' ? 'الأدوار' : 'Roles'}:</b> ${esc(String(roles || '--'))}</div>
-              <div><b>${currentLang === 'ar' ? 'مزيج الحالات' : 'Status Mix'}:</b> ${esc(String(statusMix || '--'))}</div>
-              <div><b>${currentLang === 'ar' ? 'ثقة الخطة' : 'Planner Confidence'}:</b> ${num(family.planner_confidence).toFixed(1)}</div>
-              <div><b>${currentLang === 'ar' ? 'معلقة Stale' : 'Stale Pending'}:</b> ${num(family.stale_pending_count)} · <b>${currentLang === 'ar' ? 'إعادة تحقق' : 'Revalidation'}:</b> ${num(family.revalidation_required_count)}</div>
-              <div><b>${currentLang === 'ar' ? 'مصادر لمس غير موثوقة' : 'Unreliable Touch Sources'}:</b> ${num(family.unreliable_touch_count)}</div>
-              ${members.length ? `<div><b>${currentLang === 'ar' ? 'الأعضاء' : 'Members'}:</b> ${members.map(m => `${esc(String(m.role || '--'))} ${esc(String(m.status || '--'))}@${num(m.entry_price).toFixed(2)}`).join(' · ')}</div>` : ''}
-            </div>
-          </div>`;
-    }).join(''));
 }
 
 function updateAgentPerformance() {
