@@ -1,0 +1,2 @@
+id,symbol,timeframe,analyst_name,bias,setup_type,sweep_side,poi_type,poi_quality_grade,intended_entry,invalidation,tp1,tp2,session_label,trade_decision,notes,source,created_at
+LABEL_20260715_001,XAU/USD,15m,manual,SELL,LIQUIDITY_REVERSAL,buy_side,order_block,A,4065.10,Close above 4073.70,4057.00,4021.40,London / Europe Midday,TRADE,Example label. Replace with your real analyst setup.,manual_label,2026-07-15T10:00:00+00:00

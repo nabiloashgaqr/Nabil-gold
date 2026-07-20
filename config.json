@@ -417,12 +417,15 @@
         "min_trigger_score": 40,
         "require_session_quality": "HIGH",
         "require_structure_quality": "MODERATE",
+        "min_authority_alignment_count": 2,
+        "fallback_zone_half_width_points": 120,
+        "fallback_max_reference_levels": 3,
         "allow_caution_news": true,
         "expire_after_hours": 8,
         "default_pending_slots": 2,
         "standby_min_distance_points": 60,
         "create_pending_orders_from_plan": true,
-        "description": "Planner Quality upgrade: build a sharper morning/session thesis with directional alignment, structure quality, liquidity-path reasoning, and clearer PRIMARY/STANDBY rationale before execution starts."
+        "description": "Day-Map Authority + Planner Fallback: if structured setup candidates are missing or weak, build a morning/session plan from daily bias, macro, structure, PDH/PDL, session liquidity, and premium/discount map instead of leaving the system blind."
     },
     "trading_mode": "paper",
     "paper_trading": {
@@ -615,6 +618,34 @@
             }
         },
         "description": "Adaptive Execution Calibration: when a morning pending family already exists, later 3-agent or 2-agent+confirmation signals choose the best execution now using setup-type and session-aware thresholds — keep pending, promote to market, replace with a continuation thesis, or skip as a missed move."
+    },
+    "directional_authority": {
+        "enabled": true,
+        "min_confidence_for_flip": 88,
+        "min_trigger_score_for_flip": 70,
+        "require_reversal_setup_for_flip": true,
+        "require_rejection_confirmed_for_flip": true,
+        "require_fresh_sweep_for_flip": true,
+        "description": "Phase D: when the day map has a confirmed direction, weak local opposite-direction ideas are blocked. Only a strong reversal / regime-flip setup may override the day map."
+    },
+    "day_map_sanity": {
+        "enabled": true,
+        "block_when_plan_not_ready": true,
+        "entry_zone_tolerance_points": 40,
+        "require_planner_execution_for_extreme_poi": true,
+        "allowed_execution_modes_for_extreme_poi": [
+            "session_plan_ladder",
+            "session_plan_ladder_market",
+            "adaptive_market_promotion"
+        ],
+        "description": "Phase E: all execution paths must respect the day map. Signals outside the planner zones are blocked, and EXTREME_POI scenarios must use planner-led execution instead of local legacy bypasses."
+    },
+    "split_execution": {
+        "enabled": true,
+        "starter_risk_share": 0.4,
+        "add_on_risk_share": 0.6,
+        "starter_max_zone_progress_pct": 45,
+        "description": "Phase C: when the planner classifies a zone as EXTREME_POI and price is already inside the first half of the zone, create a starter market entry plus an add-on pending order under one scenario family and one shared risk budget."
     },
     "strategy_profiles": {
         "liquidity_reversal": {
