@@ -423,112 +423,14 @@ function summarize(closedTrades, liveTrades, pendingOrders = []) {
   };
 }
 
-function snapshotOfTrade(trade) {
-  const snap = trade.signal_snapshot || {};
-  if (typeof snap === 'string') {
-    try { return JSON.parse(snap); } catch { return {}; }
-  }
-  return snap && typeof snap === 'object' ? snap : {};
-}
-
-function buildScenarioFamilies(activeTrades) {
-  const families = {};
-  (activeTrades || []).forEach(trade => {
-    const snap = snapshotOfTrade(trade);
-    const plan = snap.session_plan || {};
-    const setup = snap.setup_context || {};
-    const runtime = snap.pending_runtime || {};
-    const scenarioId = String(plan.scenario_id || setup.scenario_id || '').trim();
-    if (!scenarioId) return;
-    const family = families[scenarioId] || {
-      scenario_id: scenarioId,
-      symbol: trade.symbol || 'XAU/USD',
-      side: String(trade.type || trade.side || '').toUpperCase(),
-      scenario_type: plan.scenario_type || setup.setup_type || null,
-      planner_confidence: Number(plan.planner_confidence || 0) || 0,
-      live_count: 0,
-      pending_count: 0,
-      stale_pending_count: 0,
-      revalidation_required_count: 0,
-      unreliable_touch_count: 0,
-      roles: [],
-      statuses: [],
-      members: [],
-    };
-    const status = String(trade.status || '').toUpperCase();
-    if (LIVE_STATUSES.includes(status)) family.live_count += 1;
-    if (PENDING_STATUSES.includes(status)) family.pending_count += 1;
-    const freshness = String(runtime.freshness_state || '').toUpperCase();
-    if (freshness === 'STALE') family.stale_pending_count += 1;
-    if (runtime.revalidation_required) family.revalidation_required_count += 1;
-    if (runtime.touch_detection_source_reliable === false) family.unreliable_touch_count += 1;
-    const role = String(setup.pending_plan_role || setup.selection_role || '').toUpperCase();
-    if (role && !family.roles.includes(role)) family.roles.push(role);
-    if (status && !family.statuses.includes(status)) family.statuses.push(status);
-    family.members.push({
-      id: trade.id,
-      role: role || null,
-      status,
-      entry_price: trade.entry_price,
-      freshness_state: freshness || null,
-      revalidation_required: Boolean(runtime.revalidation_required),
-      activation_reason: trade.activation_reason || runtime.activation_reason || null,
-      freshness_reasons: runtime.freshness_reasons || [],
-    });
-    families[scenarioId] = family;
-  });
-  return Object.values(families).sort((a, b) => {
-    if (b.live_count !== a.live_count) return b.live_count - a.live_count;
-    if (b.pending_count !== a.pending_count) return b.pending_count - a.pending_count;
-    return String(a.scenario_id).localeCompare(String(b.scenario_id));
-  });
-}
-
-function buildAnalystOverlap(comparisons) {
-  const rows = Array.isArray(comparisons) ? comparisons : [];
-  const labelRows = rows.filter(r => r.analyst_label_id);
-  const labelIds = [...new Set(labelRows.map(r => String(r.analyst_label_id)).filter(Boolean))];
-  const matched = labelRows.filter(r => String(r.classification || '').toUpperCase() === 'MATCHED');
-  const partial = labelRows.filter(r => String(r.classification || '').toUpperCase() === 'PARTIAL_MATCH');
-  const missed = labelRows.filter(r => String(r.classification || '').toUpperCase() === 'MISSED_BY_BOT');
-  const extra = rows.filter(r => String(r.classification || '').toUpperCase() === 'EXTRA_BOT_SETUP');
-  const entryDistances = labelRows.map(r => Number((r.payload || {}).entry_distance_points)).filter(v => Number.isFinite(v));
-  const reasonCounts = {};
-  rows.forEach(r => {
-    const reason = String(r.reason_code || '').trim();
-    if (!reason) return;
-    reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
-  });
-  const topReasons = Object.entries(reasonCounts)
-    .sort((a, b) => (b[1] - a[1]) || String(a[0]).localeCompare(String(b[0])))
-    .slice(0, 5)
-    .map(([reason_code, count]) => ({ reason_code, count }));
-  const labelsConsidered = labelIds.length;
-  const coverage = labelsConsidered ? ((matched.length + partial.length) / labelsConsidered) * 100 : 0;
-  const match = labelsConsidered ? (matched.length / labelsConsidered) * 100 : 0;
-  return {
-    labels_considered: labelsConsidered,
-    matched_labels: matched.length,
-    partial_matches: partial.length,
-    missed_labels: missed.length,
-    extra_bot_setups: extra.length,
-    coverage_rate_pct: Number(coverage.toFixed(1)),
-    match_rate_pct: Number(match.toFixed(1)),
-    avg_entry_distance_points: entryDistances.length ? Number((entryDistances.reduce((a,b)=>a+b,0) / entryDistances.length).toFixed(1)) : null,
-    top_missed_reasons: topReasons,
-    comparisons: rows,
-  };
-}
-
 module.exports = async function handler(req, res) {
   if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'Method not allowed' });
 
   try {
     const limit = Math.min(Math.max(parseInt(req.query.limit || '150', 10) || 150, 20), 500);
     const closedFilter = `in.(${OUTCOME_STATUSES.join(',')})`;
-    const liveFilter = `in.(${LIVE_STATUSES.join(',')})`;
 
-    const [closedRaw, liveRaw, dailyReports, weeklyReports, agentWeights, analystComparisons] = await Promise.all([
+    const [closedRaw, liveRaw, dailyReports, weeklyReports, agentWeights] = await Promise.all([
       supabaseGet('trades', {
         select: '*',
         status: closedFilter,
@@ -551,20 +453,13 @@ module.exports = async function handler(req, res) {
         order: 'agent_name.asc',
         limit: 20,
       }).catch(() => []),
-      supabaseGet('analyst_comparisons', {
-        select: '*',
-        order: 'created_at.desc',
-        limit: 120,
-      }).catch(() => []),
     ]);
 
     const closedTrades = (closedRaw || []).map(normalizeTrade);
     const activeRows = (liveRaw || []).map(normalizeTrade);
     const liveTrades = activeRows.filter(t => LIVE_STATUSES.includes(String(t.status || '').toUpperCase()));
     const pendingOrders = activeRows.filter(t => PENDING_STATUSES.includes(String(t.status || '').toUpperCase()));
-    const scenarioFamilies = buildScenarioFamilies(activeRows);
     const agentPerformance = computeAgentPerformance(closedTrades, agentWeights || []);
-    const analystOverlap = buildAnalystOverlap(analystComparisons || []);
 
     return json(res, 200, {
       ok: true,
@@ -575,12 +470,10 @@ module.exports = async function handler(req, res) {
       liveTrades,
       pendingOrders,
       activeTrades: activeRows,
-      scenarioFamilies,
       dailyReports: (dailyReports && dailyReports.length ? dailyReports.map(r => ({ ...r, report_type: 'daily', month: String(r.report_date || r.created_at || '').slice(0, 7), report_text: r.report_text || buildDailyReport(r) })) : buildGeneratedDailyReports(closedTrades)),
       weeklyReports: (weeklyReports && weeklyReports.length ? weeklyReports.map(r => ({ ...r, report_type: 'weekly', month: String(r.week_start || r.created_at || '').slice(0, 7) })) : buildGeneratedWeeklyReports(closedTrades)),
       agentPerformance,
       agentWeights: agentWeights || [],
-      analystOverlap,
     });
   } catch (error) {
     const status = error.code === 'MISSING_ENV' ? 500 : 502;
