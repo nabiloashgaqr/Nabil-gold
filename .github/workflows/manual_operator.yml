@@ -100,6 +100,8 @@ jobs:
           OPERATION: ${{ github.event.inputs.operation }}
           SEND_STATUS_ON_MANUAL: ${{ github.event.inputs.send_status || 'false' }}
           FORCE_TRADE_UPDATE: ${{ github.event.inputs.force_update || 'false' }}
+          TRADE_ID: ${{ github.event.inputs.trade_id }}
+          CLOSE_REASON: ${{ github.event.inputs.close_reason || 'Manual operator close' }}
           REPORT_DATE: ${{ github.event.inputs.report_date }}
           TF: ${{ github.event.inputs.timeframe || '15m' }}
           OUTPUTSIZE: ${{ github.event.inputs.outputsize || '420' }}
@@ -126,6 +128,13 @@ jobs:
               ;;
             update_trades)
               python scripts/run_trade_updates.py
+              ;;
+            close_trade_now)
+              if [ -z "$TRADE_ID" ]; then
+                echo "trade_id is required for close_trade_now"
+                exit 1
+              fi
+              python scripts/run_close_trade_now.py --trade-id "$TRADE_ID" --reason "$CLOSE_REASON" $TELEGRAM_FLAG
               ;;
             daily_report)
               python scripts/run_daily_report.py
