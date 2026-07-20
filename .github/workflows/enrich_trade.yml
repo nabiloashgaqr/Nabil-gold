@@ -15,6 +15,7 @@ on:
         options:
           - reopen
           - update_prices
+          - close_now
           - be_hit
           - sl_hit
           - trailing_sl_hit
@@ -22,7 +23,7 @@ on:
           - tp2_hit
           - delete
       current_price:
-        description: "Current price (optional)"
+        description: "Current price (required for close_now if you want auto PnL calculation)"
         required: false
         default: ""
         type: string
@@ -40,6 +41,11 @@ on:
         description: "PnL in points (optional — overrides auto-calc)"
         required: false
         default: ""
+        type: string
+      close_reason:
+        description: "Reason shown when using close_now"
+        required: false
+        default: "Manual close now"
         type: string
 
 jobs:
@@ -60,5 +66,6 @@ jobs:
           HIGH_PRICE: ${{ github.event.inputs.high_price }}
           LOW_PRICE: ${{ github.event.inputs.low_price }}
           PNL_POINTS: ${{ github.event.inputs.pnl_points }}
+          CLOSE_REASON: ${{ github.event.inputs.close_reason || 'Manual close now' }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
