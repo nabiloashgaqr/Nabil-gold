@@ -205,7 +205,7 @@ def main() -> None:
             base_tf = symbol_config.get("data_source", {}).get("base_timeframe", "5m")
             price_payload = market_data.get_ohlcv(base_tf, outputsize=5)
             allow_synthetic = bool(symbol_config.get("data_source", {}).get("allow_synthetic_in_production", False))
-            if os.environ.get("GITHUB_ACTIONS") == "true" and price_payload.get("source") == "synthetic_demo" and not allow_synthetic:
+            if os.environ.get("GITHUB_ACTIONS") == "true" and not MarketDataService.payload_supports_signal_generation(price_payload) and price_payload.get("source") == "synthetic_demo" and not allow_synthetic:
                 # For trade management only, try a live XAU/USD spot quote before
                 # giving up. This does not provide historical candles for
                 # analysis, but it is safer than stopping SL/TP management and
@@ -256,10 +256,14 @@ def main() -> None:
             except (TypeError, ValueError):
                 candle_high = current_price
                 candle_low = current_price
-            if price_payload.get("source") == "swissquote_spot_quote_fallback" and any(str(t.get("status") or "").upper() == "PENDING" for t in symbol_trades):
+            if not MarketDataService.payload_supports_pending_activation(price_payload) and any(str(t.get("status") or "").upper() == "PENDING" for t in symbol_trades):
+                integrity = price_payload.get("source_integrity") or {}
                 logger.warning(
-                    "Pending touch detection degraded for %s: using Swissquote quote fallback without reliable intrabar OHLC. Pending orders will wait for a real candle source before activation.",
+                    "Pending touch detection degraded for %s: source=%s type=%s grade=%s. Pending orders will wait for a real candle source before activation.",
                     symbol,
+                    integrity.get("source") or price_payload.get("source"),
+                    integrity.get("source_type") or "unknown",
+                    integrity.get("reliability_grade") or "UNKNOWN",
                 )
             evaluations.extend(manager.update_trades(
                 open_trades=symbol_trades,

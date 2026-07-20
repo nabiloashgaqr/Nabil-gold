@@ -39,6 +39,8 @@ from services.llm_review import get_gemini_review_service
 from services.pending_governor import PendingGovernor
 from services.scenario_governor import ScenarioGovernor
 from services.adaptive_execution import AdaptiveExecutionService
+from services.directional_authority import DirectionalAuthorityService
+from services.day_map_sanity import DayMapSanityService
 from services.setup_memory import SetupMemoryService
 from services.session_planner import SessionPlannerService
 from utils.helpers import load_config, setup_logging, get_agent_weights
@@ -287,7 +289,7 @@ def _ladder_sibling_allowed(decision: Dict[str, Any], trade: Dict[str, Any]) -> 
         return False
     current_role = _decision_ladder_role(decision)
     existing_role = _trade_ladder_role(trade)
-    if current_role not in {"PRIMARY", "STANDBY"} or existing_role not in {"PRIMARY", "STANDBY"}:
+    if not current_role or not existing_role:
         return False
     return current_role != existing_role
 
@@ -334,27 +336,61 @@ def _plan_targets(direction: str, entry_price: float, stop_loss: float, target_p
 
 
 
+def _candidate_zone_bounds(candidate: Dict[str, Any]) -> tuple[float, float] | None:
+    zone = candidate.get("poi_zone") or {}
+    if isinstance(zone, dict) and zone.get("top") is not None and zone.get("bottom") is not None:
+        low = _safe_float(zone.get("bottom"), 0.0)
+        high = _safe_float(zone.get("top"), 0.0)
+        if low > 0 and high > 0:
+            return min(low, high), max(low, high)
+    low = _safe_float(candidate.get("poi_low"), 0.0)
+    high = _safe_float(candidate.get("poi_high"), 0.0)
+    if low > 0 and high > 0:
+        return min(low, high), max(low, high)
+    return None
+
+
+
+def _zone_progress_pct(direction: str, current_price: float, low: float, high: float) -> float:
+    width = max(high - low, 0.0001)
+    if direction == "SELL":
+        return max(0.0, min(100.0, ((current_price - low) / width) * 100.0))
+    return max(0.0, min(100.0, ((high - current_price) / width) * 100.0))
+
+
+
+def _split_execution_cfg(config: Dict[str, Any]) -> Dict[str, Any]:
+    return (config.get("split_execution") or {}) if isinstance(config, dict) else {}
+
+
+
 def _build_plan_ladder_decision(
     base_decision: Dict[str, Any],
     plan: Dict[str, Any],
     candidate: Dict[str, Any],
     config: Dict[str, Any],
+    *,
+    force_market: bool = False,
+    role_override: str | None = None,
+    entry_price_override: float | None = None,
+    risk_share: float | None = None,
+    basis_override: str | None = None,
 ) -> Dict[str, Any] | None:
     direction = str(plan.get("session_bias") or candidate.get("direction") or "").upper()
     symbol = str(plan.get("symbol") or base_decision.get("symbol") or config.get("symbol", "XAU/USD"))
     if direction not in {"BUY", "SELL"}:
         return None
-    entry_price = _safe_float(candidate.get("entry_price"), 0.0)
+    entry_price = _safe_float(entry_price_override if entry_price_override is not None else candidate.get("entry_price"), 0.0)
     stop_loss = _safe_float(candidate.get("stop_loss"), 0.0)
     target_price = _safe_float(candidate.get("target_price") or candidate.get("target_liquidity"), 0.0)
     current_price = _safe_float(base_decision.get("current_price"), 0.0)
     if entry_price <= 0 or stop_loss <= 0 or target_price <= 0 or current_price <= 0:
         return None
 
-    order_type = _planned_order_type(config, direction, entry_price, current_price, symbol)
-    if order_type.endswith("MARKET"):
+    order_type = f"{direction}_MARKET" if force_market else _planned_order_type(config, direction, entry_price, current_price, symbol)
+    if order_type.endswith("MARKET") and not force_market:
         return None
-    entry_kind = order_type.split("_")[-1]
+    entry_kind = "MARKET" if force_market else order_type.split("_")[-1]
     zone = candidate.get("poi_zone") or {}
     if isinstance(zone, dict) and zone.get("top") is not None and zone.get("bottom") is not None:
         low = min(_safe_float(zone.get("top"), entry_price), _safe_float(zone.get("bottom"), entry_price))
@@ -365,7 +401,7 @@ def _build_plan_ladder_decision(
         if low <= 0 or high <= 0:
             low = high = entry_price
     tp1, tp2, rr = _plan_targets(direction, entry_price, stop_loss, target_price)
-    role = str(candidate.get("selection_role") or "PRIMARY").upper()
+    role = str(role_override or candidate.get("selection_role") or "PRIMARY").upper()
 
     decision = deepcopy(base_decision)
     decision.update(
@@ -373,7 +409,7 @@ def _build_plan_ladder_decision(
             "decision": direction,
             "symbol": symbol,
             "confidence": max(_safe_float(plan.get("planner_confidence"), 0.0), _safe_float(candidate.get("thesis_dominance_score"), 0.0)),
-            "entry_mode": "session_plan_ladder",
+            "entry_mode": "session_plan_ladder_market" if force_market else "session_plan_ladder",
             "entry_path": 3,
             "reasons": [
                 f"Session plan {plan.get('scenario_type')} ({role})",
@@ -401,17 +437,20 @@ def _build_plan_ladder_decision(
     decision["setup_state"] = setup_context.get("setup_state")
     decision["lead_agent"] = setup_context.get("lead_agent")
     decision["setup_quality"] = setup_context.get("quality_grade") or candidate.get("quality_grade")
+    position_size = {}
+    if risk_share is not None:
+        position_size["scenario_risk_share"] = round(float(risk_share), 3)
     decision["signal"] = {
         "type": direction,
         "entry": {
             "price": round(entry_price, 2),
-            "low": round(low, 2),
-            "high": round(high, 2),
+            "low": round(current_price if force_market else low, 2),
+            "high": round(current_price if force_market else high, 2),
             "kind": entry_kind,
             "order_type": order_type,
-            "basis": f"Session plan {role.lower()} POI",
+            "basis": basis_override or f"Session plan {role.lower()} POI",
             "current_price": round(current_price, 2),
-            "distance_points": abs(price_to_points(entry_price - current_price, symbol=symbol)),
+            "distance_points": 0.0 if force_market else abs(price_to_points(entry_price - current_price, symbol=symbol)),
         },
         "stop_loss": round(stop_loss, 2),
         "tp1": round(tp1, 2),
@@ -421,10 +460,76 @@ def _build_plan_ladder_decision(
         "tp2_rr": rr,
         "order_type": order_type,
         "entry_kind": entry_kind,
-        "position_size": {},
-        "risk_summary": f"Session planner {role.lower()} ladder pending",
+        "position_size": position_size,
+        "risk_summary": f"Session planner {role.lower()} ladder {'market' if force_market else 'pending'}",
     }
     return decision
+
+
+
+def _split_execution_decisions(
+    base_decision: Dict[str, Any],
+    plan: Dict[str, Any],
+    primary: Dict[str, Any],
+    standby: Dict[str, Any] | None,
+    config: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    split_cfg = _split_execution_cfg(config)
+    if not bool(split_cfg.get("enabled", True)):
+        return []
+    if not bool(plan.get("extreme_poi", False)):
+        return []
+    if str(plan.get("execution_preference") or "").upper() != "SPLIT_EXECUTION_WATCH":
+        return []
+    direction = str(plan.get("session_bias") or primary.get("direction") or "").upper()
+    current_price = _safe_float(base_decision.get("current_price"), 0.0)
+    zone = _candidate_zone_bounds(primary)
+    if direction not in {"BUY", "SELL"} or current_price <= 0 or not zone:
+        return []
+    low, high = zone
+    if not (low <= current_price <= high):
+        return []
+    zone_progress = _zone_progress_pct(direction, current_price, low, high)
+    starter_max_progress = float(split_cfg.get("starter_max_zone_progress_pct", 45) or 45)
+    if zone_progress > starter_max_progress:
+        return []
+    starter_share = float(split_cfg.get("starter_risk_share", 0.4) or 0.4)
+    addon_share = float(split_cfg.get("add_on_risk_share", max(0.0, 1.0 - starter_share)) or max(0.0, 1.0 - starter_share))
+    starter = _build_plan_ladder_decision(
+        base_decision,
+        plan,
+        primary,
+        config,
+        force_market=True,
+        role_override="STARTER",
+        entry_price_override=current_price,
+        risk_share=starter_share,
+        basis_override="Extreme POI starter market execution",
+    )
+    if not starter:
+        return []
+    if isinstance(standby, dict) and standby:
+        addon_candidate = standby
+    else:
+        addon_candidate = deepcopy(primary)
+        addon_candidate["selection_role"] = "ADD_ON"
+        addon_zone = _candidate_zone_bounds(primary)
+        if addon_zone:
+            low_z, high_z = addon_zone
+            if direction == "SELL":
+                addon_candidate["entry_price"] = round(low_z + (high_z - low_z) * 0.5, 2)
+            else:
+                addon_candidate["entry_price"] = round(high_z - (high_z - low_z) * 0.5, 2)
+    addon = _build_plan_ladder_decision(
+        base_decision,
+        plan,
+        addon_candidate,
+        config,
+        role_override="ADD_ON",
+        risk_share=addon_share,
+        basis_override="Extreme POI add-on pending",
+    )
+    return [starter] + ([addon] if addon else [])
 
 
 
@@ -467,13 +572,18 @@ def _execute_session_plan_ladder(
     if not isinstance(primary, dict) or not primary:
         return 0
 
-    primary_decision = _build_plan_ladder_decision(base_decision, plan, primary, config)
-    if not primary_decision:
-        return 0
+    split_decisions = _split_execution_decisions(base_decision, plan, primary, standby if isinstance(standby, dict) else None, config)
+    if split_decisions:
+        plan_decisions = split_decisions
+    else:
+        primary_decision = _build_plan_ladder_decision(base_decision, plan, primary, config)
+        if not primary_decision:
+            return 0
+        plan_decisions = [primary_decision] + ([ _build_plan_ladder_decision(base_decision, plan, standby, config) ] if isinstance(standby, dict) and standby else [])
 
     created = 0
     staged_trades = list(symbol_open_trades)
-    for ladder_decision in [primary_decision] + ([ _build_plan_ladder_decision(base_decision, plan, standby, config) ] if isinstance(standby, dict) and standby else []):
+    for ladder_decision in plan_decisions:
         if not ladder_decision:
             continue
         role = _decision_ladder_role(ladder_decision)
@@ -482,7 +592,7 @@ def _execute_session_plan_ladder(
         duplicate_reason = duplicate_signal_reason(ladder_decision, database, config)
         if duplicate_reason:
             logger.info("Session-plan ladder %s blocked for %s: %s", role, symbol, duplicate_reason)
-            if role == "PRIMARY":
+            if role in {"PRIMARY", "STARTER"}:
                 return created
             continue
         trade_id = database.new_trade_id()
@@ -494,7 +604,7 @@ def _execute_session_plan_ladder(
             logger.warning("Failed to send session-plan ladder signal (%s) for %s: %s", role, symbol, exc)
             delivered = False
         if not delivered:
-            if role == "PRIMARY":
+            if role in {"PRIMARY", "STARTER"}:
                 return created
             continue
         database.save_trade(ladder_decision)
@@ -503,7 +613,7 @@ def _execute_session_plan_ladder(
                 "id": trade_id,
                 "symbol": symbol,
                 "type": ladder_decision.get("decision"),
-                "status": "PENDING",
+                "status": "OPEN" if str(((ladder_decision.get("signal") or {}).get("order_type") or "")).endswith("MARKET") else "PENDING",
                 "entry_price": ((ladder_decision.get("signal") or {}).get("entry") or {}).get("price"),
                 "signal_snapshot": ladder_decision,
             }
@@ -1395,6 +1505,23 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         market_data = MarketDataService(config)
         data = market_data.get_gold_data()
         if not data: return
+        integrity = data.get("source_integrity") or {}
+        logger.info(
+            "Market data integrity for %s: source=%s type=%s grade=%s signal_generation=%s pending_activation=%s",
+            symbol,
+            integrity.get("source") or data.get("source"),
+            integrity.get("source_type") or "unknown",
+            integrity.get("reliability_grade") or "UNKNOWN",
+            integrity.get("supports_signal_generation"),
+            integrity.get("supports_pending_activation"),
+        )
+        if not MarketDataService.payload_supports_signal_generation(data):
+            logger.error(
+                "Analysis stopped for %s: source %s is not reliable enough for signal generation.",
+                symbol,
+                integrity.get("source") or data.get("source"),
+            )
+            return
         # Global price sanity — reject obviously corrupt ticks before analysis
         _cp = float(data.get('current_price', 0))
         _sym = str(config.get('symbol', 'XAU/USD'))
@@ -1677,6 +1804,27 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                                 confirm_source, confirm_conf
                             )
 
+        # Phase D: a confirmed day-map authority must not be overridden by a
+        # weak local opposite-direction idea. Only high-authority reversal /
+        # regime-flip setups may challenge the day map.
+        if decision_type in {"BUY", "SELL"}:
+            authority_review = DirectionalAuthorityService(config).review(
+                decision,
+                all_results.get("session_plan", {}) or {},
+                [t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol],
+            )
+            decision["directional_authority"] = authority_review
+            action = str(authority_review.get("action") or "ALLOW")
+            if action == "BLOCK_OPPOSITE_LOCAL":
+                logger.info("Directional authority blocked %s for %s: %s", decision_type, symbol, authority_review.get("reason"))
+                decision["warnings"] = list(decision.get("warnings", [])) + [str(authority_review.get("reason") or "Directional authority blocked")]
+                decision["decision"] = "WAIT"
+                decision["signal"] = {}
+                decision_type = "WAIT"
+            elif action == "ALLOW_REGIME_FLIP":
+                logger.info("Directional authority allowed regime flip %s for %s: %s", decision_type, symbol, authority_review.get("reason"))
+                decision.setdefault("reasons", []).append(str(authority_review.get("reason") or "Directional authority allowed regime flip"))
+
         send_hourly_now = should_send_hourly_status(config)
         if (decision_type in {"BUY", "SELL"}) or (decision_type == "WAIT" and send_hourly_now):
             try:
@@ -1749,6 +1897,15 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                     "reason": adaptive.get("reason"),
                 }
                 logger.info("Adaptive execution %s for %s %s: %s", adaptive_action, decision_type, symbol, adaptive.get("reason"))
+
+            # Phase E: even if legacy path 1 / path 2 found an entry, it must
+            # still be inside or near the confirmed day map. This prevents small
+            # local execution zones from bypassing a stronger planner view.
+            day_map_review = DayMapSanityService(config).review(decision, all_results.get("session_plan", {}) or {})
+            decision["day_map_sanity"] = day_map_review
+            if str(day_map_review.get("action") or "ALLOW") != "ALLOW":
+                logger.info("Day-map sanity blocked %s for %s: %s", decision_type, symbol, day_map_review.get("reason"))
+                return
 
             # Cross-path distance check (applies to BOTH Path 1 and Path 2),
             # except when we're intentionally promoting/replacing an existing
