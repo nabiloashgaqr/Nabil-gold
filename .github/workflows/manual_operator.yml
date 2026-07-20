@@ -15,6 +15,7 @@ on:
         options:
           - analysis
           - update_trades
+          - close_trade_now
           - daily_report
           - weekly_report
           - analyst_comparison
@@ -35,6 +36,16 @@ on:
         default: "false"
         type: choice
         options: ["false", "true"]
+      trade_id:
+        description: "For close_trade_now only: target trade id"
+        required: false
+        default: ""
+        type: string
+      close_reason:
+        description: "For close_trade_now only: reason shown in DB / Telegram"
+        required: false
+        default: "Manual operator close"
+        type: string
       report_date:
         description: "For daily_report only: optional YYYY-MM-DD or yesterday"
         required: false
