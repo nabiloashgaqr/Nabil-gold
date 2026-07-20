@@ -85,6 +85,8 @@ def test_session_planner_builds_ready_primary_and_standby_plan(tmp_path: Path) -
     plan = service.build_plan(_results())
     assert plan["plan_ready"] is True
     assert plan["plan_status"] == "READY"
+    assert plan["planner_source"] == "setup_candidates"
+    assert plan["authority_state"] == "CONFIRMED"
     assert plan["session_bias"] == "SELL"
     assert plan["scenario_type"] == "STRUCTURE_CONTINUATION"
     assert plan["primary_entry_price"] == 4020.0
@@ -94,7 +96,9 @@ def test_session_planner_builds_ready_primary_and_standby_plan(tmp_path: Path) -
     assert plan["bias_sources"]
     assert plan["directional_alignment_count"] >= 2
     assert plan["expected_path"]
-    assert plan["execution_preference"] in {"LADDER_PENDING", "SINGLE_PENDING", "NEAR_MARKET_WATCH"}
+    assert plan["poi_classification"] in {"EXTREME_POI", "HIGH_PROBABILITY_POI", "STANDARD_POI"}
+    assert isinstance(plan["extreme_poi"], bool)
+    assert plan["execution_preference"] in {"LADDER_PENDING", "SINGLE_PENDING", "NEAR_MARKET_WATCH", "SPLIT_EXECUTION_WATCH"}
     assert plan["plan_narrative"]
     assert plan["primary_rationale"]
     assert service.latest_plan("XAU/USD")["plan_id"] == plan["plan_id"]
@@ -111,7 +115,7 @@ def test_session_planner_blocks_when_news_is_hard_block(tmp_path: Path) -> None:
     assert "news blocked" in str(plan["plan_reason"]).lower()
 
 
-def test_session_planner_rejects_weak_primary_thesis(tmp_path: Path) -> None:
+def test_session_planner_falls_back_to_day_map_when_primary_candidate_is_too_weak(tmp_path: Path) -> None:
     service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True}})
     service.storage_path = tmp_path / "session_plans.json"
     results = _results()
@@ -129,19 +133,51 @@ def test_session_planner_rejects_weak_primary_thesis(tmp_path: Path) -> None:
         )
     ]
     plan = service.build_plan(results)
-    assert plan["plan_ready"] is False
-    assert "too weak" in str(plan["plan_reason"]).lower() or "below planner floor" in str(plan["plan_reason"]).lower()
+    assert plan["plan_ready"] is True
+    assert plan["planner_source"] == "fallback_day_map"
+    assert plan["authority_direction"] == "SELL"
 
 
-def test_session_planner_blocks_when_bias_alignment_is_missing(tmp_path: Path) -> None:
+def test_session_planner_builds_fallback_day_map_when_structured_candidates_are_missing(tmp_path: Path) -> None:
     service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True}})
     service.storage_path = tmp_path / "session_plans.json"
     results = _results()
+    results["smc"]["setup_candidates"] = []
+    plan = service.build_plan(results)
+    assert plan["plan_ready"] is True
+    assert plan["planner_source"] == "fallback_day_map"
+    assert plan["authority_state"] == "CONFIRMED"
+    assert plan["authority_direction"] == "SELL"
+    assert plan["primary_poi"]["poi_type"] == "extreme_day_map_zone"
+    assert plan["poi_classification"] in {"EXTREME_POI", "HIGH_PROBABILITY_POI"}
+    assert plan["primary_entry_zone"]["low"] < plan["primary_entry_zone"]["high"]
+    assert plan["plan_narrative"]
+    assert plan["expected_path"]
+
+
+def test_session_planner_blocks_when_day_map_authority_is_conflicted(tmp_path: Path) -> None:
+    service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True}})
+    service.storage_path = tmp_path / "session_plans.json"
+    results = _results()
+    results["smc"]["setup_candidates"] = []
     results["daily_bias"] = {"bias": "BULLISH", "confidence": 91}
-    results["news"]["macro_direction"] = {"bias": "BULLISH_GOLD", "confidence": 70}
-    results["macro_fundamental"]["macro_direction"] = {"bias": "BULLISH_GOLD", "confidence": 70}
-    results["smc"]["market_structure"] = {"trend": "BULLISH", "structure_quality": "STRONG"}
+    results["news"]["macro_direction"] = {"bias": "BEARISH_GOLD", "confidence": 70}
+    results["macro_fundamental"]["macro_direction"] = {"bias": "BEARISH_GOLD", "confidence": 70}
+    results["smc"]["market_structure"] = {"trend": "RANGING", "structure_quality": "STRONG"}
     results["smc"]["liquidity"]["recent_sweep"] = {"occurred": False, "type": None}
     plan = service.build_plan(results)
     assert plan["plan_ready"] is False
-    assert "alignment" in str(plan["plan_reason"]).lower()
+    assert plan["authority_state"] == "CONFLICTED"
+    assert "conflicted" in str(plan["plan_reason"]).lower()
+
+
+def test_session_planner_classifies_extreme_poi_when_alignment_is_strong(tmp_path: Path) -> None:
+    service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True}})
+    service.storage_path = tmp_path / "session_plans.json"
+    results = _results()
+    plan = service.build_plan(results)
+    assert plan["plan_ready"] is True
+    assert plan["poi_classification"] in {"EXTREME_POI", "HIGH_PROBABILITY_POI"}
+    if plan["poi_classification"] == "EXTREME_POI":
+        assert plan["extreme_poi"] is True
+        assert plan["execution_preference"] == "SPLIT_EXECUTION_WATCH"

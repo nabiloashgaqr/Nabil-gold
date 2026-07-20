@@ -77,6 +77,9 @@ def _base_decision() -> dict:
             "scenario_type": "STRUCTURE_CONTINUATION",
             "planner_confidence": 78,
             "planner_grade": "B",
+            "poi_classification": "HIGH_PROBABILITY_POI",
+            "extreme_poi": False,
+            "execution_preference": "LADDER_PENDING",
             "primary_poi": _candidate("PRIMARY", 4020.0, 4044.0, 3965.0),
             "standby_poi": _candidate("STANDBY", 4009.0, 4030.0, 3950.0),
         },
@@ -95,6 +98,7 @@ def _config() -> dict:
             "cooldown": {"lookback_hours": 6, "after_loss_minutes": 90, "after_breakeven_minutes": 45, "after_win_minutes": 30},
         },
         "session_planner": {"create_pending_orders_from_plan": True},
+        "split_execution": {"enabled": True, "starter_risk_share": 0.4, "add_on_risk_share": 0.6, "starter_max_zone_progress_pct": 45},
     }
 
 
@@ -158,3 +162,25 @@ def test_session_plan_ladder_replaces_older_pending_family_when_new_plan_is_stro
     assert any(t["id"] == "OLD1" and t["status"] == "CANCELLED" for t in trades)
     assert len([t for t in trades if t["status"] == "PENDING"]) == 2
     assert len(telegram.sent) == 2
+
+
+def test_session_plan_extreme_poi_split_execution_creates_market_starter_and_pending_addon(tmp_path: Path) -> None:
+    db = _db(tmp_path)
+    telegram = _Telegram()
+    decision = _base_decision()
+    decision["current_price"] = 4021.0
+    decision["session_plan"]["poi_classification"] = "EXTREME_POI"
+    decision["session_plan"]["extreme_poi"] = True
+    decision["session_plan"]["execution_preference"] = "SPLIT_EXECUTION_WATCH"
+    decision["session_plan"]["primary_poi"]["poi_zone"] = {"top": 4045.0, "bottom": 4020.0}
+    decision["session_plan"]["primary_poi"]["poi_low"] = 4020.0
+    decision["session_plan"]["primary_poi"]["poi_high"] = 4045.0
+    decision["session_plan"]["primary_poi"]["entry_price"] = 4032.5
+    decision["session_plan"]["standby_poi"]["entry_price"] = 4030.0
+    created = ra._execute_session_plan_ladder(decision, {"symbol": "XAU/USD"}, [], db, telegram, _config())
+    assert created == 2
+    trades = load_trades(db.local_path)
+    statuses = sorted(str(t.get("status")) for t in trades)
+    assert statuses == ["OPEN", "PENDING"]
+    roles = sorted(str(((t.get("signal_snapshot") or {}).get("setup_context") or {}).get("pending_plan_role")) for t in trades)
+    assert roles == ["ADD_ON", "STARTER"]
