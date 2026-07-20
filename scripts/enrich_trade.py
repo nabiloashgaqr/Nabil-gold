@@ -6,6 +6,7 @@ Usage:
 Actions:
     reopen         → clear close fields, set OPEN
     update_prices  → update MFE/MAE/PnL from HIGH_PRICE/LOW_PRICE/CURRENT_PRICE
+    close_now      → manual close at CURRENT_PRICE (or PNL_POINTS override)
     be_hit         → breakeven at entry (SL moved, price retraced)
     sl_hit         → full stop-loss (loss)
     trailing_sl_hit → trailing stop hit (profit locked)
@@ -25,7 +26,7 @@ sys.path.insert(0, str(ROOT))
 from services.database import DatabaseService
 from utils.helpers import load_config, calculate_pips
 
-_VALID = {"reopen", "update_prices", "be_hit", "sl_hit", "trailing_sl_hit",
+_VALID = {"reopen", "update_prices", "close_now", "be_hit", "sl_hit", "trailing_sl_hit",
           "tp1_hit", "tp2_hit", "delete"}
 
 _CLEARABLE = {"TP2_HIT", "TP1_HIT", "SL_HIT", "TRAILING_SL_HIT", "BE_HIT",
@@ -143,6 +144,7 @@ def main() -> int:
     hi = _opt_float("HIGH_PRICE")
     lo = _opt_float("LOW_PRICE")
     manual_pnl = _opt_float("PNL_POINTS")
+    close_reason = _env("CLOSE_REASON", "Manual close now")
 
     if not tid: print("❌ TRADE_ID required"); return 1
     if action not in _VALID:
@@ -216,6 +218,37 @@ def main() -> int:
         _merge_mfe_mae(updates)
         ok = _write(db, tid, updates)
         if ok: print(f"✅ {tid} → OPEN")
+        return 0 if ok else 1
+
+    # ── close_now ──
+    if action == "close_now":
+        if cur is None and manual_pnl is None:
+            print("❌ CURRENT_PRICE أو PNL_POINTS مطلوبان لـ close_now")
+            return 1
+        cp = cur if cur is not None else float(trade.get("current_price") or entry or 0)
+        pnl = manual_pnl if manual_pnl is not None else _pnl(entry, cp, side, symbol)
+        result = "WIN" if pnl > 0 else "LOSS" if pnl < 0 else "BREAKEVEN"
+        final_mfe = max(old_mfe, mfe_val) if mfe_val is not None else old_mfe
+        updates.update(
+            status="MANUAL_CLOSE",
+            result=result,
+            close_price=round(cp, 2),
+            final_pnl=round(pnl, 1),
+            final_pnl_points=round(pnl, 1),
+            current_price=round(cp, 2),
+            current_pnl=round(pnl, 1),
+            current_pnl_points=round(pnl, 1),
+            closed_at=now,
+            close_time=now,
+            max_favorable_excursion=round(final_mfe, 1),
+            reasons=[str(close_reason or "Manual close now")],
+        )
+        if mae_val is not None:
+            updates["max_adverse_excursion"] = round(mae_val, 1)
+        updates["updates_sent"] = [e for e in _clean_us(trade) if e != "MANUAL_CLOSE"] + ["MANUAL_CLOSE"]
+        ok = _write(db, tid, updates)
+        if ok:
+            print(f"✅ {tid} → MANUAL_CLOSE  |  Price: {cp:.2f}  |  PnL: {pnl:+.1f}")
         return 0 if ok else 1
 
     # ── be_hit ──
