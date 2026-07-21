@@ -707,6 +707,10 @@ class TelegramService:
         ]
         if confirm_line:
             lines.append(f"✅ {html.escape(confirm_line)}")
+        planner_gate = decision.get("planner_execution_gate") or {}
+        if planner_led and isinstance(planner_gate, dict) and planner_gate.get("allow"):
+            gate_reason = str(planner_gate.get("reason") or "Planner execution admitted").strip()
+            lines.append(f"✅ Admission: {html.escape(gate_reason)}")
         if quality:
             lines.append(f"🏅 Quality: {html.escape(str(quality.get('grade', '')))} {html.escape(str(quality.get('score', '')))}".rstrip())
         strength_line = self._session_plan_signal_strength_line(decision) if planner_led else self._signal_strength_line(decision)
