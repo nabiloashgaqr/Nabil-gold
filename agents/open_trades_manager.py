@@ -98,6 +98,16 @@ class OpenTradesManager(BaseAgent):
         self.pending_news_require_rr_recheck = bool(pnh.get("require_rr_recheck", True))
         self.pending_news_require_spread_recheck = bool(pnh.get("require_spread_recheck", True))
         self.pending_news_cancel_if_drift_exceeds = bool(pnh.get("cancel_if_drift_exceeds", True))
+        nme = (oe.get("near_miss_execution", {}) or {}) if isinstance(oe, dict) else {}
+        self.near_miss_enabled = bool(nme.get("enabled", True))
+        self.near_miss_min_halo_points = float(nme.get("min_halo_points", 12) or 12)
+        self.near_miss_max_halo_points = float(nme.get("max_halo_points", 25) or 25)
+        self.near_miss_zone_width_multiplier = float(nme.get("zone_width_multiplier", 0.75) or 0.75)
+        self.near_miss_recent_range_multiplier = float(nme.get("recent_range_multiplier", 0.18) or 0.18)
+        self.near_miss_min_confirmation_points = float(nme.get("min_confirmation_points", 12) or 12)
+        self.near_miss_max_target_progress_pct = float(nme.get("max_target_progress_pct", 30) or 30)
+        self.near_miss_min_remaining_rr = float(nme.get("min_remaining_rr", 1.8) or 1.8)
+        self.near_miss_require_planner_context = bool(nme.get("require_planner_context", True))
         pf = (self.config.get("pending_freshness", {}) or {}) if isinstance(self.config, dict) else {}
         self.pending_freshness_enabled = bool(pf.get("enabled", True))
         self.pending_freshness_aging_after_hours = float(pf.get("aging_after_hours", 2) or 2)
@@ -908,6 +918,86 @@ class OpenTradesManager(BaseAgent):
             return None, None
         return max(highs), min(lows)
 
+    def _zone_width_points(self, trade: Dict[str, Any], entry: float, symbol: str) -> float:
+        snapshot = self._trade_snapshot(trade)
+        signal = snapshot.get("signal") or {}
+        zone = signal.get("entry") or {}
+        low = self._f(zone.get("low"), 0.0)
+        high = self._f(zone.get("high"), 0.0)
+        if low > 0 and high > 0:
+            return abs(calculate_pips(low, high, "BUY", symbol))
+        return 0.0
+
+    def _near_miss_review(
+        self,
+        trade: Dict[str, Any],
+        *,
+        trade_type: str,
+        order_type: str,
+        entry: float,
+        stop_loss: float,
+        tp2: float,
+        current_price: float,
+        high_price: float,
+        low_price: float,
+        recent_window_high: float | None,
+        recent_window_low: float | None,
+        symbol: str,
+        target_progress_pct: float,
+    ) -> tuple[bool, str | None, float | None]:
+        if not self.near_miss_enabled:
+            return False, None, None
+        if self.near_miss_require_planner_context:
+            snapshot = self._trade_snapshot(trade)
+            setup = snapshot.get("setup_context") or {}
+            if not isinstance(setup, dict) or not (setup.get("pending_plan_role") or setup.get("selection_role")):
+                return False, None, None
+        if not str(order_type or "").upper().endswith("LIMIT"):
+            return False, None, None
+        if stop_loss <= 0 or tp2 <= 0 or entry <= 0:
+            return False, None, None
+        if target_progress_pct > self.near_miss_max_target_progress_pct:
+            return False, None, None
+
+        zone_width_points = self._zone_width_points(trade, entry, symbol)
+        recent_range_points = abs(calculate_pips(recent_window_low or low_price, recent_window_high or high_price, "BUY", symbol)) if recent_window_high and recent_window_low else abs(calculate_pips(low_price, high_price, "BUY", symbol))
+        halo_points = min(
+            self.near_miss_max_halo_points,
+            max(
+                self.near_miss_min_halo_points,
+                zone_width_points * self.near_miss_zone_width_multiplier,
+                recent_range_points * self.near_miss_recent_range_multiplier,
+            ),
+        )
+        confirm_points = max(self.near_miss_min_confirmation_points, halo_points * 0.5)
+
+        if trade_type == "SELL":
+            approach_price = recent_window_high if recent_window_high is not None else high_price
+            if approach_price <= 0 or approach_price >= entry:
+                return False, None, None
+            missed_by_points = abs(calculate_pips(approach_price, entry, "BUY", symbol))
+            move_away_points = max(0.0, calculate_pips(current_price, approach_price, "BUY", symbol))
+            if not (0 < missed_by_points <= halo_points and move_away_points >= confirm_points):
+                return False, None, None
+        else:
+            approach_price = recent_window_low if recent_window_low is not None else low_price
+            if approach_price <= 0 or approach_price <= entry:
+                return False, None, None
+            missed_by_points = abs(calculate_pips(entry, approach_price, "BUY", symbol))
+            move_away_points = max(0.0, calculate_pips(approach_price, current_price, "BUY", symbol))
+            if not (0 < missed_by_points <= halo_points and move_away_points >= confirm_points):
+                return False, None, None
+
+        risk = abs(stop_loss - current_price)
+        reward = abs(tp2 - current_price)
+        if risk <= 0:
+            return False, None, None
+        remaining_rr = reward / risk
+        if remaining_rr < self.near_miss_min_remaining_rr:
+            return False, None, None
+        reason = f"Near-miss market conversion: missed entry by {missed_by_points:.0f} pts within halo {halo_points:.0f}, then confirmed away by {move_away_points:.0f} pts"
+        return True, reason, round(halo_points, 1)
+
     def _management_phase(self, status: str, sl_moved_to_entry: bool, partial_close: bool, pnl_points: float) -> str:
         if status == "TP1_HIT" or partial_close:
             return "POST_TP1_TRAILING" if sl_moved_to_entry else "POST_TP1"
@@ -1209,6 +1299,53 @@ class OpenTradesManager(BaseAgent):
                 "hours_open": hours_open,
                 "pending_distance_points": dist_pts,
             }
+
+        if (not filled_touch) and (not news_blocked) and freshness_state in {"FRESH", "AGING"}:
+            near_miss_ok, near_miss_reason, near_miss_halo = self._near_miss_review(
+                trade,
+                trade_type=trade_type,
+                order_type=order_type,
+                entry=entry,
+                stop_loss=stop_loss,
+                tp2=tp2,
+                current_price=current_price,
+                high_price=high_price,
+                low_price=low_price,
+                recent_window_high=recent_window_high,
+                recent_window_low=recent_window_low,
+                symbol=symbol,
+                target_progress_pct=target_progress_pct,
+            )
+            if near_miss_ok:
+                allowed, reason = _conversion_allowed(current_price)
+                if allowed:
+                    _persist_runtime(
+                        near_miss_activation=True,
+                        near_miss_reason=near_miss_reason,
+                        near_miss_halo_points=near_miss_halo,
+                        activation_reason=near_miss_reason,
+                    )
+                    base_updates.update({
+                        "status": "OPEN",
+                        "entry_time": self._iso(now),
+                        "entry_price": round(current_price, 2),
+                        "current_pnl": 0,
+                        "current_pnl_points": 0,
+                        "pending_cycles": 0,
+                        "activation_reason": near_miss_reason,
+                    })
+                    return {
+                        "trade_id": trade.get("id"),
+                        "old_status": "PENDING",
+                        "new_status": "OPEN",
+                        "pnl_points": 0.0,
+                        "events": ["ORDER_FILLED"],
+                        "updates": base_updates,
+                        "progress_to_tp1": 0.0,
+                        "hours_open": 0.0,
+                        "pending_distance_points": 0.0,
+                    }
+                _persist_runtime(near_miss_block_reason=reason or "near_miss_conversion_blocked")
 
         # If the order touched during a blocked-news window, freeze it instead of activating.
         if self.pending_news_hold_enabled and filled_touch and news_blocked:
