@@ -10,6 +10,7 @@ Actions:
     be_hit         → breakeven at entry (SL moved, price retraced)
     sl_hit         → full stop-loss (loss)
     trailing_sl_hit → trailing stop hit (profit locked)
+    trailing_sl_update → manually move the trailing stop without closing the trade
     tp1_hit        → first target (partial close, SL→entry)
     tp2_hit        → second target (full win)
     delete         → remove trade permanently
@@ -27,7 +28,7 @@ from services.database import DatabaseService
 from utils.helpers import load_config, calculate_pips
 
 _VALID = {"reopen", "update_prices", "close_now", "be_hit", "sl_hit", "trailing_sl_hit",
-          "tp1_hit", "tp2_hit", "delete"}
+          "trailing_sl_update", "tp1_hit", "tp2_hit", "delete"}
 
 _CLEARABLE = {"TP2_HIT", "TP1_HIT", "SL_HIT", "TRAILING_SL_HIT", "BE_HIT",
               "EXPIRED", "MANUAL_CLOSE", "MOVE_SL_TO_BE", "TRAILING_SL_UPDATED",
@@ -143,6 +144,7 @@ def main() -> int:
     cur = _opt_float("CURRENT_PRICE")
     hi = _opt_float("HIGH_PRICE")
     lo = _opt_float("LOW_PRICE")
+    new_stop_loss = _opt_float("NEW_STOP_LOSS")
     manual_pnl = _opt_float("PNL_POINTS")
     close_reason = _env("CLOSE_REASON", "Manual close now")
 
@@ -173,6 +175,7 @@ def main() -> int:
     if lo:   print(f"   Low: {lo}")
     if mfe_val is not None: print(f"   Calc MFE: {mfe_val:+.1f} pts  |  Old MFE: {old_mfe:+.1f}")
     if mae_val is not None: print(f"   Calc MAE: {mae_val:+.1f} pts  |  Old MAE: {old_mae:+.1f}")
+    if new_stop_loss is not None: print(f"   New Stop Loss: {new_stop_loss}")
 
     # ── Delete ──
     if action == "delete":
@@ -218,6 +221,52 @@ def main() -> int:
         _merge_mfe_mae(updates)
         ok = _write(db, tid, updates)
         if ok: print(f"✅ {tid} → OPEN")
+        return 0 if ok else 1
+
+    # ── trailing_sl_update ──
+    if action == "trailing_sl_update":
+        if new_stop_loss is None:
+            print("❌ NEW_STOP_LOSS مطلوب لـ trailing_sl_update")
+            return 1
+        if old_status not in {"OPEN", "PARTIAL", "TP1_HIT"}:
+            print("❌ trailing_sl_update مسموح فقط للصفقات OPEN / PARTIAL / TP1_HIT")
+            return 1
+
+        new_sl = round(float(new_stop_loss), 2)
+        if new_sl <= 0:
+            print("❌ NEW_STOP_LOSS يجب أن يكون أكبر من صفر")
+            return 1
+        if sl > 0:
+            if side == "BUY" and new_sl < sl:
+                print(f"❌ رفض التحديث: trailing stop للشراء لا يجب أن يتحرك لأسفل ({new_sl} < {sl})")
+                return 1
+            if side == "SELL" and new_sl > sl:
+                print(f"❌ رفض التحديث: trailing stop للبيع لا يجب أن يتحرك لأعلى ({new_sl} > {sl})")
+                return 1
+
+        moved_to_entry = bool(trade.get("sl_moved_to_entry"))
+        if entry > 0:
+            moved_to_entry = moved_to_entry or (new_sl >= entry if side == "BUY" else new_sl <= entry)
+
+        updates["stop_loss"] = new_sl
+        updates["sl_moved_to_entry"] = moved_to_entry
+        if cur is not None:
+            updates["current_price"] = round(cur, 2)
+            updates["current_pnl"] = cur_pnl
+            updates["current_pnl_points"] = cur_pnl
+        _merge_mfe_mae(updates)
+
+        sent = [e for e in _clean_us(trade) if e not in {"TRAILING_SL_UPDATED", "MOVE_SL_TO_BE"}]
+        if moved_to_entry:
+            sent.append("MOVE_SL_TO_BE")
+        sent.append("TRAILING_SL_UPDATED")
+        updates["updates_sent"] = sent
+
+        ok = _write(db, tid, updates)
+        if ok:
+            locked = _pnl(entry, new_sl, side, symbol) if entry > 0 else None
+            lock_txt = f"  |  Locked: {locked:+.1f} pts" if locked is not None else ""
+            print(f"✅ {tid} trailing stop updated → {new_sl:.2f}{lock_txt}")
         return 0 if ok else 1
 
     # ── close_now ──
