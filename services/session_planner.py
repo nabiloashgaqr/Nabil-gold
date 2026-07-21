@@ -39,6 +39,12 @@ class SessionPlannerService:
         self.expire_after_hours = float(cfg.get("expire_after_hours", 8) or 8)
         self.default_pending_slots = int(cfg.get("default_pending_slots", 2) or 2)
         self.standby_min_distance_points = float(cfg.get("standby_min_distance_points", 60) or 60)
+        self.max_primary_zone_width_points = float(cfg.get("max_primary_zone_width_points", 260) or 260)
+        self.max_standby_zone_width_points = float(cfg.get("max_standby_zone_width_points", 220) or 220)
+        self.min_main_rr_for_ready = float(cfg.get("min_main_rr_for_ready", (self.config.get("risk_settings", {}) or {}).get("min_rr_ratio", 1.5)) or 1.5)
+        self.min_supporting_agents_for_ready = int(cfg.get("min_supporting_agents_for_ready", 2) or 2)
+        self.max_opposing_agents_for_ready = int(cfg.get("max_opposing_agents_for_ready", 1) or 1)
+        self.agent_alignment_min_confidence = float(cfg.get("agent_alignment_min_confidence", 68) or 68)
         self.min_authority_alignment_count = int(cfg.get("min_authority_alignment_count", 2) or 2)
         self.fallback_zone_half_width_points = float(cfg.get("fallback_zone_half_width_points", 120) or 120)
         self.fallback_max_reference_levels = int(cfg.get("fallback_max_reference_levels", 3) or 3)
@@ -169,6 +175,7 @@ class SessionPlannerService:
                 dealing_range=dealing_range,
                 zone_context=zone_context,
                 current_price=current_price,
+                all_results=all_results,
             )
             if fallback.get("plan_ready"):
                 if persist:
@@ -203,6 +210,7 @@ class SessionPlannerService:
                 dealing_range=dealing_range,
                 zone_context=zone_context,
                 current_price=current_price,
+                all_results=all_results,
             )
             if fallback.get("plan_ready"):
                 if persist:
@@ -235,6 +243,28 @@ class SessionPlannerService:
             return base
 
         standby = self._validated_standby(primary, standby, symbol=symbol)
+        primary_execution_preview = self._execution_levels(
+            direction=direction,
+            entry_price=self._f(primary.get("entry_price"), 0.0),
+            stop_loss=self._f(primary.get("stop_loss"), 0.0),
+            target_price=self._f(primary.get("target_liquidity") or primary.get("target_price"), 0.0),
+            symbol=symbol,
+        )
+        quality_ok, quality_reason, quality_diag = self._plan_quality_guard(
+            direction=direction,
+            primary=primary,
+            standby=standby,
+            primary_execution=primary_execution_preview,
+            all_results=all_results,
+            symbol=symbol,
+        )
+        if not quality_ok:
+            base["plan_status"] = "WATCH_ONLY"
+            base["plan_reason"] = quality_reason
+            base["notes"] = [quality_reason] if quality_reason else []
+            base["supporting_agents"] = quality_diag.get("supporting_agents", [])
+            base["opposing_agents"] = quality_diag.get("opposing_agents", [])
+            return base
         planner_score, planner_notes = self._planner_score(
             direction=direction,
             primary=primary,
@@ -274,6 +304,8 @@ class SessionPlannerService:
         standby_rationale = self._candidate_rationale(standby, direction, structure_trend, structure_quality, recent_sweep, rank_label="STANDBY") if standby else []
         execution_preference = self._execution_preference(primary, standby, current_price)
         poi_classification = self._classify_poi(primary, direction, structure_quality, recent_sweep, zone_context, current_price, symbol=symbol)
+        primary["poi_classification"] = poi_classification
+        primary["extreme_poi"] = poi_classification == "EXTREME_POI"
         plan_narrative = self._plan_narrative(direction, scenario_type, primary, alignment["sources"], expected_path, execution_preference)
         manual_plan = self._manual_plan_hierarchy(
             direction=direction,
@@ -319,6 +351,10 @@ class SessionPlannerService:
                 "target_liquidity": primary.get("target_liquidity") or primary.get("target_price"),
                 "planner_confidence": planner_score,
                 "planner_grade": self._grade(planner_score),
+                "supporting_agents": quality_diag.get("supporting_agents", []),
+                "opposing_agents": quality_diag.get("opposing_agents", []),
+                "support_count": quality_diag.get("support_count", 0),
+                "opposition_count": quality_diag.get("opposition_count", 0),
                 "max_pending_orders_allowed": min(self.default_pending_slots, 2 if standby else 1),
                 "plan_reason": "session plan ready",
                 "notes": planner_notes,
@@ -378,6 +414,7 @@ class SessionPlannerService:
         dealing_range: Dict[str, Any],
         zone_context: str,
         current_price: float,
+        all_results: Dict[str, Any],
     ) -> Dict[str, Any]:
         fallback = deepcopy(base)
         authority = self._resolve_authority(
@@ -440,6 +477,34 @@ class SessionPlannerService:
             )
             standby = self._validated_standby(primary, standby, symbol=symbol)
 
+        primary_execution_preview = self._execution_levels(
+            direction=direction,
+            entry_price=self._f(primary.get("entry_price"), 0.0),
+            stop_loss=self._f(primary.get("stop_loss"), 0.0),
+            target_price=self._f(primary.get("target_liquidity") or primary.get("target_price"), 0.0),
+            symbol=symbol,
+        )
+        quality_ok, quality_reason, quality_diag = self._plan_quality_guard(
+            direction=direction,
+            primary=primary,
+            standby=standby,
+            primary_execution=primary_execution_preview,
+            all_results={
+                "technical": all_results.get("technical", {}),
+                "classical": all_results.get("classical", {}),
+                "smc": all_results.get("smc", {}),
+                "price_action": all_results.get("price_action", {}),
+                "multitimeframe": all_results.get("multitimeframe", {}),
+            },
+            symbol=symbol,
+        )
+        if not quality_ok:
+            fallback["plan_status"] = "WATCH_ONLY"
+            fallback["plan_reason"] = quality_reason
+            fallback["notes"] = [quality_reason] if quality_reason else []
+            fallback["supporting_agents"] = quality_diag.get("supporting_agents", [])
+            fallback["opposing_agents"] = quality_diag.get("opposing_agents", [])
+            return fallback
         planner_score, planner_notes = self._planner_score(
             direction=direction,
             primary=primary,
@@ -479,6 +544,8 @@ class SessionPlannerService:
         standby_rationale = self._candidate_rationale(standby, direction, str(market_structure.get("trend") or "RANGING"), str(market_structure.get("structure_quality") or "WEAK"), (liquidity.get("recent_sweep") or {}) if isinstance(liquidity, dict) else {}, rank_label="STANDBY") if standby else []
         execution_preference = self._execution_preference(primary, standby, current_price)
         poi_classification = self._classify_poi(primary, direction, str(market_structure.get("structure_quality") or "WEAK"), (liquidity.get("recent_sweep") or {}) if isinstance(liquidity, dict) else {}, zone_context, current_price, symbol=symbol)
+        primary["poi_classification"] = poi_classification
+        primary["extreme_poi"] = poi_classification == "EXTREME_POI"
         plan_narrative = self._plan_narrative(direction, scenario_type, primary, authority["sources"], expected_path, execution_preference)
         manual_plan = self._manual_plan_hierarchy(
             direction=direction,
@@ -521,6 +588,10 @@ class SessionPlannerService:
                 "target_liquidity": primary.get("target_liquidity") or primary.get("target_price"),
                 "planner_confidence": planner_score,
                 "planner_grade": self._grade(planner_score),
+                "supporting_agents": quality_diag.get("supporting_agents", []),
+                "opposing_agents": quality_diag.get("opposing_agents", []),
+                "support_count": quality_diag.get("support_count", 0),
+                "opposition_count": quality_diag.get("opposition_count", 0),
                 "max_pending_orders_allowed": min(self.default_pending_slots, 2 if standby else 1),
                 "plan_reason": "fallback day map ready",
                 "notes": planner_notes,
@@ -720,6 +791,71 @@ class SessionPlannerService:
             },
         }
 
+    def _zone_width_points(self, candidate: Dict[str, Any] | None, *, symbol: str) -> float:
+        zone = self._zone_payload(candidate)
+        if not zone:
+            return 0.0
+        return abs(self._price_to_points(float(zone.get("high", 0)) - float(zone.get("low", 0)), symbol=symbol))
+
+    def _zones_overlap(self, first: Dict[str, Any] | None, second: Dict[str, Any] | None) -> bool:
+        zone1 = self._zone_payload(first)
+        zone2 = self._zone_payload(second)
+        if not zone1 or not zone2:
+            return False
+        low = max(float(zone1.get("low", 0)), float(zone2.get("low", 0)))
+        high = min(float(zone1.get("high", 0)), float(zone2.get("high", 0)))
+        return high > low
+
+    def _agent_alignment_summary(self, direction: str, all_results: Dict[str, Any]) -> Dict[str, Any]:
+        supporting: List[str] = []
+        opposing: List[str] = []
+        for name in ["technical", "classical", "smc", "price_action", "multitimeframe"]:
+            result = all_results.get(name, {}) or {}
+            signal = str(result.get("signal") or result.get("direction") or "WAIT").upper()
+            confidence = self._f(result.get("confidence"), 0.0)
+            if confidence < self.agent_alignment_min_confidence:
+                continue
+            if signal == direction:
+                supporting.append(name)
+            elif signal in {"BUY", "SELL"} and signal != direction:
+                opposing.append(name)
+        return {
+            "support_count": len(supporting),
+            "opposition_count": len(opposing),
+            "available_count": len(supporting) + len(opposing),
+            "supporting_agents": supporting,
+            "opposing_agents": opposing,
+        }
+
+    def _plan_quality_guard(
+        self,
+        *,
+        direction: str,
+        primary: Dict[str, Any],
+        standby: Dict[str, Any] | None,
+        primary_execution: Dict[str, Any],
+        all_results: Dict[str, Any],
+        symbol: str,
+    ) -> tuple[bool, str | None, Dict[str, Any]]:
+        diagnostics = self._agent_alignment_summary(direction, all_results)
+        diagnostics["primary_zone_width_points"] = round(self._zone_width_points(primary, symbol=symbol), 1)
+        diagnostics["standby_zone_width_points"] = round(self._zone_width_points(standby, symbol=symbol), 1) if standby else 0.0
+        diagnostics["main_rr"] = round(self._f(primary_execution.get("rr_ratio"), 0.0), 2)
+        if diagnostics["primary_zone_width_points"] > self.max_primary_zone_width_points:
+            return False, f"main area too wide ({diagnostics['primary_zone_width_points']:.0f} pts)", diagnostics
+        if standby and diagnostics["standby_zone_width_points"] > self.max_standby_zone_width_points:
+            return False, f"add area too wide ({diagnostics['standby_zone_width_points']:.0f} pts)", diagnostics
+        if standby and self._zones_overlap(primary, standby):
+            return False, "add area overlaps the main area", diagnostics
+        if diagnostics["main_rr"] < self.min_main_rr_for_ready:
+            return False, f"main area RR {diagnostics['main_rr']:.2f} below {self.min_main_rr_for_ready:.2f}", diagnostics
+        if diagnostics.get("available_count", 0) > 0:
+            if diagnostics["support_count"] < self.min_supporting_agents_for_ready:
+                return False, f"only {diagnostics['support_count']} supporting agents for the mapped direction", diagnostics
+            if diagnostics["opposition_count"] > self.max_opposing_agents_for_ready:
+                return False, f"too many opposing agents ({diagnostics['opposition_count']}) for a ready map", diagnostics
+        return True, None, diagnostics
+
     def _planner_score(
         self,
         *,
@@ -839,6 +975,12 @@ class SessionPlannerService:
         if primary_entry > 0 and standby_entry > 0:
             distance_points = abs(self._price_to_points(standby_entry - primary_entry, symbol=symbol))
             if distance_points < self.standby_min_distance_points:
+                return None
+        if self._zones_overlap(primary, standby):
+            return None
+        primary_zone = self._zone_payload(primary)
+        if primary_zone and standby_entry > 0:
+            if float(primary_zone.get("low", 0)) <= standby_entry <= float(primary_zone.get("high", 0)):
                 return None
         return standby
 
