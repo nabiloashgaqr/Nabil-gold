@@ -58,14 +58,25 @@ def main() -> None:
     paths = pipeline.save_bundle(bundle, root=args.output_root)
 
     readiness_text = ReleaseReadinessService(config, database=db).format_telegram(bundle["release_readiness"])
+    management_brief_text = bundle.get("management_brief_text") or ""
+    operator_memo_text = bundle.get("operator_memo_text") or ""
     print(readiness_text.replace("<b>", "").replace("</b>", ""))
+    if management_brief_text:
+        print("\n" + management_brief_text.replace("<b>", "").replace("</b>", ""))
+    if operator_memo_text:
+        print("\n" + operator_memo_text.replace("<b>", "").replace("</b>", ""))
     print("Saved artifacts:")
     for key, value in paths.items():
         print(f"- {key}: {value}")
 
     should_send = args.send_telegram or os.environ.get("GITHUB_ACTIONS") == "true"
     if should_send:
-        TelegramService(config).send_message(readiness_text)
+        tg = TelegramService(config)
+        tg.send_message(readiness_text)
+        if management_brief_text:
+            tg.send_message(management_brief_text)
+        if operator_memo_text:
+            tg.send_message(operator_memo_text)
 
 
 if __name__ == "__main__":

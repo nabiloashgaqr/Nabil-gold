@@ -12,6 +12,7 @@ import sys
 import html
 from copy import deepcopy
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, List
 
 # Add project root to path
@@ -295,6 +296,25 @@ def _ladder_sibling_allowed(decision: Dict[str, Any], trade: Dict[str, Any]) -> 
 
 
 
+def _plan_execution_hierarchy(plan: Dict[str, Any], role: str) -> Dict[str, Any]:
+    manual_plan = (plan.get("manual_plan") or {}) if isinstance(plan, dict) else {}
+    direction = str(plan.get("session_bias") or "").upper()
+    side_word = "BUY" if direction == "BUY" else "SELL" if direction == "SELL" else "TRADE"
+    main_label = str(manual_plan.get("main_area_label") or f"MAIN {side_word} AREA")
+    add_label = str(manual_plan.get("add_area_label") or f"ADD {side_word} AREA")
+    role = str(role or "PRIMARY").upper()
+    if role == "PRIMARY":
+        return {"execution_leg": "MAIN_AREA", "execution_leg_label": main_label, "execution_stage": "MAIN"}
+    if role == "STANDBY":
+        return {"execution_leg": "ADD_AREA", "execution_leg_label": add_label, "execution_stage": "ADD"}
+    if role == "STARTER":
+        return {"execution_leg": "STARTER", "execution_leg_label": f"STARTER inside {main_label}", "execution_stage": "MAIN"}
+    if role == "ADD_ON":
+        return {"execution_leg": "ADD_ON", "execution_leg_label": f"ADD-ON from {add_label}", "execution_stage": "ADD"}
+    return {"execution_leg": role or "MAIN_AREA", "execution_leg_label": role or main_label, "execution_stage": "MAIN"}
+
+
+
 def _planned_order_type(config: Dict[str, Any], direction: str, entry: float, current_price: float, symbol: str) -> str:
     oe = config.get("order_execution", {}) or {}
     entry_style = str(oe.get("entry_style", "market")).lower()
@@ -402,6 +422,7 @@ def _build_plan_ladder_decision(
             low = high = entry_price
     tp1, tp2, rr = _plan_targets(direction, entry_price, stop_loss, target_price)
     role = str(role_override or candidate.get("selection_role") or "PRIMARY").upper()
+    hierarchy = _plan_execution_hierarchy(plan, role)
 
     decision = deepcopy(base_decision)
     decision.update(
@@ -413,6 +434,7 @@ def _build_plan_ladder_decision(
             "entry_path": 3,
             "reasons": [
                 f"Session plan {plan.get('scenario_type')} ({role})",
+                f"Execution leg: {hierarchy.get('execution_leg_label')}",
                 f"Morning/session planner prepared this pending thesis before the move.",
             ],
             "quality": {
@@ -429,6 +451,9 @@ def _build_plan_ladder_decision(
             "plan_id": plan.get("plan_id"),
             "pending_plan_role": role,
             "selection_role": role,
+            "execution_leg": hierarchy.get("execution_leg"),
+            "execution_leg_label": hierarchy.get("execution_leg_label"),
+            "execution_stage": hierarchy.get("execution_stage"),
         }
     )
     decision["setup_context"] = setup_context
@@ -448,7 +473,7 @@ def _build_plan_ladder_decision(
             "high": round(current_price if force_market else high, 2),
             "kind": entry_kind,
             "order_type": order_type,
-            "basis": basis_override or f"Session plan {role.lower()} POI",
+            "basis": basis_override or f"{hierarchy.get('execution_leg_label')} · session plan",
             "current_price": round(current_price, 2),
             "distance_points": 0.0 if force_market else abs(price_to_points(entry_price - current_price, symbol=symbol)),
         },
@@ -461,8 +486,12 @@ def _build_plan_ladder_decision(
         "order_type": order_type,
         "entry_kind": entry_kind,
         "position_size": position_size,
-        "risk_summary": f"Session planner {role.lower()} ladder {'market' if force_market else 'pending'}",
+        "risk_summary": f"Session planner {hierarchy.get('execution_leg_label')} {'market' if force_market else 'pending'}",
+        "execution_leg": hierarchy.get("execution_leg"),
+        "execution_leg_label": hierarchy.get("execution_leg_label"),
     }
+    decision["execution_leg"] = hierarchy.get("execution_leg")
+    decision["execution_leg_label"] = hierarchy.get("execution_leg_label")
     return decision
 
 
@@ -1120,6 +1149,155 @@ async def _check_scale_in(
         return
 
 
+def _session_plan_delivery_cfg(config: Dict[str, Any]) -> Dict[str, Any]:
+    return (config.get("session_plan_delivery") or {}) if isinstance(config, dict) else {}
+
+
+def _session_plan_payload(plan_or_row: Dict[str, Any] | None) -> Dict[str, Any]:
+    if not isinstance(plan_or_row, dict):
+        return {}
+    payload = plan_or_row.get("payload")
+    if isinstance(payload, dict) and payload:
+        return dict(payload)
+    return dict(plan_or_row)
+
+def _session_plan_reference_time(plan_or_row: Dict[str, Any] | None) -> datetime | None:
+    if not isinstance(plan_or_row, dict):
+        return None
+    for key in ("telegram_sent_at", "analysis_run_at", "plan_created_at", "created_at"):
+        parsed = _parse_datetime(plan_or_row.get(key))
+        if parsed:
+            return parsed
+    payload = _session_plan_payload(plan_or_row)
+    for key in ("telegram_sent_at", "analysis_run_at", "plan_created_at", "created_at"):
+        parsed = _parse_datetime(payload.get(key))
+        if parsed:
+            return parsed
+    return None
+
+
+def _session_plan_session_key(plan_or_row: Dict[str, Any] | None, config: Dict[str, Any], *, symbol: str) -> str:
+    payload = _session_plan_payload(plan_or_row)
+    session_label = str(payload.get("session_label") or plan_or_row.get("session_label") or "UNKNOWN")
+    ref = _session_plan_reference_time(plan_or_row) or datetime.now(timezone.utc)
+    tz_name = str((config.get("schedule", {}) or {}).get("timezone") or (config.get("trading_hours", {}) or {}).get("timezone") or "Asia/Hebron")
+    try:
+        local_dt = ref.astimezone(ZoneInfo(tz_name))
+    except Exception:
+        local_dt = ref.astimezone(timezone.utc)
+    return f"{symbol}::{local_dt.strftime('%Y-%m-%d')}::{session_label}"
+
+
+def _session_plan_delivery_meta(current_plan: Dict[str, Any], sent_rows: List[Dict[str, Any]], config: Dict[str, Any], *, symbol: str) -> Dict[str, Any]:
+    cfg = _session_plan_delivery_cfg(config)
+    if not bool(cfg.get("enabled", True)):
+        return {"send": False, "reason": None, "kind": None, "previous": None}
+    if bool(cfg.get("only_when_ready", True)) and not bool(current_plan.get("plan_ready")):
+        return {"send": False, "reason": None, "kind": None, "previous": None}
+    current_key = _session_plan_session_key(current_plan, config, symbol=symbol)
+    same_session_rows = [row for row in (sent_rows or []) if _session_plan_session_key(row, config, symbol=symbol) == current_key]
+    previous = same_session_rows[0] if same_session_rows else None
+    if previous is None:
+        return {"send": bool(current_plan.get("plan_ready")), "reason": "first_ready_plan_this_session", "kind": "OPENING_PLAN", "previous": None}
+    min_interval = float(cfg.get("min_update_interval_minutes", 25) or 25)
+    previous_time = _session_plan_reference_time(previous)
+    if previous_time:
+        age_minutes = (datetime.now(timezone.utc) - previous_time).total_seconds() / 60.0
+        if age_minutes < min_interval:
+            return {"send": False, "reason": None, "kind": None, "previous": previous}
+    reason = _session_plan_delivery_reason(current_plan, previous, config, symbol=symbol)
+    if not reason:
+        return {"send": False, "reason": None, "kind": None, "previous": previous}
+    return {"send": True, "reason": reason, "kind": "PLAN_UPDATE", "previous": previous}
+
+
+def _plan_field_changed(prev: Dict[str, Any], curr: Dict[str, Any], key: str, *, symbol: str, min_change_points: float) -> bool:
+    try:
+        old_v = float(prev.get(key))
+        new_v = float(curr.get(key))
+    except (TypeError, ValueError):
+        return False
+    return abs(price_to_points(new_v - old_v, symbol=symbol)) >= min_change_points
+
+
+def _session_plan_delivery_reason(current_plan: Dict[str, Any], previous_snapshot: Dict[str, Any] | None, config: Dict[str, Any], *, symbol: str) -> str | None:
+    cfg = _session_plan_delivery_cfg(config)
+    if not bool(cfg.get("enabled", True)):
+        return None
+    if bool(cfg.get("only_when_ready", True)) and not bool(current_plan.get("plan_ready")):
+        return None
+    prev = _session_plan_payload(previous_snapshot)
+    if not prev:
+        return "first_ready_plan"
+    if not bool(prev.get("plan_ready")) and bool(current_plan.get("plan_ready")):
+        return "became_ready"
+    keys = ["session_bias", "scenario_type", "planner_source", "authority_state", "authority_direction", "execution_preference", "poi_classification", "plan_status"]
+    for key in keys:
+        if str(prev.get(key) or "") != str(current_plan.get(key) or ""):
+            return f"changed_{key}"
+    min_change_points = float(cfg.get("min_change_points", 60) or 60)
+    for key in ["primary_entry_price", "standby_entry_price", "invalidation_level", "target_liquidity"]:
+        if _plan_field_changed(prev, current_plan, key, symbol=symbol, min_change_points=min_change_points):
+            return f"changed_{key}_materially"
+    prev_zone = prev.get("primary_entry_zone") or {}
+    curr_zone = current_plan.get("primary_entry_zone") or {}
+    for key in ["low", "high"]:
+        try:
+            old_v = float(prev_zone.get(key))
+            new_v = float(curr_zone.get(key))
+            if abs(price_to_points(new_v - old_v, symbol=symbol)) >= min_change_points:
+                return f"changed_primary_zone_{key}"
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def _should_send_session_plan_telegram(current_plan: Dict[str, Any], previous_snapshot: Dict[str, Any] | None, config: Dict[str, Any], *, symbol: str) -> bool:
+    return _session_plan_delivery_reason(current_plan, previous_snapshot, config, symbol=symbol) is not None
+
+
+def _session_plan_agent_opinions(agent_details: Dict[str, Any]) -> List[Dict[str, Any]]:
+    opinions: List[Dict[str, Any]] = []
+    for key in ["technical", "classical", "smc", "price_action", "multitimeframe", "macro_fundamental"]:
+        detail = (agent_details or {}).get(key)
+        if not isinstance(detail, dict):
+            continue
+        direction = str(detail.get("direction") or "WAIT").upper()
+        confidence = _safe_float(detail.get("confidence"), 0.0)
+        signals = [str(x) for x in (detail.get("signals") or []) if str(x).strip()]
+        summary = str(detail.get("summary") or "").strip()
+        if not summary and not signals and direction == "WAIT":
+            summary = "No strong directional edge yet."
+        opinions.append(
+            {
+                "key": key,
+                "label": str(detail.get("label") or key),
+                "direction": direction,
+                "confidence": round(confidence, 1),
+                "summary": summary,
+                "signals": signals[:2],
+            }
+        )
+    return opinions
+
+
+def _decorate_session_plan_for_delivery(
+    plan: Dict[str, Any],
+    decision: Dict[str, Any],
+    all_results: Dict[str, Any],
+    delivery_context: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    payload = deepcopy(plan) if isinstance(plan, dict) else {}
+    agent_details = decision.get("agent_details") or _compact_agent_details(all_results)
+    payload["agent_opinions"] = _session_plan_agent_opinions(agent_details if isinstance(agent_details, dict) else {})
+    payload["gemini_plan_review"] = deepcopy(decision.get("gemini_analysis") or {})
+    payload["gemini_macro_review"] = deepcopy(decision.get("gemini_macro_review") or {})
+    payload["gemini_news_review"] = deepcopy(decision.get("gemini_news_review") or {})
+    payload["macro_plan"] = deepcopy(all_results.get("macro_fundamental") or {})
+    payload["delivery_context"] = dict(delivery_context or {})
+    return payload
+
+
 def _is_news_hard_block(decision: Dict[str, Any], all_results: Dict[str, Any]) -> bool:
     warnings = [str(w).lower() for w in (decision.get("warnings") or [])]
     if any(w.startswith("news blocked") or w.startswith("ai news blocked") for w in warnings): return True
@@ -1602,8 +1780,21 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         # Phase 1 foundation: build a morning/session plan BEFORE the move.
         # This is planning-only for now; later phases can translate PRIMARY /
         # STANDBY plan objects into live laddered pending orders.
+        previous_sent_session_plan_rows: List[Dict[str, Any]] = []
+        session_plan_context = {
+            "symbol": symbol,
+            "current_price": float(data.get("current_price") or 0),
+            "market_data_source": str(data.get("source") or ""),
+            "analysis_run_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        }
+        session_plan_snapshot_id = None
+        session_plan_delivery_meta = {"send": False, "reason": None, "kind": None, "previous": None}
         try:
-            session_plan = SessionPlannerService(config).build_plan(all_results)
+            previous_sent_session_plan_rows = database.get_recent_session_plans(limit=12, symbol=symbol, sent_only=True)
+        except Exception as prev_exc:  # noqa: BLE001
+            logger.warning("Failed to load previously delivered session plans: %s", prev_exc)
+        try:
+            session_plan = SessionPlannerService(config).build_plan(all_results, persist=False)
             all_results["session_plan"] = session_plan
             if session_plan.get("plan_ready"):
                 logger.info(
@@ -1617,9 +1808,23 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 )
             else:
                 logger.info("Session plan not ready for %s: %s", symbol, session_plan.get("plan_reason"))
+            try:
+                session_plan_snapshot_id = database.save_session_plan(session_plan, session_plan_context)
+            except Exception as persist_exc:  # noqa: BLE001
+                logger.warning("Failed to persist session plan snapshot: %s", persist_exc)
+            session_plan_delivery_meta = _session_plan_delivery_meta(
+                session_plan,
+                previous_sent_session_plan_rows,
+                config,
+                symbol=symbol,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to build session plan: %s", exc)
             all_results["session_plan"] = {"enabled": True, "plan_ready": False, "plan_status": "ERROR", "plan_reason": str(exc)}
+            try:
+                session_plan_snapshot_id = database.save_session_plan(all_results["session_plan"], session_plan_context)
+            except Exception as persist_exc:  # noqa: BLE001
+                logger.warning("Failed to persist errored session plan snapshot: %s", persist_exc)
         # Inject portfolio info so RiskManagementAgent can enforce max_open_trades
         # and max_daily_signals filters. Without this, those filters see 0 and
         # never block — which caused 15 simultaneous BUY trades.
@@ -1844,7 +2049,8 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 decision.setdefault("reasons", []).append(str(authority_review.get("reason") or "Directional authority allowed regime flip"))
 
         send_hourly_now = should_send_hourly_status(config)
-        if (decision_type in {"BUY", "SELL"}) or (decision_type == "WAIT" and send_hourly_now):
+        session_plan_ready_for_delivery = bool((all_results.get("session_plan") or {}).get("plan_ready")) and bool(_session_plan_delivery_cfg(config).get("enabled", True))
+        if (decision_type in {"BUY", "SELL"}) or (decision_type == "WAIT" and send_hourly_now) or session_plan_ready_for_delivery:
             try:
                 gemini = get_gemini_review_service(config)
                 if not gemini.enabled:
@@ -1882,6 +2088,30 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 logger.exception("🧠 Gemini analysis block failed")
         elif decision_type == "WAIT":
             logger.info("🧠 Gemini skipped: normal WAIT without hourly status")
+
+        if session_plan_delivery_meta.get("send"):
+            try:
+                plan_message = _decorate_session_plan_for_delivery(
+                    all_results.get("session_plan") or {},
+                    decision,
+                    all_results,
+                    {
+                        "message_kind": session_plan_delivery_meta.get("kind"),
+                        "delivery_reason": session_plan_delivery_meta.get("reason"),
+                    },
+                )
+                sent = telegram.send_session_plan(plan_message)
+                if sent:
+                    if session_plan_snapshot_id:
+                        try:
+                            database.mark_session_plan_telegram_sent(session_plan_snapshot_id, str(session_plan_delivery_meta.get("reason") or session_plan_delivery_meta.get("kind") or "session_plan_delivery"))
+                        except Exception as mark_exc:  # noqa: BLE001
+                            logger.warning("Failed to mark session plan Telegram delivery: %s", mark_exc)
+                    logger.info("Session plan Telegram sent for %s (%s)", symbol, session_plan_delivery_meta.get("reason"))
+                else:
+                    logger.warning("Session plan Telegram returned False for %s", symbol)
+            except Exception as delivery_exc:  # noqa: BLE001
+                logger.warning("Failed to deliver session plan Telegram for %s: %s", symbol, delivery_exc)
 
         # Phase 2: if the morning/session planner already prepared a strong
         # PRIMARY / STANDBY thesis before the move, publish those pending ladder

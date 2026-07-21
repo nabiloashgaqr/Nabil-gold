@@ -24,7 +24,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agents.daily_report_agent import DailyReportAgent
 from services.analyst_distillation import AnalystDistillationService
 from services.database import DatabaseService
+from services.day_map_metrics import summarize_day_map_execution
 from services.llm_review import get_gemini_review_service
+from services.tuning_advisor import TuningAdvisor
 from services.telegram_bot import TelegramService
 from utils.helpers import calculate_pips, load_config, setup_logging
 from utils.instruments import price_to_points
@@ -317,6 +319,52 @@ def _quality_snapshot_lines(enrichment: dict[str, Any]) -> list[str]:
     return lines[:4]
 
 
+def _daily_management_brief_lines(config: dict, day_map_execution: dict[str, Any], analyst_overlap: dict[str, Any] | None = None) -> list[str]:
+    memo = TuningAdvisor(config).build_live_operator_memo(
+        day_map_execution=day_map_execution,
+        analyst_overlap=analyst_overlap or {},
+    )
+    lines = [
+        f"• Priority: {memo.get('priority', 'NORMAL')}",
+        f"• {memo.get('headline', 'No operator headline')}",
+    ]
+    focus = memo.get('next_round_focus', []) or []
+    if focus:
+        lines.append(f"• Next move: {focus[0]}")
+    return lines[:3]
+
+
+def _daily_operator_focus_lines(config: dict, day_map_execution: dict[str, Any], analyst_overlap: dict[str, Any] | None = None) -> list[str]:
+    memo = TuningAdvisor(config).build_live_operator_memo(
+        day_map_execution=day_map_execution,
+        analyst_overlap=analyst_overlap or {},
+    )
+    lines = []
+    for item in (memo.get('findings', []) or [])[:3]:
+        lines.append(f"• {item}")
+    for item in (memo.get('suggested_config_changes', []) or [])[:2]:
+        lines.append(f"• Tune: {item}")
+    return lines[:5]
+
+
+def _day_map_execution_lines(summary: dict[str, Any]) -> list[str]:
+    if not summary or int(summary.get("tracked_trade_count", 0) or 0) <= 0:
+        return []
+    metrics = summary.get("scenario_metrics") or {}
+    roles = summary.get("role_breakdown") or {}
+    main_count = int(((roles.get("PRIMARY") or {}).get("count", 0) or 0) + ((roles.get("STARTER") or {}).get("count", 0) or 0))
+    add_count = int(((roles.get("STANDBY") or {}).get("count", 0) or 0) + ((roles.get("ADD_ON") or {}).get("count", 0) or 0))
+    lines = [
+        f"• Main worked: {int(metrics.get('main_worked_count', 0) or 0)} | Add needed: {int(metrics.get('add_needed_count', 0) or 0)}",
+        f"• Starter survived alone: {int(metrics.get('starter_survived_alone_count', 0) or 0)} | Day-map failed: {int(metrics.get('day_map_failed_count', 0) or 0)}",
+        f"• Mapped legs tracked: Main {main_count} | Add {add_count}",
+    ]
+    map_changed = int(metrics.get("map_changed_cancelled_count", 0) or 0)
+    if map_changed:
+        lines.append(f"• Map-changed cancellations: {map_changed}")
+    return lines[:4]
+
+
 def _analyst_overlap_lines(summary: dict[str, Any]) -> list[str]:
     """Compact analyst-vs-bot overlap lines for the daily report."""
     if not summary or int(summary.get("labels_considered", 0) or 0) <= 0:
@@ -435,6 +483,8 @@ def main() -> None:
         stats = perf_report.get("stats", {})
         daily_enrichment = _daily_enrichment_summary(closed_today)
         stats.update(daily_enrichment)
+        day_map_execution = summarize_day_map_execution(today_trades)
+        stats["day_map_execution"] = day_map_execution
         
         open_trades = open_at_that_time
         stats["open"] = len(open_trades)
@@ -486,6 +536,12 @@ def main() -> None:
             lines.extend(quality_lines)
             lines.append("")
 
+        day_map_lines = _day_map_execution_lines(day_map_execution)
+        if day_map_lines:
+            lines.append("🗺️ <b>Day-Map Execution</b>")
+            lines.extend(day_map_lines)
+            lines.append("")
+
         analyst_lines: list[str] = []
         try:
             distill = AnalystDistillationService(database, config)
@@ -499,6 +555,17 @@ def main() -> None:
         if analyst_lines:
             lines.append("🧠 <b>Analyst Overlap</b>")
             lines.extend(analyst_lines)
+            lines.append("")
+
+        management_brief_lines = _daily_management_brief_lines(config, day_map_execution, stats.get("analyst_overlap") or {})
+        operator_focus_lines = _daily_operator_focus_lines(config, day_map_execution, stats.get("analyst_overlap") or {})
+        if management_brief_lines:
+            lines.append("📌 <b>Management Brief</b>")
+            lines.extend(management_brief_lines)
+            lines.append("")
+        if operator_focus_lines:
+            lines.append("🧭 <b>Operator Focus</b>")
+            lines.extend(operator_focus_lines)
             lines.append("")
 
         if closed_today:
