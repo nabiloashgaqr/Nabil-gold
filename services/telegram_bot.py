@@ -278,7 +278,7 @@ class TelegramService:
                 compact.append(str(setup_type).replace("_", " ").title())
             if leg_label:
                 compact.append(f"leg {leg_label}")
-            elif selection_role:
+            if selection_role:
                 compact.append(f"role {selection_role}")
             if setup_state:
                 compact.append(f"state {setup_state}")
