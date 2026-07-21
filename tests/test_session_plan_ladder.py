@@ -59,11 +59,17 @@ def _candidate(role: str, entry: float, stop: float, target: float) -> dict:
 
 def _base_decision() -> dict:
     return {
-        "decision": "WAIT",
+        "decision": "SELL",
         "symbol": "XAU/USD",
         "current_price": 3992.76,
-        "confidence": 0,
-        "agent_details": {},
+        "confidence": 78,
+        "agent_details": {
+            "technical": {"label": "Technical", "direction": "SELL", "confidence": 82},
+            "classical": {"label": "Classical", "direction": "SELL", "confidence": 80},
+            "smc": {"label": "SMC", "direction": "SELL", "confidence": 90},
+            "price_action": {"label": "Price Action", "direction": "WAIT", "confidence": 40},
+            "multitimeframe": {"label": "Multi-Timeframe", "direction": "WAIT", "confidence": 35},
+        },
         "daily_bias": {"bias": "BEARISH", "confidence": 95},
         "news_context": {"rule_based": {"can_trade": True, "market_status": "SAFE"}, "macro": {"macro_direction": {"bias": "BEARISH_GOLD", "confidence": 64}}},
         "market_context": {"macro_direction": {"bias": "BEARISH_GOLD", "confidence": 64}},
@@ -220,3 +226,21 @@ def test_session_plan_ladder_applies_minimum_sl_floor_to_pending_orders(tmp_path
     assert primary["planned_risk_points"] == 400.0
     assert primary["planned_tp2_points"] == 900.0
     assert primary["planned_rr"] == 2.25
+
+
+def test_session_plan_ladder_blocked_without_admission_gate(tmp_path: Path) -> None:
+    db = _db(tmp_path)
+    telegram = _Telegram()
+    decision = _base_decision()
+    decision["decision"] = "WAIT"
+    decision["agent_details"] = {
+        "technical": {"label": "Technical", "direction": "SELL", "confidence": 82},
+        "classical": {"label": "Classical", "direction": "WAIT", "confidence": 30},
+        "smc": {"label": "SMC", "direction": "SELL", "confidence": 90},
+        "price_action": {"label": "Price Action", "direction": "BUY", "confidence": 79},
+        "multitimeframe": {"label": "Multi-Timeframe", "direction": "BUY", "confidence": 86},
+    }
+    created = ra._execute_session_plan_ladder(decision, {"symbol": "XAU/USD"}, [], db, telegram, _config())
+    assert created == 0
+    assert load_trades(db.local_path) == []
+    assert telegram.sent == []
