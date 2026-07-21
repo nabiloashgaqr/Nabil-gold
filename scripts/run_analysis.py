@@ -566,6 +566,52 @@ def _build_plan_ladder_decision(
 
 
 
+def _planner_execution_gate(decision: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
+    side = str(decision.get("decision") or "").upper()
+    if side not in {"BUY", "SELL"}:
+        return {"allow": False, "reason": "no approved directional admission"}
+
+    sig_cfg = (config.get("signal_requirements") or {}) if isinstance(config, dict) else {}
+    min_agents = int(sig_cfg.get("min_agents_agree", 3) or 3)
+    min_agent_conf = float(sig_cfg.get("agent_min_confidence", 70) or 70)
+    details = decision.get("agent_details") or {}
+    support_count = 0
+    for key in ["technical", "classical", "smc", "price_action", "multitimeframe"]:
+        detail = (details or {}).get(key)
+        if not isinstance(detail, dict):
+            continue
+        direction = str(detail.get("direction") or "WAIT").upper()
+        confidence = _safe_float(detail.get("confidence"), 0.0)
+        if direction == side and confidence >= min_agent_conf:
+            support_count += 1
+
+    if support_count >= min_agents:
+        return {
+            "allow": True,
+            "kind": "THREE_AGENT_ADMISSION",
+            "support_count": support_count,
+            "reason": f"{support_count} qualified agents aligned with the mapped direction",
+        }
+
+    confirm_source = str(decision.get("confirm_source") or "").lower()
+    confirm_conf = _safe_float(decision.get("confirm_confidence"), 0.0)
+    if support_count >= 2 and confirm_source in {"macro", "gemini"}:
+        return {
+            "allow": True,
+            "kind": "TWO_AGENT_CONFIRMED_ADMISSION",
+            "support_count": support_count,
+            "confirm_source": confirm_source,
+            "confirm_confidence": round(confirm_conf, 1),
+            "reason": f"{support_count} qualified agents + {confirm_source} confirmation",
+        }
+
+    return {
+        "allow": False,
+        "support_count": support_count,
+        "reason": f"planner execution requires 3 qualified agents or 2 agents + macro/gemini; got {support_count}",
+    }
+
+
 def _split_execution_decisions(
     base_decision: Dict[str, Any],
     plan: Dict[str, Any],
@@ -646,6 +692,10 @@ def _execute_session_plan_ladder(
     plan = base_decision.get("session_plan") or {}
     if not isinstance(plan, dict) or not plan.get("plan_ready"):
         return 0
+    gate = _planner_execution_gate(base_decision, config)
+    if not gate.get("allow"):
+        logger.info("Session-plan ladder blocked: %s", gate.get("reason"))
+        return 0
     symbol = str(base_decision.get("symbol") or plan.get("symbol") or config.get("symbol", "XAU/USD"))
     normalized_symbol = normalize_symbol(symbol)
     symbol_open_trades = [t for t in (open_trades or []) if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol]
@@ -685,6 +735,8 @@ def _execute_session_plan_ladder(
     for ladder_decision in plan_decisions:
         if not ladder_decision:
             continue
+        ladder_decision["planner_execution_gate"] = deepcopy(gate)
+        ladder_decision.setdefault("reasons", []).append(f"Planner admission: {gate.get('reason')}")
         role = _decision_ladder_role(ladder_decision)
         if any(_trade_scenario_id(t) == _decision_scenario_id(ladder_decision) and _trade_ladder_role(t) == role for t in staged_trades):
             continue
