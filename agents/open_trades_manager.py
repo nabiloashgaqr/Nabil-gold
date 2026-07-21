@@ -280,6 +280,7 @@ class OpenTradesManager(BaseAgent):
         now: datetime | None = None,
         candle_high: float | None = None,
         candle_low: float | None = None,
+        recent_candles: List[Dict[str, Any]] | None = None,
         news_blocked: bool = False,
         news_context: Dict[str, Any] | None = None,
         market_data_source: str | None = None,
@@ -300,6 +301,7 @@ class OpenTradesManager(BaseAgent):
                 now=now,
                 candle_high=candle_high,
                 candle_low=candle_low,
+                recent_candles=recent_candles,
                 news_blocked=news_blocked,
                 news_context=news_context,
                 database=database,
@@ -375,6 +377,7 @@ class OpenTradesManager(BaseAgent):
         now: datetime | None = None,
         candle_high: float | None = None,
         candle_low: float | None = None,
+        recent_candles: List[Dict[str, Any]] | None = None,
         news_blocked: bool = False,
         news_context: Dict[str, Any] | None = None,
         database: Any | None = None,
@@ -403,6 +406,11 @@ class OpenTradesManager(BaseAgent):
         previous_mae = self._f(trade.get("max_adverse_excursion"), 0.0)
         high_price = self._f(candle_high, current_price)
         low_price = self._f(candle_low, current_price)
+        window_high, window_low = self._window_extremes_since(trade, recent_candles)
+        if window_high is not None:
+            high_price = max(high_price, window_high)
+        if window_low is not None:
+            low_price = min(low_price, window_low)
         if high_price < low_price:
             high_price, low_price = low_price, high_price
 
@@ -421,6 +429,7 @@ class OpenTradesManager(BaseAgent):
                 symbol,
                 candle_high=high_price,
                 candle_low=low_price,
+                recent_candles=recent_candles,
                 news_blocked=news_blocked,
                 news_context=news_context,
                 database=database,
@@ -856,6 +865,28 @@ class OpenTradesManager(BaseAgent):
             return True
         return False
 
+    def _window_extremes_since(self, trade: Dict[str, Any], recent_candles: List[Dict[str, Any]] | None) -> tuple[float | None, float | None]:
+        if not recent_candles:
+            return None, None
+        baseline = self._parse_dt(str(trade.get("last_updated") or trade.get("created_at") or trade.get("entry_time") or ""))
+        highs: List[float] = []
+        lows: List[float] = []
+        for candle in recent_candles:
+            if not isinstance(candle, dict):
+                continue
+            dt = self._parse_dt(str(candle.get("time") or ""))
+            if baseline and dt and dt <= baseline:
+                continue
+            high = self._f(candle.get("high"), 0.0)
+            low = self._f(candle.get("low"), 0.0)
+            if high > 0:
+                highs.append(high)
+            if low > 0:
+                lows.append(low)
+        if not highs or not lows:
+            return None, None
+        return max(highs), min(lows)
+
     def _management_phase(self, status: str, sl_moved_to_entry: bool, partial_close: bool, pnl_points: float) -> str:
         if status == "TP1_HIT" or partial_close:
             return "POST_TP1_TRAILING" if sl_moved_to_entry else "POST_TP1"
@@ -931,6 +962,7 @@ class OpenTradesManager(BaseAgent):
         symbol,
         candle_high: float | None = None,
         candle_low: float | None = None,
+        recent_candles: List[Dict[str, Any]] | None = None,
         news_blocked: bool = False,
         news_context: Dict[str, Any] | None = None,
         database: Any | None = None,
