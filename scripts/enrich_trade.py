@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from services.database import DatabaseService
+from services.telegram_bot import TelegramService
 from utils.helpers import load_config, calculate_pips
 
 _VALID = {"reopen", "update_prices", "close_now", "be_hit", "sl_hit", "trailing_sl_hit",
@@ -131,6 +132,68 @@ def _mae(entry: float, high: float | None, low: float | None,
             if worst is None or exc < worst:
                 worst = exc
     return worst if (worst is not None and worst < 0) else None
+
+
+def _progress_to_tp1(trade_type: str, entry: float, tp1: float, current_price: float | None) -> float | None:
+    if current_price is None or tp1 <= 0 or entry <= 0:
+        return None
+    target_distance = abs(tp1 - entry)
+    if target_distance <= 0:
+        return None
+    favorable_move = (current_price - entry) if trade_type == "BUY" else (entry - current_price)
+    return max(0.0, favorable_move / target_distance)
+
+
+def _telegram_requested() -> bool:
+    raw = _env("SEND_TELEGRAM")
+    if raw:
+        return raw.lower() in {"1", "true", "yes", "y", "on"}
+    return os.environ.get("GITHUB_ACTIONS") == "true"
+
+
+def _send_trade_event(
+    cfg: dict,
+    trade: dict,
+    events: list[str],
+    *,
+    current_price: float | None,
+    pnl_points: float | None,
+    old_status: str,
+    new_status: str,
+    updates: dict,
+    tp1: float = 0.0,
+    entry: float = 0.0,
+    side: str = "BUY",
+) -> None:
+    if not events or not _telegram_requested():
+        return
+    if current_price is None:
+        try:
+            current_price = float(trade.get("current_price") or trade.get("close_price") or trade.get("entry_price") or 0)
+        except (TypeError, ValueError):
+            current_price = 0.0
+    if pnl_points is None:
+        try:
+            pnl_points = float(trade.get("current_pnl_points") or trade.get("current_pnl") or trade.get("final_pnl_points") or trade.get("final_pnl") or 0)
+        except (TypeError, ValueError):
+            pnl_points = 0.0
+    evaluation = {
+        "trade_id": trade.get("id"),
+        "old_status": old_status,
+        "new_status": new_status,
+        "pnl_points": round(float(pnl_points), 1),
+        "events": list(events),
+        "updates": dict(updates),
+        "progress_to_tp1": _progress_to_tp1(side, entry, tp1, current_price),
+        "hours_open": None,
+    }
+    try:
+        telegram = TelegramService(cfg)
+        ok = telegram.send_trade_events(trade, list(events), float(current_price), float(pnl_points), evaluation)
+        if not ok:
+            logging.getLogger(__name__).warning("Telegram event not sent for %s (%s)", trade.get("id"), ",".join(events))
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).warning("Telegram event failed for %s: %s", trade.get("id"), exc)
 
 
 # ── Main ────────────────────────────────────────────────────────────
@@ -267,6 +330,17 @@ def main() -> int:
             locked = _pnl(entry, new_sl, side, symbol) if entry > 0 else None
             lock_txt = f"  |  Locked: {locked:+.1f} pts" if locked is not None else ""
             print(f"✅ {tid} trailing stop updated → {new_sl:.2f}{lock_txt}")
+            _send_trade_event(
+                cfg, trade, ["TRAILING_SL_UPDATED"],
+                current_price=cur,
+                pnl_points=cur_pnl,
+                old_status=old_status,
+                new_status=old_status,
+                updates=updates,
+                tp1=tp1,
+                entry=entry,
+                side=side,
+            )
         return 0 if ok else 1
 
     # ── close_now ──
@@ -298,6 +372,17 @@ def main() -> int:
         ok = _write(db, tid, updates)
         if ok:
             print(f"✅ {tid} → MANUAL_CLOSE  |  Price: {cp:.2f}  |  PnL: {pnl:+.1f}")
+            _send_trade_event(
+                cfg, trade, ["MANUAL_CLOSE"],
+                current_price=cp,
+                pnl_points=pnl,
+                old_status=old_status,
+                new_status="MANUAL_CLOSE",
+                updates=updates,
+                tp1=tp1,
+                entry=entry,
+                side=side,
+            )
         return 0 if ok else 1
 
     # ── be_hit ──
@@ -382,6 +467,31 @@ def main() -> int:
     ok = _write(db, tid, updates)
     if ok:
         print(f"✅ {tid} → {updates.get('status')}  |  PnL: {updates.get('final_pnl', '?')}")
+        event_map = {
+            "BE_HIT": ["MOVE_SL_TO_BE", "BE_HIT"],
+            "SL_HIT": ["SL_HIT"],
+            "TP1_HIT": ["TP1_HIT", "MOVE_SL_TO_BE"],
+            "TP2_HIT": ["TP2_HIT"],
+        }
+        if action == "trailing_sl_hit":
+            events = ["TRAILING_SL_HIT"]
+        else:
+            events = event_map.get(str(updates.get("status") or ""), [])
+        current_for_msg = cur if cur is not None else updates.get("close_price") or trade.get("current_price") or entry
+        pnl_for_msg = updates.get("final_pnl")
+        if pnl_for_msg is None:
+            pnl_for_msg = cur_pnl if cur_pnl is not None else trade.get("current_pnl") or trade.get("current_pnl_points")
+        _send_trade_event(
+            cfg, trade, events,
+            current_price=float(current_for_msg) if current_for_msg is not None else None,
+            pnl_points=float(pnl_for_msg) if pnl_for_msg is not None else None,
+            old_status=old_status,
+            new_status=str(updates.get("status") or old_status),
+            updates=updates,
+            tp1=tp1,
+            entry=entry,
+            side=side,
+        )
     return 0 if ok else 1
 
 
