@@ -188,3 +188,35 @@ def test_session_plan_extreme_poi_split_execution_creates_market_starter_and_pen
     assert roles == ["ADD_ON", "STARTER"]
     leg_labels = sorted(str(((t.get("signal_snapshot") or {}).get("setup_context") or {}).get("execution_leg_label")) for t in trades)
     assert leg_labels == ["ADD-ON from ADD SELL AREA", "STARTER inside MAIN SELL AREA"]
+
+
+def test_session_plan_ladder_applies_minimum_sl_floor_to_pending_orders(tmp_path: Path) -> None:
+    db = _db(tmp_path)
+    telegram = _Telegram()
+    decision = _base_decision()
+    decision["session_plan"]["session_bias"] = "BUY"
+    decision["session_plan"]["primary_poi"]["direction"] = "BUY"
+    decision["session_plan"]["primary_poi"]["entry_price"] = 4042.43
+    decision["session_plan"]["primary_poi"]["stop_loss"] = 4039.64
+    decision["session_plan"]["primary_poi"]["target_price"] = 4085.13
+    decision["session_plan"]["primary_poi"]["target_liquidity"] = 4085.13
+    cfg = _config()
+    cfg["session_planner"]["create_pending_orders_from_plan"] = True
+    cfg["risk_settings"] = {
+        "min_sl_distance_points": 400,
+        "atr_multiplier_sl": 2.0,
+        "atr_multiplier_tp1": 2.5,
+        "atr_multiplier_tp2": 4.5,
+        "max_rr_ratio": 4.0,
+    }
+    created = ra._execute_session_plan_ladder(decision, {"symbol": "XAU/USD"}, [], db, telegram, cfg)
+    assert created == 2
+    trades = load_trades(db.local_path)
+    primary = next(t for t in trades if ((t.get("signal_snapshot") or {}).get("setup_context") or {}).get("pending_plan_role") == "PRIMARY")
+    assert primary["stop_loss"] == 4002.43
+    assert primary["initial_stop_loss"] == 4002.43
+    assert primary["tp1"] == 4092.43
+    assert primary["tp2"] == 4132.43
+    assert primary["planned_risk_points"] == 400.0
+    assert primary["planned_tp2_points"] == 900.0
+    assert primary["planned_rr"] == 2.25
