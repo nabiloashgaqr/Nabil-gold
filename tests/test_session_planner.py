@@ -185,3 +185,45 @@ def test_session_planner_classifies_extreme_poi_when_alignment_is_strong(tmp_pat
     if plan["poi_classification"] == "EXTREME_POI":
         assert plan["extreme_poi"] is True
         assert plan["execution_preference"] == "SPLIT_EXECUTION_WATCH"
+
+
+def test_session_planner_blocks_when_main_zone_is_too_wide(tmp_path: Path) -> None:
+    service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True, "max_primary_zone_width_points": 260}})
+    service.storage_path = tmp_path / "session_plans.json"
+    results = _results()
+    results["smc"]["setup_candidates"] = [
+        _candidate("PRIMARY", entry_price=4051.18, stop_loss=3998.72, target_price=4072.66, poi_type="extreme_day_map_zone")
+    ]
+    results["smc"]["setup_candidates"][0]["poi_zone"] = {"top": 4051.18, "bottom": 3998.72}
+    plan = service.build_plan(results)
+    assert plan["plan_ready"] is False
+    assert plan["plan_status"] == "WATCH_ONLY"
+    assert "too wide" in str(plan["plan_reason"]).lower()
+
+
+def test_session_planner_removes_add_area_when_it_overlaps_main(tmp_path: Path) -> None:
+    service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True}})
+    service.storage_path = tmp_path / "session_plans.json"
+    results = _results()
+    results["smc"]["setup_candidates"] = [
+        _candidate("PRIMARY", entry_price=4020.0, stop_loss=3980.0, target_price=4110.0),
+        _candidate("STANDBY", entry_price=4021.0, stop_loss=3981.0, target_price=4111.0),
+    ]
+    results["smc"]["setup_candidates"][1]["poi_zone"] = {"top": 4022.0, "bottom": 4019.0}
+    plan = service.build_plan(results)
+    assert plan["plan_ready"] is True
+    assert plan["standby_poi"] is None
+
+
+def test_session_planner_blocks_when_main_rr_is_too_low(tmp_path: Path) -> None:
+    service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True, "min_main_rr_for_ready": 1.5}})
+    service.storage_path = tmp_path / "session_plans.json"
+    results = _results()
+    results["smc"]["setup_candidates"] = [
+        _candidate("PRIMARY", entry_price=4051.18, stop_loss=3998.72, target_price=4072.66, poi_type="extreme_day_map_zone")
+    ]
+    results["smc"]["setup_candidates"][0]["poi_zone"] = {"top": 4051.18, "bottom": 4048.72}
+    plan = service.build_plan(results)
+    assert plan["plan_ready"] is False
+    assert plan["plan_status"] == "WATCH_ONLY"
+    assert "rr" in str(plan["plan_reason"]).lower()

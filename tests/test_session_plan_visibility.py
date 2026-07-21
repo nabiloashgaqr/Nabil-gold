@@ -467,3 +467,130 @@ def test_run_analysis_resends_opening_plan_for_new_session(monkeypatch, tmp_path
     assert delivered_plan["delivery_context"]["message_kind"] == "OPENING_PLAN"
     assert delivered_plan["delivery_context"]["delivery_reason"] == "first_ready_plan_this_session"
 
+
+
+def test_run_analysis_does_not_resend_plan_for_metadata_only_changes(monkeypatch, tmp_path: Path) -> None:
+    config = {
+        "symbol": "XAU/USD",
+        "risk_settings": {"max_daily_signals": 50, "max_open_trades": 50},
+        "duplicate_signal_filter": {"enabled": False},
+        "trading_hours": {"enabled": False},
+        "schedule": {"timezone": "Asia/Hebron"},
+        "notifications": {"send_no_signal_updates": False, "hourly_status": False},
+        "session_planner": {"enabled": True, "create_pending_orders_from_plan": False},
+        "session_plan_delivery": {"enabled": True, "only_when_ready": True, "min_change_points": 60, "min_update_interval_minutes": 25},
+        "trading_mode": "paper",
+        "paper_trading": {"enabled": True},
+        "operation_mode": "observation",
+    }
+    monkeypatch.setattr(ra, "load_config", lambda: config)
+
+    telegram = MagicMock()
+    telegram.send_message.return_value = True
+    telegram.send_error_alert.return_value = True
+    telegram.send_session_plan.return_value = True
+    monkeypatch.setattr(ra, "TelegramService", lambda *_a, **_k: telegram)
+
+    database = MagicMock()
+    database.get_open_trades.return_value = []
+    database.get_recent_trades.return_value = []
+    database.get_macro_context.return_value = {}
+    database.get_recent_session_plans.return_value = [{
+        "symbol": "XAU/USD",
+        "session_label": "London / Europe Midday",
+        "telegram_sent_at": "2026-07-21T10:00:00Z",
+        "payload": {
+            "symbol": "XAU/USD",
+            "session_label": "London / Europe Midday",
+            "plan_ready": True,
+            "plan_status": "READY",
+            "session_bias": "BUY",
+            "scenario_type": "LIQUIDITY_REVERSAL",
+            "planner_source": "setup_candidates",
+            "authority_state": "CONFIRMED",
+            "authority_direction": "BUY",
+            "execution_preference": "LADDER_PENDING",
+            "poi_classification": "STANDARD_POI",
+            "primary_entry_price": 4042.43,
+            "standby_entry_price": 4024.04,
+            "invalidation_level": 4002.43,
+            "target_liquidity": 4085.13,
+            "primary_entry_zone": {"low": 4041.19, "high": 4043.68},
+            "plan_created_at": "2026-07-21T09:55:00Z",
+        },
+    }]
+    database.save_session_plan.return_value = "SESSION_PLAN_TEST_3"
+    monkeypatch.setattr(ra, "DatabaseService", lambda *_a, **_k: database)
+
+    fake_session = MagicMock()
+    fake_session.check.return_value = {
+        "trading_allowed": True,
+        "allow_signals": True,
+        "current_session": "London / Europe Midday",
+        "session_quality": "HIGH",
+    }
+    monkeypatch.setattr(ra, "TradingSessionAgent", lambda *_a, **_k: fake_session)
+
+    fake_md = MagicMock()
+    fake_md.get_gold_data.return_value = {
+        "current_price": 4040.0,
+        "source": "twelvedata",
+        "source_integrity": {"supports_signal_generation": True, "supports_pending_activation": True, "source": "twelvedata"},
+        "timeframes": {},
+        "data": [],
+    }
+    monkeypatch.setattr(ra, "MarketDataService", lambda *_a, **_k: fake_md)
+
+    class _FakeGemini:
+        enabled = False
+    monkeypatch.setattr(ra, "get_gemini_review_service", lambda *_a, **_k: _FakeGemini())
+    monkeypatch.setattr(ra, "get_learning_service", lambda *_a, **_k: None)
+    monkeypatch.setattr(ra, "run_agent", lambda name, agent, data: {"agent": name, "signal": "WAIT", "confidence": 0})
+    monkeypatch.setattr(ra, "RiskManagementAgent", lambda *_a, **_k: MagicMock(evaluate=lambda r: {}))
+    monkeypatch.setattr(ra, "DynamicRiskManager", lambda *_a, **_k: MagicMock(evaluate=lambda db: {}))
+    monkeypatch.setattr(ra, "SetupMemoryService", lambda *_a, **_k: MagicMock(process_candidates=lambda candidates, **kwargs: candidates, mark_entry_triggered=lambda **kwargs: None))
+
+    class _FakePlanner:
+        def build_plan(self, *_a, **_k):
+            return {
+                "enabled": True,
+                "symbol": "XAU/USD",
+                "plan_ready": True,
+                "plan_status": "READY",
+                "plan_reason": "session plan ready",
+                "plan_id": "PLAN::TEST3",
+                "scenario_id": "SCENARIO::TEST3",
+                "planner_source": "setup_candidates",
+                "authority_state": "CONFIRMED",
+                "authority_direction": "BUY",
+                "session_label": "London / Europe Midday",
+                "session_quality": "HIGH",
+                "session_bias": "BUY",
+                "scenario_type": "STRUCTURE_CONTINUATION",
+                "planner_confidence": 84.0,
+                "planner_grade": "A",
+                "primary_entry_price": 4042.43,
+                "standby_entry_price": 4024.04,
+                "invalidation_level": 4002.43,
+                "target_liquidity": 4085.13,
+                "market_zone_context": "PREMIUM",
+                "structure_trend": "BULLISH",
+                "structure_quality": "STRONG",
+                "execution_preference": "LADDER_PENDING",
+                "poi_classification": "HIGH_PROBABILITY_POI",
+                "expected_path": "test path",
+                "primary_entry_zone": {"low": 4041.19, "high": 4043.68},
+                "plan_created_at": "2026-07-21T10:30:00Z",
+                "plan_expires_at": "2026-07-21T14:00:00Z",
+            }
+    monkeypatch.setattr(ra, "SessionPlannerService", lambda *_a, **_k: _FakePlanner())
+
+    class _FakeDecisionAgent:
+        def __init__(self, *_a, **_k):
+            pass
+        async def decide_async(self, _all_results):
+            return {"decision": "WAIT", "reasons": [], "warnings": [], "classic": {}}
+    monkeypatch.setattr(ra, "DecisionAgent", _FakeDecisionAgent)
+
+    asyncio.run(ra.run_analysis_async())
+    telegram.send_session_plan.assert_not_called()
