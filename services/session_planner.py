@@ -255,6 +255,20 @@ class SessionPlannerService:
         scenario_type = str(primary.get("setup_type") or "SCENARIO")
         scenario_id = self._scenario_id(symbol, direction, scenario_type, session_label, now)
         plan_id = f"PLAN::{scenario_id}"
+        primary_execution = self._execution_levels(
+            direction=direction,
+            entry_price=self._f(primary.get("entry_price"), 0.0),
+            stop_loss=self._f(primary.get("stop_loss"), 0.0),
+            target_price=self._f(primary.get("target_liquidity") or primary.get("target_price"), 0.0),
+            symbol=symbol,
+        )
+        standby_execution = self._execution_levels(
+            direction=direction,
+            entry_price=self._f(standby.get("entry_price"), 0.0),
+            stop_loss=self._f(standby.get("stop_loss"), 0.0),
+            target_price=self._f(standby.get("target_liquidity") or standby.get("target_price"), 0.0),
+            symbol=symbol,
+        ) if standby else None
         expected_path = self._expected_path(direction, primary, liquidity, dealing_range, current_price)
         primary_rationale = self._candidate_rationale(primary, direction, structure_trend, structure_quality, recent_sweep, rank_label="PRIMARY")
         standby_rationale = self._candidate_rationale(standby, direction, structure_trend, structure_quality, recent_sweep, rank_label="STANDBY") if standby else []
@@ -273,6 +287,12 @@ class SessionPlannerService:
             narrative=plan_narrative,
             symbol=symbol,
         )
+        manual_plan["target_script"] = {
+            "tp1": primary_execution.get("tp1"),
+            "tp2": primary_execution.get("tp2"),
+        }
+        if primary_execution.get("floor_applied"):
+            manual_plan["risk_note"] = f"Execution stop normalized to the configured {primary_execution.get('min_sl_distance_points', 0):.0f}-point minimum."
 
         base.update(
             {
@@ -293,7 +313,9 @@ class SessionPlannerService:
                 "standby_entry_zone": self._zone_payload(standby) if standby else None,
                 "primary_entry_price": primary.get("entry_price"),
                 "standby_entry_price": standby.get("entry_price") if standby else None,
-                "invalidation_level": primary.get("stop_loss"),
+                "primary_execution": primary_execution,
+                "standby_execution": standby_execution,
+                "invalidation_level": primary_execution.get("stop_loss"),
                 "target_liquidity": primary.get("target_liquidity") or primary.get("target_price"),
                 "planner_confidence": planner_score,
                 "planner_grade": self._grade(planner_score),
@@ -438,6 +460,20 @@ class SessionPlannerService:
         scenario_type = str(primary.get("setup_type") or "DAY_MAP_FALLBACK")
         scenario_id = self._scenario_id(symbol, direction, scenario_type, session_label, now)
         plan_id = f"PLAN::{scenario_id}"
+        primary_execution = self._execution_levels(
+            direction=direction,
+            entry_price=self._f(primary.get("entry_price"), 0.0),
+            stop_loss=self._f(primary.get("stop_loss"), 0.0),
+            target_price=self._f(primary.get("target_liquidity") or primary.get("target_price"), 0.0),
+            symbol=symbol,
+        )
+        standby_execution = self._execution_levels(
+            direction=direction,
+            entry_price=self._f(standby.get("entry_price"), 0.0),
+            stop_loss=self._f(standby.get("stop_loss"), 0.0),
+            target_price=self._f(standby.get("target_liquidity") or standby.get("target_price"), 0.0),
+            symbol=symbol,
+        ) if standby else None
         expected_path = self._expected_path(direction, primary, liquidity, dealing_range, current_price)
         primary_rationale = self._candidate_rationale(primary, direction, str(market_structure.get("trend") or "RANGING"), str(market_structure.get("structure_quality") or "WEAK"), (liquidity.get("recent_sweep") or {}) if isinstance(liquidity, dict) else {}, rank_label="PRIMARY")
         standby_rationale = self._candidate_rationale(standby, direction, str(market_structure.get("trend") or "RANGING"), str(market_structure.get("structure_quality") or "WEAK"), (liquidity.get("recent_sweep") or {}) if isinstance(liquidity, dict) else {}, rank_label="STANDBY") if standby else []
@@ -456,6 +492,12 @@ class SessionPlannerService:
             narrative=plan_narrative,
             symbol=symbol,
         )
+        manual_plan["target_script"] = {
+            "tp1": primary_execution.get("tp1"),
+            "tp2": primary_execution.get("tp2"),
+        }
+        if primary_execution.get("floor_applied"):
+            manual_plan["risk_note"] = f"Execution stop normalized to the configured {primary_execution.get('min_sl_distance_points', 0):.0f}-point minimum."
 
         fallback.update(
             {
@@ -473,7 +515,9 @@ class SessionPlannerService:
                 "standby_entry_zone": self._zone_payload(standby) if standby else None,
                 "primary_entry_price": primary.get("entry_price"),
                 "standby_entry_price": standby.get("entry_price") if standby else None,
-                "invalidation_level": primary.get("stop_loss"),
+                "primary_execution": primary_execution,
+                "standby_execution": standby_execution,
+                "invalidation_level": primary_execution.get("stop_loss"),
                 "target_liquidity": primary.get("target_liquidity") or primary.get("target_price"),
                 "planner_confidence": planner_score,
                 "planner_grade": self._grade(planner_score),
@@ -913,6 +957,82 @@ class SessionPlannerService:
             reasons.append("liquidity sweep supports the path")
         reasons.append(f"structure {structure_trend.lower()} / {structure_quality.lower()}")
         return reasons[:5]
+
+    def _execution_levels(
+        self,
+        *,
+        direction: str,
+        entry_price: float,
+        stop_loss: float,
+        target_price: float,
+        symbol: str,
+    ) -> Dict[str, Any]:
+        risk_cfg = (self.config.get("risk_settings") or {}) if isinstance(self.config, dict) else {}
+        min_sl_points = self._f(risk_cfg.get("min_sl_distance_points"), 0.0)
+        min_sl_distance = points_to_price(min_sl_points, symbol) if min_sl_points > 0 else 0.0
+        max_rr = self._f(risk_cfg.get("max_rr_ratio"), 0.0)
+        floor_applied = False
+        adjusted_stop = float(stop_loss)
+
+        if min_sl_distance > 0 and abs(entry_price - adjusted_stop) < min_sl_distance:
+            adjusted_stop = entry_price - min_sl_distance if direction == "BUY" else entry_price + min_sl_distance
+            sl_mult = self._f(risk_cfg.get("atr_multiplier_sl"), 2.0) or 2.0
+            tp1_ratio = (self._f(risk_cfg.get("atr_multiplier_tp1"), 2.5) or 2.5) / sl_mult
+            tp2_ratio = (self._f(risk_cfg.get("atr_multiplier_tp2"), 4.5) or 4.5) / sl_mult
+            if direction == "BUY":
+                tp1 = entry_price + min_sl_distance * tp1_ratio
+                tp2 = entry_price + min_sl_distance * tp2_ratio
+            else:
+                tp1 = entry_price - min_sl_distance * tp1_ratio
+                tp2 = entry_price - min_sl_distance * tp2_ratio
+            floor_applied = True
+            target_method = "rr_from_floored_sl"
+        else:
+            tp1, tp2, _ = self._plan_targets(direction, entry_price, adjusted_stop, target_price)
+            target_method = "mapped_target"
+
+        risk = abs(adjusted_stop - entry_price)
+        if max_rr > 0 and risk > 0:
+            max_tp2_distance = risk * max_rr
+            if direction == "BUY" and tp2 - entry_price > max_tp2_distance:
+                tp2 = entry_price + max_tp2_distance
+                target_method += "+max_rr_cap"
+            elif direction == "SELL" and entry_price - tp2 > max_tp2_distance:
+                tp2 = entry_price - max_tp2_distance
+                target_method += "+max_rr_cap"
+
+        rr = abs(tp2 - entry_price) / risk if risk > 0 else 0.0
+        return {
+            "entry_price": round(entry_price, 2),
+            "stop_loss": round(adjusted_stop, 2),
+            "tp1": round(tp1, 2),
+            "tp2": round(tp2, 2),
+            "rr_ratio": round(rr, 2),
+            "floor_applied": floor_applied,
+            "target_method": target_method,
+            "min_sl_distance_points": round(min_sl_points, 1),
+        }
+
+    @staticmethod
+    def _plan_targets(direction: str, entry_price: float, stop_loss: float, target_price: float) -> tuple[float, float, float]:
+        risk = abs(stop_loss - entry_price)
+        reward = abs(target_price - entry_price)
+        if risk <= 0 or reward <= 0:
+            tp1 = target_price
+            tp2 = target_price
+            rr = 0.0
+            return round(tp1, 2), round(tp2, 2), rr
+        one_r = risk
+        half_reward = reward * 0.5
+        tp1_dist = min(max(one_r, reward * 0.35), half_reward if half_reward > 0 else one_r)
+        if direction == "BUY":
+            tp1 = entry_price + tp1_dist
+            tp2 = target_price
+        else:
+            tp1 = entry_price - tp1_dist
+            tp2 = target_price
+        rr = reward / risk if risk > 0 else 0.0
+        return round(tp1, 2), round(tp2, 2), round(rr, 2)
 
     def _manual_plan_hierarchy(
         self,

@@ -516,11 +516,14 @@ class TelegramService:
             return line
 
         tp1, tp2 = _targets()
+        primary_execution = plan.get("primary_execution") or {}
         target_script = manual_plan.get("target_script") or {}
         if target_script.get("tp1") not in {None, ""}:
             tp1 = target_script.get("tp1")
         if target_script.get("tp2") not in {None, ""}:
             tp2 = target_script.get("tp2")
+        if primary_execution.get("stop_loss") not in {None, ""}:
+            plan["invalidation_level"] = primary_execution.get("stop_loss")
         authority_reason = str(plan.get("authority_reason") or "").strip()
         expected = str(manual_plan.get("expected_path") or plan.get("expected_path") or "").strip()
         primary_rationale = [str(x) for x in (plan.get("primary_rationale") or []) if str(x).strip()]
@@ -530,6 +533,7 @@ class TelegramService:
         missed_area_plan = str(manual_plan.get("missed_area_plan") or "").strip()
         map_change_plan = str(manual_plan.get("map_change_plan") or "").strip()
         execution_items = [str(x) for x in (manual_plan.get("execution_items") or []) if str(x).strip()]
+        risk_note = str(manual_plan.get("risk_note") or "").strip()
         agent_opinions = [op for op in (plan.get("agent_opinions") or []) if isinstance(op, dict)]
         gemini_plan_review = plan.get("gemini_plan_review") or {}
         gemini_macro_review = plan.get("gemini_macro_review") or {}
@@ -575,6 +579,10 @@ class TelegramService:
             lines.append(f"• TP2 area: {self._money(tp2, symbol)}")
         elif plan.get("target_liquidity") not in {None, ""}:
             lines.append(f"• Target liquidity: {self._money(plan.get('target_liquidity'), symbol)}")
+        if plan.get("target_liquidity") not in {None, ""} and tp2 not in {None, ""} and str(self._money(plan.get('target_liquidity'), symbol)) != str(self._money(tp2, symbol)):
+            lines.append(f"• Liquidity objective: {self._money(plan.get('target_liquidity'), symbol)}")
+        if risk_note:
+            lines.append(f"• Risk note: {html.escape(risk_note)}")
         lines.extend([
             "",
             "⚙️ <b>EXECUTION PLAN</b>",
