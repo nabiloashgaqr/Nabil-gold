@@ -136,6 +136,18 @@ class TelegramService:
                 lines.append(f"  • {text}")
         return lines
 
+    def _session_plan_signal_strength_line(self, decision: Dict[str, Any]) -> str | None:
+        plan = decision.get("session_plan") or {}
+        if not isinstance(plan, dict) or not plan:
+            return None
+        confidence = plan.get("planner_confidence")
+        authority = str(plan.get("authority_state") or "UNKNOWN").upper()
+        grade = str(plan.get("planner_grade") or "--")
+        session_bias = str(plan.get("session_bias") or decision.get("decision") or "WAIT").upper()
+        execution = str(plan.get("execution_preference") or "planner-led").replace("_", " ").title()
+        conf_text = f" {float(confidence):.1f}%" if confidence not in {None, ""} else ""
+        return f"🧭 Planner-led day map — {session_bias} {grade}{conf_text} · authority {authority} · {execution}"
+
     def _signal_strength_line(self, decision: Dict[str, Any]) -> str | None:
         classic = decision.get("classic") or {}
         two_agent = classic.get("two_agent")
@@ -671,7 +683,11 @@ class TelegramService:
         confirm_conf = decision.get('confirm_confidence')
 
         # Distinctive header per entry path
-        if entry_path_num == 2:
+        planner_led = entry_path_num == 3 or entry_mode in {'session_plan_ladder', 'session_plan_ladder_market'}
+        if planner_led:
+            path_badge = '🧭 SESSION PLAN / DAY MAP'
+            confirm_line = None
+        elif entry_path_num == 2:
             if 'macro' in entry_mode:
                 path_badge = '⚡ DUAL-AGENT + MACRO'
                 confirm_line = f'📊 Macro confirms {trade_type} ({confirm_conf:.0f}% confidence ≥ 55%)' if confirm_conf else None
@@ -693,7 +709,7 @@ class TelegramService:
             lines.append(f"✅ {html.escape(confirm_line)}")
         if quality:
             lines.append(f"🏅 Quality: {html.escape(str(quality.get('grade', '')))} {html.escape(str(quality.get('score', '')))}".rstrip())
-        strength_line = self._signal_strength_line(decision)
+        strength_line = self._session_plan_signal_strength_line(decision) if planner_led else self._signal_strength_line(decision)
         if strength_line:
             lines.append(strength_line)
         order_kind = str(signal.get("entry_kind") or signal.get("order_type") or entry.get("kind") or "MARKET").upper()
