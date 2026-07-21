@@ -145,6 +145,8 @@ CREATE TABLE IF NOT EXISTS trades (
     updates_sent JSONB DEFAULT '[]'::jsonb,
     exit_warning BOOLEAN DEFAULT FALSE,
     management_phase VARCHAR(40),
+    recent_30m_high DECIMAL(18, 6),
+    recent_30m_low DECIMAL(18, 6),
     max_favorable_excursion DECIMAL(18, 6) DEFAULT 0,
     max_adverse_excursion DECIMAL(18, 6) DEFAULT 0,
     result VARCHAR(30),
@@ -210,6 +212,8 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS partial_close       BOOLEAN DEFAULT 
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS updates_sent        JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS exit_warning        BOOLEAN DEFAULT FALSE;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS management_phase    VARCHAR(40);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS recent_30m_high     DECIMAL(18, 6);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS recent_30m_low      DECIMAL(18, 6);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS max_favorable_excursion DECIMAL(18, 6) DEFAULT 0;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS max_adverse_excursion   DECIMAL(18, 6) DEFAULT 0;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS result              VARCHAR(30);
