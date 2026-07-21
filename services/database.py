@@ -1142,6 +1142,8 @@ class DatabaseService:
             # can report actual candle extremes and all-time PnL excursions.
             "last_candle_low",
             "last_candle_high",
+            "recent_30m_high",
+            "recent_30m_low",
             "max_favorable_excursion",
             "max_adverse_excursion",
         }
