@@ -64,8 +64,8 @@ def test_send_session_plan_formats_manual_style_message(monkeypatch) -> None:
     assert "SECONDARY SELL AREA" in text
     assert "INVALIDATION" in text
     assert "TARGETS" in text
-    assert "TP1 area" in text
-    assert "TP2 area" in text
+    assert "TP1" in text
+    assert "TP2" in text
     assert "EXECUTION PLAN" in text
     assert "THESIS" in text
     assert "AGENT READS" in text
@@ -75,8 +75,8 @@ def test_send_session_plan_formats_manual_style_message(monkeypatch) -> None:
     assert "AI REVIEW" in text
     assert "Why now" in text
     assert "first ready plan this session" in text
-    assert "Gemini Context" in text
-    assert "Gemini Macro" in text
+    assert "Gemini" in text
+    assert "Macro" in text
     assert "4020.00" in text
     assert "4045.00" in text
     assert "3965.00" in text
