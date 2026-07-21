@@ -1855,6 +1855,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         persisted_macro_context = database.get_macro_context()
         if has_symbol_active_trades:
             high, low = _latest_candle_extremes(data)
+            recent_candles = (((data.get("timeframes", {}) or {}).get("5m") or {}).get("data") or data.get("data") or [])[-6:]
             try:
                 news_pre_cfg = {**config, "macro_context": persisted_macro_context} if persisted_macro_context else config
                 news_pre = NewsRiskAgent(news_pre_cfg).check()
@@ -1866,6 +1867,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 current_price=float(data.get("current_price", 0)),
                 candle_high=high,
                 candle_low=low,
+                recent_candles=recent_candles,
                 database=database,
                 telegram=telegram,
                 now=datetime.now(timezone.utc),

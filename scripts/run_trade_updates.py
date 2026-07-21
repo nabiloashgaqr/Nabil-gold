@@ -266,6 +266,7 @@ def main() -> None:
                     )
                 continue
             latest_candle = (price_payload.get("data") or [{}])[-1] or {}
+            recent_candles = (price_payload.get("data") or [])[-6:]
             try:
                 candle_high = float(latest_candle.get("high") or current_price)
                 candle_low = float(latest_candle.get("low") or current_price)
@@ -286,6 +287,7 @@ def main() -> None:
                 current_price=current_price,
                 candle_high=candle_high,
                 candle_low=candle_low,
+                recent_candles=recent_candles,
                 database=database,
                 telegram=telegram_for_events,
                 now=datetime.now(timezone.utc),
