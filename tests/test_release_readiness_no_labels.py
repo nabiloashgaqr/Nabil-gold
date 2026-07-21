@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(ROOT))
+
 from services.release_readiness import ReleaseReadinessService
 
 
@@ -29,6 +35,8 @@ def test_release_readiness_allows_trial_without_labels_when_other_scores_are_goo
             "overlap_score": 50,
             "overlap_available": False,
             "execution_score": 84,
+            "day_map_execution_score": 70,
+            "day_map_execution_available": True,
         },
     }
     tuning = {"actions": [{"key": "minor_1"}], "recommendations": ["minor tune"]}

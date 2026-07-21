@@ -3,6 +3,12 @@ points units (gold: 1 USD = 10 points)."""
 
 from __future__ import annotations
 
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(ROOT))
+
 import re
 from unittest.mock import MagicMock
 
@@ -164,3 +170,22 @@ def test_daily_report_includes_analyst_overlap_section(monkeypatch):
     assert "Analyst Overlap" in text
     assert "Coverage: 80.0% | Match: 60.0%" in text
     assert "MISSED_ENTRY_TOO_FAR" in text
+
+
+def test_daily_report_includes_day_map_execution_block(monkeypatch):
+    today = [
+        {
+            "type": "SELL", "status": "TP2_HIT", "entry_price": 4020.0, "final_pnl": 550.0,
+            "signal_snapshot": {"session_plan": {"scenario_id": "SCENARIO::A"}, "setup_context": {"pending_plan_role": "PRIMARY", "selection_role": "PRIMARY"}},
+        },
+        {
+            "type": "SELL", "status": "TP2_HIT", "entry_price": 4030.0, "final_pnl": 420.0,
+            "signal_snapshot": {"session_plan": {"scenario_id": "SCENARIO::B"}, "setup_context": {"pending_plan_role": "STANDBY", "selection_role": "STANDBY"}},
+        },
+    ]
+    text = _run(today, [], monkeypatch)
+    assert "Day-Map Execution" in text
+    assert "Main worked:" in text
+    assert "Add needed:" in text
+    assert "Management Brief" in text
+    assert "Operator Focus" in text

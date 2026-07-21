@@ -135,6 +135,7 @@ class TestCollectStats:
         assert "smc" in stats.by_agent
         # Session names are normalized by _trade_session() — check for the actual keys used
         assert any("London" in key for key in stats.by_session.keys())
+        assert "tracked_trade_count" in stats.day_map_execution
 
     def test_handles_empty_recent_trades(self, database_mock):
         database_mock.get_recent_trades.return_value = []

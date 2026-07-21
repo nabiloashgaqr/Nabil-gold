@@ -101,6 +101,10 @@ def test_session_planner_builds_ready_primary_and_standby_plan(tmp_path: Path) -
     assert plan["execution_preference"] in {"LADDER_PENDING", "SINGLE_PENDING", "NEAR_MARKET_WATCH", "SPLIT_EXECUTION_WATCH"}
     assert plan["plan_narrative"]
     assert plan["primary_rationale"]
+    assert plan["manual_plan"]["headline"] in {"SELL DAY MAP", "BUY DAY MAP"}
+    assert plan["manual_plan"]["confirmation_items"]
+    assert plan["manual_plan"]["missed_area_plan"]
+    assert plan["manual_plan"]["map_change_plan"]
     assert service.latest_plan("XAU/USD")["plan_id"] == plan["plan_id"]
 
 

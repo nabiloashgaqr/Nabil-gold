@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(ROOT))
+
 from services.release_readiness import ReleaseReadinessService
 
 
@@ -12,6 +18,7 @@ def _config() -> dict:
             "min_overlap_score_for_trial": 45,
             "min_execution_score_for_trial": 55,
             "min_governance_score_for_trial": 55,
+            "min_day_map_execution_score_for_trial": 55,
             "allow_structured_trial_when_no_overlap_labels": True,
         },
     }
@@ -33,6 +40,8 @@ def test_release_readiness_promising_without_actions_can_proceed(monkeypatch) ->
             "execution_score": 81.8,
             "governance_score": 62.0,
             "governance_available": True,
+            "day_map_execution_score": 71.0,
+            "day_map_execution_available": True,
         },
     }
     tuning = {"actions": [], "recommendations": ["No urgent tuning changes detected."]}

@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(ROOT))
+
 from services.release_readiness import ReleaseReadinessService
 
 
@@ -24,7 +30,7 @@ def test_release_readiness_can_proceed_to_structured_trial(monkeypatch) -> None:
 
     final_eval = {
         "verdict": "READY_FOR_STRUCTURED_TRIAL",
-        "scorecard": {"benchmark_score": 78, "overlap_score": 64, "overlap_available": True, "execution_score": 84, "governance_score": 68, "governance_available": True},
+        "scorecard": {"benchmark_score": 78, "overlap_score": 64, "overlap_available": True, "execution_score": 84, "governance_score": 68, "governance_available": True, "day_map_execution_score": 70, "day_map_execution_available": True},
     }
     tuning = {"actions": [{"key": "minor_1"}], "recommendations": ["minor tune"]}
 
@@ -52,7 +58,7 @@ def test_release_readiness_can_require_tuning(monkeypatch) -> None:
 
     final_eval = {
         "verdict": "PROMISING_BUT_NEEDS_TUNING",
-        "scorecard": {"benchmark_score": 62, "overlap_score": 48, "overlap_available": True, "execution_score": 70, "governance_score": 60, "governance_available": True},
+        "scorecard": {"benchmark_score": 62, "overlap_score": 48, "overlap_available": True, "execution_score": 70, "governance_score": 60, "governance_available": True, "day_map_execution_score": 52, "day_map_execution_available": True},
     }
     tuning = {"actions": [{"key": "a"}, {"key": "b"}, {"key": "c"}], "recommendations": ["fix things"]}
 
@@ -80,7 +86,7 @@ def test_release_readiness_can_hold_for_more_refinement(monkeypatch) -> None:
 
     final_eval = {
         "verdict": "REQUIRES_MORE_REFINEMENT",
-        "scorecard": {"benchmark_score": 35, "overlap_score": 20, "overlap_available": True, "execution_score": 30, "governance_score": 20, "governance_available": True},
+        "scorecard": {"benchmark_score": 35, "overlap_score": 20, "overlap_available": True, "execution_score": 30, "governance_score": 20, "governance_available": True, "day_map_execution_score": 30, "day_map_execution_available": True},
     }
     tuning = {"actions": [{"key": "a"}], "recommendations": ["more work"]}
 
@@ -104,3 +110,31 @@ def test_release_readiness_can_hold_for_more_refinement(monkeypatch) -> None:
     assert report["readiness"]["decision"] == "HOLD_AND_REFINEMENT_REQUIRED"
     text = svc.format_telegram(report)
     assert "Release Readiness" in text
+
+
+def test_release_readiness_blocks_trial_when_day_map_execution_is_weak(monkeypatch) -> None:
+    import services.release_readiness as rr
+
+    final_eval = {
+        "verdict": "READY_FOR_STRUCTURED_TRIAL",
+        "scorecard": {"benchmark_score": 78, "overlap_score": 64, "overlap_available": True, "execution_score": 84, "governance_score": 68, "governance_available": True, "day_map_execution_score": 40, "day_map_execution_available": True},
+    }
+    tuning = {"actions": [], "recommendations": ["monitor day-map quality"]}
+
+    class _Final:
+        def __init__(self, *_a, **_k):
+            pass
+        def run(self, *a, **k):
+            return final_eval
+
+    class _Tune:
+        def __init__(self, *_a, **_k):
+            pass
+        def build_advice(self, *_a, **_k):
+            return tuning
+
+    monkeypatch.setattr(rr, "FinalEvaluationService", _Final)
+    monkeypatch.setattr(rr, "TuningAdvisor", _Tune)
+
+    report = ReleaseReadinessService(_config(), database=_DB()).run(candles=[{"time": "2026-07-15T00:00:00Z"}])
+    assert report["readiness"]["decision"] != "PROCEED_TO_STRUCTURED_TRIAL"

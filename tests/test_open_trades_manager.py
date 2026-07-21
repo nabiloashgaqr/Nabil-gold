@@ -247,6 +247,8 @@ def test_scenario_governor_cancels_pending_sibling_after_fill(tmp_path: Path) ->
     assert statuses["P2"] == "CANCELLED"
     filled_eval = next(ev for ev in evaluations if ev["trade_id"] == "P1")
     assert filled_eval["scenario_governor"]["action"] == "CANCELLED_SIBLINGS_ON_ACTIVATION"
+    assert filled_eval["plan_execution_context"]["story"] == "Main area filled. Secondary area is no longer needed and will be cancelled."
+    assert filled_eval["plan_execution_context"]["pending_sibling_roles"] == ["STANDBY"]
 
 
 def test_pending_touch_not_activated_from_quote_fallback_source() -> None:
@@ -530,3 +532,54 @@ def test_protected_sell_trailing_update_is_not_executable_in_same_candle() -> No
     assert result["updates"]["stop_loss"] == 3953.37
     assert "close_price" not in result["updates"]
     assert "final_pnl" not in result["updates"]
+
+
+def test_starter_trailing_update_can_explain_add_on_not_needed() -> None:
+    manager = OpenTradesManager({"trailing_stop": {"enabled": True, "trailing_distance": 20.0, "trailing_step": 5.0}})
+    trade = base_trade(
+        id="STARTER1",
+        type="BUY",
+        status="TP1_HIT",
+        entry_price=4000.0,
+        stop_loss=4000.0,
+        tp1=4010.0,
+        tp2=4020.0,
+        sl_moved_to_entry=True,
+        partial_close=True,
+        signal_snapshot={
+            "session_plan": {
+                "scenario_id": "SCENARIO::STARTER",
+                "session_bias": "BUY",
+                "standby_poi": {"entry_price": 3992.0},
+                "manual_plan": {"main_area_label": "MAIN BUY AREA", "add_area_label": "ADD BUY AREA"},
+            },
+            "setup_context": {
+                "scenario_id": "SCENARIO::STARTER",
+                "pending_plan_role": "STARTER",
+                "execution_leg_label": "STARTER inside MAIN BUY AREA",
+            },
+        },
+    )
+    evaluations = manager.update_trades([trade], current_price=4013.0, now=datetime.now(timezone.utc))
+    ctx = evaluations[0]["plan_execution_context"]
+    assert ctx["story"] == "Starter survived — add-on is not needed right now."
+
+
+def test_main_area_stop_loss_can_explain_day_map_failure() -> None:
+    manager = OpenTradesManager()
+    trade = base_trade(
+        id="MAIN_FAIL",
+        type="BUY",
+        status="OPEN",
+        entry_price=4000.0,
+        stop_loss=3980.0,
+        tp1=4010.0,
+        tp2=4020.0,
+        signal_snapshot={
+            "session_plan": {"scenario_id": "SCENARIO::FAIL", "session_bias": "BUY", "manual_plan": {"main_area_label": "MAIN BUY AREA"}},
+            "setup_context": {"scenario_id": "SCENARIO::FAIL", "pending_plan_role": "PRIMARY", "execution_leg_label": "MAIN BUY AREA"},
+        },
+    )
+    evaluations = manager.update_trades([trade], current_price=3979.0, candle_high=4001.0, candle_low=3978.5, now=datetime.now(timezone.utc))
+    ctx = evaluations[0]["plan_execution_context"]
+    assert ctx["story"] == "Main day-map execution failed from the mapped area."

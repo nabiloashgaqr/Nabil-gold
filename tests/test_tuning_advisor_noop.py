@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(ROOT))
+
 from services.tuning_advisor import TuningAdvisor
 
 
@@ -11,6 +17,8 @@ def _config() -> dict:
         "setup_memory": {"expire_after_hours": 12},
         "smc_engine": {"poi_preference": {"order_block_bonus": 10}},
         "learning": {"contextual_blend": 0.35},
+        "session_planner": {"min_primary_dominance": 50, "min_plan_score": 62, "min_trigger_score": 40, "min_authority_alignment_count": 2},
+        "split_execution": {"starter_risk_share": 0.4, "add_on_risk_share": 0.6},
     }
 
 

@@ -202,12 +202,19 @@ def test_pending_activation_can_show_delayed_touch_revalidation_reason():
             "activation_reason": "Delayed touch revalidated (STALE)",
         },
         "scenario_governor": {"action": "CANCELLED_SIBLINGS_ON_ACTIVATION", "cancelled_ids": ["P2"]},
+        "plan_execution_context": {
+            "story": "Main area filled. Secondary area is no longer needed and will be cancelled.",
+            "pending_sibling_roles": ["STANDBY"],
+        },
     }
     text = _capture_text("send_trade_events", trade, ["ORDER_FILLED"], 4003.00, 0.0, evaluation)
     assert "Activation review:" in text
     assert "Delayed touch revalidated" in text
     assert "Scenario family:" in text
     assert "1 sibling pending order(s) cancelled" in text
+    assert "Execution story:" in text
+    assert "Cancelled leg(s):" in text
+    assert "STANDBY" in text
 
 
 def test_pending_governance_can_announce_replacement_blocked():

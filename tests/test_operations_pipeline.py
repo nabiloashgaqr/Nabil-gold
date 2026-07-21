@@ -13,7 +13,7 @@ def test_operations_pipeline_stitches_reports(monkeypatch, tmp_path: Path) -> No
     import services.operations_pipeline as op
 
     final_report = {"verdict": "PROMISING_BUT_NEEDS_TUNING", "scorecard": {"benchmark_score": 60, "overlap_score": 50, "execution_score": 70}}
-    tuning = {"actions": [{"key": "x"}], "recommendations": ["do something"], "config_patch": {"a": 1}}
+    tuning = {"actions": [{"key": "x"}], "recommendations": ["do something"], "config_patch": {"a": 1}, "operator_memo": {"headline": "main area weak", "priority": "MEDIUM"}}
     readiness = {"readiness": {"decision": "APPLY_TUNING_THEN_REEVALUATE"}}
 
     class _Final:
@@ -30,6 +30,10 @@ def test_operations_pipeline_stitches_reports(monkeypatch, tmp_path: Path) -> No
             pass
         def build_advice(self, *_a, **_k):
             return tuning
+        def format_management_brief(self, *_a, **_k):
+            return "management text"
+        def format_operator_memo(self, *_a, **_k):
+            return "memo text"
         def save(self, report, path):
             Path(path).write_text("tuning", encoding="utf-8")
             return Path(path)
@@ -52,8 +56,12 @@ def test_operations_pipeline_stitches_reports(monkeypatch, tmp_path: Path) -> No
     assert bundle["final_evaluation"] == final_report
     assert bundle["tuning_advice"] == tuning
     assert bundle["release_readiness"] == readiness
+    assert bundle["management_brief_text"] == "management text"
+    assert bundle["operator_memo_text"] == "memo text"
 
     paths = pipeline.save_bundle(bundle, root=tmp_path)
     assert Path(paths["final_evaluation"]).exists()
     assert Path(paths["tuning_advice"]).exists()
     assert Path(paths["release_readiness"]).exists()
+    assert Path(paths["management_brief"]).exists()
+    assert Path(paths["operator_memo"]).exists()

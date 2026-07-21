@@ -113,6 +113,8 @@ def test_session_plan_ladder_creates_primary_and_standby_pending_orders(tmp_path
     assert all(t["status"] == "PENDING" for t in trades)
     roles = sorted(str(((t.get("signal_snapshot") or {}).get("setup_context") or {}).get("pending_plan_role")) for t in trades)
     assert roles == ["PRIMARY", "STANDBY"]
+    leg_labels = sorted(str(((t.get("signal_snapshot") or {}).get("setup_context") or {}).get("execution_leg_label")) for t in trades)
+    assert leg_labels == ["ADD SELL AREA", "MAIN SELL AREA"]
     assert len(telegram.sent) == 2
 
 
@@ -184,3 +186,5 @@ def test_session_plan_extreme_poi_split_execution_creates_market_starter_and_pen
     assert statuses == ["OPEN", "PENDING"]
     roles = sorted(str(((t.get("signal_snapshot") or {}).get("setup_context") or {}).get("pending_plan_role")) for t in trades)
     assert roles == ["ADD_ON", "STARTER"]
+    leg_labels = sorted(str(((t.get("signal_snapshot") or {}).get("setup_context") or {}).get("execution_leg_label")) for t in trades)
+    assert leg_labels == ["ADD-ON from ADD SELL AREA", "STARTER inside MAIN SELL AREA"]

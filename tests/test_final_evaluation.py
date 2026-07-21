@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(ROOT))
+
 from services.final_evaluation import FinalEvaluationService
 
 
@@ -16,7 +22,25 @@ def _config() -> dict:
 
 
 class _DB:
-    pass
+    def get_recent_trades(self, limit: int = 100):
+        return [
+            {
+                "id": "T_MAIN",
+                "symbol": "XAU/USD",
+                "type": "SELL",
+                "status": "TP2_HIT",
+                "final_pnl": 480.0,
+                "signal_snapshot": {"session_plan": {"scenario_id": "SCENARIO::1"}, "setup_context": {"pending_plan_role": "PRIMARY", "selection_role": "PRIMARY"}},
+            },
+            {
+                "id": "T_ADD",
+                "symbol": "XAU/USD",
+                "type": "SELL",
+                "status": "TP2_HIT",
+                "final_pnl": 350.0,
+                "signal_snapshot": {"session_plan": {"scenario_id": "SCENARIO::2"}, "setup_context": {"pending_plan_role": "STANDBY", "selection_role": "STANDBY"}},
+            },
+        ]
 
 
 def test_final_evaluation_recommendations_reflect_benchmark_and_overlap(monkeypatch) -> None:
@@ -73,6 +97,8 @@ def test_final_evaluation_recommendations_reflect_benchmark_and_overlap(monkeypa
     assert "Analyst Overlap" in text
     assert "governance=" in text
     assert "planner=" in text
+    assert "daymap=" in text
+    assert "Day-Map:" in text
 
 
 def test_final_evaluation_positive_case_can_recommend_trial(monkeypatch) -> None:

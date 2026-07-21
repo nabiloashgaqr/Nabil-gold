@@ -51,6 +51,7 @@ def test_weekly_phase6_executive_report_contains_edge_quality():
         regime_fit={"HIGH": {"count": 2, "pnl": 600.0, "win_rate_pct": 100}},
         news_proximity={"CAUTION": {"count": 2, "pnl": -200.0, "win_rate_pct": 0}},
     )
+    stats.day_map_execution = {"tracked_trade_count": 4, "scenario_count": 3, "scenario_metrics": {"main_worked_count": 1, "add_needed_count": 2, "starter_survived_alone_count": 0, "day_map_failed_count": 1, "map_changed_cancelled_count": 0}}
     service = WeeklyReportService({"weekly_report": {}}, database=object(), telegram=None)
     text = service._fallback_message(stats)
 
@@ -59,4 +60,6 @@ def test_weekly_phase6_executive_report_contains_edge_quality():
     assert "EDGE QUALITY" in text
     assert "RR Capture: +1.00R vs planned 2.50R (40.0%)" in text
     assert "Best session: London / Europe Midday +600 pts" in text
+    assert "MANAGEMENT BRIEF" in text
+    assert "OPERATOR FOCUS" in text
     assert "NEXT WEEK ACTIONS" in text
