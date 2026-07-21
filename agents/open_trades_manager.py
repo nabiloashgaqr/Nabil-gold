@@ -157,6 +157,120 @@ class OpenTradesManager(BaseAgent):
         params["symbol"] = symbol
         return params
 
+    def _trade_snapshot(self, trade: Dict[str, Any]) -> Dict[str, Any]:
+        snapshot = trade.get("signal_snapshot") or {}
+        if isinstance(snapshot, str):
+            try:
+                snapshot = json.loads(snapshot)
+            except Exception:
+                snapshot = {}
+        return snapshot if isinstance(snapshot, dict) else {}
+
+    def _execution_leg_label_from_context(self, role: str, setup: Dict[str, Any], plan: Dict[str, Any], direction: str) -> str | None:
+        direct = str(setup.get("execution_leg_label") or "").strip()
+        if direct:
+            return direct
+        manual_plan = (plan.get("manual_plan") or {}) if isinstance(plan, dict) else {}
+        side_word = "BUY" if direction == "BUY" else "SELL" if direction == "SELL" else "TRADE"
+        main_label = str(manual_plan.get("main_area_label") or f"MAIN {side_word} AREA")
+        add_label = str(manual_plan.get("add_area_label") or f"ADD {side_word} AREA")
+        mapping = {
+            "PRIMARY": main_label,
+            "STANDBY": add_label,
+            "STARTER": f"STARTER inside {main_label}",
+            "ADD_ON": f"ADD-ON from {add_label}",
+        }
+        return mapping.get(str(role or "").upper())
+
+    def _plan_execution_context(
+        self,
+        trade: Dict[str, Any],
+        evaluation: Dict[str, Any],
+        open_trades: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        snapshot = self._trade_snapshot(trade)
+        setup = (snapshot.get("setup_context") or {}) if isinstance(snapshot, dict) else {}
+        setup = setup if isinstance(setup, dict) else {}
+        plan = (snapshot.get("session_plan") or {}) if isinstance(snapshot, dict) else {}
+        plan = plan if isinstance(plan, dict) else {}
+        role = str(setup.get("pending_plan_role") or setup.get("selection_role") or "").upper()
+        direction = str(trade.get("type") or trade.get("side") or setup.get("direction") or plan.get("session_bias") or "").upper()
+        scenario_id = str(plan.get("scenario_id") or setup.get("scenario_id") or "").strip()
+        leg_label = self._execution_leg_label_from_context(role, setup, plan, direction)
+        if not scenario_id and not role and not leg_label:
+            return {}
+
+        sibling_roles: List[str] = []
+        pending_sibling_roles: List[str] = []
+        live_sibling_roles: List[str] = []
+        for sibling in (open_trades or []):
+            if str(sibling.get("id") or "") == str(trade.get("id") or ""):
+                continue
+            sibling_snapshot = self._trade_snapshot(sibling)
+            sibling_setup = sibling_snapshot.get("setup_context") or {}
+            sibling_setup = sibling_setup if isinstance(sibling_setup, dict) else {}
+            sibling_plan = sibling_snapshot.get("session_plan") or {}
+            sibling_plan = sibling_plan if isinstance(sibling_plan, dict) else {}
+            sibling_scenario = str(sibling_plan.get("scenario_id") or sibling_setup.get("scenario_id") or "").strip()
+            if not scenario_id or sibling_scenario != scenario_id:
+                continue
+            sibling_role = str(sibling_setup.get("pending_plan_role") or sibling_setup.get("selection_role") or "").upper()
+            sibling_status = str(sibling.get("status") or "").upper()
+            if sibling_role:
+                sibling_roles.append(sibling_role)
+                if sibling_status == "PENDING":
+                    pending_sibling_roles.append(sibling_role)
+                if sibling_status in self.OPEN_STATUSES:
+                    live_sibling_roles.append(sibling_role)
+
+        events = set(evaluation.get("events") or [])
+        result = str((evaluation.get("updates") or {}).get("result") or "").upper()
+        has_secondary_defined = bool(plan.get("standby_poi")) or str(plan.get("execution_preference") or "").upper() == "SPLIT_EXECUTION_WATCH"
+        story = None
+        if "ORDER_FILLED" in events:
+            if role == "PRIMARY":
+                story = "Main area filled."
+                if pending_sibling_roles:
+                    story += " Secondary area is no longer needed and will be cancelled."
+            elif role == "STANDBY":
+                story = "Add area activated after price reached the deeper backup zone."
+            elif role == "STARTER":
+                story = "Starter leg activated inside the main mapped area."
+            elif role == "ADD_ON":
+                story = "Add-on leg activated from the deeper mapped area."
+        elif "PENDING_CANCELLED" in events:
+            reasons = " | ".join(str(x) for x in ((evaluation.get("updates") or {}).get("reasons") or []))
+            if role in {"STANDBY", "ADD_ON"}:
+                story = "Add area cancelled — mapped conditions are no longer valid."
+                if "Scenario governor" in reasons:
+                    story = "Add area cancelled because the map reprioritized another family leg."
+            elif role in {"PRIMARY", "STARTER"}:
+                story = "Main mapped execution was cancelled before activation because the day map lost validity."
+        elif events.intersection({"TP1_HIT", "TRAILING_SL_UPDATED", "TP2_HIT"}):
+            if role == "STARTER" and has_secondary_defined and not pending_sibling_roles and not live_sibling_roles:
+                story = "Starter survived — add-on is not needed right now."
+            elif role == "PRIMARY" and has_secondary_defined and not pending_sibling_roles and not live_sibling_roles:
+                story = "Main area is delivering — add area is not needed right now."
+        elif "SL_HIT" in events and result == "LOSS":
+            if role in {"PRIMARY", "STARTER"}:
+                story = "Main day-map execution failed from the mapped area."
+            elif role in {"STANDBY", "ADD_ON"}:
+                story = "Secondary mapped execution failed from the deeper area."
+        elif "BE_HIT" in events:
+            if role in {"PRIMARY", "STARTER"}:
+                story = "Main mapped execution did not expand; protection closed it at breakeven."
+            elif role in {"STANDBY", "ADD_ON"}:
+                story = "Secondary mapped execution stalled and closed at breakeven."
+
+        return {
+            "scenario_id": scenario_id or None,
+            "role": role or None,
+            "leg_label": leg_label,
+            "pending_sibling_roles": pending_sibling_roles,
+            "live_sibling_roles": live_sibling_roles,
+            "story": story,
+        }
+
     def update_trades(
         self,
         open_trades: List[Dict[str, Any]],
@@ -196,6 +310,7 @@ class OpenTradesManager(BaseAgent):
             events = evaluation.get("events", []) or []
             notification_events = [event for event in events if event in self.NOTIFIABLE_EVENTS and event not in self.SILENT_EVENTS]
             evaluation["notification_events"] = notification_events
+            evaluation["plan_execution_context"] = self._plan_execution_context(trade, evaluation, open_trades)
 
             # Send critical trade-management notifications BEFORE writing the DB
             # update. If Supabase has a transient/schema issue, the user still
