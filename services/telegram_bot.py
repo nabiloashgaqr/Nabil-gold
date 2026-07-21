@@ -455,7 +455,6 @@ class TelegramService:
         delivery_kind = str(delivery_context.get("message_kind") or "OPENING_PLAN").upper()
         delivery_reason = str(delivery_context.get("delivery_reason") or "").strip()
         headline = str(manual_plan.get("headline") or f"{side_word} DAY MAP")
-        bias_label = str(manual_plan.get("bias_label") or f"MAIN {side_word} BIAS")
         main_area_label = str(manual_plan.get("main_area_label") or f"PRIMARY {side_word} AREA")
         add_area_label = str(manual_plan.get("add_area_label") or f"SECONDARY {side_word} AREA")
 
@@ -490,61 +489,32 @@ class TelegramService:
                 return round(entry - tp1_dist, 2), round(target, 2)
             return None, round(target, 2)
 
-        def _invalidation_text() -> str:
-            level = _f(plan.get("invalidation_level"))
-            if level is None:
-                return "--"
-            if bias == "BUY":
-                return f"Below {self._money(level, symbol)}"
-            if bias == "SELL":
-                return f"Above {self._money(level, symbol)}"
-            return self._money(level, symbol)
-
-        def _execution_text() -> str:
-            mode = str(plan.get("execution_preference") or "").upper()
-            if mode == "LADDER_PENDING":
-                return "Primary area first, secondary area kept ready as backup."
-            if mode == "SINGLE_PENDING":
-                return "Single planned entry from the primary area only."
-            if mode == "NEAR_MARKET_WATCH":
-                return "Price is already near the POI — wait for live rejection / confirmation."
-            if mode == "SPLIT_EXECUTION_WATCH":
-                return "Extreme zone: starter first if price is already inside, then add deeper if needed."
-            return str(plan.get("execution_preference") or "Planner-led execution")
-
         def _opinion_line(opinion: Dict[str, Any]) -> str:
             direction = str(opinion.get("direction") or "WAIT").upper()
             emoji = "🟢" if direction == "BUY" else "🔴" if direction == "SELL" else "🟡"
             label = str(opinion.get("label") or opinion.get("key") or "Agent")
             conf = opinion.get("confidence")
-            summary = str(opinion.get("summary") or "").strip()
-            signals = [str(x).strip() for x in (opinion.get("signals") or []) if str(x).strip()]
+            note = str(opinion.get("summary") or "").strip()
+            if not note:
+                signals = [str(x).strip() for x in (opinion.get("signals") or []) if str(x).strip()]
+                note = signals[0] if signals else ""
             line = f"{emoji} <b>{html.escape(label)}</b>: {html.escape(direction)}"
             if conf not in {None, ""}:
                 line += f" ({float(conf):.0f}%)"
-            note = summary or (signals[0] if signals else "")
             if note:
                 line += f" — {self._clean_text(note)}"
             return line
 
-        tp1, tp2 = _targets()
         primary_execution = plan.get("primary_execution") or {}
-        target_script = manual_plan.get("target_script") or {}
-        if target_script.get("tp1") not in {None, ""}:
-            tp1 = target_script.get("tp1")
-        if target_script.get("tp2") not in {None, ""}:
-            tp2 = target_script.get("tp2")
-        if primary_execution.get("stop_loss") not in {None, ""}:
-            plan["invalidation_level"] = primary_execution.get("stop_loss")
-        authority_reason = str(plan.get("authority_reason") or "").strip()
+        tp1_fallback, tp2_fallback = _targets()
+        tp1 = primary_execution.get("tp1") if primary_execution.get("tp1") not in {None, ""} else tp1_fallback
+        tp2 = primary_execution.get("tp2") if primary_execution.get("tp2") not in {None, ""} else (tp2_fallback if tp2_fallback not in {None, ""} else plan.get("target_liquidity"))
+        stop_level = primary_execution.get("stop_loss") if primary_execution.get("stop_loss") not in {None, ""} else plan.get("invalidation_level")
         expected = str(manual_plan.get("expected_path") or plan.get("expected_path") or "").strip()
-        primary_rationale = [str(x) for x in (plan.get("primary_rationale") or []) if str(x).strip()]
-        standby_rationale = [str(x) for x in (plan.get("standby_rationale") or []) if str(x).strip()]
-        narrative = str(manual_plan.get("narrative") or plan.get("plan_narrative") or "").strip()
         confirmation_items = [str(x) for x in (manual_plan.get("confirmation_items") or []) if str(x).strip()]
+        execution_items = [str(x) for x in (manual_plan.get("execution_items") or []) if str(x).strip()]
         missed_area_plan = str(manual_plan.get("missed_area_plan") or "").strip()
         map_change_plan = str(manual_plan.get("map_change_plan") or "").strip()
-        execution_items = [str(x) for x in (manual_plan.get("execution_items") or []) if str(x).strip()]
         risk_note = str(manual_plan.get("risk_note") or "").strip()
         agent_opinions = [op for op in (plan.get("agent_opinions") or []) if isinstance(op, dict)]
         gemini_plan_review = plan.get("gemini_plan_review") or {}
@@ -556,115 +526,70 @@ class TelegramService:
             f"🧭 <b>{html.escape(symbol)} — {html.escape(top_title)}</b>",
             f"<b>{html.escape(headline)}</b>",
             "━━━━━━━━━━━━━━━━━━━━━",
-            f"{'🟢' if bias == 'BUY' else '🔴' if bias == 'SELL' else '🟡'} <b>{html.escape(bias_label)}:</b> {html.escape(bias)}",
+            f"{'🟢' if bias == 'BUY' else '🔴' if bias == 'SELL' else '🟡'} <b>Bias:</b> {html.escape(bias)}",
             f"🏷️ <b>Session:</b> {html.escape(str(plan.get('session_label') or '--'))} · {html.escape(str(plan.get('session_quality') or '--'))}",
-            f"🏅 <b>Plan Quality:</b> {html.escape(grade)} {confidence:.1f}%",
-            f"🧱 <b>Map Strength:</b> {html.escape(authority)}" + (f" · {html.escape(authority_reason)}" if authority_reason else ""),
+            f"🏅 <b>Plan:</b> {html.escape(grade)} {confidence:.1f}% · {html.escape(authority)}",
         ]
         if delivery_reason:
             lines.append(f"📝 <b>Why now:</b> {html.escape(delivery_reason.replace('_', ' '))}")
-        lines.extend([
-            "──────────────────",
-            f"🎯 <b>{html.escape(main_area_label)}</b>",
-            f"• {html.escape(_zone_text(primary_zone))}",
-            f"• Ref entry: {self._money(plan.get('primary_entry_price'), symbol)}",
-        ])
+        lines.append("──────────────────")
+        lines.append(f"🎯 <b>{html.escape(main_area_label)}</b>")
+        lines.append(f"• Zone: {html.escape(_zone_text(primary_zone))}")
+        lines.append(f"• Ref entry: {self._money(plan.get('primary_entry_price'), symbol)}")
         standby_zone_text = _zone_text(standby_zone)
         standby_entry = plan.get('standby_entry_price')
         if standby_zone_text != "--" or standby_entry not in {None, ""}:
-            lines.extend([
-                "",
-                f"🎯 <b>{html.escape(add_area_label)}</b>",
-                f"• {html.escape(standby_zone_text)}",
-                f"• Ref entry: {self._money(standby_entry, symbol)}",
-            ])
-        lines.extend([
-            "",
-            "🛑 <b>INVALIDATION</b>",
-            f"• {html.escape(_invalidation_text())}",
-            "",
-            "🎯 <b>TARGETS</b>",
-        ])
-        if tp1 is not None:
-            lines.append(f"• TP1 area: {self._money(tp1, symbol)}")
-        if tp2 is not None:
-            lines.append(f"• TP2 area: {self._money(tp2, symbol)}")
-        elif plan.get("target_liquidity") not in {None, ""}:
-            lines.append(f"• Target liquidity: {self._money(plan.get('target_liquidity'), symbol)}")
-        if plan.get("target_liquidity") not in {None, ""} and tp2 not in {None, ""} and str(self._money(plan.get('target_liquidity'), symbol)) != str(self._money(tp2, symbol)):
-            lines.append(f"• Liquidity objective: {self._money(plan.get('target_liquidity'), symbol)}")
+            lines.append(f"• {html.escape(add_area_label)}: {html.escape(standby_zone_text)} @ {self._money(standby_entry, symbol)}")
+        lines.append(f"🛑 <b>INVALIDATION</b> · {self._money(stop_level, symbol) if stop_level not in {None, ''} else '--'}")
+        if tp1 is not None or tp2 is not None:
+            target_bits = []
+            if tp1 is not None:
+                target_bits.append(f"TP1 {self._money(tp1, symbol)}")
+            if tp2 is not None:
+                target_bits.append(f"TP2 {self._money(tp2, symbol)}")
+            lines.append(f"🎯 <b>TARGETS</b> · {' · '.join(target_bits)}")
         if risk_note:
-            lines.append(f"• Risk note: {html.escape(risk_note)}")
-        lines.extend([
-            "",
-            "⚙️ <b>EXECUTION PLAN</b>",
-            f"• {html.escape(_execution_text())}",
-        ])
-        for item in execution_items[:3]:
-            lines.append(f"• {html.escape(item)}")
+            lines.append(f"⚠️ <b>Risk note:</b> {html.escape(risk_note)}")
+        exec_summary = execution_items[0] if execution_items else str(plan.get("execution_preference") or scenario)
+        lines.append(f"⚙️ <b>EXECUTION PLAN</b> · {self._clean_text(exec_summary)}")
         if str(plan.get("poi_classification") or "").strip():
-            lines.append(f"• Zone class: {html.escape(str(plan.get('poi_classification')))}")
-        if scenario:
-            lines.append(f"• Setup family: {html.escape(scenario)}")
-        if expected or narrative or primary_rationale or standby_rationale or confirmation_items or missed_area_plan or map_change_plan:
-            lines.extend(["", "🧠 <b>THESIS</b>"])
+            lines.append(f"• Class: {html.escape(str(plan.get('poi_classification')))} · Setup: {html.escape(scenario)}")
         if expected:
-            lines.append(f"• {html.escape(expected)}")
-        if narrative:
-            lines.append(f"• {html.escape(narrative)}")
-        for item in primary_rationale[:3]:
-            lines.append(f"• Primary: {html.escape(item)}")
-        for item in standby_rationale[:2]:
-            lines.append(f"• Secondary: {html.escape(item)}")
+            lines.append(f"🧠 <b>THESIS</b> · {html.escape(expected)}")
         if confirmation_items:
-            lines.append("")
-            lines.append("✅ <b>CONFIRMATION</b>")
-            for item in confirmation_items[:4]:
-                lines.append(f"• {html.escape(item)}")
+            lines.append(f"✅ <b>CONFIRMATION</b> · {html.escape(confirmation_items[0])}")
         if missed_area_plan:
-            lines.append("")
-            lines.append("📌 <b>IF PRICE MISSES THE MAIN AREA</b>")
-            lines.append(f"• {html.escape(missed_area_plan)}")
+            lines.append(f"📌 <b>If missed:</b> {html.escape(missed_area_plan)}")
         if map_change_plan:
-            lines.append("")
-            lines.append("🔄 <b>IF THE MAP CHANGES</b>")
-            lines.append(f"• {html.escape(map_change_plan)}")
+            lines.append(f"🔄 <b>If map changes:</b> {html.escape(map_change_plan)}")
         if agent_opinions:
-            lines.extend(["", "🗳️ <b>AGENT READS</b>"])
+            lines.append("──────────────────")
+            lines.append("🗳️ <b>AGENT READS</b>")
             for opinion in agent_opinions:
                 lines.append(_opinion_line(opinion))
-        gemini_lines: List[str] = []
+        ai_lines: List[str] = []
         if isinstance(gemini_plan_review, dict) and gemini_plan_review.get("available"):
             verdict = gemini_plan_review.get("market_bias") or gemini_plan_review.get("verdict") or gemini_plan_review.get("opinion") or "REVIEWED"
             reason = gemini_plan_review.get("reason") or gemini_plan_review.get("summary") or ""
-            gemini_lines.append(f"🧠 <b>Gemini Context:</b> {self._clean_text(verdict)}" + (f" — {self._clean_text(reason)}" if reason else ""))
+            ai_lines.append(f"🧠 Gemini: {self._clean_text(verdict)}" + (f" — {self._clean_text(reason)}" if reason else ""))
         if isinstance(gemini_macro_review, dict) and gemini_macro_review.get("available"):
             verdict = gemini_macro_review.get("macro_verdict") or gemini_macro_review.get("verdict") or "NEUTRAL"
             conf = gemini_macro_review.get("confidence")
-            reason = gemini_macro_review.get("reason") or gemini_macro_review.get("summary") or gemini_macro_review.get("primary_driver") or ""
-            line = f"🌍 <b>Gemini Macro:</b> {self._clean_text(verdict)}"
-            if conf not in {None, ""}:
-                line += f" ({html.escape(str(conf))}%)"
-            if reason:
-                line += f" — {self._clean_text(reason)}"
-            gemini_lines.append(line)
+            ai_lines.append(f"🌍 Macro: {self._clean_text(verdict)}" + (f" ({html.escape(str(conf))}%)" if conf not in {None, ''} else ""))
         if isinstance(gemini_news_review, dict) and gemini_news_review.get("available"):
             risk = str(gemini_news_review.get("risk_level") or "LOW").upper()
             advice = str(gemini_news_review.get("trading_advice") or "").strip()
-            first = ""
-            bullets = [str(x).strip() for x in (gemini_news_review.get("summary_bullets") or []) if str(x).strip()]
-            if bullets:
-                first = bullets[0]
-            note = advice or first
-            gemini_lines.append(f"📰 <b>Gemini News:</b> {html.escape(risk)}" + (f" — {self._clean_text(note)}" if note else ""))
-        if gemini_lines:
-            lines.extend(["", "🤖 <b>AI REVIEW</b>"])
-            lines.extend(gemini_lines)
+            ai_lines.append(f"📰 News: {html.escape(risk)}" + (f" — {self._clean_text(advice)}" if advice else ""))
+        if ai_lines:
+            lines.append("──────────────────")
+            lines.append("🤖 <b>AI REVIEW</b>")
+            lines.extend(ai_lines[:3])
         if status != "READY" and str(plan.get("plan_reason") or "").strip():
-            lines.extend(["", "⚠️ <b>PLAN STATUS</b>", f"• {html.escape(str(plan.get('plan_reason')))}"])
+            lines.append(f"⚠️ <b>Plan status:</b> {html.escape(str(plan.get('plan_reason')))}")
         lines.append("━━━━━━━━━━━━━━━━━━━━━")
         lines.append("<i>Session map only — execution still depends on live validation.</i>")
-        return self.send_message("\n".join(line for line in lines if str(line).strip() or line == ""), urgent=True)
+        compact = [line for line in lines if str(line).strip()]
+        return self.send_message("\n".join(compact), urgent=True)
 
     def send_signal(self, decision: Dict[str, Any]) -> bool:
         symbol = str(decision.get("symbol", "XAU/USD"))
