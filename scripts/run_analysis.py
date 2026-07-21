@@ -356,6 +356,63 @@ def _plan_targets(direction: str, entry_price: float, stop_loss: float, target_p
 
 
 
+def _planner_trade_levels(
+    config: Dict[str, Any],
+    *,
+    direction: str,
+    entry_price: float,
+    stop_loss: float,
+    target_price: float,
+    symbol: str,
+) -> Dict[str, Any]:
+    risk_cfg = (config.get("risk_settings") or {}) if isinstance(config, dict) else {}
+    min_sl_points = _safe_float(risk_cfg.get("min_sl_distance_points"), 0.0)
+    min_sl_distance = points_to_price(min_sl_points, symbol=symbol) if min_sl_points > 0 else 0.0
+    max_rr = _safe_float(risk_cfg.get("max_rr_ratio"), 0.0)
+    target_method = "mapped_target"
+    floor_applied = False
+
+    adjusted_stop = float(stop_loss)
+    if min_sl_distance > 0 and abs(entry_price - adjusted_stop) < min_sl_distance:
+        adjusted_stop = entry_price - min_sl_distance if direction == "BUY" else entry_price + min_sl_distance
+        sl_mult = _safe_float(risk_cfg.get("atr_multiplier_sl"), 2.0) or 2.0
+        tp1_ratio = (_safe_float(risk_cfg.get("atr_multiplier_tp1"), 2.5) or 2.5) / sl_mult
+        tp2_ratio = (_safe_float(risk_cfg.get("atr_multiplier_tp2"), 4.5) or 4.5) / sl_mult
+        if direction == "BUY":
+            tp1 = entry_price + min_sl_distance * tp1_ratio
+            tp2 = entry_price + min_sl_distance * tp2_ratio
+        else:
+            tp1 = entry_price - min_sl_distance * tp1_ratio
+            tp2 = entry_price - min_sl_distance * tp2_ratio
+        floor_applied = True
+        target_method = "rr_from_floored_sl"
+    else:
+        tp1, tp2, _ = _plan_targets(direction, entry_price, adjusted_stop, target_price)
+
+    risk = abs(adjusted_stop - entry_price)
+    if max_rr > 0 and risk > 0:
+        max_tp2_distance = risk * max_rr
+        if direction == "BUY" and tp2 - entry_price > max_tp2_distance:
+            tp2 = entry_price + max_tp2_distance
+            target_method += "+max_rr_cap"
+        elif direction == "SELL" and entry_price - tp2 > max_tp2_distance:
+            tp2 = entry_price - max_tp2_distance
+            target_method += "+max_rr_cap"
+
+    rr = abs(tp2 - entry_price) / risk if risk > 0 else 0.0
+    return {
+        "entry_price": round(entry_price, 2),
+        "stop_loss": round(adjusted_stop, 2),
+        "tp1": round(tp1, 2),
+        "tp2": round(tp2, 2),
+        "rr": round(rr, 2),
+        "floor_applied": floor_applied,
+        "target_method": target_method,
+        "min_sl_distance_points": round(min_sl_points, 1),
+    }
+
+
+
 def _candidate_zone_bounds(candidate: Dict[str, Any]) -> tuple[float, float] | None:
     zone = candidate.get("poi_zone") or {}
     if isinstance(zone, dict) and zone.get("top") is not None and zone.get("bottom") is not None:
@@ -407,6 +464,15 @@ def _build_plan_ladder_decision(
     if entry_price <= 0 or stop_loss <= 0 or target_price <= 0 or current_price <= 0:
         return None
 
+    levels = _planner_trade_levels(
+        config,
+        direction=direction,
+        entry_price=entry_price,
+        stop_loss=stop_loss,
+        target_price=target_price,
+        symbol=symbol,
+    )
+    stop_loss = levels["stop_loss"]
     order_type = f"{direction}_MARKET" if force_market else _planned_order_type(config, direction, entry_price, current_price, symbol)
     if order_type.endswith("MARKET") and not force_market:
         return None
@@ -420,7 +486,9 @@ def _build_plan_ladder_decision(
         high = _safe_float(candidate.get("poi_high"), entry_price)
         if low <= 0 or high <= 0:
             low = high = entry_price
-    tp1, tp2, rr = _plan_targets(direction, entry_price, stop_loss, target_price)
+    tp1 = levels["tp1"]
+    tp2 = levels["tp2"]
+    rr = levels["rr"]
     role = str(role_override or candidate.get("selection_role") or "PRIMARY").upper()
     hierarchy = _plan_execution_hierarchy(plan, role)
 
@@ -435,6 +503,7 @@ def _build_plan_ladder_decision(
             "reasons": [
                 f"Session plan {plan.get('scenario_type')} ({role})",
                 f"Execution leg: {hierarchy.get('execution_leg_label')}",
+                *([f"Planner SL floored to {levels.get('min_sl_distance_points', 0):.0f} points minimum risk distance."] if levels.get("floor_applied") else []),
                 f"Morning/session planner prepared this pending thesis before the move.",
             ],
             "quality": {
@@ -486,9 +555,10 @@ def _build_plan_ladder_decision(
         "order_type": order_type,
         "entry_kind": entry_kind,
         "position_size": position_size,
-        "risk_summary": f"Session planner {hierarchy.get('execution_leg_label')} {'market' if force_market else 'pending'}",
+        "risk_summary": f"Session planner {hierarchy.get('execution_leg_label')} {'market' if force_market else 'pending'} · {levels.get('target_method')}",
         "execution_leg": hierarchy.get("execution_leg"),
         "execution_leg_label": hierarchy.get("execution_leg_label"),
+        "target_method": levels.get("target_method"),
     }
     decision["execution_leg"] = hierarchy.get("execution_leg")
     decision["execution_leg_label"] = hierarchy.get("execution_leg_label")
