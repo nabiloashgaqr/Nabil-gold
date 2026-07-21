@@ -216,10 +216,12 @@ def main() -> None:
             manager = OpenTradesManager(symbol_config)
 
             # Use the SAME base timeframe as analysis (5m) to benefit from
-            # the 60-second cache. Only need current price for trade management,
-            # not full 15m OHLCV data.
+            # the 60-second cache. We intentionally fetch MORE than 6 candles
+            # here because the trade manager now computes a rolling "recent 30m"
+            # range from the last 6 x 5m candles. Requesting only 5 candles was
+            # insufficient and could miss one candle from the intended window.
             base_tf = symbol_config.get("data_source", {}).get("base_timeframe", "5m")
-            price_payload = market_data.get_ohlcv(base_tf, outputsize=5)
+            price_payload = market_data.get_ohlcv(base_tf, outputsize=12)
             allow_synthetic = bool(symbol_config.get("data_source", {}).get("allow_synthetic_in_production", False))
             if os.environ.get("GITHUB_ACTIONS") == "true" and not _payload_supports_signal_generation(price_payload) and price_payload.get("source") == "synthetic_demo" and not allow_synthetic:
                 # For trade management only, try a live XAU/USD spot quote before
