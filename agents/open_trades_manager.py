@@ -406,6 +406,7 @@ class OpenTradesManager(BaseAgent):
         previous_mae = self._f(trade.get("max_adverse_excursion"), 0.0)
         high_price = self._f(candle_high, current_price)
         low_price = self._f(candle_low, current_price)
+        recent_window_high, recent_window_low = self._recent_window_extremes(recent_candles)
         window_high, window_low = self._window_extremes_since(trade, recent_candles)
         if window_high is not None:
             high_price = max(high_price, window_high)
@@ -758,6 +759,8 @@ class OpenTradesManager(BaseAgent):
             "current_price": round(current_price, 2),
             "last_candle_high": round(high_price, 2),
             "last_candle_low": round(low_price, 2),
+            "recent_30m_high": round(recent_window_high, 2) if recent_window_high is not None else None,
+            "recent_30m_low": round(recent_window_low, 2) if recent_window_low is not None else None,
             "current_pnl": round(pnl_points, 1),
             "current_pnl_points": round(pnl_points, 1),
             "max_favorable_excursion": round(max_favorable_excursion, 1),
@@ -887,6 +890,24 @@ class OpenTradesManager(BaseAgent):
             return None, None
         return max(highs), min(lows)
 
+    def _recent_window_extremes(self, recent_candles: List[Dict[str, Any]] | None) -> tuple[float | None, float | None]:
+        if not recent_candles:
+            return None, None
+        highs: List[float] = []
+        lows: List[float] = []
+        for candle in recent_candles:
+            if not isinstance(candle, dict):
+                continue
+            high = self._f(candle.get("high"), 0.0)
+            low = self._f(candle.get("low"), 0.0)
+            if high > 0:
+                highs.append(high)
+            if low > 0:
+                lows.append(low)
+        if not highs or not lows:
+            return None, None
+        return max(highs), min(lows)
+
     def _management_phase(self, status: str, sl_moved_to_entry: bool, partial_close: bool, pnl_points: float) -> str:
         if status == "TP1_HIT" or partial_close:
             return "POST_TP1_TRAILING" if sl_moved_to_entry else "POST_TP1"
@@ -979,6 +1000,7 @@ class OpenTradesManager(BaseAgent):
         order_type = str(trade.get("order_type") or trade.get("order_kind") or "").upper()
         high_price = self._f(candle_high, current_price)
         low_price = self._f(candle_low, current_price)
+        recent_window_high, recent_window_low = self._recent_window_extremes(recent_candles)
         if high_price < low_price:
             high_price, low_price = low_price, high_price
         market_source = str(market_data_source or trade.get("market_data_source") or "")
@@ -989,6 +1011,8 @@ class OpenTradesManager(BaseAgent):
             "current_price": round(current_price, 2),
             "last_candle_high": round(high_price, 2),
             "last_candle_low": round(low_price, 2),
+            "recent_30m_high": round(recent_window_high, 2) if recent_window_high is not None else None,
+            "recent_30m_low": round(recent_window_low, 2) if recent_window_low is not None else None,
             "last_updated": self._iso(now),
             "market_data_source": market_source or None,
         }
