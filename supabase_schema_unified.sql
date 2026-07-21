@@ -575,6 +575,100 @@ CREATE TRIGGER update_macro_context_timestamp
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- =====================================================
+-- 14.5) Session Plans / Day-Map snapshots
+-- =====================================================
+-- Stores the planner output even when no trade is opened, so production can
+-- audit whether the system actually saw the day map like a manual analyst.
+-- =====================================================
+CREATE TABLE IF NOT EXISTS session_plans (
+    id TEXT PRIMARY KEY,
+    plan_id TEXT,
+    scenario_id TEXT,
+    symbol TEXT DEFAULT 'XAU/USD',
+    session_label TEXT,
+    session_quality TEXT,
+    session_bias TEXT,
+    scenario_type TEXT,
+    planner_source TEXT,
+    authority_state TEXT,
+    authority_direction TEXT,
+    plan_ready BOOLEAN DEFAULT FALSE,
+    plan_status TEXT,
+    plan_reason TEXT,
+    planner_confidence DECIMAL(10, 4),
+    planner_grade TEXT,
+    poi_classification TEXT,
+    extreme_poi BOOLEAN DEFAULT FALSE,
+    primary_entry_price DECIMAL(18, 6),
+    standby_entry_price DECIMAL(18, 6),
+    invalidation_level DECIMAL(18, 6),
+    target_liquidity DECIMAL(18, 6),
+    market_zone_context TEXT,
+    structure_trend TEXT,
+    structure_quality TEXT,
+    execution_preference TEXT,
+    expected_path TEXT,
+    current_price DECIMAL(18, 6),
+    market_data_source TEXT,
+    analysis_run_at TIMESTAMPTZ DEFAULT NOW(),
+    plan_created_at TIMESTAMPTZ DEFAULT NOW(),
+    plan_expires_at TIMESTAMPTZ,
+    payload JSONB DEFAULT '{}'::jsonb,
+    telegram_sent_at TIMESTAMPTZ,
+    telegram_delivery_note TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS plan_id TEXT;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS scenario_id TEXT;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS symbol TEXT DEFAULT 'XAU/USD';
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS session_label TEXT;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS session_quality TEXT;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS session_bias TEXT;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS scenario_type TEXT;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS planner_source TEXT;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS authority_state TEXT;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS authority_direction TEXT;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS plan_ready BOOLEAN DEFAULT FALSE;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS plan_status TEXT;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS plan_reason TEXT;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS planner_confidence DECIMAL(10, 4);
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS planner_grade TEXT;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS poi_classification TEXT;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS extreme_poi BOOLEAN DEFAULT FALSE;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS primary_entry_price DECIMAL(18, 6);
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS standby_entry_price DECIMAL(18, 6);
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS invalidation_level DECIMAL(18, 6);
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS target_liquidity DECIMAL(18, 6);
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS market_zone_context TEXT;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS structure_trend TEXT;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS structure_quality TEXT;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS execution_preference TEXT;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS expected_path TEXT;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS current_price DECIMAL(18, 6);
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS market_data_source TEXT;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS analysis_run_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS plan_created_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS plan_expires_at TIMESTAMPTZ;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS payload JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS telegram_sent_at TIMESTAMPTZ;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS telegram_delivery_note TEXT;
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE session_plans ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+CREATE INDEX IF NOT EXISTS idx_session_plans_symbol ON session_plans(symbol);
+CREATE INDEX IF NOT EXISTS idx_session_plans_ready ON session_plans(plan_ready);
+CREATE INDEX IF NOT EXISTS idx_session_plans_run_at ON session_plans(analysis_run_at DESC);
+CREATE INDEX IF NOT EXISTS idx_session_plans_plan_id ON session_plans(plan_id);
+CREATE INDEX IF NOT EXISTS idx_session_plans_telegram_sent_at ON session_plans(telegram_sent_at DESC);
+
+DROP TRIGGER IF EXISTS update_session_plans_timestamp ON session_plans;
+CREATE TRIGGER update_session_plans_timestamp
+    BEFORE UPDATE ON session_plans
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- =====================================================
 -- 15) Setup Candidates (Sprint 1 foundation)
 -- =====================================================
 -- Stores structured pre-trade setup context (setup type, POI, sweep side,
@@ -794,6 +888,7 @@ ALTER TABLE agent_evaluations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE partial_alert_tracker ENABLE ROW LEVEL SECURITY;
 ALTER TABLE post_news_tracker ENABLE ROW LEVEL SECURITY;
 ALTER TABLE macro_context ENABLE ROW LEVEL SECURITY;
+ALTER TABLE session_plans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE setup_candidates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE setup_state_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE analyst_labels ENABLE ROW LEVEL SECURITY;

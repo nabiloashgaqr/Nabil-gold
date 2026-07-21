@@ -322,8 +322,9 @@
         "min_overlap_score_for_trial": 45,
         "min_execution_score_for_trial": 55,
         "min_governance_score_for_trial": 55,
+        "min_day_map_execution_score_for_trial": 55,
         "allow_structured_trial_when_no_overlap_labels": true,
-        "description": "Final orchestration layer: decide whether to proceed to a structured forward trial, tune first, or hold for more refinement."
+        "description": "Final orchestration layer: decide whether to proceed to a structured forward trial, tune first, or hold for more refinement. Day-map execution must also stay healthy before production trial expansion."
     },
     "operations_pipeline": {
         "output_root": "storage/ops_pipeline",
@@ -426,6 +427,13 @@
         "standby_min_distance_points": 60,
         "create_pending_orders_from_plan": true,
         "description": "Day-Map Authority + Planner Fallback: if structured setup candidates are missing or weak, build a morning/session plan from daily bias, macro, structure, PDH/PDL, session liquidity, and premium/discount map instead of leaving the system blind."
+    },
+    "session_plan_delivery": {
+        "enabled": true,
+        "only_when_ready": true,
+        "min_change_points": 60,
+        "min_update_interval_minutes": 25,
+        "description": "Deliver day-map / morning-plan only by Telegram. Send one opening plan per session when the map first becomes ready, then send updates only on material changes and not more frequently than the configured interval. Do not expose it in the public dashboard/API."
     },
     "trading_mode": "paper",
     "paper_trading": {
