@@ -1353,7 +1353,10 @@ def _session_plan_delivery_reason(current_plan: Dict[str, Any], previous_snapsho
         return "first_ready_plan"
     if not bool(prev.get("plan_ready")) and bool(current_plan.get("plan_ready")):
         return "became_ready"
-    keys = ["session_bias", "scenario_type", "planner_source", "authority_state", "authority_direction", "execution_preference", "poi_classification", "plan_status"]
+    # Metadata-only changes (scenario_type / poi_classification / planner_source)
+    # must not spam users with a fresh PLAN UPDATE. Only material directional,
+    # authority, execution, or price-level changes deserve a new broadcast.
+    keys = ["session_bias", "authority_state", "authority_direction", "execution_preference", "plan_status"]
     for key in keys:
         if str(prev.get(key) or "") != str(current_plan.get(key) or ""):
             return f"changed_{key}"
