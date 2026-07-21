@@ -514,6 +514,18 @@
             "cancel_if_drift_exceeds": true,
             "description": "إذا لُمس الأمر المعلق أثناء نافذة منع الأخبار لا يتفعل. يتحول إلى News Hold ثم يُعاد فحص الخبر والـ drift والـ RR بعد انتهاء المنع. إذا بقي صالحاً يدخل MARKET، وإلا يُلغى بأمان."
         },
+        "near_miss_execution": {
+            "enabled": true,
+            "min_halo_points": 12,
+            "max_halo_points": 25,
+            "zone_width_multiplier": 0.75,
+            "recent_range_multiplier": 0.18,
+            "min_confirmation_points": 12,
+            "max_target_progress_pct": 30,
+            "min_remaining_rr": 1.8,
+            "require_planner_context": true,
+            "description": "If price misses a planner limit area by only a few points, then rejects and moves away in the intended direction, allow a controlled market conversion without widening the original POI itself."
+        },
         "smart_entry": {
             "enabled": true,
             "fill_at": "mid",
