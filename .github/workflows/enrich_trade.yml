@@ -53,6 +53,14 @@ on:
         required: false
         default: "Manual close now"
         type: string
+      send_telegram:
+        description: "Send Telegram notification for manual trade events"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 jobs:
   enrich:
@@ -74,5 +82,8 @@ jobs:
           NEW_STOP_LOSS: ${{ github.event.inputs.new_stop_loss }}
           PNL_POINTS: ${{ github.event.inputs.pnl_points }}
           CLOSE_REASON: ${{ github.event.inputs.close_reason || 'Manual close now' }}
+          SEND_TELEGRAM: ${{ github.event.inputs.send_telegram || 'true' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
