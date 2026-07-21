@@ -425,8 +425,14 @@
         "expire_after_hours": 8,
         "default_pending_slots": 2,
         "standby_min_distance_points": 60,
+        "max_primary_zone_width_points": 260,
+        "max_standby_zone_width_points": 220,
+        "min_main_rr_for_ready": 1.5,
+        "min_supporting_agents_for_ready": 2,
+        "max_opposing_agents_for_ready": 1,
+        "agent_alignment_min_confidence": 68,
         "create_pending_orders_from_plan": true,
-        "description": "Day-Map Authority + Planner Fallback: if structured setup candidates are missing or weak, build a morning/session plan from daily bias, macro, structure, PDH/PDL, session liquidity, and premium/discount map instead of leaving the system blind."
+        "description": "Day-Map Authority + Planner Fallback: if structured setup candidates are missing or weak, build a morning/session plan from daily bias, macro, structure, PDH/PDL, session liquidity, and premium/discount map instead of leaving the system blind. Additional guards block micro / contradictory / overly wide execution maps from being published as READY."
     },
     "session_plan_delivery": {
         "enabled": true,
