@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from services.analyst_distillation import AnalystDistillationService
+from services.day_map_metrics import summarize_day_map_execution
 from services.backtesting import benchmark_backtests
 
 
@@ -43,6 +44,7 @@ class FinalEvaluationService:
             max_trades=max_trades,
         )
         analyst_overlap: Dict[str, Any] = {}
+        day_map_execution: Dict[str, Any] = {}
         if self.database is not None:
             try:
                 distill = AnalystDistillationService(self.database, self.config)
@@ -53,14 +55,20 @@ class FinalEvaluationService:
                     )
             except Exception as exc:  # noqa: BLE001
                 analyst_overlap = {"error": str(exc), "labels_considered": 0}
-        scorecard = self._scorecard(benchmark, analyst_overlap)
-        recommendations = self._recommendations(benchmark, analyst_overlap, scorecard)
+            try:
+                recent = self.database.get_recent_trades(limit=max(self.analyst_compare_limit * 2, 80))
+                day_map_execution = summarize_day_map_execution(list(recent or []))
+            except Exception as exc:  # noqa: BLE001
+                day_map_execution = {"error": str(exc), "tracked_trade_count": 0}
+        scorecard = self._scorecard(benchmark, analyst_overlap, day_map_execution)
+        recommendations = self._recommendations(benchmark, analyst_overlap, day_map_execution, scorecard)
         verdict = self._verdict(scorecard)
         return {
             "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
             "symbol": self.config.get("symbol", "XAU/USD"),
             "benchmark": benchmark,
             "analyst_overlap": analyst_overlap,
+            "day_map_execution": day_map_execution,
             "scorecard": scorecard,
             "verdict": verdict,
             "recommendations": recommendations,
@@ -78,6 +86,7 @@ class FinalEvaluationService:
         current = ((benchmark.get("variants", {}) or {}).get("current_engine", {}) or {}).get("summary", {})
         overlap = report.get("analyst_overlap", {}) or {}
         scorecard = report.get("scorecard", {}) or {}
+        day_map = report.get("day_map_execution", {}) or {}
         recommendations = report.get("recommendations", []) or []
         lines = [
             "📋 <b>Final Evaluation Pass — SmartSignal</b>",
@@ -94,8 +103,13 @@ class FinalEvaluationService:
             )
         else:
             lines.append("Analyst Overlap: N/A (no analyst labels in evaluation window)")
+        metrics = day_map.get("scenario_metrics") or {}
+        if day_map.get("tracked_trade_count"):
+            lines.append(
+                f"Day-Map: main worked {int(metrics.get('main_worked_count', 0) or 0)} | add needed {int(metrics.get('add_needed_count', 0) or 0)} | starter alone {int(metrics.get('starter_survived_alone_count', 0) or 0)} | failed {int(metrics.get('day_map_failed_count', 0) or 0)}"
+            )
         lines.append(
-            f"Scorecard: benchmark={scorecard.get('benchmark_score', 0)}/100 | overlap={scorecard.get('overlap_score', 0)}/100 | execution={scorecard.get('execution_score', 0)}/100 | governance={scorecard.get('governance_score', 0)}/100 | planner={scorecard.get('planner_score', 0)}/100"
+            f"Scorecard: benchmark={scorecard.get('benchmark_score', 0)}/100 | overlap={scorecard.get('overlap_score', 0)}/100 | execution={scorecard.get('execution_score', 0)}/100 | governance={scorecard.get('governance_score', 0)}/100 | planner={scorecard.get('planner_score', 0)}/100 | daymap={scorecard.get('day_map_execution_score', 0)}/100"
         )
         if recommendations:
             lines.append("Recommendations:")
@@ -104,7 +118,7 @@ class FinalEvaluationService:
         lines.append("━━━━━━━━━━━━━━━━━━━━")
         return "\n".join(lines)
 
-    def _scorecard(self, benchmark: Dict[str, Any], overlap: Dict[str, Any]) -> Dict[str, Any]:
+    def _scorecard(self, benchmark: Dict[str, Any], overlap: Dict[str, Any], day_map_execution: Dict[str, Any]) -> Dict[str, Any]:
         cmp = benchmark.get("comparison", {}) or {}
         current = ((benchmark.get("variants", {}) or {}).get("current_engine", {}) or {}).get("summary", {})
         benchmark_score = 50.0
@@ -152,6 +166,20 @@ class FinalEvaluationService:
             planner_score = 50.0
             planner_available = False
 
+        day_map_metrics = day_map_execution.get("scenario_metrics", {}) if isinstance(day_map_execution, dict) else {}
+        tracked = int((day_map_execution or {}).get("tracked_trade_count", 0) or 0)
+        if tracked > 0:
+            main_worked = float(day_map_metrics.get("main_worked_count", 0) or 0)
+            add_needed = float(day_map_metrics.get("add_needed_count", 0) or 0)
+            starter_alone = float(day_map_metrics.get("starter_survived_alone_count", 0) or 0)
+            failed = float(day_map_metrics.get("day_map_failed_count", 0) or 0)
+            scenario_count = float((day_map_execution or {}).get("scenario_count", 0) or tracked or 1)
+            day_map_execution_score = max(0.0, min(100.0, (main_worked / max(scenario_count, 1)) * 55.0 + (starter_alone / max(scenario_count, 1)) * 20.0 + max(0.0, 25.0 - (failed / max(scenario_count, 1)) * 40.0)))
+            day_map_execution_available = True
+        else:
+            day_map_execution_score = 50.0
+            day_map_execution_available = False
+
         return {
             "benchmark_score": round(benchmark_score, 1),
             "overlap_score": round(overlap_score, 1),
@@ -161,6 +189,8 @@ class FinalEvaluationService:
             "governance_available": governance_available,
             "planner_score": round(planner_score, 1),
             "planner_available": planner_available,
+            "day_map_execution_score": round(day_map_execution_score, 1),
+            "day_map_execution_available": day_map_execution_available,
             "plan_ready_rate_pct": round(plan_ready_rate, 2),
             "standby_ready_rate_pct": round(standby_ready_rate, 2),
             "not_filled_ratio": round(not_filled_ratio, 3),
@@ -188,7 +218,7 @@ class FinalEvaluationService:
             return "PROMISING_BUT_NEEDS_TUNING"
         return "REQUIRES_MORE_REFINEMENT"
 
-    def _recommendations(self, benchmark: Dict[str, Any], overlap: Dict[str, Any], scorecard: Dict[str, Any]) -> List[str]:
+    def _recommendations(self, benchmark: Dict[str, Any], overlap: Dict[str, Any], day_map_execution: Dict[str, Any], scorecard: Dict[str, Any]) -> List[str]:
         cmp = benchmark.get("comparison", {}) or {}
         current = ((benchmark.get("variants", {}) or {}).get("current_engine", {}) or {}).get("summary", {})
         recommendations: List[str] = []
@@ -201,14 +231,19 @@ class FinalEvaluationService:
             recommendations.append("Too many pending setups are not filling; consider loosening market-threshold or POI distance rules.")
         if float(scorecard.get("governance_score", 0) or 0) < 55:
             recommendations.append("Pending governance quality is weak; review PRIMARY/STANDBY selection and thesis dominance thresholds.")
+        day_map_metrics = (day_map_execution.get("scenario_metrics") or {}) if isinstance(day_map_execution, dict) else {}
+        if float(scorecard.get("day_map_execution_score", 0) or 0) < 55 and int((day_map_execution or {}).get("tracked_trade_count", 0) or 0) > 0:
+            recommendations.append("Day-map execution quality is weak; review whether main-area ideas are failing too often or whether add legs are being forced unnecessarily.")
+        if int(day_map_metrics.get("day_map_failed_count", 0) or 0) > int(day_map_metrics.get("main_worked_count", 0) or 0):
+            recommendations.append("Day-map failures outnumber main-area successes; tighten invalidation logic and avoid forcing the first mapped zone.")
 
         labels = int(overlap.get("labels_considered", 0) or 0)
         if labels > 0:
-            if float(overlap.get("match_rate_pct", 0) or 0) < self.min_match_rate_good:
-                recommendations.append("Analyst match-rate is still low; revisit POI ranking and setup-type mapping against analyst labels.")
             avg_entry = overlap.get("avg_entry_distance_points")
             if avg_entry is not None and float(avg_entry) > self.max_entry_distance_good:
                 recommendations.append("Average entry distance from analyst labels is high; tighten entry timing and rejection confirmation around POI.")
+            if float(overlap.get("match_rate_pct", 0) or 0) < self.min_match_rate_good:
+                recommendations.append("Analyst match-rate is still low; revisit POI ranking and setup-type mapping against analyst labels.")
             reasons = overlap.get("top_missed_reasons") or []
             if reasons:
                 top = str(reasons[0].get("reason_code") or "")

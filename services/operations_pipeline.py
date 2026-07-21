@@ -42,14 +42,19 @@ class OperationsPipeline:
             horizon=horizon,
             max_trades=max_trades,
         )
-        tuning_report = TuningAdvisor(self.config).build_advice(final_report)
+        advisor = TuningAdvisor(self.config)
+        tuning_report = advisor.build_advice(final_report)
         readiness_service = ReleaseReadinessService(self.config, database=self.database)
         readiness_report = readiness_service.build_from_reports(final_report, tuning_report)
+        management_brief_text = advisor.format_management_brief(tuning_report)
+        operator_memo_text = advisor.format_operator_memo(tuning_report)
         return {
             "symbol": self.config.get("symbol", "XAU/USD"),
             "final_evaluation": final_report,
             "tuning_advice": tuning_report,
             "release_readiness": readiness_report,
+            "management_brief_text": management_brief_text,
+            "operator_memo_text": operator_memo_text,
         }
 
     def save_bundle(
@@ -69,9 +74,15 @@ class OperationsPipeline:
 
         readiness_service = ReleaseReadinessService(self.config, database=self.database)
         readiness_path = readiness_service.save(bundle.get("release_readiness", {}), root_path / "release_readiness.json")
+        management_path = root_path / "management_brief.md"
+        management_path.write_text(str(bundle.get("management_brief_text") or ""), encoding="utf-8")
+        memo_path = root_path / "operator_memo.md"
+        memo_path.write_text(str(bundle.get("operator_memo_text") or ""), encoding="utf-8")
 
         return {
             "final_evaluation": str(final_path),
             "tuning_advice": str(tuning_path),
             "release_readiness": str(readiness_path),
+            "management_brief": str(management_path),
+            "operator_memo": str(memo_path),
         }

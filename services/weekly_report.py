@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
+from services.day_map_metrics import summarize_day_map_execution
+from services.tuning_advisor import TuningAdvisor
 from utils.sessions import session_label_from_trade
 
 logger = logging.getLogger(__name__)
@@ -61,6 +63,7 @@ class WeeklyStats:
     rr_efficiency: Dict[str, Any] = field(default_factory=dict)
     regime_fit: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     news_proximity: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    day_map_execution: Dict[str, Any] = field(default_factory=dict)
 
     def to_prompt_dict(self) -> Dict[str, Any]:
         pf_display = "∞" if self.profit_factor >= 99 else round(self.profit_factor, 2)
@@ -96,6 +99,7 @@ class WeeklyStats:
             "rr_efficiency": self.rr_efficiency,
             "regime_fit": self.regime_fit,
             "news_proximity": self.news_proximity,
+            "day_map_execution": self.day_map_execution,
         }
 
 
@@ -276,6 +280,9 @@ class WeeklyReportService:
         stats.regime_fit = self._regime_fit(closed)
         stats.news_proximity = self._news_proximity(closed)
 
+        # ---- Day-map execution ----------------------------------------- #
+        stats.day_map_execution = summarize_day_map_execution(all_trades)
+
         # ---- Risk / memory / news counters (best-effort) ---------------- #
         stats.halt_activations = self._safe_count("session_log",
                                                    {"event": "HALT_ACTIVATED", "since": start_iso})
@@ -448,6 +455,26 @@ class WeeklyReportService:
     # ------------------------------------------------------------------ #
     # Internals
     # ------------------------------------------------------------------ #
+    def _weekly_management_brief_lines(self, stats: WeeklyStats) -> List[str]:
+        memo = TuningAdvisor(self.config).build_live_operator_memo(day_map_execution=stats.day_map_execution)
+        lines = [
+            f"• Priority: {memo.get('priority', 'NORMAL')}",
+            f"• {memo.get('headline', 'No operator headline')}",
+        ]
+        focus = memo.get('next_round_focus', []) or []
+        if focus:
+            lines.append(f"• Next move: {focus[0]}")
+        return lines[:3]
+
+    def _weekly_operator_focus_lines(self, stats: WeeklyStats) -> List[str]:
+        memo = TuningAdvisor(self.config).build_live_operator_memo(day_map_execution=stats.day_map_execution)
+        lines = []
+        for item in (memo.get('findings', []) or [])[:3]:
+            lines.append(f"• {item}")
+        for item in (memo.get('suggested_config_changes', []) or [])[:2]:
+            lines.append(f"• Tune: {item}")
+        return lines[:5]
+
     def _fallback_message(self, stats: WeeklyStats) -> str:
         """Professional weekly report with full details."""
         pf = stats.profit_factor
@@ -557,6 +584,12 @@ class WeeklyReportService:
             f"• Best day: {stats.best_day} {stats.best_day_pnl:+.0f} pts" if stats.best_day != "—" else "• Best day: —",
             f"• Worst day: {stats.worst_day} {stats.worst_day_pnl:+.0f} pts" if stats.worst_day != "—" else "• Worst day: —",
             daily_section,
+            separator,
+            "📌 MANAGEMENT BRIEF",
+            *self._weekly_management_brief_lines(stats),
+            separator,
+            "🧭 OPERATOR FOCUS",
+            *self._weekly_operator_focus_lines(stats),
             separator,
             "🎯 NEXT WEEK ACTIONS",
             *[f"• {rec}" for rec in recommendations[:4]],

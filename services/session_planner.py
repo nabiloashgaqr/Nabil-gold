@@ -261,6 +261,18 @@ class SessionPlannerService:
         execution_preference = self._execution_preference(primary, standby, current_price)
         poi_classification = self._classify_poi(primary, direction, structure_quality, recent_sweep, zone_context, current_price, symbol=symbol)
         plan_narrative = self._plan_narrative(direction, scenario_type, primary, alignment["sources"], expected_path, execution_preference)
+        manual_plan = self._manual_plan_hierarchy(
+            direction=direction,
+            primary=primary,
+            standby=standby,
+            structure_trend=structure_trend,
+            structure_quality=structure_quality,
+            recent_sweep=recent_sweep,
+            execution_preference=execution_preference,
+            expected_path=expected_path,
+            narrative=plan_narrative,
+            symbol=symbol,
+        )
 
         base.update(
             {
@@ -293,6 +305,7 @@ class SessionPlannerService:
                 "primary_rationale": primary_rationale,
                 "standby_rationale": standby_rationale,
                 "plan_narrative": plan_narrative,
+                "manual_plan": manual_plan,
                 "poi_classification": poi_classification,
                 "extreme_poi": poi_classification == "EXTREME_POI",
             }
@@ -431,6 +444,18 @@ class SessionPlannerService:
         execution_preference = self._execution_preference(primary, standby, current_price)
         poi_classification = self._classify_poi(primary, direction, str(market_structure.get("structure_quality") or "WEAK"), (liquidity.get("recent_sweep") or {}) if isinstance(liquidity, dict) else {}, zone_context, current_price, symbol=symbol)
         plan_narrative = self._plan_narrative(direction, scenario_type, primary, authority["sources"], expected_path, execution_preference)
+        manual_plan = self._manual_plan_hierarchy(
+            direction=direction,
+            primary=primary,
+            standby=standby,
+            structure_trend=str(market_structure.get("trend") or "RANGING"),
+            structure_quality=str(market_structure.get("structure_quality") or "WEAK"),
+            recent_sweep=(liquidity.get("recent_sweep") or {}) if isinstance(liquidity, dict) else {},
+            execution_preference=execution_preference,
+            expected_path=expected_path,
+            narrative=plan_narrative,
+            symbol=symbol,
+        )
 
         fallback.update(
             {
@@ -460,6 +485,7 @@ class SessionPlannerService:
                 "primary_rationale": primary_rationale,
                 "standby_rationale": standby_rationale,
                 "plan_narrative": plan_narrative,
+                "manual_plan": manual_plan,
                 "poi_classification": poi_classification,
                 "extreme_poi": poi_classification == "EXTREME_POI",
             }
@@ -887,6 +913,122 @@ class SessionPlannerService:
             reasons.append("liquidity sweep supports the path")
         reasons.append(f"structure {structure_trend.lower()} / {structure_quality.lower()}")
         return reasons[:5]
+
+    def _manual_plan_hierarchy(
+        self,
+        *,
+        direction: str,
+        primary: Dict[str, Any],
+        standby: Dict[str, Any] | None,
+        structure_trend: str,
+        structure_quality: str,
+        recent_sweep: Dict[str, Any],
+        execution_preference: str,
+        expected_path: str,
+        narrative: str,
+        symbol: str,
+    ) -> Dict[str, Any]:
+        side_word = "BUY" if direction == "BUY" else "SELL"
+        main_label = f"MAIN {side_word} AREA"
+        add_label = f"ADD {side_word} AREA"
+        primary_entry = self._f(primary.get("entry_price"), 0.0)
+        invalidation = self._f(primary.get("stop_loss"), 0.0)
+        target = self._f(primary.get("target_liquidity") or primary.get("target_price"), 0.0)
+        trigger_state = str(primary.get("trigger_state") or "").upper()
+        setup_state = str(primary.get("setup_state") or "").upper()
+        sweep_type = str((recent_sweep or {}).get("type") or "").replace("_", " ")
+
+        confirmation_items: List[str] = []
+        if self._aligned_sweep(direction, recent_sweep):
+            confirmation_items.append(
+                f"Preferred confirmation: rejection after {sweep_type} sweep inside the mapped area."
+            )
+        if trigger_state == "REJECTION_CONFIRMED":
+            confirmation_items.append("Trigger is already rejection-confirmed; price reaction quality matters more than chasing.")
+        elif trigger_state:
+            confirmation_items.append(
+                f"Wait for trigger improvement from {trigger_state.replace('_', ' ').lower()} before aggressive execution."
+            )
+        if setup_state == "ENTRY_ARMED":
+            confirmation_items.append("The zone is armed now — react to live rejection / acceptance instead of forcing late entries.")
+        if structure_trend:
+            confirmation_items.append(f"Keep {structure_trend.lower()} structure intact; no acceptance through invalidation.")
+        if not confirmation_items:
+            confirmation_items.append("Wait for live confirmation inside the mapped zone before committing.")
+
+        if standby:
+            missed_area_plan = (
+                f"If the main area is missed, do not chase. Wait for {add_label.lower()} around "
+                f"{self._f(standby.get('entry_price'), 0.0):.2f} while the same thesis stays intact."
+            )
+        elif str(execution_preference).upper() == "SPLIT_EXECUTION_WATCH":
+            missed_area_plan = (
+                "If price starts delivering early from the extreme zone, only starter execution is valid; "
+                "otherwise wait for deeper mitigation, no chase."
+            )
+        else:
+            missed_area_plan = "If price misses the mapped area, do not chase the move. Wait for a fresh rebuild or a cleaner retest."
+
+        if invalidation > 0:
+            if direction == "BUY":
+                map_change_plan = f"If an opposite buy-side sweep forms and price then accepts below {invalidation:.2f}, cancel this buy map and rebuild."
+            else:
+                map_change_plan = f"If an opposite sell-side sweep forms and price then accepts above {invalidation:.2f}, cancel this sell map and rebuild."
+        else:
+            opposite_sweep_label = "buy-side" if direction == "BUY" else "sell-side"
+            map_change_plan = f"If an opposite {opposite_sweep_label} sweep appears with structure flip, cancel this map and rebuild."
+
+        execution_items: List[str] = []
+        mode = str(execution_preference or "").upper()
+        if mode == "LADDER_PENDING":
+            execution_items = [
+                "Work the main area first.",
+                "Keep the add area only if the thesis is still intact after the first reaction.",
+                "No blind chasing outside the mapped zones.",
+            ]
+        elif mode == "SPLIT_EXECUTION_WATCH":
+            execution_items = [
+                "Starter execution is allowed only if price is already inside the extreme area.",
+                "Keep the deeper add-on for better location, not for emotional averaging.",
+                "Both legs still obey one invalidation logic.",
+            ]
+        elif mode == "NEAR_MARKET_WATCH":
+            execution_items = [
+                "Price is already near the zone.",
+                "Wait for live reaction / rejection quality before committing.",
+                "If no clean reaction appears, stand down and rebuild later.",
+            ]
+        else:
+            execution_items = [
+                "Take only the mapped entry, not an emotional chase.",
+                "If the area is missed, wait for a fresh setup.",
+            ]
+
+        tp1 = None
+        if primary_entry > 0 and invalidation > 0 and target > 0:
+            risk = abs(invalidation - primary_entry)
+            reward = abs(target - primary_entry)
+            if risk > 0 and reward > 0:
+                tp1_dist = min(max(risk, reward * 0.35), reward * 0.5)
+                tp1 = round(primary_entry + tp1_dist, 2) if direction == "BUY" else round(primary_entry - tp1_dist, 2)
+
+        return {
+            "headline": f"{side_word} DAY MAP",
+            "bias_label": f"MAIN {side_word} BIAS",
+            "main_area_label": main_label,
+            "add_area_label": add_label,
+            "confirmation_items": confirmation_items[:4],
+            "missed_area_plan": missed_area_plan,
+            "map_change_plan": map_change_plan,
+            "execution_items": execution_items,
+            "target_script": {
+                "tp1": tp1,
+                "tp2": round(target, 2) if target > 0 else None,
+            },
+            "expected_path": expected_path,
+            "narrative": narrative,
+            "structure_script": f"{structure_trend} / {structure_quality}",
+        }
 
     def _plan_narrative(
         self,

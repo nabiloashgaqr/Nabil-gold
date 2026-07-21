@@ -227,6 +227,40 @@ class TelegramService:
         block = self._macro_block(decision)
         return block[0] if block else "• Macro: Collecting hourly data"
 
+    def _execution_leg_label(self, setup: Dict[str, Any] | None, plan: Dict[str, Any] | None, *, direction: str = "") -> str | None:
+        setup = setup if isinstance(setup, dict) else {}
+        plan = plan if isinstance(plan, dict) else {}
+        direct = str(setup.get("execution_leg_label") or "").strip()
+        if direct:
+            return direct
+        manual_plan = (plan.get("manual_plan") or {}) if isinstance(plan, dict) else {}
+        role = str(setup.get("pending_plan_role") or setup.get("selection_role") or "").upper()
+        direction = str(direction or plan.get("session_bias") or "").upper()
+        side_word = "BUY" if direction == "BUY" else "SELL" if direction == "SELL" else "TRADE"
+        main_label = str(manual_plan.get("main_area_label") or f"MAIN {side_word} AREA")
+        add_label = str(manual_plan.get("add_area_label") or f"ADD {side_word} AREA")
+        mapping = {
+            "PRIMARY": main_label,
+            "STANDBY": add_label,
+            "STARTER": f"STARTER inside {main_label}",
+            "ADD_ON": f"ADD-ON from {add_label}",
+        }
+        return mapping.get(role) if role else None
+
+    def _trade_execution_leg_label(self, trade: Dict[str, Any]) -> str | None:
+        snap = trade.get("signal_snapshot") or {}
+        if isinstance(snap, str):
+            try:
+                import json as _json
+                snap = _json.loads(snap)
+            except Exception:
+                snap = {}
+        if not isinstance(snap, dict):
+            snap = {}
+        setup = snap.get("setup_context") or {}
+        plan = snap.get("session_plan") or {}
+        return self._execution_leg_label(setup, plan, direction=str(trade.get("type") or trade.get("side") or ""))
+
     def _setup_lines(self, decision: Dict[str, Any], signal: Dict[str, Any]) -> List[str]:
         setup = decision.get("setup_context") or {}
         if not isinstance(setup, dict):
@@ -237,11 +271,14 @@ class TelegramService:
         lead_agent = setup.get("lead_agent")
         quality = setup.get("quality_grade") or decision.get("setup_quality")
         selection_role = setup.get("selection_role")
+        leg_label = self._execution_leg_label(setup, decision.get("session_plan") or {}, direction=str(decision.get("decision") or signal.get("type") or ""))
         if setup_type or setup_state or lead_agent:
             compact = []
             if setup_type:
                 compact.append(str(setup_type).replace("_", " ").title())
-            if selection_role:
+            if leg_label:
+                compact.append(f"leg {leg_label}")
+            elif selection_role:
                 compact.append(f"role {selection_role}")
             if setup_state:
                 compact.append(f"state {setup_state}")
@@ -250,6 +287,8 @@ class TelegramService:
             if quality:
                 compact.append(f"quality {quality}")
             lines.append(f"• <b>Setup:</b> {html.escape(' · '.join(compact))}")
+        if leg_label:
+            lines.append(f"• <b>Execution leg:</b> {html.escape(leg_label)}")
         zone = signal.get("entry", {}) or {}
         low = zone.get("low")
         high = zone.get("high")
@@ -388,6 +427,225 @@ class TelegramService:
         lines.append("• <b>Status:</b> Offline this run")
         return lines
 
+    def send_session_plan(self, plan: Dict[str, Any]) -> bool:
+        symbol = str(plan.get("symbol") or "XAU/USD")
+        bias = str(plan.get("session_bias") or plan.get("authority_direction") or "WAIT").upper()
+        scenario = str(plan.get("scenario_type") or "DAY_MAP").replace("_", " ").title()
+        status = str(plan.get("plan_status") or ("READY" if plan.get("plan_ready") else "NOT_READY")).upper()
+        primary_zone = plan.get("primary_entry_zone") or {}
+        standby_zone = plan.get("standby_entry_zone") or {}
+        confidence = float(plan.get("planner_confidence") or 0)
+        grade = str(plan.get("planner_grade") or "--")
+        authority = str(plan.get("authority_state") or "--")
+        side_word = "BUY" if bias == "BUY" else "SELL" if bias == "SELL" else "TRADE"
+        manual_plan = plan.get("manual_plan") or {}
+        delivery_context = plan.get("delivery_context") or {}
+        delivery_kind = str(delivery_context.get("message_kind") or "OPENING_PLAN").upper()
+        delivery_reason = str(delivery_context.get("delivery_reason") or "").strip()
+        headline = str(manual_plan.get("headline") or f"{side_word} DAY MAP")
+        bias_label = str(manual_plan.get("bias_label") or f"MAIN {side_word} BIAS")
+        main_area_label = str(manual_plan.get("main_area_label") or f"PRIMARY {side_word} AREA")
+        add_area_label = str(manual_plan.get("add_area_label") or f"SECONDARY {side_word} AREA")
+
+        def _zone_text(zone: Dict[str, Any]) -> str:
+            try:
+                low = float(zone.get("low"))
+                high = float(zone.get("high"))
+                return f"{self._money(low, symbol)} → {self._money(high, symbol)}"
+            except Exception:
+                return "--"
+
+        def _f(value: Any) -> float | None:
+            try:
+                return float(value)
+            except Exception:
+                return None
+
+        def _targets() -> tuple[float | None, float | None]:
+            entry = _f(plan.get("primary_entry_price"))
+            invalidation = _f(plan.get("invalidation_level"))
+            target = _f(plan.get("target_liquidity"))
+            if entry is None or invalidation is None or target is None:
+                return None, target
+            risk = abs(invalidation - entry)
+            reward = abs(target - entry)
+            if risk <= 0 or reward <= 0:
+                return None, target
+            tp1_dist = min(max(risk, reward * 0.35), reward * 0.5)
+            if bias == "BUY":
+                return round(entry + tp1_dist, 2), round(target, 2)
+            if bias == "SELL":
+                return round(entry - tp1_dist, 2), round(target, 2)
+            return None, round(target, 2)
+
+        def _invalidation_text() -> str:
+            level = _f(plan.get("invalidation_level"))
+            if level is None:
+                return "--"
+            if bias == "BUY":
+                return f"Below {self._money(level, symbol)}"
+            if bias == "SELL":
+                return f"Above {self._money(level, symbol)}"
+            return self._money(level, symbol)
+
+        def _execution_text() -> str:
+            mode = str(plan.get("execution_preference") or "").upper()
+            if mode == "LADDER_PENDING":
+                return "Primary area first, secondary area kept ready as backup."
+            if mode == "SINGLE_PENDING":
+                return "Single planned entry from the primary area only."
+            if mode == "NEAR_MARKET_WATCH":
+                return "Price is already near the POI — wait for live rejection / confirmation."
+            if mode == "SPLIT_EXECUTION_WATCH":
+                return "Extreme zone: starter first if price is already inside, then add deeper if needed."
+            return str(plan.get("execution_preference") or "Planner-led execution")
+
+        def _opinion_line(opinion: Dict[str, Any]) -> str:
+            direction = str(opinion.get("direction") or "WAIT").upper()
+            emoji = "🟢" if direction == "BUY" else "🔴" if direction == "SELL" else "🟡"
+            label = str(opinion.get("label") or opinion.get("key") or "Agent")
+            conf = opinion.get("confidence")
+            summary = str(opinion.get("summary") or "").strip()
+            signals = [str(x).strip() for x in (opinion.get("signals") or []) if str(x).strip()]
+            line = f"{emoji} <b>{html.escape(label)}</b>: {html.escape(direction)}"
+            if conf not in {None, ""}:
+                line += f" ({float(conf):.0f}%)"
+            note = summary or (signals[0] if signals else "")
+            if note:
+                line += f" — {self._clean_text(note)}"
+            return line
+
+        tp1, tp2 = _targets()
+        target_script = manual_plan.get("target_script") or {}
+        if target_script.get("tp1") not in {None, ""}:
+            tp1 = target_script.get("tp1")
+        if target_script.get("tp2") not in {None, ""}:
+            tp2 = target_script.get("tp2")
+        authority_reason = str(plan.get("authority_reason") or "").strip()
+        expected = str(manual_plan.get("expected_path") or plan.get("expected_path") or "").strip()
+        primary_rationale = [str(x) for x in (plan.get("primary_rationale") or []) if str(x).strip()]
+        standby_rationale = [str(x) for x in (plan.get("standby_rationale") or []) if str(x).strip()]
+        narrative = str(manual_plan.get("narrative") or plan.get("plan_narrative") or "").strip()
+        confirmation_items = [str(x) for x in (manual_plan.get("confirmation_items") or []) if str(x).strip()]
+        missed_area_plan = str(manual_plan.get("missed_area_plan") or "").strip()
+        map_change_plan = str(manual_plan.get("map_change_plan") or "").strip()
+        execution_items = [str(x) for x in (manual_plan.get("execution_items") or []) if str(x).strip()]
+        agent_opinions = [op for op in (plan.get("agent_opinions") or []) if isinstance(op, dict)]
+        gemini_plan_review = plan.get("gemini_plan_review") or {}
+        gemini_macro_review = plan.get("gemini_macro_review") or {}
+        gemini_news_review = plan.get("gemini_news_review") or {}
+
+        top_title = "SESSION OPENING PLAN" if delivery_kind == "OPENING_PLAN" else "PLAN UPDATE"
+        lines = [
+            f"🧭 <b>{html.escape(symbol)} — {html.escape(top_title)}</b>",
+            f"<b>{html.escape(headline)}</b>",
+            "━━━━━━━━━━━━━━━━━━━━━",
+            f"{'🟢' if bias == 'BUY' else '🔴' if bias == 'SELL' else '🟡'} <b>{html.escape(bias_label)}:</b> {html.escape(bias)}",
+            f"🏷️ <b>Session:</b> {html.escape(str(plan.get('session_label') or '--'))} · {html.escape(str(plan.get('session_quality') or '--'))}",
+            f"🏅 <b>Plan Quality:</b> {html.escape(grade)} {confidence:.1f}%",
+            f"🧱 <b>Map Strength:</b> {html.escape(authority)}" + (f" · {html.escape(authority_reason)}" if authority_reason else ""),
+        ]
+        if delivery_reason:
+            lines.append(f"📝 <b>Why now:</b> {html.escape(delivery_reason.replace('_', ' '))}")
+        lines.extend([
+            "──────────────────",
+            f"🎯 <b>{html.escape(main_area_label)}</b>",
+            f"• {html.escape(_zone_text(primary_zone))}",
+            f"• Ref entry: {self._money(plan.get('primary_entry_price'), symbol)}",
+        ])
+        standby_zone_text = _zone_text(standby_zone)
+        standby_entry = plan.get('standby_entry_price')
+        if standby_zone_text != "--" or standby_entry not in {None, ""}:
+            lines.extend([
+                "",
+                f"🎯 <b>{html.escape(add_area_label)}</b>",
+                f"• {html.escape(standby_zone_text)}",
+                f"• Ref entry: {self._money(standby_entry, symbol)}",
+            ])
+        lines.extend([
+            "",
+            "🛑 <b>INVALIDATION</b>",
+            f"• {html.escape(_invalidation_text())}",
+            "",
+            "🎯 <b>TARGETS</b>",
+        ])
+        if tp1 is not None:
+            lines.append(f"• TP1 area: {self._money(tp1, symbol)}")
+        if tp2 is not None:
+            lines.append(f"• TP2 area: {self._money(tp2, symbol)}")
+        elif plan.get("target_liquidity") not in {None, ""}:
+            lines.append(f"• Target liquidity: {self._money(plan.get('target_liquidity'), symbol)}")
+        lines.extend([
+            "",
+            "⚙️ <b>EXECUTION PLAN</b>",
+            f"• {html.escape(_execution_text())}",
+        ])
+        for item in execution_items[:3]:
+            lines.append(f"• {html.escape(item)}")
+        if str(plan.get("poi_classification") or "").strip():
+            lines.append(f"• Zone class: {html.escape(str(plan.get('poi_classification')))}")
+        if scenario:
+            lines.append(f"• Setup family: {html.escape(scenario)}")
+        if expected or narrative or primary_rationale or standby_rationale or confirmation_items or missed_area_plan or map_change_plan:
+            lines.extend(["", "🧠 <b>THESIS</b>"])
+        if expected:
+            lines.append(f"• {html.escape(expected)}")
+        if narrative:
+            lines.append(f"• {html.escape(narrative)}")
+        for item in primary_rationale[:3]:
+            lines.append(f"• Primary: {html.escape(item)}")
+        for item in standby_rationale[:2]:
+            lines.append(f"• Secondary: {html.escape(item)}")
+        if confirmation_items:
+            lines.append("")
+            lines.append("✅ <b>CONFIRMATION</b>")
+            for item in confirmation_items[:4]:
+                lines.append(f"• {html.escape(item)}")
+        if missed_area_plan:
+            lines.append("")
+            lines.append("📌 <b>IF PRICE MISSES THE MAIN AREA</b>")
+            lines.append(f"• {html.escape(missed_area_plan)}")
+        if map_change_plan:
+            lines.append("")
+            lines.append("🔄 <b>IF THE MAP CHANGES</b>")
+            lines.append(f"• {html.escape(map_change_plan)}")
+        if agent_opinions:
+            lines.extend(["", "🗳️ <b>AGENT READS</b>"])
+            for opinion in agent_opinions:
+                lines.append(_opinion_line(opinion))
+        gemini_lines: List[str] = []
+        if isinstance(gemini_plan_review, dict) and gemini_plan_review.get("available"):
+            verdict = gemini_plan_review.get("market_bias") or gemini_plan_review.get("verdict") or gemini_plan_review.get("opinion") or "REVIEWED"
+            reason = gemini_plan_review.get("reason") or gemini_plan_review.get("summary") or ""
+            gemini_lines.append(f"🧠 <b>Gemini Context:</b> {self._clean_text(verdict)}" + (f" — {self._clean_text(reason)}" if reason else ""))
+        if isinstance(gemini_macro_review, dict) and gemini_macro_review.get("available"):
+            verdict = gemini_macro_review.get("macro_verdict") or gemini_macro_review.get("verdict") or "NEUTRAL"
+            conf = gemini_macro_review.get("confidence")
+            reason = gemini_macro_review.get("reason") or gemini_macro_review.get("summary") or gemini_macro_review.get("primary_driver") or ""
+            line = f"🌍 <b>Gemini Macro:</b> {self._clean_text(verdict)}"
+            if conf not in {None, ""}:
+                line += f" ({html.escape(str(conf))}%)"
+            if reason:
+                line += f" — {self._clean_text(reason)}"
+            gemini_lines.append(line)
+        if isinstance(gemini_news_review, dict) and gemini_news_review.get("available"):
+            risk = str(gemini_news_review.get("risk_level") or "LOW").upper()
+            advice = str(gemini_news_review.get("trading_advice") or "").strip()
+            first = ""
+            bullets = [str(x).strip() for x in (gemini_news_review.get("summary_bullets") or []) if str(x).strip()]
+            if bullets:
+                first = bullets[0]
+            note = advice or first
+            gemini_lines.append(f"📰 <b>Gemini News:</b> {html.escape(risk)}" + (f" — {self._clean_text(note)}" if note else ""))
+        if gemini_lines:
+            lines.extend(["", "🤖 <b>AI REVIEW</b>"])
+            lines.extend(gemini_lines)
+        if status != "READY" and str(plan.get("plan_reason") or "").strip():
+            lines.extend(["", "⚠️ <b>PLAN STATUS</b>", f"• {html.escape(str(plan.get('plan_reason')))}"])
+        lines.append("━━━━━━━━━━━━━━━━━━━━━")
+        lines.append("<i>Session map only — execution still depends on live validation.</i>")
+        return self.send_message("\n".join(line for line in lines if str(line).strip() or line == ""), urgent=True)
+
     def send_signal(self, decision: Dict[str, Any]) -> bool:
         symbol = str(decision.get("symbol", "XAU/USD"))
         signal = decision.get("signal", {}) or {}
@@ -438,6 +696,11 @@ class TelegramService:
             "🎯 <b>TRADE PLAN</b>",
             f"• <b>Order:</b> {html.escape(trade_type)} {html.escape(order_kind)}",
             f"• <b>Entry:</b> {self._money(entry_price, symbol)}",
+        ])
+        leg_label = self._execution_leg_label(decision.get("setup_context") or {}, decision.get("session_plan") or {}, direction=trade_type)
+        if leg_label:
+            lines.append(f"• <b>Execution leg:</b> {html.escape(leg_label)}")
+        lines.extend([
             f"• <b>Stop Loss:</b> {self._money(signal.get('stop_loss'), symbol)}",
             f"• <b>TP1:</b> {self._money(signal.get('tp1'), symbol)}",
             f"• <b>TP2:</b> {self._money(signal.get('tp2'), symbol)}",
@@ -648,6 +911,7 @@ class TelegramService:
             f"• <b>Symbol:</b> {html.escape(symbol)}",
             f"• <b>Side:</b> {html.escape(side)}",
         ]
+        trade_leg_label = self._trade_execution_leg_label(trade)
         if old_status != new_status:
             lines.append(f"• <b>Status:</b> {html.escape(old_status)} → {html.escape(new_status)}")
         else:
@@ -656,6 +920,11 @@ class TelegramService:
             f"• <b>Entry:</b> {self._money(trade.get('entry_price'), symbol)}",
             f"• <b>Current Price:</b> {self._money(current_price, symbol)}",
         ])
+        if trade_leg_label:
+            lines.append(f"• <b>Plan leg:</b> {html.escape(trade_leg_label)}")
+        plan_exec = evaluation.get("plan_execution_context") or {}
+        if isinstance(plan_exec, dict) and plan_exec.get("story"):
+            lines.append(f"• <b>Execution story:</b> {self._clean_text(plan_exec.get('story'))}")
         if closing:
             close_price = updates.get("close_price") or updates.get("stop_loss") or current_price
             actual = updates.get("final_pnl", pnl_points)
@@ -679,6 +948,9 @@ class TelegramService:
                 cancelled_siblings = scenario_gov.get("cancelled_ids") or []
                 if cancelled_siblings:
                     lines.append(f"• <b>Scenario family:</b> {len(cancelled_siblings)} sibling pending order(s) cancelled")
+                    if isinstance(plan_exec, dict) and plan_exec.get("pending_sibling_roles"):
+                        roles = " / ".join(str(x) for x in plan_exec.get("pending_sibling_roles") or [])
+                        lines.append(f"• <b>Cancelled leg(s):</b> {html.escape(roles)}")
         else:
             lines.append(f"• <b>Current PnL:</b> {self._fmt_points(pnl_points)}")
 

@@ -29,6 +29,7 @@ class ReleaseReadinessService:
         self.min_overlap_score_for_trial = float(cfg.get("min_overlap_score_for_trial", 45) or 45)
         self.min_execution_score_for_trial = float(cfg.get("min_execution_score_for_trial", 55) or 55)
         self.min_governance_score_for_trial = float(cfg.get("min_governance_score_for_trial", 55) or 55)
+        self.min_day_map_execution_score_for_trial = float(cfg.get("min_day_map_execution_score_for_trial", 55) or 55)
         self.allow_structured_trial_when_no_overlap_labels = bool(cfg.get("allow_structured_trial_when_no_overlap_labels", True))
 
     def build_from_reports(self, final_eval: Dict[str, Any], tuning: Dict[str, Any]) -> Dict[str, Any]:
@@ -80,7 +81,7 @@ class ReleaseReadinessService:
             "━━━━━━━━━━━━━━━━━━━━",
             f"Decision: <b>{readiness.get('decision', 'REVIEW')}</b>",
             f"Reason: {readiness.get('reason', 'No summary')}",
-            f"Benchmark {scorecard.get('benchmark_score', 0)}/100 | {overlap_text} | Execution {scorecard.get('execution_score', 0)}/100 | Governance {scorecard.get('governance_score', 0)}/100",
+            f"Benchmark {scorecard.get('benchmark_score', 0)}/100 | {overlap_text} | Execution {scorecard.get('execution_score', 0)}/100 | Governance {scorecard.get('governance_score', 0)}/100 | DayMap {scorecard.get('day_map_execution_score', 0)}/100",
             f"Actions suggested: {readiness.get('actions_count', 0)}",
         ]
         if recommendations:
@@ -98,11 +99,14 @@ class ReleaseReadinessService:
         execution_score = float(scorecard.get("execution_score", 0) or 0)
         governance_score = float(scorecard.get("governance_score", 0) or 0)
         governance_available = bool(scorecard.get("governance_available", False))
+        day_map_execution_score = float(scorecard.get("day_map_execution_score", 0) or 0)
+        day_map_execution_available = bool(scorecard.get("day_map_execution_available", False))
         actions = tuning.get("actions", []) or []
         verdict = str(final_eval.get("verdict") or "REVIEW")
 
         overlap_ok = overlap_score >= self.min_overlap_score_for_trial if overlap_available else self.allow_structured_trial_when_no_overlap_labels
         governance_ok = governance_score >= self.min_governance_score_for_trial if governance_available else True
+        day_map_ok = day_map_execution_score >= self.min_day_map_execution_score_for_trial if day_map_execution_available else True
 
         if (
             verdict == "READY_FOR_STRUCTURED_TRIAL"
@@ -110,11 +114,12 @@ class ReleaseReadinessService:
             and overlap_ok
             and execution_score >= self.min_execution_score_for_trial
             and governance_ok
+            and day_map_ok
             and len(actions) <= self.max_actions_for_trial
         ):
             decision = "PROCEED_TO_STRUCTURED_TRIAL"
             reason = "Core evaluation is strong and only minor tuning remains."
-        elif verdict == "PROMISING_BUT_NEEDS_TUNING" and len(actions) == 0 and benchmark_score >= self.min_benchmark_score_for_trial and execution_score >= self.min_execution_score_for_trial and governance_ok and overlap_ok:
+        elif verdict == "PROMISING_BUT_NEEDS_TUNING" and len(actions) == 0 and benchmark_score >= self.min_benchmark_score_for_trial and execution_score >= self.min_execution_score_for_trial and governance_ok and overlap_ok and day_map_ok:
             decision = "PROCEED_TO_STRUCTURED_TRIAL"
             reason = "Engine is promising and no urgent tuning actions remain; proceed with a tightly monitored structured trial."
         elif verdict == "PROMISING_BUT_NEEDS_TUNING":
@@ -134,4 +139,6 @@ class ReleaseReadinessService:
             "execution_score": round(execution_score, 1),
             "governance_score": round(governance_score, 1),
             "governance_available": governance_available,
+            "day_map_execution_score": round(day_map_execution_score, 1),
+            "day_map_execution_available": day_map_execution_available,
         }

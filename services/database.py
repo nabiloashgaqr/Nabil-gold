@@ -45,6 +45,7 @@ class DatabaseService:
         self.local_path = root / fallback
         self.setup_candidates_path = root / "storage" / "setup_candidates.json"
         self.setup_state_events_path = root / "storage" / "setup_state_events.json"
+        self.session_plans_path = root / "storage" / "session_plans.json"
         self.analyst_labels_path = root / "storage" / "analyst_labels.json"
         self.analyst_comparisons_path = root / "storage" / "analyst_comparisons.json"
         self.client: Client | None = None
@@ -413,6 +414,143 @@ class DatabaseService:
             rows.append(payload)
         save_trades(rows, self.analyst_comparisons_path)
         return comparison_id
+
+    def save_session_plan(self, plan: Dict[str, Any], analysis_context: Dict[str, Any] | None = None) -> str:
+        """Persist a day-map / session-plan snapshot for production auditability.
+
+        Unlike trades, plans must be visible even when NO trade was opened.
+        Each save writes a snapshot row so the dashboard/API can show what the
+        system believed the day map was at that analysis cycle.
+        """
+        if not isinstance(plan, dict):
+            return ""
+        analysis_context = analysis_context or {}
+        now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        symbol = str(plan.get("symbol") or analysis_context.get("symbol") or self.config.get("symbol", "XAU/USD"))
+        snapshot_id = str(
+            plan.get("snapshot_id")
+            or analysis_context.get("snapshot_id")
+            or f"SESSION_PLAN_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}_{uuid.uuid4().hex[:8]}"
+        )
+        payload = {
+            "id": snapshot_id,
+            "plan_id": plan.get("plan_id"),
+            "scenario_id": plan.get("scenario_id"),
+            "symbol": symbol,
+            "session_label": plan.get("session_label"),
+            "session_quality": plan.get("session_quality"),
+            "session_bias": plan.get("session_bias"),
+            "scenario_type": plan.get("scenario_type"),
+            "planner_source": plan.get("planner_source"),
+            "authority_state": plan.get("authority_state"),
+            "authority_direction": plan.get("authority_direction"),
+            "plan_ready": bool(plan.get("plan_ready", False)),
+            "plan_status": plan.get("plan_status"),
+            "plan_reason": plan.get("plan_reason"),
+            "planner_confidence": plan.get("planner_confidence"),
+            "planner_grade": plan.get("planner_grade"),
+            "poi_classification": plan.get("poi_classification"),
+            "extreme_poi": bool(plan.get("extreme_poi", False)),
+            "primary_entry_price": plan.get("primary_entry_price"),
+            "standby_entry_price": plan.get("standby_entry_price"),
+            "invalidation_level": plan.get("invalidation_level"),
+            "target_liquidity": plan.get("target_liquidity"),
+            "market_zone_context": plan.get("market_zone_context"),
+            "structure_trend": plan.get("structure_trend"),
+            "structure_quality": plan.get("structure_quality"),
+            "execution_preference": plan.get("execution_preference"),
+            "expected_path": plan.get("expected_path"),
+            "current_price": analysis_context.get("current_price"),
+            "market_data_source": analysis_context.get("market_data_source"),
+            "analysis_run_at": analysis_context.get("analysis_run_at") or now_iso,
+            "plan_created_at": plan.get("plan_created_at") or now_iso,
+            "plan_expires_at": plan.get("plan_expires_at"),
+            "payload": plan,
+            "telegram_sent_at": None,
+            "telegram_delivery_note": None,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
+        if self.use_supabase and self.client:
+            try:
+                self.client.table("session_plans").insert(payload).execute()
+                return snapshot_id
+            except Exception as exc:  # noqa: BLE001
+                self.logger.error("Failed to insert session plan snapshot in Supabase, falling back local: %s", exc)
+        rows = load_trades(self.session_plans_path)
+        rows.append(payload)
+        rows = sorted(
+            rows,
+            key=lambda row: str(row.get("analysis_run_at") or row.get("updated_at") or row.get("created_at") or ""),
+            reverse=True,
+        )[:500]
+        save_trades(rows, self.session_plans_path)
+        return snapshot_id
+
+    def get_recent_session_plans(
+        self,
+        *,
+        limit: int = 20,
+        symbol: str | None = None,
+        plan_ready_only: bool = False,
+        sent_only: bool = False,
+    ) -> List[Dict[str, Any]]:
+        if self.use_supabase and self.client:
+            try:
+                query = self.client.table("session_plans").select("*").order("analysis_run_at", desc=True).limit(limit)
+                if symbol:
+                    query = query.eq("symbol", str(symbol))
+                if plan_ready_only:
+                    query = query.eq("plan_ready", True)
+                response = query.execute()
+                rows = list(response.data or [])
+                if sent_only:
+                    rows = [row for row in rows if row.get("telegram_sent_at")]
+                return rows
+            except Exception as exc:  # noqa: BLE001
+                self.logger.error("Failed to fetch session plans from Supabase: %s", exc)
+        rows = load_trades(self.session_plans_path)
+        if symbol:
+            rows = [row for row in rows if str(row.get("symbol") or "") == str(symbol)]
+        if plan_ready_only:
+            rows = [row for row in rows if bool(row.get("plan_ready", False))]
+        if sent_only:
+            rows = [row for row in rows if row.get("telegram_sent_at")]
+        rows.sort(key=lambda row: str(row.get("analysis_run_at") or row.get("updated_at") or row.get("created_at") or ""), reverse=True)
+        return rows[:limit]
+
+    def get_latest_session_plan(self, symbol: str | None = None, *, plan_ready_only: bool = False) -> Dict[str, Any] | None:
+        rows = self.get_recent_session_plans(limit=1, symbol=symbol, plan_ready_only=plan_ready_only)
+        return rows[0] if rows else None
+
+    def get_latest_sent_session_plan(self, symbol: str | None = None, *, plan_ready_only: bool = False) -> Dict[str, Any] | None:
+        rows = self.get_recent_session_plans(limit=1, symbol=symbol, plan_ready_only=plan_ready_only, sent_only=True)
+        return rows[0] if rows else None
+
+    def mark_session_plan_telegram_sent(self, snapshot_id: str, note: str | None = None) -> None:
+        if not snapshot_id:
+            return
+        now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        updates = {
+            "telegram_sent_at": now_iso,
+            "telegram_delivery_note": str(note or "session_plan_telegram"),
+            "updated_at": now_iso,
+        }
+        if self.use_supabase and self.client:
+            try:
+                self.client.table("session_plans").update(updates).eq("id", snapshot_id).execute()
+                return
+            except Exception as exc:  # noqa: BLE001
+                self.logger.error("Failed to mark session plan Telegram delivery in Supabase: %s", exc)
+        rows = load_trades(self.session_plans_path)
+        changed = False
+        for row in rows:
+            if str(row.get("id")) == str(snapshot_id):
+                row.update(updates)
+                changed = True
+                break
+        if changed:
+            save_trades(rows, self.session_plans_path)
 
     @staticmethod
     def _build_regime_composite(tech_regime: dict) -> str:
