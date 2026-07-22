@@ -537,6 +537,27 @@ def test_pending_cycles_is_persisted_as_integer_not_float() -> None:
     assert isinstance(result["updates"]["pending_cycles"], int)
 
 
+def test_planner_pending_does_not_auto_convert_to_market_when_cycle_limit_hits() -> None:
+    manager = OpenTradesManager({"order_execution": {"entry_style": "hybrid", "pending_order_max_cycles": 36}})
+    trade = base_trade(
+        type="SELL",
+        status="PENDING",
+        order_type="SELL_LIMIT",
+        entry_price=4134.79,
+        pending_cycles=35,
+        signal_snapshot={
+            "setup_context": {"pending_plan_role": "PRIMARY", "selection_role": "PRIMARY", "scenario_id": "SCENARIO::A"},
+            "session_plan": {"scenario_id": "SCENARIO::A", "session_bias": "SELL", "plan_ready": True},
+        },
+    )
+    result = manager.evaluate_trade(trade, 4118.97, candle_high=4121.67, candle_low=4116.24)
+    assert result["new_status"] == "PENDING"
+    assert result["events"] == []
+    assert result["updates"]["pending_cycles"] == 36
+    runtime = result["updates"]["signal_snapshot"]["pending_runtime"]
+    assert runtime["auto_market_conversion_disabled_for_planner"] is True
+
+
 def test_pending_auto_market_conversion_blocked_without_new_post_exit_thesis(tmp_path: Path) -> None:
     db = _db(tmp_path)
     recent_closed = {

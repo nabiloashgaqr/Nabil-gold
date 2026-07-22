@@ -208,6 +208,8 @@ def test_pending_activation_can_show_delayed_touch_revalidation_reason():
         },
     }
     text = _capture_text("send_trade_events", trade, ["ORDER_FILLED"], 4003.00, 0.0, evaluation)
+    assert "Activation:" in text
+    assert "touched its trigger and is now live" in text
     assert "Activation review:" in text
     assert "Delayed touch revalidated" in text
     assert "Scenario family:" in text
@@ -215,6 +217,30 @@ def test_pending_activation_can_show_delayed_touch_revalidation_reason():
     assert "Execution story:" in text
     assert "Cancelled leg(s):" in text
     assert "STANDBY" in text
+
+
+def test_pending_market_conversion_message_is_explicit_not_touch_fill():
+    trade = {
+        "id": "TRADE_PENDING_Z",
+        "symbol": "XAU/USD",
+        "type": "SELL",
+        "status": "PENDING",
+        "entry_price": 4134.79,
+    }
+    evaluation = {
+        "old_status": "PENDING",
+        "new_status": "OPEN",
+        "hours_open": 3.0,
+        "pending_distance_points": 0.0,
+        "updates": {
+            "entry_price": 4118.97,
+            "activation_reason": "Auto market conversion after waiting 36 cycles without fill",
+        },
+    }
+    text = _capture_text("send_trade_events", trade, ["ORDER_FILLED"], 4118.97, 0.0, evaluation)
+    assert "converted to MARKET and is now live" in text
+    assert "touched its trigger and is now live" not in text
+    assert "Auto market conversion" in text
 
 
 def test_pending_governance_can_announce_replacement_blocked():
