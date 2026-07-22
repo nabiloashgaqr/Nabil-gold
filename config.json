@@ -500,8 +500,8 @@
         "description_market_threshold_points": "في وضع hybrid: إذا كانت أقرب منطقة قوية ضمن 30 نقطة فقط من السعر الحالي، يدخل MARKET بدل تعليق أمر pending.",
         "pending_threshold_points": 20,
         "description_pending_threshold_points": "حد تقريبي لتصنيف LIMIT/STOP مقابل MARKET عندما يكون الدخول بعيداً عن السعر الحالي بما يكفي.",
-        "pending_order_max_cycles": 6,
-        "description_pending_order_max_cycles": "في وضع hybrid: إذا بقي الأمر المعلق 6 دورات تحليل بدون fill يمكن تحويله إلى MARKET حسب منطق OpenTradesManager.",
+        "pending_order_max_cycles": 36,
+        "description_pending_order_max_cycles": "في وضع hybrid: إذا بقي الأمر المعلق 36 دورة تحليل بدون fill (حوالي 3 ساعات) يمكن تحويله إلى MARKET حسب منطق OpenTradesManager، بدل المطاردة السريعة بعد 30 دقيقة فقط.",
         "pending_expire_after_hours": 24,
         "description_pending_expire_after_hours": "إذا بقي أمر LIMIT/STOP معلقاً أكثر من 24 ساعة بدون تفعيل يُلغى تلقائياً كـ EXPIRED بدل أن يبقى للأبد.",
         "pending_news_hold": {
