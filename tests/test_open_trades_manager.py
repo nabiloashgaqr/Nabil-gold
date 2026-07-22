@@ -522,6 +522,21 @@ def test_stale_pending_touch_can_activate_after_successful_revalidation() -> Non
     assert "Delayed touch revalidated" in result["updates"]["activation_reason"]
 
 
+def test_pending_cycles_is_persisted_as_integer_not_float() -> None:
+    manager = OpenTradesManager({"order_execution": {"entry_style": "hybrid", "pending_order_max_cycles": 6}})
+    trade = base_trade(
+        type="SELL",
+        status="PENDING",
+        order_type="SELL_LIMIT",
+        entry_price=2360.0,
+        pending_cycles=0,
+    )
+    result = manager.evaluate_trade(trade, 2352.0, candle_high=2354.0, candle_low=2350.0)
+    assert result["new_status"] == "PENDING"
+    assert result["updates"]["pending_cycles"] == 1
+    assert isinstance(result["updates"]["pending_cycles"], int)
+
+
 def test_pending_auto_market_conversion_blocked_without_new_post_exit_thesis(tmp_path: Path) -> None:
     db = _db(tmp_path)
     recent_closed = {
