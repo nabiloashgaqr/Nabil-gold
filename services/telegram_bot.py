@@ -522,6 +522,10 @@ class TelegramService:
         gemini_news_review = plan.get("gemini_news_review") or {}
 
         top_title = "SESSION OPENING PLAN" if delivery_kind == "OPENING_PLAN" else "PLAN UPDATE"
+        objective_label = str(manual_plan.get("objective_label") or plan.get("day_objective_label") or "").strip()
+        market_objective_label = str(manual_plan.get("market_objective_label") or plan.get("market_objective_label") or "").strip()
+        execution_priority_label = str(manual_plan.get("execution_priority_label") or "").strip()
+        objective_alignment = str(manual_plan.get("objective_alignment") or plan.get("objective_alignment") or "").strip()
         lines = [
             f"🧭 <b>{html.escape(symbol)} — {html.escape(top_title)}</b>",
             f"<b>{html.escape(headline)}</b>",
@@ -530,6 +534,16 @@ class TelegramService:
             f"🏷️ <b>Session:</b> {html.escape(str(plan.get('session_label') or '--'))} · {html.escape(str(plan.get('session_quality') or '--'))}",
             f"🏅 <b>Plan:</b> {html.escape(grade)} {confidence:.1f}% · {html.escape(authority)}",
         ]
+        if market_objective_label:
+            lines.append(f"🎯 <b>Market objective:</b> {html.escape(market_objective_label)}")
+        if objective_label and objective_label != market_objective_label:
+            lines.append(f"🧩 <b>Plan type:</b> {html.escape(objective_label)}")
+        elif objective_label:
+            lines.append(f"🎯 <b>Objective:</b> {html.escape(objective_label)}")
+        if execution_priority_label:
+            lines.append(f"🧭 <b>Execution priority:</b> {html.escape(execution_priority_label)}")
+        if objective_alignment == "COUNTER_OBJECTIVE_REVERSAL_CONFIRMED":
+            lines.append("⚠️ <b>Mode:</b> Counter-objective reversal — no add leg until broader objective flips")
         if delivery_reason:
             lines.append(f"📝 <b>Why now:</b> {html.escape(delivery_reason.replace('_', ' '))}")
         lines.append("──────────────────")
@@ -636,6 +650,17 @@ class TelegramService:
         if planner_led and isinstance(planner_gate, dict) and planner_gate.get("allow"):
             gate_reason = str(planner_gate.get("reason") or "Planner execution admitted").strip()
             lines.append(f"✅ Admission: {html.escape(gate_reason)}")
+        if planner_led:
+            plan = decision.get("session_plan") or {}
+            market_objective_label = str(((plan.get("manual_plan") or {}).get("market_objective_label") if isinstance(plan, dict) else "") or plan.get("market_objective_label") or "").strip()
+            execution_priority_label = str(((plan.get("manual_plan") or {}).get("execution_priority_label") if isinstance(plan, dict) else "") or "").strip()
+            objective_alignment = str(((plan.get("manual_plan") or {}).get("objective_alignment") if isinstance(plan, dict) else "") or plan.get("objective_alignment") or "").strip()
+            if market_objective_label:
+                lines.append(f"🎯 Objective: {html.escape(market_objective_label)}")
+            if execution_priority_label:
+                lines.append(f"🧭 Priority: {html.escape(execution_priority_label)}")
+            if objective_alignment == "COUNTER_OBJECTIVE_REVERSAL_CONFIRMED":
+                lines.append("⚠️ Counter-objective reversal — main leg only")
         if quality:
             lines.append(f"🏅 Quality: {html.escape(str(quality.get('grade', '')))} {html.escape(str(quality.get('score', '')))}".rstrip())
         strength_line = self._session_plan_signal_strength_line(decision) if planner_led else self._signal_strength_line(decision)
