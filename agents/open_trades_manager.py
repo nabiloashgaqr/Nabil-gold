@@ -928,6 +928,94 @@ class OpenTradesManager(BaseAgent):
             return abs(calculate_pips(low, high, "BUY", symbol))
         return 0.0
 
+    def _has_planner_pending_context(self, trade: Dict[str, Any]) -> bool:
+        snapshot = self._trade_snapshot(trade)
+        setup = snapshot.get("setup_context") or {}
+        plan = snapshot.get("session_plan") or {}
+        if isinstance(setup, dict) and (
+            setup.get("pending_plan_role")
+            or setup.get("selection_role")
+            or setup.get("scenario_id")
+            or str(setup.get("id") or "").startswith("DAYMAP::")
+        ):
+            return True
+        if isinstance(plan, dict) and (
+            plan.get("scenario_id")
+            or plan.get("plan_id")
+            or plan.get("planner_confidence") is not None
+            or plan.get("session_bias")
+        ):
+            return True
+        return False
+
+    def _planned_rr_value(self, trade: Dict[str, Any]) -> float:
+        try:
+            direct = float(trade.get("planned_rr"))
+            if direct > 0:
+                return direct
+        except (TypeError, ValueError):
+            pass
+        snapshot = self._trade_snapshot(trade)
+        signal = snapshot.get("signal") or {}
+        for key in ("rr_ratio", "tp2_rr"):
+            try:
+                value = float(signal.get(key))
+                if value > 0:
+                    return value
+            except (TypeError, ValueError):
+                continue
+        return 0.0
+
+    def _session_plan_row_payload(self, row: Dict[str, Any] | None) -> Dict[str, Any]:
+        if not isinstance(row, dict):
+            return {}
+        payload = row.get("payload")
+        if isinstance(payload, dict) and payload:
+            return dict(payload)
+        return dict(row)
+
+    def _session_plan_reference_time(self, row: Dict[str, Any] | None) -> datetime | None:
+        payload = self._session_plan_row_payload(row)
+        for key in ("analysis_run_at", "plan_created_at", "created_at", "updated_at"):
+            parsed = self._parse_dt(str((row or {}).get(key) or payload.get(key) or ""))
+            if parsed:
+                return parsed
+        return None
+
+    def _opposite_ready_plan_cancel_reason(
+        self,
+        trade: Dict[str, Any],
+        *,
+        database: Any | None,
+        symbol: str,
+        trade_type: str,
+    ) -> str | None:
+        if database is None or not hasattr(database, "get_latest_session_plan"):
+            return None
+        try:
+            latest_row = database.get_latest_session_plan(symbol=symbol, plan_ready_only=True)
+        except Exception:
+            return None
+        if not isinstance(latest_row, dict) or not latest_row:
+            return None
+        plan = self._session_plan_row_payload(latest_row)
+        latest_bias = str(plan.get("session_bias") or latest_row.get("session_bias") or "").upper()
+        if latest_bias not in {"BUY", "SELL"} or latest_bias == trade_type:
+            return None
+        if not bool(plan.get("plan_ready", latest_row.get("plan_ready", False))):
+            return None
+        latest_status = str(plan.get("plan_status") or latest_row.get("plan_status") or "").upper()
+        if latest_status and latest_status != "READY":
+            return None
+        authority_state = str(plan.get("authority_state") or latest_row.get("authority_state") or "").upper()
+        if authority_state in {"BLOCKED", "ERROR"}:
+            return None
+        latest_time = self._session_plan_reference_time(latest_row)
+        trade_time = self._parse_dt(str(trade.get("created_at") or trade.get("entry_time") or trade.get("opened_at") or ""))
+        if latest_time and trade_time and latest_time <= trade_time:
+            return None
+        return f"newer opposite ready session plan ({latest_bias}) replaced this planner pending"
+
     def _near_miss_review(
         self,
         trade: Dict[str, Any],
@@ -1250,6 +1338,8 @@ class OpenTradesManager(BaseAgent):
             target_progress_pct=target_progress_pct,
             plan_expires_at=str(((snapshot.get("session_plan") or {}).get("plan_expires_at")) or runtime.get("plan_expires_at") or ""),
         )
+        planner_pending = self._has_planner_pending_context(trade)
+        planned_rr = self._planned_rr_value(trade)
 
         def _late_touch_required() -> bool:
             return self.pending_touch_revalidation_enabled and freshness_state in {"STALE", "REVALIDATION_REQUIRED"}
@@ -1294,6 +1384,96 @@ class OpenTradesManager(BaseAgent):
                 "new_status": "EXPIRED",
                 "pnl_points": 0.0,
                 "events": ["EXPIRED"],
+                "updates": base_updates,
+                "progress_to_tp1": 0.0,
+                "hours_open": hours_open,
+                "pending_distance_points": dist_pts,
+            }
+
+        opposite_plan_reason = None
+        if not filled_touch and planner_pending:
+            opposite_plan_reason = self._opposite_ready_plan_cancel_reason(
+                trade,
+                database=database,
+                symbol=symbol,
+                trade_type=trade_type,
+            )
+        if opposite_plan_reason:
+            _persist_runtime(
+                cancelled_by_opposite_ready_plan=True,
+                opposite_ready_plan_cancel_reason=opposite_plan_reason,
+                opposite_ready_plan_cancelled_at=self._iso(now),
+            )
+            base_updates.update({
+                "status": "CANCELLED",
+                "result": "CANCELLED",
+                "closed_at": self._iso(now),
+                "close_time": self._iso(now),
+                "reasons": [f"Planner pending cancelled by opposite plan guard: {opposite_plan_reason}"],
+            })
+            return {
+                "trade_id": trade.get("id"),
+                "old_status": "PENDING",
+                "new_status": "CANCELLED",
+                "pnl_points": 0.0,
+                "events": ["PENDING_CANCELLED"],
+                "updates": base_updates,
+                "progress_to_tp1": 0.0,
+                "hours_open": hours_open,
+                "pending_distance_points": dist_pts,
+            }
+
+        # Professional planner hygiene: if a mapped pending order is already
+        # structurally stale, do not leave it hanging until a late touch or a
+        # 24h expiry. Once the market already showed the map is old, cancel it.
+        if not filled_touch and planner_pending and freshness_state in {"STALE", "REVALIDATION_REQUIRED"}:
+            stale_reason = "; ".join(str(x) for x in freshness_reasons if str(x).strip()) or f"freshness state {freshness_state.lower()}"
+            _persist_runtime(
+                cancelled_as_stale=True,
+                stale_cancel_reason=stale_reason,
+                stale_cancelled_at=self._iso(now),
+            )
+            base_updates.update({
+                "status": "CANCELLED",
+                "result": "CANCELLED",
+                "closed_at": self._iso(now),
+                "close_time": self._iso(now),
+                "reasons": [f"Planner pending cancelled as stale: {stale_reason}"],
+            })
+            return {
+                "trade_id": trade.get("id"),
+                "old_status": "PENDING",
+                "new_status": "CANCELLED",
+                "pnl_points": 0.0,
+                "events": ["PENDING_CANCELLED"],
+                "updates": base_updates,
+                "progress_to_tp1": 0.0,
+                "hours_open": hours_open,
+                "pending_distance_points": dist_pts,
+            }
+
+        # Safety kill-switch: a planner pending order with sub-minimum RR must
+        # not stay live even if it slipped in from an older/legacy map.
+        if not filled_touch and planner_pending and planned_rr > 0 and planned_rr < min_rr_ratio:
+            rr_reason = f"planned RR {planned_rr:.2f} below minimum {min_rr_ratio:.2f}"
+            _persist_runtime(
+                cancelled_for_low_rr=True,
+                low_rr_cancel_reason=rr_reason,
+                low_rr_cancelled_at=self._iso(now),
+            )
+            base_updates.update({
+                "status": "CANCELLED",
+                "result": "CANCELLED",
+                "closed_at": self._iso(now),
+                "close_time": self._iso(now),
+                "reasons": [f"Planner pending cancelled by RR guard: {rr_reason}"],
+            })
+            return {
+                "trade_id": trade.get("id"),
+                "old_status": "PENDING",
+                "new_status": "CANCELLED",
+                "pnl_points": 0.0,
+                "events": ["PENDING_CANCELLED"],
                 "updates": base_updates,
                 "progress_to_tp1": 0.0,
                 "hours_open": hours_open,
