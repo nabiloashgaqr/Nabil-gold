@@ -347,6 +347,24 @@ def test_session_planner_blocks_when_day_map_authority_is_conflicted(tmp_path: P
     assert "conflicted" in str(plan["plan_reason"]).lower()
 
 
+def test_session_planner_breaks_authority_tie_with_structure_and_sweep_objective(tmp_path: Path) -> None:
+    service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True}})
+    service.storage_path = tmp_path / "session_plans.json"
+    results = _results()
+    results["smc"]["setup_candidates"] = []
+    results["daily_bias"] = {"bias": "NEUTRAL", "confidence": 50}
+    results["news"]["macro_direction"] = {"bias": "BEARISH_GOLD", "confidence": 70}
+    results["macro_fundamental"]["macro_direction"] = {"bias": "BEARISH_GOLD", "confidence": 70}
+    results["smc"]["zone"] = "DISCOUNT"
+    results["smc"]["market_structure"] = {"trend": "BULLISH", "structure_quality": "STRONG"}
+    results["smc"]["liquidity"]["recent_sweep"] = {"occurred": True, "type": "sell_side", "reference_type": "session_low", "confirmation": "STRONG"}
+    plan = service.build_plan(results)
+    assert plan["authority_state"] == "CONFIRMED"
+    assert plan["authority_direction"] == "BUY"
+    assert "market objective" in str(plan["authority_reason"]).lower()
+    assert "conflicted" not in str(plan["plan_reason"]).lower()
+
+
 def test_session_planner_classifies_extreme_poi_when_alignment_is_strong(tmp_path: Path) -> None:
     service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True}})
     service.storage_path = tmp_path / "session_plans.json"
