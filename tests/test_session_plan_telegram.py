@@ -29,6 +29,8 @@ def test_send_session_plan_formats_manual_style_message(monkeypatch) -> None:
         "planner_grade": "A",
         "authority_state": "CONFIRMED",
         "authority_reason": "SELL alignment from daily_bias, macro, structure",
+        "day_objective": "PREMIUM_REVERSAL_SHORT",
+        "day_objective_label": "Reversal short from premium",
         "scenario_type": "LIQUIDITY_REVERSAL",
         "primary_entry_zone": {"low": 4020.0, "high": 4028.0},
         "standby_entry_zone": {"low": 4030.0, "high": 4038.0},
@@ -50,9 +52,17 @@ def test_send_session_plan_formats_manual_style_message(monkeypatch) -> None:
         "gemini_plan_review": {"available": True, "market_bias": "SELL", "reason": "Premium rejection day map."},
         "gemini_macro_review": {"available": True, "macro_verdict": "BEARISH_GOLD", "confidence": 67, "reason": "Higher yields pressure gold."},
         "gemini_news_review": {"available": True, "risk_level": "LOW", "trading_advice": "No major blocker to the bearish map."},
-        "delivery_context": {"message_kind": "OPENING_PLAN", "delivery_reason": "first_ready_plan_this_session"},
+        "market_objective_label": "Downside continuation after mitigation",
+        "objective_alignment": "COUNTER_OBJECTIVE_REVERSAL_CONFIRMED",
+        "delivery_context": {"message_kind": "OPENING_PLAN", "delivery_reason": "first_ready plan this session"},
         "plan_ready": True,
         "plan_status": "READY",
+        "manual_plan": {
+            "objective_label": "Reversal short from premium",
+            "market_objective_label": "Downside continuation after mitigation",
+            "execution_priority_label": "Counter-objective reversal — main leg only",
+            "objective_alignment": "COUNTER_OBJECTIVE_REVERSAL_CONFIRMED",
+        },
     }
 
     assert service.send_session_plan(plan) is True
@@ -75,6 +85,12 @@ def test_send_session_plan_formats_manual_style_message(monkeypatch) -> None:
     assert "AI REVIEW" in text
     assert "Why now" in text
     assert "first ready plan this session" in text
+    assert "Market objective" in text
+    assert "Downside continuation after mitigation" in text
+    assert "Plan type" in text
+    assert "Reversal short from premium" in text
+    assert "Execution priority" in text
+    assert "main leg only" in text
     assert "Gemini" in text
     assert "Macro" in text
     assert "4020.00" in text
