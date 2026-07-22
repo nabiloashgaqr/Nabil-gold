@@ -10,7 +10,12 @@ drops ONLY the genuinely-missing column(s) and retries, preserving everything el
 
 from __future__ import annotations
 
+from pathlib import Path
+import sys
 from typing import Any, Dict, List
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(ROOT))
 
 from services.database import DatabaseService
 
@@ -120,3 +125,24 @@ def test_update_succeeds_directly_when_schema_complete():
     assert stored == updates
     # Exactly one successful call (no retries needed).
     assert len(db.client._table.calls) == 1  # type: ignore[attr-defined]
+
+
+def test_legacy_payload_keeps_pending_lifecycle_fields() -> None:
+    db = _make_db(set())
+    payload = db._legacy_payload({
+        "id": "TRADE_X",
+        "status": "PENDING",
+        "order_kind": "LIMIT",
+        "order_type": "SELL_LIMIT",
+        "pending_cycles": 4,
+        "activation_reason": "Near-miss market conversion",
+        "market_data_source": "twelvedata",
+        "signal_snapshot": {"pending_runtime": {"freshness_state": "AGING"}},
+        "current_pnl_points": 0,
+        "last_candle_high": 4122.61,
+        "last_candle_low": 4116.60,
+    })
+    assert payload["pending_cycles"] == 4
+    assert payload["order_type"] == "SELL_LIMIT"
+    assert payload["market_data_source"] == "twelvedata"
+    assert payload["signal_snapshot"]["pending_runtime"]["freshness_state"] == "AGING"

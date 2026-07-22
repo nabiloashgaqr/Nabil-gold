@@ -339,6 +339,102 @@ def test_pending_freshness_marks_revalidation_required_after_plan_expiry() -> No
     assert any("expired" in str(x).lower() for x in runtime["freshness_reasons"])
 
 
+def test_planner_pending_is_cancelled_immediately_once_it_becomes_stale() -> None:
+    manager = OpenTradesManager({
+        "schedule": {"timezone": "Asia/Hebron"},
+        "pending_freshness": {
+            "enabled": True,
+            "aging_after_hours": 2,
+            "stale_after_hours": 6,
+            "stale_after_excursion_points": 250,
+            "stale_after_target_progress_pct": 60,
+            "mark_revalidation_required_on_session_change": False,
+        },
+        "order_execution": {"entry_style": "hybrid", "pending_order_max_cycles": 99, "pending_expire_after_hours": 24},
+    })
+    trade = base_trade(
+        type="SELL",
+        status="PENDING",
+        order_type="SELL_LIMIT",
+        entry_price=4006.0,
+        tp1=3990.0,
+        tp2=3965.0,
+        signal_snapshot={
+            "session_info": {"current_session": "London + New York Afternoon"},
+            "setup_context": {"pending_plan_role": "PRIMARY", "selection_role": "PRIMARY"},
+            "session_plan": {"scenario_id": "SCENARIO::A", "session_bias": "SELL"},
+        },
+    )
+    result = manager.evaluate_trade(trade, 3960.0, candle_high=3965.0, candle_low=3958.0)
+    assert result["new_status"] == "CANCELLED"
+    assert result["events"] == ["PENDING_CANCELLED"]
+    assert "Planner pending cancelled as stale" in result["updates"]["reasons"][0]
+
+
+def test_planner_pending_is_cancelled_immediately_when_rr_is_below_minimum() -> None:
+    manager = OpenTradesManager({
+        "risk_settings": {"min_rr_ratio": 1.5},
+        "pending_freshness": {"enabled": False},
+        "order_execution": {"entry_style": "hybrid", "pending_order_max_cycles": 99, "pending_expire_after_hours": 24},
+    })
+    trade = base_trade(
+        type="BUY",
+        status="PENDING",
+        order_type="BUY_LIMIT",
+        entry_price=4051.18,
+        stop_loss=3998.72,
+        tp1=4061.92,
+        tp2=4072.66,
+        planned_rr=0.41,
+        signal_snapshot={
+            "setup_context": {"pending_plan_role": "PRIMARY", "selection_role": "PRIMARY"},
+            "session_plan": {"scenario_id": "SCENARIO::LOW_RR", "session_bias": "BUY"},
+        },
+    )
+    result = manager.evaluate_trade(trade, 4120.0, candle_high=4122.0, candle_low=4118.0)
+    assert result["new_status"] == "CANCELLED"
+    assert result["events"] == ["PENDING_CANCELLED"]
+    assert "RR guard" in result["updates"]["reasons"][0]
+
+
+def test_planner_pending_is_cancelled_when_newer_opposite_ready_plan_exists() -> None:
+    manager = OpenTradesManager({
+        "pending_freshness": {"enabled": False},
+        "order_execution": {"entry_style": "hybrid", "pending_order_max_cycles": 99, "pending_expire_after_hours": 24},
+    })
+
+    class DummyDB:
+        def get_latest_session_plan(self, symbol=None, plan_ready_only=False):
+            return {
+                "symbol": symbol or "XAU/USD",
+                "session_bias": "SELL",
+                "plan_ready": True,
+                "plan_status": "READY",
+                "authority_state": "CONFIRMED",
+                "analysis_run_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+    trade = base_trade(
+        type="BUY",
+        status="PENDING",
+        order_type="BUY_LIMIT",
+        entry_price=4000.0,
+        stop_loss=3960.0,
+        tp1=4050.0,
+        tp2=4090.0,
+        created_at=(datetime.now(timezone.utc) - timedelta(hours=3)).isoformat(),
+        entry_time=(datetime.now(timezone.utc) - timedelta(hours=3)).isoformat(),
+        signal_snapshot={
+            "setup_context": {"pending_plan_role": "PRIMARY", "selection_role": "PRIMARY"},
+            "session_plan": {"scenario_id": "SCENARIO::BUY::OLD", "session_bias": "BUY", "plan_ready": True},
+        },
+    )
+    result = manager.evaluate_trade(trade, 4120.0, candle_high=4122.0, candle_low=4118.0, database=DummyDB())
+    assert result["new_status"] == "CANCELLED"
+    assert result["events"] == ["PENDING_CANCELLED"]
+    assert "opposite plan guard" in result["updates"]["reasons"][0]
+
+
 def test_pending_touched_during_news_blackout_enters_news_hold() -> None:
     manager = OpenTradesManager({"order_execution": {"entry_style": "hybrid", "pending_news_hold": {"enabled": True, "reactivation_delay_minutes": 3}}})
     trade = base_trade(type="SELL", status="PENDING", order_type="SELL_LIMIT", entry_price=2355.0)
@@ -583,3 +679,148 @@ def test_main_area_stop_loss_can_explain_day_map_failure() -> None:
     evaluations = manager.update_trades([trade], current_price=3979.0, candle_high=4001.0, candle_low=3978.5, now=datetime.now(timezone.utc))
     ctx = evaluations[0]["plan_execution_context"]
     assert ctx["story"] == "Main day-map execution failed from the mapped area."
+
+
+def test_pending_sell_limit_fills_from_recent_candle_window_even_if_latest_candle_is_below_entry() -> None:
+    manager = OpenTradesManager({"pending_freshness": {"enabled": False}, "order_execution": {"entry_style": "market"}})
+    trade = base_trade(
+        type="SELL",
+        status="PENDING",
+        order_type="SELL_LIMIT",
+        entry_price=4065.05,
+        created_at="2026-07-21T11:11:15+00:00",
+        entry_time="2026-07-21T11:11:15+00:00",
+        last_updated="2026-07-21T12:20:10+00:00",
+        tp1=4015.05,
+        tp2=3975.05,
+    )
+    recent_candles = [
+        {"time": "2026-07-21T12:25:00Z", "open": 4064.86, "high": 4065.55, "low": 4060.47, "close": 4061.54},
+        {"time": "2026-07-21T12:30:00Z", "open": 4061.54, "high": 4062.10, "low": 4057.90, "close": 4058.39},
+    ]
+    result = manager.evaluate_trade(
+        trade,
+        4058.39,
+        candle_high=4062.10,
+        candle_low=4057.90,
+        recent_candles=recent_candles,
+    )
+    assert result["new_status"] == "OPEN"
+    assert result["events"] == ["ORDER_FILLED"]
+
+
+
+def test_open_trade_saves_recent_30m_high_low_from_last_6_candles() -> None:
+    manager = OpenTradesManager()
+    trade = base_trade(type="BUY", status="OPEN", entry_price=4000.0, stop_loss=3980.0, tp1=4010.0, tp2=4020.0)
+    recent_candles = [
+        {"time": "2026-07-21T12:00:00Z", "high": 4008.0, "low": 3998.0},
+        {"time": "2026-07-21T12:05:00Z", "high": 4012.0, "low": 3999.5},
+        {"time": "2026-07-21T12:10:00Z", "high": 4007.5, "low": 3997.2},
+    ]
+    result = manager.evaluate_trade(trade, 4006.0, candle_high=4006.5, candle_low=4001.0, recent_candles=recent_candles)
+    assert result["updates"]["recent_30m_high"] == 4012.0
+    assert result["updates"]["recent_30m_low"] == 3997.2
+
+
+def test_pending_trade_saves_recent_30m_high_low_from_last_6_candles() -> None:
+    manager = OpenTradesManager({"pending_freshness": {"enabled": False}, "order_execution": {"entry_style": "market"}})
+    trade = base_trade(type="SELL", status="PENDING", order_type="SELL_LIMIT", entry_price=4065.05, tp1=4015.05, tp2=3975.05)
+    recent_candles = [
+        {"time": "2026-07-21T12:20:00Z", "high": 4064.2, "low": 4058.0},
+        {"time": "2026-07-21T12:25:00Z", "high": 4065.55, "low": 4060.47},
+        {"time": "2026-07-21T12:30:00Z", "high": 4062.10, "low": 4057.90},
+    ]
+    result = manager.evaluate_trade(trade, 4058.39, candle_high=4062.10, candle_low=4057.90, recent_candles=recent_candles)
+    assert result["updates"]["recent_30m_high"] == 4065.55
+    assert result["updates"]["recent_30m_low"] == 4057.9
+
+
+def test_pending_near_miss_sell_limit_can_convert_to_open_after_rejection() -> None:
+    manager = OpenTradesManager({
+        "order_execution": {
+            "entry_style": "hybrid",
+            "near_miss_execution": {
+                "enabled": True,
+                "min_halo_points": 12,
+                "max_halo_points": 25,
+                "zone_width_multiplier": 0.75,
+                "recent_range_multiplier": 0.18,
+                "min_confirmation_points": 12,
+                "max_target_progress_pct": 30,
+                "min_remaining_rr": 1.5,
+                "require_planner_context": True,
+            }
+        },
+        "pending_freshness": {"enabled": False},
+        "risk_settings": {"min_rr_ratio": 1.5},
+    })
+    trade = base_trade(
+        type="SELL",
+        status="PENDING",
+        order_type="SELL_LIMIT",
+        entry_price=4065.05,
+        stop_loss=4105.05,
+        tp1=4015.05,
+        tp2=3975.05,
+        signal_snapshot={
+            "setup_context": {"pending_plan_role": "PRIMARY", "selection_role": "PRIMARY"},
+            "signal": {"entry": {"low": 4063.24, "high": 4066.86}},
+        },
+    )
+    recent_candles = [
+        {"time": "2026-07-21T12:25:00Z", "high": 4064.10, "low": 4060.47},
+        {"time": "2026-07-21T12:30:00Z", "high": 4062.10, "low": 4057.90},
+    ]
+    result = manager.evaluate_trade(
+        trade,
+        4058.39,
+        candle_high=4062.10,
+        candle_low=4057.90,
+        recent_candles=recent_candles,
+    )
+    assert result["new_status"] == "OPEN"
+    assert result["events"] == ["ORDER_FILLED"]
+    assert "Near-miss market conversion" in result["updates"]["activation_reason"]
+
+
+def test_pending_near_miss_does_not_chase_after_large_target_progress() -> None:
+    manager = OpenTradesManager({
+        "order_execution": {
+            "entry_style": "hybrid",
+            "near_miss_execution": {
+                "enabled": True,
+                "max_target_progress_pct": 10,
+                "require_planner_context": True,
+            }
+        },
+        "pending_freshness": {"enabled": False},
+        "risk_settings": {"min_rr_ratio": 1.5},
+    })
+    trade = base_trade(
+        type="SELL",
+        status="PENDING",
+        order_type="SELL_LIMIT",
+        entry_price=4065.05,
+        stop_loss=4105.05,
+        tp1=4015.05,
+        tp2=3975.05,
+        signal_snapshot={
+            "setup_context": {"pending_plan_role": "PRIMARY", "selection_role": "PRIMARY"},
+            "signal": {"entry": {"low": 4063.24, "high": 4066.86}},
+        },
+    )
+    recent_candles = [
+        {"time": "2026-07-21T12:25:00Z", "high": 4064.10, "low": 4060.47},
+        {"time": "2026-07-21T12:30:00Z", "high": 4062.10, "low": 4048.00},
+    ]
+    result = manager.evaluate_trade(
+        trade,
+        4049.00,
+        candle_high=4062.10,
+        candle_low=4048.00,
+        recent_candles=recent_candles,
+    )
+    assert result["new_status"] == "PENDING"
+    assert result["events"] == []
+
