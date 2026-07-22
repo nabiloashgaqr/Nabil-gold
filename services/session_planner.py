@@ -708,6 +708,25 @@ class SessionPlannerService:
                 counts[direction] += 1
                 sources[direction].append(src)
         if counts["BUY"] == counts["SELL"] and counts["BUY"] > 0:
+            objective = self._market_objective(
+                structure_trend=str((market_structure or {}).get("trend") or ""),
+                recent_sweep=recent_sweep,
+                zone_context=zone_context,
+            )
+            objective_direction = str(objective.get("direction") or "").upper()
+            if objective_direction in {"BUY", "SELL"}:
+                objective_sources = list(sources.get(objective_direction, []))
+                objective_sources.append("market_objective_tiebreak")
+                return {
+                    "state": "CONFIRMED",
+                    "direction": objective_direction,
+                    "sources": objective_sources,
+                    "count": counts.get(objective_direction, 0),
+                    "reason": (
+                        "day-map authority tie resolved by market objective: "
+                        f"{objective.get('label') or objective_direction}"
+                    ),
+                }
             return {
                 "state": "CONFLICTED",
                 "direction": None,
