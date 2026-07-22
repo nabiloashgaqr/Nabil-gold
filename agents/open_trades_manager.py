@@ -1679,74 +1679,89 @@ class OpenTradesManager(BaseAgent):
                 "pending_distance_points": 0.0,
             }
 
-        # Hybrid mode: auto-convert stale PENDING to MARKET
+        # Hybrid mode: auto-convert stale PENDING to MARKET.
+        # IMPORTANT: planner / day-map pending orders must NOT be auto-promoted
+        # just because a cycle counter elapsed. They should activate only by
+        # real touch, explicit near-miss logic, or controlled news-hold
+        # reactivation. Otherwise keep them pending until stale/opposite-plan
+        # governance cancels them.
         if not filled_touch and self.entry_style == "hybrid" and self.pending_order_max_cycles > 0:
             pending_cycles = int(self._f(trade.get("pending_cycles", 0)))
             pending_cycles += 1
-            if pending_cycles >= self.pending_order_max_cycles:
-                if _late_touch_required() or freshness_state in {"STALE", "REVALIDATION_REQUIRED"}:
-                    reason = "; ".join(freshness_reasons) if freshness_reasons else f"pending classified as {freshness_state}"
-                    _persist_runtime(auto_conversion_block_reason=reason, auto_conversion_blocked_at=self._iso(now))
+            if planner_pending:
+                _persist_runtime(
+                    auto_market_conversion_disabled_for_planner=True,
+                    last_pending_cycles=pending_cycles,
+                )
+                base_updates["pending_cycles"] = int(pending_cycles)
+            else:
+                if pending_cycles >= self.pending_order_max_cycles:
+                    if _late_touch_required() or freshness_state in {"STALE", "REVALIDATION_REQUIRED"}:
+                        reason = "; ".join(freshness_reasons) if freshness_reasons else f"pending classified as {freshness_state}"
+                        _persist_runtime(auto_conversion_block_reason=reason, auto_conversion_blocked_at=self._iso(now))
+                        base_updates.update({
+                            "status": "CANCELLED",
+                            "result": "CANCELLED",
+                            "closed_at": self._iso(now),
+                            "close_time": self._iso(now),
+                            "pending_cycles": 0,
+                            "reasons": [f"Auto market conversion blocked: {reason}"],
+                        })
+                        return {
+                            "trade_id": trade.get("id"),
+                            "old_status": "PENDING",
+                            "new_status": "CANCELLED",
+                            "pnl_points": 0.0,
+                            "events": ["PENDING_CANCELLED"],
+                            "updates": base_updates,
+                            "progress_to_tp1": 0.0,
+                            "hours_open": hours_open,
+                            "pending_distance_points": dist_pts,
+                        }
+                    allowed, reason = _conversion_allowed(current_price)
+                    if not allowed:
+                        _persist_runtime(auto_conversion_block_reason=reason, auto_conversion_blocked_at=self._iso(now))
+                        base_updates.update({
+                            "status": "CANCELLED",
+                            "result": "CANCELLED",
+                            "closed_at": self._iso(now),
+                            "close_time": self._iso(now),
+                            "pending_cycles": 0,
+                            "reasons": [f"Auto market conversion blocked: {reason}"] if reason else ["Auto market conversion blocked"],
+                        })
+                        return {
+                            "trade_id": trade.get("id"),
+                            "old_status": "PENDING",
+                            "new_status": "CANCELLED",
+                            "pnl_points": 0.0,
+                            "events": ["PENDING_CANCELLED"],
+                            "updates": base_updates,
+                            "progress_to_tp1": 0.0,
+                            "hours_open": hours_open,
+                            "pending_distance_points": dist_pts,
+                        }
+                    activation_reason = f"Auto market conversion after waiting {pending_cycles} cycles without fill"
+                    _persist_runtime(auto_market_conversion_used=True, activation_reason=activation_reason)
                     base_updates.update({
-                        "status": "CANCELLED",
-                        "result": "CANCELLED",
-                        "closed_at": self._iso(now),
-                        "close_time": self._iso(now),
+                        "status": "OPEN",
+                        "entry_time": self._iso(now),
+                        "entry_price": round(current_price, 2),
+                        "current_pnl": 0,
+                        "current_pnl_points": 0,
                         "pending_cycles": 0,
-                        "reasons": [f"Auto market conversion blocked: {reason}"],
+                        "activation_reason": activation_reason,
                     })
                     return {
                         "trade_id": trade.get("id"),
                         "old_status": "PENDING",
-                        "new_status": "CANCELLED",
+                        "new_status": "OPEN",
                         "pnl_points": 0.0,
-                        "events": ["PENDING_CANCELLED"],
+                        "events": ["ORDER_FILLED"],
                         "updates": base_updates,
                         "progress_to_tp1": 0.0,
-                        "hours_open": hours_open,
-                        "pending_distance_points": dist_pts,
+                        "hours_open": 0.0,
                     }
-                allowed, reason = _conversion_allowed(current_price)
-                if not allowed:
-                    _persist_runtime(auto_conversion_block_reason=reason, auto_conversion_blocked_at=self._iso(now))
-                    base_updates.update({
-                        "status": "CANCELLED",
-                        "result": "CANCELLED",
-                        "closed_at": self._iso(now),
-                        "close_time": self._iso(now),
-                        "pending_cycles": 0,
-                        "reasons": [f"Auto market conversion blocked: {reason}"] if reason else ["Auto market conversion blocked"],
-                    })
-                    return {
-                        "trade_id": trade.get("id"),
-                        "old_status": "PENDING",
-                        "new_status": "CANCELLED",
-                        "pnl_points": 0.0,
-                        "events": ["PENDING_CANCELLED"],
-                        "updates": base_updates,
-                        "progress_to_tp1": 0.0,
-                        "hours_open": hours_open,
-                        "pending_distance_points": dist_pts,
-                    }
-                base_updates.update({
-                    "status": "OPEN",
-                    "entry_time": self._iso(now),
-                    "entry_price": round(current_price, 2),
-                    "current_pnl": 0,
-                    "current_pnl_points": 0,
-                    "pending_cycles": 0,
-                })
-                return {
-                    "trade_id": trade.get("id"),
-                    "old_status": "PENDING",
-                    "new_status": "OPEN",
-                    "pnl_points": 0.0,
-                    "events": ["ORDER_FILLED"],
-                    "updates": base_updates,
-                    "progress_to_tp1": 0.0,
-                    "hours_open": 0.0,
-                }
-            base_updates["pending_cycles"] = int(pending_cycles)
+                base_updates["pending_cycles"] = int(pending_cycles)
 
         if filled_touch:
             if _late_touch_required():
