@@ -893,8 +893,11 @@ class TelegramService:
             if "NEWS_HOLD" in events:
                 lines.append("• <b>Activation:</b> Paused — touched during news blackout")
             elif "ORDER_FILLED" in events and old_status == "PENDING":
-                lines.append("• <b>Activation:</b> Pending order triggered and is now live")
                 activation_reason = updates.get("activation_reason")
+                if activation_reason and "market conversion" in str(activation_reason).lower():
+                    lines.append("• <b>Activation:</b> Pending order was converted to MARKET and is now live")
+                else:
+                    lines.append("• <b>Activation:</b> Pending order touched its trigger and is now live")
                 if activation_reason:
                     lines.append(f"• <b>Activation review:</b> {self._clean_text(activation_reason)}")
                 scenario_gov = evaluation.get("scenario_governor") or {}
