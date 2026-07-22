@@ -1681,7 +1681,7 @@ class OpenTradesManager(BaseAgent):
 
         # Hybrid mode: auto-convert stale PENDING to MARKET
         if not filled_touch and self.entry_style == "hybrid" and self.pending_order_max_cycles > 0:
-            pending_cycles = self._f(trade.get("pending_cycles", 0))
+            pending_cycles = int(self._f(trade.get("pending_cycles", 0)))
             pending_cycles += 1
             if pending_cycles >= self.pending_order_max_cycles:
                 if _late_touch_required() or freshness_state in {"STALE", "REVALIDATION_REQUIRED"}:
@@ -1746,7 +1746,7 @@ class OpenTradesManager(BaseAgent):
                     "progress_to_tp1": 0.0,
                     "hours_open": 0.0,
                 }
-            base_updates["pending_cycles"] = pending_cycles
+            base_updates["pending_cycles"] = int(pending_cycles)
 
         if filled_touch:
             if _late_touch_required():
