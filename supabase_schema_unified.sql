@@ -108,6 +108,11 @@ CREATE TABLE IF NOT EXISTS trades (
         'OPEN', 'PARTIAL', 'PENDING', 'TP1_HIT', 'TP2_HIT', 'SL_HIT', 'BE_HIT',
         'MANUAL_CLOSE', 'EXPIRED', 'CLOSED', 'CANCELLED'
     )),
+    order_kind VARCHAR(20),
+    order_type VARCHAR(20),
+    pending_cycles INTEGER DEFAULT 0,
+    activation_reason TEXT,
+    market_data_source TEXT,
 
     current_price DECIMAL(18, 6),
     current_pnl DECIMAL(18, 6) DEFAULT 0,
@@ -145,6 +150,8 @@ CREATE TABLE IF NOT EXISTS trades (
     updates_sent JSONB DEFAULT '[]'::jsonb,
     exit_warning BOOLEAN DEFAULT FALSE,
     management_phase VARCHAR(40),
+    last_candle_high DECIMAL(18, 6),
+    last_candle_low DECIMAL(18, 6),
     recent_30m_high DECIMAL(18, 6),
     recent_30m_low DECIMAL(18, 6),
     max_favorable_excursion DECIMAL(18, 6) DEFAULT 0,
@@ -179,6 +186,11 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS paper_trading       BOOLEAN DEFAULT 
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS paper_balance_start DECIMAL(18, 6);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS paper_lot_size      DECIMAL(18, 6);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS status              VARCHAR(30) DEFAULT 'OPEN';
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS order_kind          VARCHAR(20);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS order_type          VARCHAR(20);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS pending_cycles      INTEGER DEFAULT 0;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS activation_reason   TEXT;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS market_data_source  TEXT;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS current_price       DECIMAL(18, 6);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS current_pnl         DECIMAL(18, 6) DEFAULT 0;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS current_pnl_points  DECIMAL(18, 6) DEFAULT 0;
@@ -212,6 +224,8 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS partial_close       BOOLEAN DEFAULT 
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS updates_sent        JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS exit_warning        BOOLEAN DEFAULT FALSE;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS management_phase    VARCHAR(40);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS last_candle_high    DECIMAL(18, 6);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS last_candle_low     DECIMAL(18, 6);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS recent_30m_high     DECIMAL(18, 6);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS recent_30m_low      DECIMAL(18, 6);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS max_favorable_excursion DECIMAL(18, 6) DEFAULT 0;
