@@ -55,23 +55,31 @@ class SMCAgent(BaseAgent):
 
             direction = "BUY" if score >= 4 else "SELL" if score <= -4 else "NEUTRAL"
             signal = direction if direction in {"BUY", "SELL"} else "WAIT"
+            objective_direction = self._context_objective_direction(market_structure, liquidity, zone)
             confidence = self._confidence(score, liquidity.get("recent_sweep", {}).get("occurred", False), direction)
-            entry_suggestion = self._entry_suggestion(direction, current_price, atr, order_blocks, liquidity, dealing_range)
-            setup_candidates = self._build_setup_candidates(
-                symbol=str(market_data.get("symbol", "XAU/USD")),
-                timeframe=timeframe,
-                direction=direction,
-                current_price=current_price,
-                atr=atr,
-                confidence=confidence,
-                market_structure=market_structure,
-                order_blocks=order_blocks,
-                liquidity=liquidity,
-                fvg=fvg,
-                dealing_range=dealing_range,
-                entry_suggestion=entry_suggestion,
-                candles=recent,
-            )
+            entry_suggestion = self._entry_suggestion(direction if direction in {"BUY", "SELL"} else (objective_direction or "NEUTRAL"), current_price, atr, order_blocks, liquidity, dealing_range)
+            setup_candidates = []
+            for candidate_direction in self._candidate_direction_pool(direction, objective_direction):
+                setup_candidates.extend(
+                    self._build_setup_candidates(
+                        symbol=str(market_data.get("symbol", "XAU/USD")),
+                        timeframe=timeframe,
+                        direction=candidate_direction,
+                        current_price=current_price,
+                        atr=atr,
+                        confidence=confidence,
+                        market_structure=market_structure,
+                        liquidity=liquidity,
+                        zone_context=zone,
+                        objective_direction=objective_direction,
+                        order_blocks=order_blocks,
+                        fvg=fvg,
+                        dealing_range=dealing_range,
+                        entry_suggestion=entry_suggestion,
+                        candles=recent,
+                    )
+                )
+            setup_candidates = self._merge_setup_candidates(setup_candidates)
             setup_structure = setup_candidates[0] if setup_candidates else {
                 "setup_type": "NONE",
                 "setup_state": "DETECTED",
@@ -422,6 +430,47 @@ class SMCAgent(BaseAgent):
 
         return score, signals
 
+    def _context_objective_direction(
+        self,
+        market_structure: Dict[str, Any],
+        liquidity: Dict[str, Any],
+        zone: str,
+    ) -> str | None:
+        trend = str((market_structure or {}).get("trend") or "").upper()
+        recent_sweep = (liquidity.get("recent_sweep") or {}) if isinstance(liquidity, dict) else {}
+        sweep_type = str(recent_sweep.get("type") or "")
+        zone = str(zone or "").upper()
+        if trend == "BULLISH" and sweep_type == "sell_side":
+            return "BUY"
+        if trend == "BEARISH" and sweep_type == "buy_side":
+            return "SELL"
+        if trend == "BULLISH" and zone == "DISCOUNT":
+            return "BUY"
+        if trend == "BEARISH" and zone == "PREMIUM":
+            return "SELL"
+        return None
+
+    @staticmethod
+    def _candidate_direction_pool(score_direction: str, objective_direction: str | None) -> List[str]:
+        directions: List[str] = []
+        if score_direction in {"BUY", "SELL"}:
+            directions.append(score_direction)
+        if objective_direction in {"BUY", "SELL"} and objective_direction not in directions:
+            directions.append(objective_direction)
+        return directions
+
+    @staticmethod
+    def _merge_setup_candidates(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        merged: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for candidate in sorted(candidates or [], key=lambda c: float(c.get("thesis_dominance_score") or 0), reverse=True):
+            key = str(candidate.get("state_key") or candidate.get("id") or "")
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            merged.append(candidate)
+        return merged
+
     def _entry_suggestion(
         self,
         direction: str,
@@ -476,8 +525,10 @@ class SMCAgent(BaseAgent):
         atr: float,
         confidence: int,
         market_structure: Dict[str, Any],
-        order_blocks: List[Dict[str, Any]],
         liquidity: Dict[str, Any],
+        zone_context: str,
+        objective_direction: str | None,
+        order_blocks: List[Dict[str, Any]],
         fvg: List[Dict[str, Any]],
         dealing_range: Dict[str, float],
         entry_suggestion: Dict[str, Any],
@@ -554,6 +605,13 @@ class SMCAgent(BaseAgent):
             candidate_id = f"SMC::{symbol}::{timeframe}::{direction}::{created_at or 'now'}::{setup_type}::{idx}"
             midpoint = (zone_top + zone_bottom) / 2.0 if zone_top and zone_bottom else current_price
             candidate_entry = midpoint if midpoint > 0 else self._f(entry_suggestion.get("entry"), current_price)
+            objective_alignment = (
+                "ALIGNED_WITH_OBJECTIVE"
+                if objective_direction in {"BUY", "SELL"} and objective_direction == direction
+                else "COUNTER_OBJECTIVE"
+                if objective_direction in {"BUY", "SELL"} and objective_direction != direction
+                else "NEUTRAL_OBJECTIVE"
+            )
             candidate = {
                 "id": candidate_id,
                 "state_key": state_key,
@@ -591,6 +649,8 @@ class SMCAgent(BaseAgent):
                 "displacement_quality": poi.get("displacement_quality"),
                 "confidence": confidence,
                 "entry_reason": entry_suggestion.get("reason"),
+                "objective_direction": objective_direction,
+                "objective_alignment": objective_alignment,
                 "source": "smc",
                 "is_active": True,
                 "created_at": created_at,
@@ -598,6 +658,9 @@ class SMCAgent(BaseAgent):
                     "market_trend": market_structure.get("trend"),
                     "structure_quality": market_structure.get("structure_quality"),
                     "recent_sweep": sweep,
+                    "zone_context": zone_context,
+                    "objective_direction": objective_direction,
+                    "objective_alignment": objective_alignment,
                     "poi": poi,
                     "trigger": trigger,
                     "dealing_range": dealing_range,
@@ -609,9 +672,22 @@ class SMCAgent(BaseAgent):
                     },
                 },
             }
+            candidate["priority_score"] = self._setup_candidate_priority_score(
+                candidate,
+                current_price=current_price,
+                zone_context=zone_context,
+                objective_direction=objective_direction,
+            )
             setup_candidates.append(candidate)
 
-        setup_candidates.sort(key=lambda c: float(c.get("thesis_dominance_score") or 0), reverse=True)
+        setup_candidates.sort(
+            key=lambda c: (
+                float(c.get("priority_score") or 0),
+                float(c.get("thesis_dominance_score") or 0),
+                float(c.get("return_probability_score") or 0),
+            ),
+            reverse=True,
+        )
         primary = setup_candidates[0] if setup_candidates else None
         standby_min = float(selection_cfg.get("standby_min_dominance_score", 42) or 42)
         standby_rel = float(selection_cfg.get("standby_min_relative_to_primary", 0.72) or 0.72)
@@ -636,6 +712,44 @@ class SMCAgent(BaseAgent):
                 "standby_min_dominance_score": standby_min,
             }
         return setup_candidates
+
+    def _setup_candidate_priority_score(
+        self,
+        candidate: Dict[str, Any],
+        *,
+        current_price: float,
+        zone_context: str,
+        objective_direction: str | None,
+    ) -> float:
+        direction = str(candidate.get("direction") or "").upper()
+        setup_type = str(candidate.get("setup_type") or "").upper()
+        mitigation = str((((candidate.get("details") or {}).get("poi") or {}).get("mitigation_status") or "")).upper()
+        entry_price = self._f(candidate.get("entry_price"), current_price)
+        trend = str((candidate.get("details") or {}).get("market_trend") or "").upper()
+        trigger_state = str(candidate.get("trigger_state") or "").upper()
+        score = (
+            float(candidate.get("thesis_dominance_score") or 0) * 0.55
+            + float(candidate.get("return_probability_score") or 0) * 0.25
+            + float(candidate.get("trigger_score") or 0) * 0.20
+        )
+        if objective_direction in {"BUY", "SELL"} and objective_direction == direction:
+            score += 10.0
+            if (direction == "BUY" and entry_price < current_price) or (direction == "SELL" and entry_price > current_price):
+                score += 8.0
+            if mitigation == "FRESH":
+                score += 4.0
+            if setup_type in {"STRUCTURE_CONTINUATION", "ORDER_BLOCK_PULLBACK"}:
+                score += 4.0
+        elif objective_direction in {"BUY", "SELL"} and objective_direction != direction:
+            score -= 8.0
+            if setup_type == "LIQUIDITY_REVERSAL" and trigger_state == "REJECTION_CONFIRMED":
+                score += 6.0
+        if trend == ("BULLISH" if direction == "BUY" else "BEARISH"):
+            score += 3.0
+        zone_context = str(zone_context or "").upper()
+        if (direction == "BUY" and zone_context == "DISCOUNT") or (direction == "SELL" and zone_context == "PREMIUM"):
+            score += 2.0
+        return round(score, 2)
 
     def _primary_poi(
         self,
