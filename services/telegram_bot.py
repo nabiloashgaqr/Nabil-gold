@@ -28,6 +28,7 @@ class TelegramService:
         "BE_HIT": "Breakeven Hit",
         "MOVE_SL_TO_BE": "SL Moved to Breakeven",
         "TRAILING_SL_UPDATED": "Trailing Stop Updated",
+        "THESIS_SCALE_OUT": "Thesis Risk Scale-Out",
         "LONG_RUNNING": "Long-running Trade",
         "EXIT_WARNING": "Exit / Risk Warning",
         "EXPIRED": "Trade Expired",
@@ -35,7 +36,7 @@ class TelegramService:
     }
     EVENT_PRIORITY = [
         "TP2_HIT", "TRAILING_SL_HIT", "SL_HIT", "BE_HIT", "TP1_HIT",
-        "MOVE_SL_TO_BE", "TRAILING_SL_UPDATED", "ORDER_FILLED", "NEWS_HOLD", "PENDING_CANCELLED", "EXIT_WARNING",
+        "THESIS_SCALE_OUT", "MOVE_SL_TO_BE", "TRAILING_SL_UPDATED", "ORDER_FILLED", "NEWS_HOLD", "PENDING_CANCELLED", "EXIT_WARNING",
         "LONG_RUNNING", "NEAR_TP1", "EXPIRED", "MANUAL_CLOSE",
     ]
 
@@ -830,6 +831,8 @@ class TelegramService:
             notes.append("Stop loss moved to entry / breakeven protection.")
         if "TRAILING_SL_UPDATED" in events:
             notes.append("Trailing stop updated using 150-point gap / 40-point step.")
+        if "THESIS_SCALE_OUT" in events:
+            notes.append("Position size was reduced because thesis risk increased before the formal target was reached.")
         if "TP1_HIT" in events:
             notes.append("TP1 reached; partial profit/protection rules applied.")
         if "TP2_HIT" in events:
@@ -874,12 +877,13 @@ class TelegramService:
     ) -> bool:
         if not events:
             return False
-        title = self._event_title(events)
         side = str(trade.get("type") or trade.get("side") or "").upper()
         symbol = str(trade.get("symbol") or "XAU/USD")
         old_status = str(evaluation.get("old_status") or trade.get("status") or "OPEN")
         new_status = str(evaluation.get("new_status") or old_status)
         updates = evaluation.get("updates") or {}
+        primary_reason = self._first_reason(updates.get("reasons"), trade.get("reasons"))
+        title = "Thesis Exit" if ("MANUAL_CLOSE" in events and primary_reason and "thesis exit" in str(primary_reason).lower()) else self._event_title(events)
         closing = any(e in events for e in {"TP2_HIT", "SL_HIT", "TRAILING_SL_HIT", "BE_HIT", "EXPIRED", "MANUAL_CLOSE"})
 
         lines = [
@@ -956,6 +960,8 @@ class TelegramService:
             cancel_reason = self._first_reason(updates.get("reasons"), trade.get("reasons"))
             if cancel_reason:
                 lines.append(f"• <b>Cancellation reason:</b> {self._clean_text(cancel_reason)}")
+        if any(e in events for e in {"MANUAL_CLOSE", "THESIS_SCALE_OUT"}) and primary_reason:
+            lines.append(f"• <b>Exit reason:</b> {self._clean_text(primary_reason)}")
         notes = self._event_notes(events)
         if notes:
             lines.append("──────────────────")
