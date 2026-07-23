@@ -125,6 +125,33 @@ def test_smc_objective_direction_detects_bullish_mitigation_context() -> None:
     assert direction == "BUY"
 
 
+def test_continuation_trigger_detects_bearish_failed_reclaim() -> None:
+    agent = SMCAgent({"symbol": "XAU/USD"})
+    trigger = agent._continuation_trigger(
+        "SELL",
+        candles=[
+            {"open": 4129.0, "high": 4134.5, "low": 4123.0, "close": 4125.5},
+            {"open": 4124.8, "high": 4126.0, "low": 4116.0, "close": 4117.2},
+        ],
+        zone={"top": 4135.0, "bottom": 4124.0},
+        atr=2.0,
+    )
+    assert trigger["confirmed"] is True
+    assert trigger["state"] == "FAILED_RECLAIM_CONFIRMED"
+    assert trigger["execution_hint"] == "MARKET"
+
+
+def test_setup_type_uses_continuation_breakdown_when_trigger_confirms() -> None:
+    agent = SMCAgent({"symbol": "XAU/USD"})
+    setup_type = agent._setup_type_from_context(
+        "SELL",
+        {"type": "buy_side"},
+        {"trend": "BEARISH"},
+        {"trigger": {"state": "CONTINUATION_BREAKDOWN_CONFIRMED"}, "poi_type": "order_block"},
+    )
+    assert setup_type == "CONTINUATION_BREAKDOWN"
+
+
 def test_smc_candidate_direction_pool_keeps_objective_direction_even_if_score_differs() -> None:
     pool = SMCAgent._candidate_direction_pool("SELL", "BUY")
     assert pool == ["SELL", "BUY"]
