@@ -566,6 +566,67 @@ def _build_plan_ladder_decision(
 
 
 
+def _planner_context_confirmation(decision: Dict[str, Any], config: Dict[str, Any], side: str) -> Dict[str, Any]:
+    sig_cfg = (config.get("signal_requirements") or {}) if isinstance(config, dict) else {}
+    two_agent_cfg = (sig_cfg.get("two_agent_entry") or {}) if isinstance(sig_cfg, dict) else {}
+    macro_cfg = (two_agent_cfg.get("macro_confirmation") or {}) if isinstance(two_agent_cfg, dict) else {}
+    gemini_cfg = (two_agent_cfg.get("gemini_confirmation") or {}) if isinstance(two_agent_cfg, dict) else {}
+    macro_min = float(macro_cfg.get("min_confidence", 55) or 55)
+    gemini_min = float(gemini_cfg.get("min_confidence", 70) or 70)
+
+    news_context = decision.get("news_context") or {}
+    macro_agent = (news_context.get("macro") or {}) if isinstance(news_context, dict) else {}
+    macro_direction = (macro_agent.get("macro_direction") or {}) if isinstance(macro_agent, dict) else {}
+    macro_bias = str(macro_direction.get("bias") or "").upper()
+    macro_conf = _safe_float(macro_direction.get("confidence"), 0.0)
+    expected_macro = "BULLISH_GOLD" if side == "BUY" else "BEARISH_GOLD"
+    if macro_bias == expected_macro and macro_conf >= macro_min:
+        return {
+            "allow": True,
+            "source": "macro",
+            "confidence": round(macro_conf, 1),
+            "reason": f"macro context confirms {side} ({macro_conf:.0f}% ≥ {macro_min:.0f}%)",
+        }
+
+    gemini_macro = decision.get("gemini_macro_review") or {}
+    if isinstance(gemini_macro, dict) and gemini_macro.get("available"):
+        verdict = str(gemini_macro.get("macro_verdict") or gemini_macro.get("verdict") or "").upper()
+        conf = _safe_float(gemini_macro.get("confidence"), 0.0)
+        if verdict == expected_macro and conf >= gemini_min:
+            return {
+                "allow": True,
+                "source": "gemini",
+                "confidence": round(conf, 1),
+                "reason": f"gemini macro review confirms {side} ({conf:.0f}% ≥ {gemini_min:.0f}%)",
+            }
+
+    gemini_review = decision.get("gemini_review") or {}
+    if isinstance(gemini_review, dict) and gemini_review.get("available"):
+        verdict = str(gemini_review.get("verdict") or gemini_review.get("signal") or gemini_review.get("opinion") or "").upper()
+        conf = _safe_float(gemini_review.get("confidence"), 0.0)
+        if verdict == side and conf >= gemini_min:
+            return {
+                "allow": True,
+                "source": "gemini",
+                "confidence": round(conf, 1),
+                "reason": f"gemini signal review confirms {side} ({conf:.0f}% ≥ {gemini_min:.0f}%)",
+            }
+
+    gemini_analysis = decision.get("gemini_analysis") or {}
+    if isinstance(gemini_analysis, dict) and gemini_analysis.get("available"):
+        bias = str(gemini_analysis.get("market_bias") or gemini_analysis.get("verdict") or "").upper()
+        conf = _safe_float(gemini_analysis.get("confidence"), 0.0)
+        if bias == side and conf >= gemini_min:
+            return {
+                "allow": True,
+                "source": "gemini",
+                "confidence": round(conf, 1),
+                "reason": f"gemini market context confirms {side} ({conf:.0f}% ≥ {gemini_min:.0f}%)",
+            }
+
+    return {"allow": False}
+
+
 def _planner_execution_gate(decision: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
     side = str(decision.get("decision") or "").upper()
     if side not in {"BUY", "SELL"}:
@@ -607,6 +668,18 @@ def _planner_execution_gate(decision: Dict[str, Any], config: Dict[str, Any]) ->
             "confirm_source": confirm_source,
             "confirm_confidence": round(confirm_conf, 1),
             "reason": f"{support_count} qualified agents + {confirm_source} confirmation",
+        }
+
+    direct_context_confirmation = _planner_context_confirmation(decision, config, side)
+    if support_count >= 2 and direct_context_confirmation.get("allow"):
+        return {
+            "allow": True,
+            "kind": "TWO_AGENT_CONTEXT_CONFIRMED_ADMISSION",
+            "support_count": support_count,
+            "support_agents": support_agents,
+            "confirm_source": direct_context_confirmation.get("source"),
+            "confirm_confidence": direct_context_confirmation.get("confidence"),
+            "reason": f"{support_count} qualified agents + {direct_context_confirmation.get('reason')}",
         }
 
     plan = decision.get("session_plan") or {}
