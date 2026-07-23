@@ -680,6 +680,13 @@ class SMCAgent(BaseAgent):
             )
             setup_candidates.append(candidate)
 
+        setup_candidates = self._expand_objective_same_box_ladder(
+            setup_candidates,
+            direction=direction,
+            current_price=current_price,
+            atr=atr,
+            objective_direction=objective_direction,
+        )
         setup_candidates.sort(
             key=lambda c: (
                 float(c.get("priority_score") or 0),
@@ -738,7 +745,7 @@ class SMCAgent(BaseAgent):
                 score += 8.0
             if mitigation == "FRESH":
                 score += 4.0
-            if setup_type in {"STRUCTURE_CONTINUATION", "ORDER_BLOCK_PULLBACK"}:
+            if setup_type in {"STRUCTURE_CONTINUATION", "ORDER_BLOCK_PULLBACK", "LIQUIDITY_REVERSAL"}:
                 score += 4.0
         elif objective_direction in {"BUY", "SELL"} and objective_direction != direction:
             score -= 8.0
@@ -750,6 +757,91 @@ class SMCAgent(BaseAgent):
         if (direction == "BUY" and zone_context == "DISCOUNT") or (direction == "SELL" and zone_context == "PREMIUM"):
             score += 2.0
         return round(score, 2)
+
+    def _expand_objective_same_box_ladder(
+        self,
+        candidates: List[Dict[str, Any]],
+        *,
+        direction: str,
+        current_price: float,
+        atr: float,
+        objective_direction: str | None,
+    ) -> List[Dict[str, Any]]:
+        if direction not in {"BUY", "SELL"} or objective_direction != direction or not candidates:
+            return candidates
+        ordered = sorted(candidates, key=lambda c: float(c.get("priority_score") or 0), reverse=True)
+        anchor = next(
+            (
+                c for c in ordered
+                if str(c.get("objective_alignment") or "") == "ALIGNED_WITH_OBJECTIVE"
+                and str((((c.get("details") or {}).get("poi") or {}).get("mitigation_status") or "")).upper() == "FRESH"
+                and str(c.get("poi_type") or "") in {"order_block", "fvg"}
+            ),
+            None,
+        )
+        if not anchor:
+            return candidates
+        zone = anchor.get("poi_zone") or {}
+        top = self._f(zone.get("top"), 0.0)
+        bottom = self._f(zone.get("bottom"), 0.0)
+        if top <= 0 or bottom <= 0:
+            return candidates
+        high = max(top, bottom)
+        low = min(top, bottom)
+        width = high - low
+        if width < max(atr * 0.8, 1.2):
+            return candidates
+        separation = min(max(atr * 0.05, 0.05), width * 0.12)
+        mid = (high + low) / 2.0
+        if width <= separation * 2:
+            return candidates
+        primary = dict(anchor)
+        standby = dict(anchor)
+        ladder_parent_id = str(anchor.get("id") or anchor.get("state_key") or "SMC_LADDER")
+        if direction == "BUY":
+            primary_zone = {"top": round(high, 2), "bottom": round(mid + separation, 2)}
+            standby_zone = {"top": round(mid - separation, 2), "bottom": round(low, 2)}
+            primary_entry = round(high, 2)
+            standby_entry = round(mid - separation, 2)
+        else:
+            primary_zone = {"top": round(mid - separation, 2), "bottom": round(low, 2)}
+            standby_zone = {"top": round(high, 2), "bottom": round(mid + separation, 2)}
+            primary_entry = round(low, 2)
+            standby_entry = round(mid + separation, 2)
+        primary.update({
+            "id": f"{ladder_parent_id}::MAIN",
+            "state_key": f"{str(anchor.get('state_key') or ladder_parent_id)}::MAIN",
+            "poi_zone": primary_zone,
+            "poi_low": round(min(primary_zone['top'], primary_zone['bottom']), 2),
+            "poi_high": round(max(primary_zone['top'], primary_zone['bottom']), 2),
+            "entry_price": primary_entry,
+            "selection_role": "PRIMARY",
+            "selection_rank": 1,
+            "priority_score": round(float(anchor.get("priority_score") or 0) + 4.0, 2),
+        })
+        standby.update({
+            "id": f"{ladder_parent_id}::ADD",
+            "state_key": f"{str(anchor.get('state_key') or ladder_parent_id)}::ADD",
+            "poi_zone": standby_zone,
+            "poi_low": round(min(standby_zone['top'], standby_zone['bottom']), 2),
+            "poi_high": round(max(standby_zone['top'], standby_zone['bottom']), 2),
+            "entry_price": standby_entry,
+            "selection_role": "STANDBY",
+            "selection_rank": 2,
+            "priority_score": round(float(anchor.get("priority_score") or 0) + 1.5, 2),
+            "thesis_dominance_score": round(max(0.0, float(anchor.get("thesis_dominance_score") or 0) - 4.0), 1),
+            "return_probability_score": round(max(0.0, float(anchor.get("return_probability_score") or 0) - 2.0), 1),
+        })
+        for leg_name, candidate in (("PRIMARY", primary), ("STANDBY", standby)):
+            candidate["details"] = dict(candidate.get("details") or {})
+            candidate["details"]["selection"] = {
+                **(candidate["details"].get("selection") or {}),
+                "same_box_ladder": True,
+                "ladder_parent_id": ladder_parent_id,
+                "ladder_leg": leg_name,
+            }
+        remainder = [c for c in candidates if str(c.get("id") or "") != str(anchor.get("id") or "")]
+        return [primary, standby] + remainder
 
     def _primary_poi(
         self,
