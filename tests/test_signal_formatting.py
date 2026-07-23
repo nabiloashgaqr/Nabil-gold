@@ -260,6 +260,52 @@ def test_pending_governance_can_announce_replacement_blocked():
     assert "no materially new POI" in text
 
 
+def test_thesis_exit_message_is_labeled_clearly() -> None:
+    trade = {
+        "id": "TRADE_EXIT_1",
+        "symbol": "XAU/USD",
+        "type": "SELL",
+        "status": "OPEN",
+        "entry_price": 4120.00,
+    }
+    evaluation = {
+        "old_status": "OPEN",
+        "new_status": "MANUAL_CLOSE",
+        "updates": {
+            "close_price": 4130.00,
+            "final_pnl": -100.0,
+            "reasons": ["Automatic thesis exit: bullish continuation reclaimed the breakdown"],
+        },
+    }
+    text = _capture_text("send_trade_events", trade, ["MANUAL_CLOSE"], 4130.00, -100.0, evaluation)
+    assert "Thesis Exit" in text
+    assert "Exit reason:" in text
+    assert "reclaimed the breakdown" in text
+
+
+def test_thesis_scale_out_message_is_labeled_clearly() -> None:
+    trade = {
+        "id": "TRADE_EXIT_2",
+        "symbol": "XAU/USD",
+        "type": "SELL",
+        "status": "OPEN",
+        "entry_price": 4120.00,
+    }
+    evaluation = {
+        "old_status": "OPEN",
+        "new_status": "PARTIAL",
+        "updates": {
+            "stop_loss": 4120.00,
+            "reasons": ["Automatic thesis scale-out: opposing BUY POI rejection from target_liquidity near 4087.40"],
+        },
+    }
+    text = _capture_text("send_trade_events", trade, ["THESIS_SCALE_OUT", "MOVE_SL_TO_BE"], 4094.00, 260.0, evaluation)
+    assert "Thesis Risk Scale-Out" in text
+    assert "Exit reason:" in text
+    assert "scale-out" in text.lower()
+    assert "SL Moved to Breakeven" not in text  # title should be the scale-out event, not BE
+
+
 def test_revalidation_block_message_is_clear():
     text = _capture_text(
         "send_revalidation_block",

@@ -772,6 +772,106 @@ def test_pending_trade_saves_recent_30m_high_low_from_last_6_candles() -> None:
     assert result["updates"]["recent_30m_low"] == 4057.9
 
 
+def test_open_sell_trade_can_auto_exit_on_bullish_continuation_reclaim() -> None:
+    manager = OpenTradesManager()
+    trade = base_trade(
+        type="SELL",
+        status="OPEN",
+        entry_price=4120.0,
+        stop_loss=4145.0,
+        tp1=4090.0,
+        tp2=4060.0,
+    )
+    recent_candles = [
+        {"time": "2026-07-23T10:00:00Z", "open": 4124.0, "high": 4128.0, "low": 4118.0, "close": 4121.0},
+        {"time": "2026-07-23T10:05:00Z", "open": 4121.2, "high": 4131.0, "low": 4120.8, "close": 4130.0},
+    ]
+    result = manager.evaluate_trade(trade, 4130.0, candle_high=4131.0, candle_low=4120.8, recent_candles=recent_candles)
+    assert result["new_status"] == "MANUAL_CLOSE"
+    assert result["events"] == ["MANUAL_CLOSE"]
+    assert "thesis exit" in result["updates"]["reasons"][0].lower()
+
+
+def test_open_sell_trade_scales_out_on_opposing_poi_rejection_before_tp1_when_aligned() -> None:
+    manager = OpenTradesManager()
+    trade = base_trade(
+        type="SELL",
+        status="OPEN",
+        entry_price=4120.0,
+        stop_loss=4145.0,
+        tp1=4075.0,
+        tp2=4060.0,
+        signal_snapshot={
+            "session_plan": {
+                "objective_alignment": "ALIGNED_WITH_MARKET_OBJECTIVE",
+                "target_liquidity": 4087.4,
+                "liquidity_map": {"previous_day_low": 4087.4, "session_low": 4083.0},
+            }
+        },
+    )
+    recent_candles = [
+        {"time": "2026-07-23T10:00:00Z", "open": 4092.0, "high": 4093.0, "low": 4086.9, "close": 4088.1},
+        {"time": "2026-07-23T10:05:00Z", "open": 4088.3, "high": 4095.0, "low": 4087.0, "close": 4094.0},
+    ]
+    result = manager.evaluate_trade(trade, 4094.0, candle_high=4095.0, candle_low=4087.0, recent_candles=recent_candles)
+    assert result["new_status"] == "PARTIAL"
+    assert "THESIS_SCALE_OUT" in result["events"]
+    assert result["updates"]["partial_close"] is True
+    assert result["updates"]["sl_moved_to_entry"] is True
+    assert result["updates"]["stop_loss"] == 4120.0
+    assert "scale-out" in result["updates"]["reasons"][0].lower()
+
+
+def test_open_sell_trade_closes_on_opposing_poi_rejection_if_not_aligned() -> None:
+    manager = OpenTradesManager()
+    trade = base_trade(
+        type="SELL",
+        status="OPEN",
+        entry_price=4120.0,
+        stop_loss=4145.0,
+        tp1=4075.0,
+        tp2=4060.0,
+        signal_snapshot={
+            "session_plan": {
+                "objective_alignment": "COUNTER_OBJECTIVE_REVERSAL_CONFIRMED",
+                "target_liquidity": 4087.4,
+                "liquidity_map": {"previous_day_low": 4087.4, "session_low": 4083.0},
+            }
+        },
+    )
+    recent_candles = [
+        {"time": "2026-07-23T10:00:00Z", "open": 4092.0, "high": 4093.0, "low": 4086.9, "close": 4088.1},
+        {"time": "2026-07-23T10:05:00Z", "open": 4088.3, "high": 4095.0, "low": 4087.0, "close": 4094.0},
+    ]
+    result = manager.evaluate_trade(trade, 4094.0, candle_high=4095.0, candle_low=4087.0, recent_candles=recent_candles)
+    assert result["new_status"] == "MANUAL_CLOSE"
+    assert result["events"] == ["MANUAL_CLOSE"]
+    assert "opposing buy poi rejection" in result["updates"]["reasons"][0].lower()
+
+
+def test_countertrend_trade_exits_early_when_it_fails_to_follow_through() -> None:
+    manager = OpenTradesManager()
+    trade = base_trade(
+        type="SELL",
+        status="OPEN",
+        entry_price=4120.0,
+        stop_loss=4145.0,
+        tp1=4090.0,
+        tp2=4060.0,
+        entry_time=(datetime.now(timezone.utc) - timedelta(minutes=25)).isoformat(),
+        max_favorable_excursion=10.0,
+        signal_snapshot={"session_plan": {"objective_alignment": "COUNTER_OBJECTIVE_REVERSAL_CONFIRMED"}},
+    )
+    recent_candles = [
+        {"time": "2026-07-23T10:00:00Z", "open": 4120.5, "high": 4122.0, "low": 4119.5, "close": 4120.8},
+        {"time": "2026-07-23T10:05:00Z", "open": 4120.9, "high": 4122.2, "low": 4120.1, "close": 4121.1},
+    ]
+    result = manager.evaluate_trade(trade, 4121.1, candle_high=4122.2, candle_low=4120.1, recent_candles=recent_candles)
+    assert result["new_status"] == "MANUAL_CLOSE"
+    assert result["events"] == ["MANUAL_CLOSE"]
+    assert "counter-objective" in result["updates"]["reasons"][0].lower()
+
+
 def test_pending_near_miss_sell_limit_can_convert_to_open_after_rejection() -> None:
     manager = OpenTradesManager({
         "order_execution": {
