@@ -419,6 +419,7 @@ class SessionPlannerService:
                 "day_objective": day_objective,
                 "day_objective_label": day_objective_label,
                 "objective_alignment": objective_alignment,
+                "same_box_ladder": bool(manual_plan.get("same_box_ladder")),
                 "expected_path": expected_path,
                 "execution_preference": execution_preference,
                 "primary_rationale": primary_rationale,
@@ -675,6 +676,7 @@ class SessionPlannerService:
                 "day_objective": day_objective,
                 "day_objective_label": day_objective_label,
                 "objective_alignment": objective_alignment,
+                "same_box_ladder": bool(manual_plan.get("same_box_ladder")),
                 "expected_path": expected_path,
                 "execution_preference": execution_preference,
                 "primary_rationale": primary_rationale,
@@ -944,7 +946,8 @@ class SessionPlannerService:
             return False, f"main area too wide ({diagnostics['primary_zone_width_points']:.0f} pts)", diagnostics
         if standby and diagnostics["standby_zone_width_points"] > self.max_standby_zone_width_points:
             return False, f"add area too wide ({diagnostics['standby_zone_width_points']:.0f} pts)", diagnostics
-        if standby and self._zones_overlap(primary, standby):
+        diagnostics["same_box_ladder"] = self._same_box_ladder_pair(primary, standby)
+        if standby and self._zones_overlap(primary, standby) and not diagnostics["same_box_ladder"]:
             return False, "add area overlaps the main area", diagnostics
         if diagnostics["main_rr"] < self.min_main_rr_for_ready:
             return False, f"main area RR {diagnostics['main_rr']:.2f} below {self.min_main_rr_for_ready:.2f}", diagnostics
@@ -1184,9 +1187,22 @@ class SessionPlannerService:
                     base += 1.0
         return round(base, 2)
 
+    def _same_box_ladder_pair(self, first: Dict[str, Any] | None, second: Dict[str, Any] | None) -> bool:
+        if not isinstance(first, dict) or not isinstance(second, dict):
+            return False
+        first_sel = (((first.get("details") or {}).get("selection") or {}) if isinstance(first.get("details"), dict) else {})
+        second_sel = (((second.get("details") or {}).get("selection") or {}) if isinstance(second.get("details"), dict) else {})
+        if not bool(first_sel.get("same_box_ladder")) or not bool(second_sel.get("same_box_ladder")):
+            return False
+        first_parent = str(first_sel.get("ladder_parent_id") or "").strip()
+        second_parent = str(second_sel.get("ladder_parent_id") or "").strip()
+        return bool(first_parent and second_parent and first_parent == second_parent)
+
     def _validated_standby(self, primary: Dict[str, Any], standby: Dict[str, Any] | None, *, symbol: str) -> Dict[str, Any] | None:
         if not isinstance(standby, dict) or not standby:
             return None
+        if self._same_box_ladder_pair(primary, standby):
+            return standby
         primary_entry = self._f(primary.get("entry_price"), 0.0)
         standby_entry = self._f(standby.get("entry_price"), 0.0)
         if primary_entry > 0 and standby_entry > 0:
@@ -1470,8 +1486,9 @@ class SessionPlannerService:
         objective_alignment: str,
     ) -> Dict[str, Any]:
         side_word = "BUY" if direction == "BUY" else "SELL"
+        same_box_ladder = self._same_box_ladder_pair(primary, standby)
         main_label = f"MAIN {side_word} AREA"
-        add_label = f"ADD {side_word} AREA"
+        add_label = f"MORE {side_word} AREA" if same_box_ladder else f"ADD {side_word} AREA"
         primary_entry = self._f(primary.get("entry_price"), 0.0)
         invalidation = self._f(primary.get("stop_loss"), 0.0)
         target = self._f(primary.get("target_liquidity") or primary.get("target_price"), 0.0)
@@ -1562,6 +1579,8 @@ class SessionPlannerService:
         execution_priority_label = (
             "Counter-objective reversal — main leg only"
             if objective_alignment == "COUNTER_OBJECTIVE_REVERSAL_CONFIRMED"
+            else "Same-box ladder — main then more inside one POI"
+            if same_box_ladder and standby
             else "Continuation priority — main then add"
             if standby
             else "Single mapped execution"
@@ -1584,6 +1603,7 @@ class SessionPlannerService:
                 "tp1": tp1,
                 "tp2": round(target, 2) if target > 0 else None,
             },
+            "same_box_ladder": same_box_ladder,
             "expected_path": expected_path,
             "narrative": narrative,
             "structure_script": f"{structure_trend} / {structure_quality}",
@@ -1682,6 +1702,9 @@ class SessionPlannerService:
             "quality_grade",
             "poi_classification",
             "extreme_poi",
+            "priority_score",
+            "objective_alignment",
+            "objective_direction",
         }
         return {key: candidate.get(key) for key in keep if key in candidate}
 

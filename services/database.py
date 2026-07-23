@@ -552,6 +552,45 @@ class DatabaseService:
         if changed:
             save_trades(rows, self.session_plans_path)
 
+    def merge_session_plan_payload(self, snapshot_id: str, payload_patch: Dict[str, Any], scalar_updates: Dict[str, Any] | None = None) -> None:
+        if not snapshot_id or not isinstance(payload_patch, dict) or not payload_patch:
+            return
+        scalar_updates = dict(scalar_updates or {})
+        now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        scalar_updates.setdefault("updated_at", now_iso)
+        if self.use_supabase and self.client:
+            try:
+                response = self.client.table("session_plans").select("payload").eq("id", snapshot_id).limit(1).execute()
+                rows = list(response.data or [])
+                current_payload = dict((rows[0] or {}).get("payload") or {}) if rows else {}
+                merged_payload = self._deep_merge_dict(current_payload, payload_patch)
+                updates = {"payload": merged_payload, **scalar_updates}
+                self.client.table("session_plans").update(updates).eq("id", snapshot_id).execute()
+                return
+            except Exception as exc:  # noqa: BLE001
+                self.logger.error("Failed to merge session plan payload in Supabase: %s", exc)
+        rows = load_trades(self.session_plans_path)
+        changed = False
+        for row in rows:
+            if str(row.get("id")) == str(snapshot_id):
+                current_payload = dict(row.get("payload") or {}) if isinstance(row.get("payload"), dict) else {}
+                row["payload"] = self._deep_merge_dict(current_payload, payload_patch)
+                row.update(scalar_updates)
+                changed = True
+                break
+        if changed:
+            save_trades(rows, self.session_plans_path)
+
+    @staticmethod
+    def _deep_merge_dict(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
+        merged = dict(base or {})
+        for key, value in (patch or {}).items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = DatabaseService._deep_merge_dict(dict(merged.get(key) or {}), value)
+            else:
+                merged[key] = value
+        return merged
+
     @staticmethod
     def _build_regime_composite(tech_regime: dict) -> str:
         """Build a composite regime label from volatility_regime + market_phase.
