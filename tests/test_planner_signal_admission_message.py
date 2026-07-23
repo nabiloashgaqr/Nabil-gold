@@ -27,9 +27,10 @@ def test_planner_led_signal_shows_admission_line() -> None:
         "entry_path": 3,
         "planner_execution_gate": {
             "allow": True,
-            "kind": "THREE_AGENT_ADMISSION",
-            "support_count": 3,
-            "reason": "3 qualified agents aligned with the mapped direction",
+            "kind": "OBJECTIVE_ALIGNED_TWO_AGENT_OVERRIDE",
+            "support_count": 2,
+            "support_agents": ["smc", "price_action"],
+            "reason": "objective-aligned continuation override: 2 qualified agents including SMC + local confirmation, with aligned sweep and structure",
         },
         "quality": {"grade": "A+", "score": 100.0},
         "signal": {
@@ -55,4 +56,4 @@ def test_planner_led_signal_shows_admission_line() -> None:
     service.send_signal(decision)
     text = captured["text"]
     assert "Admission:" in text
-    assert "3 qualified agents aligned with the mapped direction" in text
+    assert "objective-aligned continuation override" in text

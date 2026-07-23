@@ -55,6 +55,32 @@ def test_planner_execution_gate_allows_two_agent_plus_macro() -> None:
     assert gate["confirm_source"] == "macro"
 
 
+def test_planner_execution_gate_allows_objective_aligned_two_agent_override() -> None:
+    decision = {
+        "decision": "BUY",
+        "agent_details": {
+            "technical": {"direction": "SELL", "confidence": 74},
+            "classical": {"direction": "WAIT", "confidence": 30},
+            "smc": {"direction": "BUY", "confidence": 84},
+            "price_action": {"direction": "BUY", "confidence": 76},
+            "multitimeframe": {"direction": "WAIT", "confidence": 55},
+        },
+        "session_plan": {
+            "market_objective_direction": "BUY",
+            "objective_alignment": "ALIGNED_WITH_MARKET_OBJECTIVE",
+            "scenario_type": "STRUCTURE_CONTINUATION",
+            "poi_classification": "EXTREME_POI",
+            "structure_trend": "BULLISH",
+            "recent_sweep": {"type": "sell_side"},
+        },
+    }
+    gate = ra._planner_execution_gate(decision, _config())
+    assert gate["allow"] is True
+    assert gate["kind"] == "OBJECTIVE_ALIGNED_TWO_AGENT_OVERRIDE"
+    assert gate["support_count"] == 2
+    assert "smc" in gate["support_agents"]
+
+
 def test_planner_execution_gate_blocks_without_required_admission() -> None:
     decision = {
         "decision": "SELL",
@@ -64,6 +90,14 @@ def test_planner_execution_gate_blocks_without_required_admission() -> None:
             "smc": {"direction": "SELL", "confidence": 90},
             "price_action": {"direction": "SELL", "confidence": 79},
             "multitimeframe": {"direction": "BUY", "confidence": 86},
+        },
+        "session_plan": {
+            "market_objective_direction": "BUY",
+            "objective_alignment": "COUNTER_OBJECTIVE_REVERSAL_CONFIRMED",
+            "scenario_type": "LIQUIDITY_REVERSAL",
+            "poi_classification": "EXTREME_POI",
+            "structure_trend": "BULLISH",
+            "recent_sweep": {"type": "sell_side"},
         },
     }
     gate = ra._planner_execution_gate(decision, _config())
