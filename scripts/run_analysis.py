@@ -1372,6 +1372,26 @@ def _session_plan_delivery_meta(current_plan: Dict[str, Any], sent_rows: List[Di
     return {"send": True, "reason": reason, "kind": "PLAN_UPDATE", "previous": previous}
 
 
+def _session_plan_execution_audit(plan: Dict[str, Any], **extra: Any) -> Dict[str, Any]:
+    manual_plan = (plan.get("manual_plan") or {}) if isinstance(plan, dict) else {}
+    primary = (plan.get("primary_poi") or {}) if isinstance(plan, dict) else {}
+    standby = (plan.get("standby_poi") or {}) if isinstance(plan, dict) else {}
+    return {
+        "plan_ready": bool(plan.get("plan_ready")),
+        "plan_status": plan.get("plan_status"),
+        "plan_reason": plan.get("plan_reason"),
+        "authority_state": plan.get("authority_state"),
+        "authority_direction": plan.get("authority_direction"),
+        "market_objective": plan.get("market_objective"),
+        "market_objective_direction": plan.get("market_objective_direction"),
+        "objective_alignment": plan.get("objective_alignment"),
+        "same_box_ladder": bool(plan.get("same_box_ladder") or manual_plan.get("same_box_ladder")),
+        "primary_entry_price": plan.get("primary_entry_price") or primary.get("entry_price"),
+        "standby_entry_price": plan.get("standby_entry_price") or standby.get("entry_price"),
+        **extra,
+    }
+
+
 def _plan_field_changed(prev: Dict[str, Any], curr: Dict[str, Any], key: str, *, symbol: str, min_change_points: float) -> bool:
     try:
         old_v = float(prev.get(key))
@@ -1974,6 +1994,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 )
             else:
                 logger.info("Session plan not ready for %s: %s", symbol, session_plan.get("plan_reason"))
+            session_plan["execution_audit"] = _session_plan_execution_audit(session_plan, stage="plan_built")
             try:
                 session_plan_snapshot_id = database.save_session_plan(session_plan, session_plan_context)
             except Exception as persist_exc:  # noqa: BLE001
@@ -1984,6 +2005,22 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 config,
                 symbol=symbol,
             )
+            if session_plan_snapshot_id:
+                try:
+                    database.merge_session_plan_payload(
+                        session_plan_snapshot_id,
+                        {
+                            "execution_audit": _session_plan_execution_audit(
+                                session_plan,
+                                stage="delivery_evaluated",
+                                delivery_send_planned=bool(session_plan_delivery_meta.get("send")),
+                                delivery_reason=session_plan_delivery_meta.get("reason"),
+                                delivery_kind=session_plan_delivery_meta.get("kind"),
+                            )
+                        },
+                    )
+                except Exception as audit_exc:  # noqa: BLE001
+                    logger.warning("Failed to merge session plan execution audit: %s", audit_exc)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to build session plan: %s", exc)
             all_results["session_plan"] = {"enabled": True, "plan_ready": False, "plan_status": "ERROR", "plan_reason": str(exc)}
@@ -2271,6 +2308,10 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                     if session_plan_snapshot_id:
                         try:
                             database.mark_session_plan_telegram_sent(session_plan_snapshot_id, str(session_plan_delivery_meta.get("reason") or session_plan_delivery_meta.get("kind") or "session_plan_delivery"))
+                            database.merge_session_plan_payload(
+                                session_plan_snapshot_id,
+                                {"execution_audit": {"delivery_sent": True, "delivery_sent_reason": session_plan_delivery_meta.get("reason")}},
+                            )
                         except Exception as mark_exc:  # noqa: BLE001
                             logger.warning("Failed to mark session plan Telegram delivery: %s", mark_exc)
                     logger.info("Session plan Telegram sent for %s (%s)", symbol, session_plan_delivery_meta.get("reason"))
@@ -2283,6 +2324,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         # PRIMARY / STANDBY thesis before the move, publish those pending ladder
         # orders now instead of waiting for a late one-off signal after price has
         # already traveled.
+        planner_gate_preview = _planner_execution_gate(decision, config) if isinstance((all_results.get("session_plan") or {}), dict) and (all_results.get("session_plan") or {}).get("plan_ready") else None
         ladder_created = _execute_session_plan_ladder(
             decision,
             all_results,
@@ -2291,6 +2333,21 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             telegram,
             config,
         )
+        if session_plan_snapshot_id and planner_gate_preview:
+            try:
+                database.merge_session_plan_payload(
+                    session_plan_snapshot_id,
+                    {
+                        "execution_audit": {
+                            "planner_gate_allow": bool(planner_gate_preview.get("allow")),
+                            "planner_gate_kind": planner_gate_preview.get("kind"),
+                            "planner_gate_reason": planner_gate_preview.get("reason"),
+                            "ladder_created": int(ladder_created or 0),
+                        }
+                    },
+                )
+            except Exception as audit_exc:  # noqa: BLE001
+                logger.warning("Failed to merge planner gate audit: %s", audit_exc)
         if ladder_created:
             logger.info("Session-plan ladder created %s pending order(s) for %s", ladder_created, symbol)
             return
