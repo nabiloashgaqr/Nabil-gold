@@ -576,6 +576,7 @@ def _planner_execution_gate(decision: Dict[str, Any], config: Dict[str, Any]) ->
     min_agent_conf = float(sig_cfg.get("agent_min_confidence", 70) or 70)
     details = decision.get("agent_details") or {}
     support_count = 0
+    support_agents: list[str] = []
     for key in ["technical", "classical", "smc", "price_action", "multitimeframe"]:
         detail = (details or {}).get(key)
         if not isinstance(detail, dict):
@@ -584,12 +585,14 @@ def _planner_execution_gate(decision: Dict[str, Any], config: Dict[str, Any]) ->
         confidence = _safe_float(detail.get("confidence"), 0.0)
         if direction == side and confidence >= min_agent_conf:
             support_count += 1
+            support_agents.append(key)
 
     if support_count >= min_agents:
         return {
             "allow": True,
             "kind": "THREE_AGENT_ADMISSION",
             "support_count": support_count,
+            "support_agents": support_agents,
             "reason": f"{support_count} qualified agents aligned with the mapped direction",
         }
 
@@ -600,14 +603,50 @@ def _planner_execution_gate(decision: Dict[str, Any], config: Dict[str, Any]) ->
             "allow": True,
             "kind": "TWO_AGENT_CONFIRMED_ADMISSION",
             "support_count": support_count,
+            "support_agents": support_agents,
             "confirm_source": confirm_source,
             "confirm_confidence": round(confirm_conf, 1),
             "reason": f"{support_count} qualified agents + {confirm_source} confirmation",
         }
 
+    plan = decision.get("session_plan") or {}
+    if isinstance(plan, dict):
+        objective_direction = str(plan.get("market_objective_direction") or "").upper()
+        objective_alignment = str(plan.get("objective_alignment") or "").upper()
+        scenario_type = str(plan.get("scenario_type") or "").upper()
+        poi_classification = str(plan.get("poi_classification") or "").upper()
+        structure_trend = str(plan.get("structure_trend") or "").upper()
+        recent_sweep = plan.get("recent_sweep") or {}
+        sweep_type = str((recent_sweep or {}).get("type") or "")
+        aligned_sweep = (side == "BUY" and sweep_type == "sell_side") or (side == "SELL" and sweep_type == "buy_side")
+        structure_aligned = structure_trend == ("BULLISH" if side == "BUY" else "BEARISH")
+        objective_aligned = objective_direction == side and objective_alignment == "ALIGNED_WITH_MARKET_OBJECTIVE"
+        quality_plan = poi_classification in {"EXTREME_POI", "HIGH_PROBABILITY_POI"}
+        continuation_family = scenario_type in {"STRUCTURE_CONTINUATION", "ORDER_BLOCK_PULLBACK", "LIQUIDITY_REVERSAL"}
+        has_smc = "smc" in support_agents
+        has_local_confirmation = any(agent in support_agents for agent in {"price_action", "classical"})
+        if (
+            support_count >= 2
+            and has_smc
+            and has_local_confirmation
+            and objective_aligned
+            and structure_aligned
+            and aligned_sweep
+            and quality_plan
+            and continuation_family
+        ):
+            return {
+                "allow": True,
+                "kind": "OBJECTIVE_ALIGNED_TWO_AGENT_OVERRIDE",
+                "support_count": support_count,
+                "support_agents": support_agents,
+                "reason": "objective-aligned continuation override: 2 qualified agents including SMC + local confirmation, with aligned sweep and structure",
+            }
+
     return {
         "allow": False,
         "support_count": support_count,
+        "support_agents": support_agents,
         "reason": f"planner execution requires 3 qualified agents or 2 agents + macro/gemini; got {support_count}",
     }
 
