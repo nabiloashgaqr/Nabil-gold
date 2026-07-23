@@ -405,6 +405,31 @@ def test_session_planner_removes_add_area_when_it_overlaps_main(tmp_path: Path) 
     assert plan["standby_poi"] is None
 
 
+def test_session_planner_keeps_same_box_ladder_standby_even_when_overlapping(tmp_path: Path) -> None:
+    service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True}})
+    service.storage_path = tmp_path / "session_plans.json"
+    results = _results()
+    primary = _candidate("PRIMARY", direction="BUY", entry_price=4087.0, stop_loss=4064.5, target_price=4130.0)
+    standby = _candidate("STANDBY", direction="BUY", entry_price=4077.0, stop_loss=4064.5, target_price=4130.0)
+    primary["poi_zone"] = {"top": 4087.43, "bottom": 4077.50}
+    standby["poi_zone"] = {"top": 4077.49, "bottom": 4067.05}
+    primary["details"] = {"poi": {"mitigation_status": "FRESH"}, "selection": {"same_box_ladder": True, "ladder_parent_id": "BOX::1", "ladder_leg": "PRIMARY"}}
+    standby["details"] = {"poi": {"mitigation_status": "FRESH"}, "selection": {"same_box_ladder": True, "ladder_parent_id": "BOX::1", "ladder_leg": "STANDBY"}}
+    results["daily_bias"] = {"bias": "BULLISH", "confidence": 91}
+    results["news"]["macro_direction"] = {"bias": "BULLISH_GOLD", "confidence": 70}
+    results["macro_fundamental"]["macro_direction"] = {"bias": "BULLISH_GOLD", "confidence": 70}
+    results["smc"]["zone"] = "DISCOUNT"
+    results["smc"]["market_structure"] = {"trend": "BULLISH", "structure_quality": "STRONG"}
+    results["smc"]["liquidity"]["recent_sweep"] = {"occurred": True, "type": "sell_side", "reference_type": "session_low", "confirmation": "STRONG"}
+    results["smc"]["setup_candidates"] = [primary, standby]
+    plan = service.build_plan(results)
+    assert plan["plan_ready"] is True
+    assert plan["standby_poi"] is not None
+    assert plan["same_box_ladder"] is True
+    assert plan["manual_plan"]["same_box_ladder"] is True
+    assert "Same-box ladder" in plan["manual_plan"]["execution_priority_label"]
+
+
 def test_session_planner_blocks_when_main_rr_is_too_low(tmp_path: Path) -> None:
     service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True, "min_main_rr_for_ready": 1.5}})
     service.storage_path = tmp_path / "session_plans.json"

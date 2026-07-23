@@ -70,6 +70,28 @@ def test_database_service_saves_and_reads_session_plan_locally(tmp_path: Path) -
     assert sent_latest["telegram_delivery_note"] == "first_ready_plan_this_session"
 
 
+def test_database_service_can_merge_session_plan_payload_locally(tmp_path: Path) -> None:
+    db = _db(tmp_path)
+    snapshot_id = db.save_session_plan({
+        "plan_id": "PLAN::XAU::2",
+        "scenario_id": "SCENARIO::XAU::2",
+        "symbol": "XAU/USD",
+        "session_label": "London / Europe Midday",
+        "session_quality": "HIGH",
+        "plan_ready": True,
+        "plan_status": "READY",
+        "plan_reason": "ok",
+        "execution_audit": {"stage": "plan_built"},
+    }, {"current_price": 4011.0, "analysis_run_at": "2026-07-21T06:10:00Z"})
+    db.merge_session_plan_payload(snapshot_id, {"execution_audit": {"delivery_send_planned": True, "same_box_ladder": True}})
+    latest = db.get_latest_session_plan("XAU/USD")
+    assert latest is not None
+    payload = latest["payload"]
+    assert payload["execution_audit"]["stage"] == "plan_built"
+    assert payload["execution_audit"]["delivery_send_planned"] is True
+    assert payload["execution_audit"]["same_box_ladder"] is True
+
+
 def test_run_analysis_persists_session_plan_snapshot(monkeypatch, tmp_path: Path) -> None:
     config = {
         "symbol": "XAU/USD",
