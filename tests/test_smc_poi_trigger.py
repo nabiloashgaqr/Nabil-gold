@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(ROOT))
+
 from agents.risk_management_agent import RiskManagementAgent
 from agents.smc_agent import SMCAgent
 
@@ -107,3 +113,55 @@ def test_hybrid_entry_uses_market_when_trigger_confirmed() -> None:
     assert result["entry"]["kind"] == "MARKET"
     assert result["entry"]["order_type"] == "SELL_MARKET"
     assert "trigger confirmed" in result["entry"]["basis"].lower()
+
+
+def test_smc_objective_direction_detects_bullish_mitigation_context() -> None:
+    agent = SMCAgent({"symbol": "XAU/USD"})
+    direction = agent._context_objective_direction(
+        {"trend": "BULLISH"},
+        {"recent_sweep": {"occurred": True, "type": "sell_side", "confirmation": "STRONG"}},
+        "DISCOUNT",
+    )
+    assert direction == "BUY"
+
+
+def test_smc_candidate_direction_pool_keeps_objective_direction_even_if_score_differs() -> None:
+    pool = SMCAgent._candidate_direction_pool("SELL", "BUY")
+    assert pool == ["SELL", "BUY"]
+
+
+def test_smc_priority_prefers_bullish_mitigation_candidate_when_objective_is_buy() -> None:
+    agent = SMCAgent({"symbol": "XAU/USD"})
+    buy_candidate = {
+        "direction": "BUY",
+        "setup_type": "STRUCTURE_CONTINUATION",
+        "entry_price": 4087.0,
+        "trigger_state": "AT_POI_WAIT_TRIGGER",
+        "trigger_score": 56,
+        "thesis_dominance_score": 66,
+        "return_probability_score": 62,
+        "details": {"market_trend": "BULLISH", "poi": {"mitigation_status": "FRESH"}},
+    }
+    sell_candidate = {
+        "direction": "SELL",
+        "setup_type": "LIQUIDITY_REVERSAL",
+        "entry_price": 4134.0,
+        "trigger_state": "AT_POI_WAIT_TRIGGER",
+        "trigger_score": 58,
+        "thesis_dominance_score": 72,
+        "return_probability_score": 63,
+        "details": {"market_trend": "BULLISH", "poi": {"mitigation_status": "FRESH"}},
+    }
+    buy_score = agent._setup_candidate_priority_score(
+        buy_candidate,
+        current_price=4115.0,
+        zone_context="DISCOUNT",
+        objective_direction="BUY",
+    )
+    sell_score = agent._setup_candidate_priority_score(
+        sell_candidate,
+        current_price=4115.0,
+        zone_context="DISCOUNT",
+        objective_direction="BUY",
+    )
+    assert buy_score > sell_score
