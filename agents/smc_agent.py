@@ -745,8 +745,10 @@ class SMCAgent(BaseAgent):
                 score += 8.0
             if mitigation == "FRESH":
                 score += 4.0
-            if setup_type in {"STRUCTURE_CONTINUATION", "ORDER_BLOCK_PULLBACK", "LIQUIDITY_REVERSAL"}:
+            if setup_type in {"STRUCTURE_CONTINUATION", "ORDER_BLOCK_PULLBACK", "LIQUIDITY_REVERSAL", "CONTINUATION_BREAKDOWN", "FAILED_RECLAIM_CONTINUATION"}:
                 score += 4.0
+            if trigger_state in {"CONTINUATION_BREAKDOWN_CONFIRMED", "FAILED_RECLAIM_CONFIRMED"}:
+                score += 6.0
         elif objective_direction in {"BUY", "SELL"} and objective_direction != direction:
             score -= 8.0
             if setup_type == "LIQUIDITY_REVERSAL" and trigger_state == "REJECTION_CONFIRMED":
@@ -1126,6 +1128,12 @@ class SMCAgent(BaseAgent):
         market_structure: Dict[str, Any],
         poi: Dict[str, Any],
     ) -> str:
+        trigger = poi.get("trigger") or {}
+        trigger_state = str(trigger.get("state") or "").upper()
+        if trigger_state == "FAILED_RECLAIM_CONFIRMED":
+            return "FAILED_RECLAIM_CONTINUATION"
+        if trigger_state == "CONTINUATION_BREAKDOWN_CONFIRMED":
+            return "CONTINUATION_BREAKDOWN"
         sweep_type = str(sweep.get("type") or "")
         if (direction == "BUY" and sweep_type == "sell_side") or (direction == "SELL" and sweep_type == "buy_side"):
             return "LIQUIDITY_REVERSAL"
@@ -1142,6 +1150,9 @@ class SMCAgent(BaseAgent):
         poi: Dict[str, Any],
         sweep: Dict[str, Any],
     ) -> str:
+        trigger = poi.get("trigger") or {}
+        if bool(trigger.get("market_ready")):
+            return "ENTRY_ARMED"
         if poi.get("near_price"):
             return "ENTRY_ARMED"
         if sweep.get("occurred"):
@@ -1267,23 +1278,33 @@ class SMCAgent(BaseAgent):
             if body > 0 and wick >= body * wick_body_ratio:
                 score += 10.0
                 reasons.append("upper_wick_rejection")
-        market_ready = touched and score >= market_min_score
-        if market_ready:
-            state = "REJECTION_CONFIRMED"
+
+        continuation = self._continuation_trigger(direction, candles, zone, atr)
+        if continuation.get("confirmed"):
+            score = max(score, market_min_score + float(continuation.get("score_bonus") or 0))
+            reasons.extend(list(continuation.get("reasons") or []))
+            market_ready = True
+            state = str(continuation.get("state") or "REJECTION_CONFIRMED")
             timing = "MARKET_READY"
-            execution_hint = "MARKET"
-        elif touched:
-            state = "TOUCH_NO_REJECTION"
-            timing = "WAIT_CONFIRMATION"
-            execution_hint = "LIMIT"
-        elif near:
-            state = "AT_POI_WAIT_TRIGGER"
-            timing = "WAIT_TRIGGER"
-            execution_hint = "LIMIT"
+            execution_hint = str(continuation.get("execution_hint") or "MARKET")
         else:
-            state = "AWAY_FROM_POI"
-            timing = "WAIT_PULLBACK"
-            execution_hint = "LIMIT"
+            market_ready = touched and score >= market_min_score
+            if market_ready:
+                state = "REJECTION_CONFIRMED"
+                timing = "MARKET_READY"
+                execution_hint = "MARKET"
+            elif touched:
+                state = "TOUCH_NO_REJECTION"
+                timing = "WAIT_CONFIRMATION"
+                execution_hint = "LIMIT"
+            elif near:
+                state = "AT_POI_WAIT_TRIGGER"
+                timing = "WAIT_TRIGGER"
+                execution_hint = "LIMIT"
+            else:
+                state = "AWAY_FROM_POI"
+                timing = "WAIT_PULLBACK"
+                execution_hint = "LIMIT"
         return {
             "state": state,
             "score": round(score, 1),
@@ -1292,6 +1313,94 @@ class SMCAgent(BaseAgent):
             "execution_hint": execution_hint,
             "reasons": reasons,
         }
+
+    def _continuation_trigger(
+        self,
+        direction: str,
+        candles: List[Candle],
+        zone: Dict[str, Any],
+        atr: float,
+    ) -> Dict[str, Any]:
+        if len(candles) < 2:
+            return {"confirmed": False}
+        top = self._f(zone.get("top"))
+        bottom = self._f(zone.get("bottom"))
+        if top <= 0 or bottom <= 0:
+            return {"confirmed": False}
+        low = min(top, bottom)
+        high = max(top, bottom)
+        prev = candles[-2]
+        last = candles[-1]
+        prev_high = self._f(prev.get("high"))
+        prev_low = self._f(prev.get("low"))
+        prev_close = self._f(prev.get("close"))
+        last_open = self._f(last.get("open"))
+        last_high = self._f(last.get("high"))
+        last_low = self._f(last.get("low"))
+        last_close = self._f(last.get("close"))
+        reclaim_buffer = max(atr * 0.10, 0.35)
+        continuation_buffer = max(atr * 0.08, 0.25)
+        if direction == "SELL":
+            recent_reclaim = prev_high >= low - reclaim_buffer or last_high >= low - reclaim_buffer
+            failed_reclaim = (
+                recent_reclaim
+                and last_close < prev_low - continuation_buffer
+                and last_close < low + reclaim_buffer
+                and last_close < last_open
+            )
+            if failed_reclaim:
+                return {
+                    "confirmed": True,
+                    "state": "FAILED_RECLAIM_CONFIRMED",
+                    "execution_hint": "MARKET",
+                    "score_bonus": 8.0,
+                    "reasons": ["failed_reclaim_continuation", "bearish_breakdown_after_reclaim"],
+                }
+            breakdown = (
+                last_close < prev_low - continuation_buffer
+                and last_close < low - continuation_buffer
+                and last_close < prev_close
+                and last_close < last_open
+            )
+            if breakdown:
+                return {
+                    "confirmed": True,
+                    "state": "CONTINUATION_BREAKDOWN_CONFIRMED",
+                    "execution_hint": "MARKET",
+                    "score_bonus": 6.0,
+                    "reasons": ["continuation_breakdown", "bearish_follow_through"],
+                }
+        else:
+            recent_reclaim = prev_low <= high + reclaim_buffer or last_low <= high + reclaim_buffer
+            failed_reclaim = (
+                recent_reclaim
+                and last_close > prev_high + continuation_buffer
+                and last_close > high - reclaim_buffer
+                and last_close > last_open
+            )
+            if failed_reclaim:
+                return {
+                    "confirmed": True,
+                    "state": "FAILED_RECLAIM_CONFIRMED",
+                    "execution_hint": "MARKET",
+                    "score_bonus": 8.0,
+                    "reasons": ["failed_reclaim_continuation", "bullish_breakout_after_reclaim"],
+                }
+            breakdown = (
+                last_close > prev_high + continuation_buffer
+                and last_close > high + continuation_buffer
+                and last_close > prev_close
+                and last_close > last_open
+            )
+            if breakdown:
+                return {
+                    "confirmed": True,
+                    "state": "CONTINUATION_BREAKDOWN_CONFIRMED",
+                    "execution_hint": "MARKET",
+                    "score_bonus": 6.0,
+                    "reasons": ["continuation_breakdown", "bullish_follow_through"],
+                }
+        return {"confirmed": False}
 
     def _recent_sweep(
         self,
