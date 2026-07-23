@@ -55,6 +55,46 @@ def test_planner_execution_gate_allows_two_agent_plus_macro() -> None:
     assert gate["confirm_source"] == "macro"
 
 
+def test_planner_execution_gate_allows_two_agent_direct_macro_context_confirmation() -> None:
+    decision = {
+        "decision": "SELL",
+        "agent_details": {
+            "technical": {"direction": "SELL", "confidence": 92},
+            "classical": {"direction": "WAIT", "confidence": 27},
+            "smc": {"direction": "SELL", "confidence": 84},
+            "price_action": {"direction": "WAIT", "confidence": 35},
+            "multitimeframe": {"direction": "WAIT", "confidence": 48},
+        },
+        "news_context": {
+            "macro": {"macro_direction": {"bias": "BEARISH_GOLD", "confidence": 66}}
+        },
+    }
+    gate = ra._planner_execution_gate(decision, _config())
+    assert gate["allow"] is True
+    assert gate["kind"] == "TWO_AGENT_CONTEXT_CONFIRMED_ADMISSION"
+    assert gate["confirm_source"] == "macro"
+    assert gate["support_count"] == 2
+
+
+def test_planner_execution_gate_allows_two_agent_direct_gemini_macro_confirmation() -> None:
+    decision = {
+        "decision": "BUY",
+        "agent_details": {
+            "technical": {"direction": "BUY", "confidence": 78},
+            "classical": {"direction": "WAIT", "confidence": 25},
+            "smc": {"direction": "BUY", "confidence": 84},
+            "price_action": {"direction": "WAIT", "confidence": 40},
+            "multitimeframe": {"direction": "WAIT", "confidence": 48},
+        },
+        "gemini_macro_review": {"available": True, "macro_verdict": "BULLISH_GOLD", "confidence": 74},
+    }
+    gate = ra._planner_execution_gate(decision, _config())
+    assert gate["allow"] is True
+    assert gate["kind"] == "TWO_AGENT_CONTEXT_CONFIRMED_ADMISSION"
+    assert gate["confirm_source"] == "gemini"
+    assert gate["support_count"] == 2
+
+
 def test_planner_execution_gate_allows_objective_aligned_two_agent_override() -> None:
     decision = {
         "decision": "BUY",
