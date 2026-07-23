@@ -38,6 +38,7 @@ class OpenTradesManager(BaseAgent):
         "PENDING_CANCELLED",
         "MOVE_SL_TO_BE",
         "TRAILING_SL_UPDATED",
+        "THESIS_SCALE_OUT",
         "TP1_HIT",
         "TP2_HIT",
         "SL_HIT",
@@ -122,6 +123,15 @@ class OpenTradesManager(BaseAgent):
         self.pending_touch_revalidation_stop_max_drift_points = float(ptr.get("stop_max_drift_points", 25) or 25)
         self.pending_touch_revalidation_cancel_on_failed = bool(ptr.get("cancel_on_failed_revalidation", True))
         self.profile_overrides = (self.management.get("profiles", {}) or {}) if isinstance(self.management, dict) else {}
+        thesis_exit = (self.management.get("thesis_exit", {}) or {}) if isinstance(self.management, dict) else {}
+        self.thesis_exit_enabled = bool(thesis_exit.get("enabled", True))
+        self.thesis_exit_countertrend_hold_minutes = float(thesis_exit.get("countertrend_hold_minutes", 20) or 20)
+        self.thesis_exit_min_progress_pct = float(thesis_exit.get("min_progress_pct", 18) or 18)
+        self.thesis_exit_min_mfe_points = float(thesis_exit.get("min_mfe_points", 35) or 35)
+        self.thesis_exit_reclaim_points = float(thesis_exit.get("reclaim_points", 12) or 12)
+        self.thesis_exit_opposing_poi_enabled = bool(thesis_exit.get("opposing_poi_enabled", True))
+        self.thesis_exit_opposing_poi_buffer_points = float(thesis_exit.get("opposing_poi_buffer_points", 18) or 18)
+        self.thesis_exit_opposing_poi_reclaim_points = float(thesis_exit.get("opposing_poi_reclaim_points", 12) or 12)
         self.pending_governor = PendingGovernor(self.config)
         self.scenario_governor = ScenarioGovernor(self.config)
 
@@ -523,6 +533,19 @@ class OpenTradesManager(BaseAgent):
         sl_touched = _stop_touched(stop_loss)
         be_touched = _breakeven_touched()
         hours_open = self._hours_open(trade, now)
+        thesis_exit = self._thesis_exit_review(
+            trade,
+            trade_type=trade_type,
+            symbol=symbol,
+            current_price=current_price,
+            recent_candles=recent_candles,
+            hours_open=hours_open,
+            pnl_points=pnl_points,
+            max_favorable_excursion=max_favorable_excursion,
+            tp1=tp1,
+            entry=entry,
+            partial_close=partial_close,
+        )
 
         # Informational age/risk markers are still recorded even if the same
         # cycle also expires the trade.
@@ -671,6 +694,20 @@ class OpenTradesManager(BaseAgent):
                 sl_moved_to_entry = True
                 new_stop_loss = entry  # actually persist breakeven, not just the flag
                 events.append("MOVE_SL_TO_BE")
+        elif thesis_exit.get("scale_out"):
+            new_status = "PARTIAL"
+            partial_close = True
+            events.append("THESIS_SCALE_OUT")
+            if not sl_moved_to_entry:
+                sl_moved_to_entry = True
+                new_stop_loss = entry
+                events.append("MOVE_SL_TO_BE")
+        elif thesis_exit.get("exit_now"):
+            new_status = "MANUAL_CLOSE"
+            events.append("MANUAL_CLOSE")
+            close_price = current_price
+            final_pnl = round(pnl_points, 1)
+            result = "WIN" if pnl_points > 0 else "LOSS" if pnl_points < 0 else "BREAKEVEN"
         else:
             # 2) Informational events only if no status-changing event happened.
             progress = self._progress_to_tp1(trade_type, entry, tp1, current_price)
@@ -756,6 +793,9 @@ class OpenTradesManager(BaseAgent):
                         events.append("TRAILING_SL_UPDATED")
 
         # Avoid repeating informational events already sent. Status events are naturally one-time after status changes.
+        closing_events = {"TP2_HIT", "SL_HIT", "TRAILING_SL_HIT", "BE_HIT", "MANUAL_CLOSE"}
+        if any(event in closing_events for event in events):
+            events = [event for event in events if event not in {"NEAR_TP1", "LONG_RUNNING", "EXIT_WARNING"}]
         filtered_events: List[str] = []
         for event in events:
             if event in {"NEAR_TP1", "LONG_RUNNING", "MOVE_SL_TO_BE", "EXIT_WARNING"} and event in updates_sent:
@@ -787,6 +827,8 @@ class OpenTradesManager(BaseAgent):
             updates["stop_loss"] = round(new_stop_loss, 2)
         if result is not None:
             updates["result"] = result
+        if thesis_exit.get("exit_now") or thesis_exit.get("scale_out"):
+            updates["reasons"] = [str(thesis_exit.get("reason") or "Automatic thesis exit")]
         if close_price is not None:
             updates["close_price"] = round(close_price, 2)
             updates["closed_at"] = self._iso(now)
@@ -1110,6 +1152,193 @@ class OpenTradesManager(BaseAgent):
         if tp1 and abs(current_price - entry) <= risk * 0.15:
             return None
         return None
+
+    def _objective_alignment(self, trade: Dict[str, Any]) -> str:
+        snapshot = self._trade_snapshot(trade)
+        plan = (snapshot.get("session_plan") or {}) if isinstance(snapshot, dict) else {}
+        alignment = str((plan or {}).get("objective_alignment") or "").upper()
+        if alignment:
+            return alignment
+        objective_dir = str((plan or {}).get("market_objective_direction") or "").upper()
+        trade_type = str(trade.get("type") or trade.get("side") or "").upper()
+        if objective_dir in {"BUY", "SELL"} and trade_type in {"BUY", "SELL"}:
+            return "ALIGNED_WITH_MARKET_OBJECTIVE" if objective_dir == trade_type else "COUNTER_OBJECTIVE_REVERSAL_CONFIRMED"
+        return ""
+
+    def _continuation_trigger_against_trade(
+        self,
+        trade_type: str,
+        recent_candles: List[Dict[str, Any]] | None,
+        symbol: str,
+    ) -> str | None:
+        if not recent_candles or len(recent_candles) < 2:
+            return None
+        prev = recent_candles[-2] if isinstance(recent_candles[-2], dict) else {}
+        last = recent_candles[-1] if isinstance(recent_candles[-1], dict) else {}
+        prev_high = self._f(prev.get("high"), 0.0)
+        prev_low = self._f(prev.get("low"), 0.0)
+        prev_close = self._f(prev.get("close"), 0.0)
+        last_open = self._f(last.get("open"), 0.0)
+        last_close = self._f(last.get("close"), 0.0)
+        if prev_high <= 0 or prev_low <= 0 or last_close <= 0 or last_open <= 0:
+            return None
+        reclaim = points_to_price(self.thesis_exit_reclaim_points, symbol)
+        if trade_type == "SELL":
+            if last_close > prev_high + reclaim and last_close > prev_close and last_close > last_open:
+                return "bullish continuation reclaimed the breakdown"
+        else:
+            if last_close < prev_low - reclaim and last_close < prev_close and last_close < last_open:
+                return "bearish continuation reclaimed the breakout"
+        return None
+
+    def _opposing_poi_levels(self, trade: Dict[str, Any], trade_type: str) -> List[tuple[str, float]]:
+        snapshot = self._trade_snapshot(trade)
+        plan = (snapshot.get("session_plan") or {}) if isinstance(snapshot, dict) else {}
+        if not isinstance(plan, dict):
+            return []
+        liquidity_map = (plan.get("liquidity_map") or {}) if isinstance(plan.get("liquidity_map"), dict) else {}
+        raw_levels: List[tuple[str, Any]] = []
+        if trade_type == "SELL":
+            raw_levels.extend([
+                ("target_liquidity", plan.get("target_liquidity")),
+                ("previous_day_low", liquidity_map.get("previous_day_low")),
+                ("session_low", liquidity_map.get("session_low")),
+            ])
+        else:
+            raw_levels.extend([
+                ("target_liquidity", plan.get("target_liquidity")),
+                ("previous_day_high", liquidity_map.get("previous_day_high")),
+                ("session_high", liquidity_map.get("session_high")),
+            ])
+        levels: List[tuple[str, float]] = []
+        seen: set[float] = set()
+        for label, value in raw_levels:
+            price = self._f(value, 0.0)
+            if price <= 0:
+                continue
+            marker = round(price, 2)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            levels.append((label, marker))
+        return levels
+
+    def _opposing_poi_exit_review(
+        self,
+        trade: Dict[str, Any],
+        *,
+        trade_type: str,
+        symbol: str,
+        current_price: float,
+        recent_candles: List[Dict[str, Any]] | None,
+        entry: float,
+        tp1: float,
+        partial_close: bool,
+    ) -> Dict[str, Any]:
+        if not self.thesis_exit_opposing_poi_enabled or not recent_candles or len(recent_candles) < 2:
+            return {"exit_now": False, "scale_out": False}
+        if tp1 > 0:
+            progress_pct = self._progress_to_tp1(trade_type, entry, tp1, current_price) * 100.0 if entry > 0 else 0.0
+            if progress_pct >= 100.0:
+                return {"exit_now": False, "scale_out": False}
+        prev = recent_candles[-2] if isinstance(recent_candles[-2], dict) else {}
+        last = recent_candles[-1] if isinstance(recent_candles[-1], dict) else {}
+        prev_close = self._f(prev.get("close"), 0.0)
+        last_open = self._f(last.get("open"), 0.0)
+        last_close = self._f(last.get("close"), 0.0)
+        if last_close <= 0 or last_open <= 0:
+            return {"exit_now": False, "scale_out": False}
+        touch_buffer = points_to_price(self.thesis_exit_opposing_poi_buffer_points, symbol)
+        reclaim = points_to_price(self.thesis_exit_opposing_poi_reclaim_points, symbol)
+        alignment = self._objective_alignment(trade)
+        for label, level in self._opposing_poi_levels(trade, trade_type):
+            if trade_type == "SELL":
+                touched = self._f(last.get("low"), 0.0) <= level + touch_buffer
+                rejected = touched and last_close > level + reclaim and last_close > prev_close and last_close > last_open
+                if rejected:
+                    if alignment == "ALIGNED_WITH_MARKET_OBJECTIVE" and not partial_close:
+                        return {
+                            "exit_now": False,
+                            "scale_out": True,
+                            "reason": f"Automatic thesis scale-out: opposing BUY POI rejection from {label} near {level:.2f}",
+                            "kind": "OPPOSING_POI_SCALE_OUT",
+                        }
+                    return {
+                        "exit_now": True,
+                        "scale_out": False,
+                        "reason": f"Automatic thesis exit: opposing BUY POI rejection from {label} near {level:.2f}",
+                        "kind": "OPPOSING_POI_REJECTION",
+                    }
+            else:
+                touched = self._f(last.get("high"), 0.0) >= level - touch_buffer
+                rejected = touched and last_close < level - reclaim and last_close < prev_close and last_close < last_open
+                if rejected:
+                    if alignment == "ALIGNED_WITH_MARKET_OBJECTIVE" and not partial_close:
+                        return {
+                            "exit_now": False,
+                            "scale_out": True,
+                            "reason": f"Automatic thesis scale-out: opposing SELL POI rejection from {label} near {level:.2f}",
+                            "kind": "OPPOSING_POI_SCALE_OUT",
+                        }
+                    return {
+                        "exit_now": True,
+                        "scale_out": False,
+                        "reason": f"Automatic thesis exit: opposing SELL POI rejection from {label} near {level:.2f}",
+                        "kind": "OPPOSING_POI_REJECTION",
+                    }
+        return {"exit_now": False, "scale_out": False}
+
+    def _thesis_exit_review(
+        self,
+        trade: Dict[str, Any],
+        *,
+        trade_type: str,
+        symbol: str,
+        current_price: float,
+        recent_candles: List[Dict[str, Any]] | None,
+        hours_open: float,
+        pnl_points: float,
+        max_favorable_excursion: float,
+        tp1: float,
+        entry: float,
+        partial_close: bool,
+    ) -> Dict[str, Any]:
+        if not self.thesis_exit_enabled or trade_type not in {"BUY", "SELL"}:
+            return {"exit_now": False, "scale_out": False}
+        opposite_continuation = self._continuation_trigger_against_trade(trade_type, recent_candles, symbol)
+        if opposite_continuation:
+            return {
+                "exit_now": True,
+                "reason": f"Automatic thesis exit: {opposite_continuation}",
+                "kind": "OPPOSITE_CONTINUATION",
+            }
+        opposing_poi = self._opposing_poi_exit_review(
+            trade,
+            trade_type=trade_type,
+            symbol=symbol,
+            current_price=current_price,
+            recent_candles=recent_candles,
+            entry=entry,
+            tp1=tp1,
+            partial_close=partial_close,
+        )
+        if opposing_poi.get("exit_now") or opposing_poi.get("scale_out"):
+            return opposing_poi
+        alignment = self._objective_alignment(trade)
+        progress_pct = self._progress_to_tp1(trade_type, entry, tp1, current_price) * 100.0 if tp1 > 0 and entry > 0 else 0.0
+        if (
+            alignment == "COUNTER_OBJECTIVE_REVERSAL_CONFIRMED"
+            and hours_open >= (self.thesis_exit_countertrend_hold_minutes / 60.0)
+            and pnl_points <= 0
+            and max_favorable_excursion < self.thesis_exit_min_mfe_points
+            and progress_pct < self.thesis_exit_min_progress_pct
+        ):
+            return {
+                "exit_now": True,
+                "reason": "Automatic thesis exit: counter-objective reversal failed to follow through quickly",
+                "kind": "COUNTERTREND_NO_FOLLOW_THROUGH",
+            }
+        return {"exit_now": False, "scale_out": False}
 
     def _order_filled(
         self,
