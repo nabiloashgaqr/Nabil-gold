@@ -526,13 +526,13 @@ class SMCAgent(BaseAgent):
         confidence: int,
         market_structure: Dict[str, Any],
         liquidity: Dict[str, Any],
-        zone_context: str,
-        objective_direction: str | None,
         order_blocks: List[Dict[str, Any]],
         fvg: List[Dict[str, Any]],
         dealing_range: Dict[str, float],
         entry_suggestion: Dict[str, Any],
         candles: List[Candle],
+        zone_context: str = "",
+        objective_direction: str | None = None,
     ) -> List[Dict[str, Any]]:
         """Return ranked SMC setup candidates with PRIMARY/STANDBY roles.
 
