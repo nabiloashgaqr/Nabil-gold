@@ -165,3 +165,38 @@ def test_smc_priority_prefers_bullish_mitigation_candidate_when_objective_is_buy
         objective_direction="BUY",
     )
     assert buy_score > sell_score
+
+
+def test_smc_expands_same_box_ladder_for_objective_aligned_mitigation() -> None:
+    agent = SMCAgent({"symbol": "XAU/USD"})
+    anchor = {
+        "id": "SMC::BASE",
+        "state_key": "STATE::BASE",
+        "direction": "BUY",
+        "setup_type": "STRUCTURE_CONTINUATION",
+        "entry_price": 4077.0,
+        "stop_loss": 4064.5,
+        "poi_type": "order_block",
+        "poi_zone": {"top": 4087.43, "bottom": 4067.05},
+        "poi_low": 4067.05,
+        "poi_high": 4087.43,
+        "thesis_dominance_score": 70.0,
+        "return_probability_score": 64.0,
+        "trigger_score": 56.0,
+        "priority_score": 80.0,
+        "objective_alignment": "ALIGNED_WITH_OBJECTIVE",
+        "details": {"poi": {"mitigation_status": "FRESH"}, "selection": {}},
+    }
+    expanded = agent._expand_objective_same_box_ladder(
+        [anchor],
+        direction="BUY",
+        current_price=4115.0,
+        atr=2.0,
+        objective_direction="BUY",
+    )
+    assert len(expanded) == 2
+    assert expanded[0]["selection_role"] == "PRIMARY"
+    assert expanded[1]["selection_role"] == "STANDBY"
+    assert expanded[0]["entry_price"] > expanded[1]["entry_price"]
+    assert expanded[0]["stop_loss"] == expanded[1]["stop_loss"]
+    assert expanded[0]["details"]["selection"]["same_box_ladder"] is True
