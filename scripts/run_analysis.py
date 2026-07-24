@@ -666,7 +666,10 @@ def _planner_context_confirmation(decision: Dict[str, Any], config: Dict[str, An
 
 
 def _planner_execution_gate(decision: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
+    plan = decision.get("session_plan") or {}
     side = str(decision.get("decision") or "").upper()
+    if side not in {"BUY", "SELL"} and isinstance(plan, dict):
+        side = str(plan.get("session_bias") or "").upper()
     if side not in {"BUY", "SELL"}:
         return {"allow": False, "reason": "no approved directional admission"}
 
@@ -841,6 +844,11 @@ def _execute_session_plan_ladder(
         return 0
     plan = base_decision.get("session_plan") or {}
     if not isinstance(plan, dict) or not plan.get("plan_ready"):
+        return 0
+    readiness = (plan.get("execution_readiness") or {}) if isinstance(plan.get("execution_readiness"), dict) else {}
+    readiness_state = str(readiness.get("state") or "")
+    if readiness_state and readiness_state not in {"PENDING_EXECUTION_READY", "MARKET_EXECUTION_READY"}:
+        logger.info("Session-plan ladder blocked by execution readiness: %s", readiness.get("reason") or readiness_state or "unknown")
         return 0
     gate = _planner_execution_gate(base_decision, config)
     if not gate.get("allow"):
@@ -1500,6 +1508,8 @@ def _session_plan_execution_audit(plan: Dict[str, Any], **extra: Any) -> Dict[st
         "preferred_execution_family": plan.get("preferred_execution_family"),
         "objective_alignment": plan.get("objective_alignment"),
         "same_box_ladder": bool(plan.get("same_box_ladder") or manual_plan.get("same_box_ladder")),
+        "execution_readiness_state": str(((plan.get("execution_readiness") or {}) if isinstance(plan.get("execution_readiness"), dict) else {}).get("state") or ""),
+        "execution_readiness_reason": str(((plan.get("execution_readiness") or {}) if isinstance(plan.get("execution_readiness"), dict) else {}).get("reason") or ""),
         "reversal_watch_active": bool((plan.get("reversal_watch") or {}).get("active")) if isinstance(plan.get("reversal_watch"), dict) else False,
         "primary_entry_price": plan.get("primary_entry_price") or primary.get("entry_price"),
         "standby_entry_price": plan.get("standby_entry_price") or standby.get("entry_price"),
