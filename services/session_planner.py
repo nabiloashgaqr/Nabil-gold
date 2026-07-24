@@ -68,6 +68,10 @@ class SessionPlannerService:
         dealing_range = smc.get("dealing_range", {}) or {}
         zone_context = str(smc.get("zone") or "")
         reversal_watch = all_results.get("reversal_watch") or {}
+        smc_archetype = str(smc.get("day_archetype") or "").upper()
+        smc_archetype_confidence = self._f(smc.get("day_archetype_confidence"), 0.0)
+        smc_archetype_reason = str(smc.get("day_archetype_reason") or "").strip()
+        smc_preferred_execution_family = str(smc.get("preferred_execution_family") or "").upper()
         current_price = self._f(all_results.get("current_price"), 0.0)
 
         now = datetime.now(timezone.utc)
@@ -129,6 +133,10 @@ class SessionPlannerService:
             "market_objective": None,
             "market_objective_label": None,
             "market_objective_direction": None,
+            "day_archetype": None,
+            "day_archetype_confidence": 0,
+            "day_archetype_reason": None,
+            "preferred_execution_family": None,
             "primary_rationale": [],
             "standby_rationale": [],
             "plan_narrative": None,
@@ -152,6 +160,10 @@ class SessionPlannerService:
             "market_objective": market_objective.get("objective"),
             "market_objective_label": market_objective.get("label"),
             "market_objective_direction": market_objective.get("direction"),
+            "day_archetype": smc_archetype or None,
+            "day_archetype_confidence": round(smc_archetype_confidence, 1),
+            "day_archetype_reason": smc_archetype_reason or None,
+            "preferred_execution_family": smc_preferred_execution_family or None,
             "reversal_watch": reversal_watch if isinstance(reversal_watch, dict) else {},
         }
 
@@ -358,7 +370,12 @@ class SessionPlannerService:
         )
         primary_rationale = self._candidate_rationale(primary, direction, structure_trend, structure_quality, recent_sweep, rank_label="PRIMARY")
         standby_rationale = self._candidate_rationale(standby, direction, structure_trend, structure_quality, recent_sweep, rank_label="STANDBY") if standby else []
-        execution_preference = self._execution_preference(primary, standby, current_price)
+        execution_preference = self._execution_preference(
+            primary,
+            standby,
+            current_price,
+            preferred_execution_family=smc_preferred_execution_family,
+        )
         if objective_alignment == "COUNTER_OBJECTIVE_REVERSAL_CONFIRMED":
             execution_preference = "SINGLE_PENDING"
         poi_classification = self._classify_poi(primary, direction, structure_quality, recent_sweep, zone_context, current_price, symbol=symbol)
@@ -411,6 +428,10 @@ class SessionPlannerService:
                 "standby_execution": standby_execution,
                 "invalidation_level": primary_execution.get("stop_loss"),
                 "target_liquidity": primary.get("target_liquidity") or primary.get("target_price"),
+                "day_archetype": smc_archetype or None,
+                "day_archetype_confidence": round(smc_archetype_confidence, 1),
+                "day_archetype_reason": smc_archetype_reason or None,
+                "preferred_execution_family": smc_preferred_execution_family or None,
                 "planner_confidence": planner_score,
                 "planner_grade": self._grade(planner_score),
                 "supporting_agents": quality_diag.get("supporting_agents", []),
@@ -484,6 +505,11 @@ class SessionPlannerService:
         all_results: Dict[str, Any],
     ) -> Dict[str, Any]:
         fallback = deepcopy(base)
+        smc_payload = all_results.get("smc", {}) or {}
+        smc_archetype = str(smc_payload.get("day_archetype") or "").upper()
+        smc_archetype_confidence = self._f(smc_payload.get("day_archetype_confidence"), 0.0)
+        smc_archetype_reason = str(smc_payload.get("day_archetype_reason") or "").strip()
+        smc_preferred_execution_family = str(smc_payload.get("preferred_execution_family") or "").upper()
         authority = self._resolve_authority(
             daily_bias=daily_bias,
             macro=macro,
@@ -622,7 +648,12 @@ class SessionPlannerService:
         )
         primary_rationale = self._candidate_rationale(primary, direction, str(market_structure.get("trend") or "RANGING"), str(market_structure.get("structure_quality") or "WEAK"), (liquidity.get("recent_sweep") or {}) if isinstance(liquidity, dict) else {}, rank_label="PRIMARY")
         standby_rationale = self._candidate_rationale(standby, direction, str(market_structure.get("trend") or "RANGING"), str(market_structure.get("structure_quality") or "WEAK"), (liquidity.get("recent_sweep") or {}) if isinstance(liquidity, dict) else {}, rank_label="STANDBY") if standby else []
-        execution_preference = self._execution_preference(primary, standby, current_price)
+        execution_preference = self._execution_preference(
+            primary,
+            standby,
+            current_price,
+            preferred_execution_family=smc_preferred_execution_family,
+        )
         poi_classification = self._classify_poi(primary, direction, str(market_structure.get("structure_quality") or "WEAK"), (liquidity.get("recent_sweep") or {}) if isinstance(liquidity, dict) else {}, zone_context, current_price, symbol=symbol)
         primary["poi_classification"] = poi_classification
         primary["extreme_poi"] = poi_classification == "EXTREME_POI"
@@ -670,6 +701,10 @@ class SessionPlannerService:
                 "standby_execution": standby_execution,
                 "invalidation_level": primary_execution.get("stop_loss"),
                 "target_liquidity": primary.get("target_liquidity") or primary.get("target_price"),
+                "day_archetype": smc_archetype or None,
+                "day_archetype_confidence": round(smc_archetype_confidence, 1),
+                "day_archetype_reason": smc_archetype_reason or None,
+                "preferred_execution_family": smc_preferred_execution_family or None,
                 "planner_confidence": planner_score,
                 "planner_grade": self._grade(planner_score),
                 "supporting_agents": quality_diag.get("supporting_agents", []),
@@ -1358,11 +1393,25 @@ class SessionPlannerService:
             return False, f"trigger score {trigger_score:.1f} is below reversal proof threshold"
         return True, "reversal proof confirmed"
 
-    def _execution_preference(self, primary: Dict[str, Any], standby: Dict[str, Any] | None, current_price: float) -> str:
+    def _execution_preference(
+        self,
+        primary: Dict[str, Any],
+        standby: Dict[str, Any] | None,
+        current_price: float,
+        *,
+        preferred_execution_family: str = "",
+    ) -> str:
         trigger_state = str(primary.get("trigger_state") or "").upper()
         setup_state = str(primary.get("setup_state") or "").upper()
         entry_price = self._f(primary.get("entry_price"), 0.0)
         poi_classification = str(primary.get("poi_classification") or "").upper()
+        family = str(preferred_execution_family or "").upper()
+        if family == "MITIGATION_LADDER":
+            return "LADDER_PENDING" if standby else "SINGLE_PENDING"
+        if family in {"FAILED_RECLAIM_CONTINUATION", "CONTINUATION_BREAKDOWN"}:
+            return "NEAR_MARKET_WATCH" if trigger_state in {"FAILED_RECLAIM_CONFIRMED", "CONTINUATION_BREAKDOWN_CONFIRMED"} else "SINGLE_PENDING"
+        if family == "REVERSAL_MAP":
+            return "SINGLE_PENDING" if standby is None else "LADDER_PENDING"
         if poi_classification == "EXTREME_POI":
             return "SPLIT_EXECUTION_WATCH"
         if setup_state == "ENTRY_ARMED" and trigger_state == "REJECTION_CONFIRMED":
