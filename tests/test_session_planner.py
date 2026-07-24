@@ -365,6 +365,23 @@ def test_session_planner_breaks_authority_tie_with_structure_and_sweep_objective
     assert "conflicted" not in str(plan["plan_reason"]).lower()
 
 
+def test_session_planner_can_use_reversal_watch_as_authority_source(tmp_path: Path) -> None:
+    service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True}})
+    service.storage_path = tmp_path / "session_plans.json"
+    results = _results()
+    results["smc"]["setup_candidates"] = []
+    results["daily_bias"] = {"bias": "NEUTRAL", "confidence": 50}
+    results["news"]["macro_direction"] = {"bias": "NEUTRAL", "confidence": 50}
+    results["macro_fundamental"]["macro_direction"] = {"bias": "NEUTRAL", "confidence": 50}
+    results["smc"]["zone"] = "DISCOUNT"
+    results["smc"]["market_structure"] = {"trend": "RANGING", "structure_quality": "STRONG"}
+    results["smc"]["liquidity"]["recent_sweep"] = {"occurred": False, "type": None}
+    results["reversal_watch"] = {"direction": "BUY", "active": True}
+    plan = service.build_plan(results)
+    assert plan["authority_state"] == "WEAK" or plan["authority_state"] == "CONFIRMED"
+    assert plan["authority_direction"] == "BUY"
+
+
 def test_session_planner_classifies_extreme_poi_when_alignment_is_strong(tmp_path: Path) -> None:
     service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True}})
     service.storage_path = tmp_path / "session_plans.json"
