@@ -441,6 +441,44 @@ def _split_execution_cfg(config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 
+def _planner_display_confidence(
+    base_decision: Dict[str, Any],
+    plan: Dict[str, Any],
+    candidate: Dict[str, Any],
+    config: Dict[str, Any],
+    *,
+    direction: str,
+) -> float:
+    sig_cfg = (config.get("signal_requirements") or {}) if isinstance(config, dict) else {}
+    min_agent_conf = float(sig_cfg.get("agent_min_confidence", 70) or 70)
+    details = base_decision.get("agent_details") or {}
+    support_confidences: List[float] = []
+    for key in ["technical", "classical", "smc", "price_action", "multitimeframe"]:
+        detail = (details or {}).get(key)
+        if not isinstance(detail, dict):
+            continue
+        agent_direction = str(detail.get("direction") or "WAIT").upper()
+        agent_confidence = _safe_float(detail.get("confidence"), 0.0)
+        if agent_direction == direction and agent_confidence >= min_agent_conf:
+            support_confidences.append(agent_confidence)
+
+    dominance = _safe_float(candidate.get("thesis_dominance_score"), 0.0)
+    quality_score = _safe_float(candidate.get("quality_score"), _safe_float((candidate.get("setup_quality") or {}).get("score"), 0.0))
+    if support_confidences:
+        avg_support = sum(support_confidences) / max(len(support_confidences), 1)
+        display_confidence = avg_support * 0.75 + dominance * 0.25
+    else:
+        display_confidence = max(dominance, quality_score * 0.80, 60.0)
+
+    context_confirmation = _planner_context_confirmation(base_decision, config, direction)
+    if len(support_confidences) >= 2 and context_confirmation.get("allow"):
+        display_confidence += 2.0
+
+    cap = 95.0 if len(support_confidences) >= 3 else 92.0 if len(support_confidences) >= 2 else 88.0
+    return round(max(50.0, min(cap, display_confidence)), 1)
+
+
+
 def _build_plan_ladder_decision(
     base_decision: Dict[str, Any],
     plan: Dict[str, Any],
@@ -497,7 +535,7 @@ def _build_plan_ladder_decision(
         {
             "decision": direction,
             "symbol": symbol,
-            "confidence": max(_safe_float(plan.get("planner_confidence"), 0.0), _safe_float(candidate.get("thesis_dominance_score"), 0.0)),
+            "confidence": _planner_display_confidence(base_decision, plan, candidate, config, direction=direction),
             "entry_mode": "session_plan_ladder_market" if force_market else "session_plan_ladder",
             "entry_path": 3,
             "reasons": [
