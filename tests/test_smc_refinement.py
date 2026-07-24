@@ -74,3 +74,16 @@ def test_equal_highs_detail_exposes_touch_quality() -> None:
     assert detail
     assert detail[0]["touches"] >= 4
     assert detail[0]["quality"] == "STRONG"
+
+
+def test_day_archetype_prefers_continuation_after_sweep_day() -> None:
+    agent = SMCAgent({"symbol": "XAU/USD"})
+    archetype = agent._day_archetype(
+        direction="BUY",
+        market_structure={"trend": "BULLISH", "structure_quality": "STRONG"},
+        liquidity={"recent_sweep": {"occurred": True, "type": "sell_side", "confirmation": "STRONG"}},
+        zone="DISCOUNT",
+        setup_candidates=[{"setup_type": "STRUCTURE_CONTINUATION", "trigger_state": "AT_POI_WAIT_TRIGGER", "thesis_dominance_score": 74}],
+    )
+    assert archetype["name"] == "CONTINUATION_AFTER_SWEEP_DAY"
+    assert archetype["preferred_execution_family"] == "MITIGATION_LADDER"

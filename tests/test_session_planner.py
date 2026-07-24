@@ -63,6 +63,10 @@ def _results() -> dict:
         "macro_fundamental": {"macro_direction": {"bias": "BEARISH_GOLD", "confidence": 64}},
         "daily_bias": {"bias": "BEARISH", "confidence": 95},
         "smc": {
+            "day_archetype": "CONTINUATION_AFTER_SWEEP_DAY",
+            "day_archetype_confidence": 78,
+            "day_archetype_reason": "bearish structure + buy-side sweep + premium mitigation",
+            "preferred_execution_family": "MITIGATION_LADDER",
             "zone": "PREMIUM",
             "dealing_range": {"high": 4048.0, "low": 3970.0, "midpoint": 4009.0, "current_position_pct": 0.72},
             "market_structure": {"trend": "BEARISH", "structure_quality": "STRONG"},
@@ -105,6 +109,8 @@ def test_session_planner_builds_ready_primary_and_standby_plan(tmp_path: Path) -
         "DOWNSIDE_SESSION_BIAS",
     }
     assert plan["day_objective_label"]
+    assert plan["day_archetype"] is not None
+    assert plan["preferred_execution_family"] is not None
     assert plan["poi_classification"] in {"EXTREME_POI", "HIGH_PROBABILITY_POI", "STANDARD_POI"}
     assert isinstance(plan["extreme_poi"], bool)
     assert plan["execution_preference"] in {"LADDER_PENDING", "SINGLE_PENDING", "NEAR_MARKET_WATCH", "SPLIT_EXECUTION_WATCH"}
