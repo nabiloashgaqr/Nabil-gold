@@ -62,7 +62,13 @@ def _results() -> dict:
         "news": {"can_trade": True, "market_status": "SAFE", "macro_direction": {"bias": "BEARISH_GOLD", "confidence": 64}},
         "macro_fundamental": {"macro_direction": {"bias": "BEARISH_GOLD", "confidence": 64}},
         "daily_bias": {"bias": "BEARISH", "confidence": 95},
+        "technical": {"signal": "SELL", "confidence": 82},
+        "classical": {"signal": "SELL", "confidence": 80},
+        "price_action": {"signal": "WAIT", "confidence": 40},
+        "multitimeframe": {"signal": "WAIT", "confidence": 35},
         "smc": {
+            "signal": "SELL",
+            "confidence": 84,
             "day_archetype": "CONTINUATION_AFTER_SWEEP_DAY",
             "day_archetype_confidence": 78,
             "day_archetype_reason": "bearish structure + buy-side sweep + premium mitigation",
@@ -335,6 +341,7 @@ def test_session_planner_builds_fallback_day_map_when_structured_candidates_are_
     assert plan["primary_entry_zone"]["low"] < plan["primary_entry_zone"]["high"]
     assert plan["plan_narrative"]
     assert plan["expected_path"]
+    assert plan["execution_readiness"]["state"] in {"PENDING_EXECUTION_READY", "MARKET_EXECUTION_READY"}
 
 
 def test_session_planner_blocks_when_day_map_authority_is_conflicted(tmp_path: Path) -> None:
@@ -351,6 +358,28 @@ def test_session_planner_blocks_when_day_map_authority_is_conflicted(tmp_path: P
     assert plan["plan_ready"] is False
     assert plan["authority_state"] == "CONFLICTED"
     assert "conflicted" in str(plan["plan_reason"]).lower()
+
+
+def test_execution_readiness_constrains_fallback_when_support_is_missing() -> None:
+    service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True}})
+    primary = _candidate("PRIMARY", direction="BUY", entry_price=4022.0, stop_loss=3982.0, target_price=4112.0)
+    readiness = service._execution_readiness(
+        planner_source="fallback_day_map",
+        direction="BUY",
+        primary=primary,
+        standby=None,
+        all_results={
+            "technical": {"signal": "WAIT", "confidence": 43},
+            "classical": {"signal": "WAIT", "confidence": 30},
+            "price_action": {"signal": "WAIT", "confidence": 29},
+            "multitimeframe": {"signal": "WAIT", "confidence": 48},
+            "smc": {"signal": "WAIT", "confidence": 34},
+        },
+        preferred_execution_family="SINGLE_PENDING",
+        macro={"bias": "BEARISH_GOLD", "confidence": 66},
+    )
+    assert readiness["state"] == "MAP_ONLY"
+    assert "no execution-support" in readiness["reason"].lower()
 
 
 def test_session_planner_breaks_authority_tie_with_structure_and_sweep_objective(tmp_path: Path) -> None:
@@ -441,6 +470,12 @@ def test_session_planner_keeps_same_box_ladder_standby_even_when_overlapping(tmp
     results["daily_bias"] = {"bias": "BULLISH", "confidence": 91}
     results["news"]["macro_direction"] = {"bias": "BULLISH_GOLD", "confidence": 70}
     results["macro_fundamental"]["macro_direction"] = {"bias": "BULLISH_GOLD", "confidence": 70}
+    results["technical"] = {"signal": "BUY", "confidence": 82}
+    results["classical"] = {"signal": "BUY", "confidence": 80}
+    results["price_action"] = {"signal": "WAIT", "confidence": 40}
+    results["multitimeframe"] = {"signal": "WAIT", "confidence": 35}
+    results["smc"]["signal"] = "BUY"
+    results["smc"]["confidence"] = 84
     results["smc"]["zone"] = "DISCOUNT"
     results["smc"]["market_structure"] = {"trend": "BULLISH", "structure_quality": "STRONG"}
     results["smc"]["liquidity"]["recent_sweep"] = {"occurred": True, "type": "sell_side", "reference_type": "session_low", "confirmation": "STRONG"}

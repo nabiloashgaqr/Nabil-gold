@@ -243,6 +243,10 @@ def test_session_plan_ladder_blocked_without_admission_gate(tmp_path: Path) -> N
     telegram = _Telegram()
     decision = _base_decision()
     decision["decision"] = "WAIT"
+    decision["news_context"] = {"rule_based": {"can_trade": True, "market_status": "SAFE"}, "macro": {"macro_direction": {"bias": "NEUTRAL", "confidence": 40}}}
+    decision["gemini_macro_review"] = {"available": False}
+    decision["gemini_review"] = {"available": False}
+    decision["gemini_analysis"] = {"available": False}
     decision["agent_details"] = {
         "technical": {"label": "Technical", "direction": "SELL", "confidence": 82},
         "classical": {"label": "Classical", "direction": "WAIT", "confidence": 30},
