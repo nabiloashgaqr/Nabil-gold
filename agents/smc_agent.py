@@ -90,6 +90,13 @@ class SMCAgent(BaseAgent):
                 "displacement_score": 0.0,
                 "target_liquidity": None,
             }
+            archetype = self._day_archetype(
+                direction=direction,
+                market_structure=market_structure,
+                liquidity=liquidity,
+                zone=zone,
+                setup_candidates=setup_candidates,
+            )
 
             return {
                 "agent": self.name,
@@ -106,6 +113,10 @@ class SMCAgent(BaseAgent):
                 "entry_suggestion": entry_suggestion,
                 "setup_candidates": setup_candidates,
                 "setup_structure": setup_structure,
+                "day_archetype": archetype.get("name"),
+                "day_archetype_confidence": archetype.get("confidence"),
+                "day_archetype_reason": archetype.get("reason"),
+                "preferred_execution_family": archetype.get("preferred_execution_family"),
                 "summary": self._summary(direction, confidence, market_structure, liquidity, zone, signals),
             }
         except Exception as exc:  # noqa: BLE001
@@ -470,6 +481,67 @@ class SMCAgent(BaseAgent):
             seen.add(key)
             merged.append(candidate)
         return merged
+
+    def _day_archetype(
+        self,
+        *,
+        direction: str,
+        market_structure: Dict[str, Any],
+        liquidity: Dict[str, Any],
+        zone: str,
+        setup_candidates: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        trend = str((market_structure or {}).get("trend") or "RANGING").upper()
+        structure_quality = str((market_structure or {}).get("structure_quality") or "WEAK").upper()
+        recent_sweep = (liquidity.get("recent_sweep") or {}) if isinstance(liquidity, dict) else {}
+        sweep_type = str(recent_sweep.get("type") or "")
+        zone = str(zone or "").upper()
+        top_candidate = setup_candidates[0] if setup_candidates else {}
+        top_setup = str((top_candidate or {}).get("setup_type") or "").upper()
+        top_trigger = str((top_candidate or {}).get("trigger_state") or "").upper()
+        top_conf = float((top_candidate or {}).get("thesis_dominance_score") or 0)
+
+        if top_trigger == "FAILED_RECLAIM_CONFIRMED":
+            return {
+                "name": "FAILED_RECLAIM_DAY",
+                "confidence": min(92, round(max(60.0, top_conf))),
+                "reason": "failed reclaim confirmed after directional break",
+                "preferred_execution_family": "FAILED_RECLAIM_CONTINUATION",
+            }
+        if top_trigger == "CONTINUATION_BREAKDOWN_CONFIRMED":
+            return {
+                "name": "TREND_ACCELERATION_DAY",
+                "confidence": min(92, round(max(60.0, top_conf))),
+                "reason": "continuation breakdown confirmed with follow-through",
+                "preferred_execution_family": "CONTINUATION_BREAKDOWN",
+            }
+        if trend == "BULLISH" and sweep_type == "sell_side" and zone in {"DISCOUNT", "EQUILIBRIUM"}:
+            return {
+                "name": "CONTINUATION_AFTER_SWEEP_DAY",
+                "confidence": min(90, round(max(58.0, top_conf))),
+                "reason": "bullish structure + sell-side sweep + discount/equilibrium mitigation",
+                "preferred_execution_family": "MITIGATION_LADDER",
+            }
+        if trend == "BEARISH" and sweep_type == "buy_side" and zone in {"PREMIUM", "EQUILIBRIUM"}:
+            return {
+                "name": "CONTINUATION_AFTER_SWEEP_DAY",
+                "confidence": min(90, round(max(58.0, top_conf))),
+                "reason": "bearish structure + buy-side sweep + premium/equilibrium mitigation",
+                "preferred_execution_family": "MITIGATION_LADDER",
+            }
+        if top_setup == "LIQUIDITY_REVERSAL":
+            return {
+                "name": "LIQUIDITY_REVERSAL_DAY",
+                "confidence": min(88, round(max(55.0, top_conf))),
+                "reason": "liquidity reversal setup dominates the active thesis",
+                "preferred_execution_family": "REVERSAL_MAP",
+            }
+        return {
+            "name": "RANGE_TRAP_DAY" if trend == "RANGING" else "STRUCTURE_BIAS_DAY",
+            "confidence": min(82, round(max(50.0, top_conf or 50.0))),
+            "reason": "no cleaner continuation/reversal archetype dominated yet",
+            "preferred_execution_family": "SINGLE_PENDING",
+        }
 
     def _entry_suggestion(
         self,
@@ -1683,5 +1755,9 @@ class SMCAgent(BaseAgent):
             "entry_suggestion": {},
             "setup_candidates": [],
             "setup_structure": {"setup_type": "NONE", "setup_state": "DETECTED", "lead_agent": "smc", "setup_quality": {"grade": "D", "score": 0}},
+            "day_archetype": None,
+            "day_archetype_confidence": 0,
+            "day_archetype_reason": None,
+            "preferred_execution_family": None,
             "summary": summary,
         }
