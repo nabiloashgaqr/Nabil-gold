@@ -228,6 +228,16 @@ def test_session_plan_ladder_applies_minimum_sl_floor_to_pending_orders(tmp_path
     assert primary["planned_rr"] == 2.25
 
 
+def test_session_plan_ladder_display_confidence_is_capped_below_100(tmp_path: Path) -> None:
+    decision = _base_decision()
+    decision["session_plan"]["planner_confidence"] = 100
+    candidate = decision["session_plan"]["primary_poi"]
+    ladder = ra._build_plan_ladder_decision(decision, decision["session_plan"], candidate, _config())
+    assert ladder is not None
+    assert ladder["confidence"] < 100
+    assert ladder["confidence"] <= 95
+
+
 def test_session_plan_ladder_blocked_without_admission_gate(tmp_path: Path) -> None:
     db = _db(tmp_path)
     telegram = _Telegram()
