@@ -1503,6 +1503,35 @@ def _session_plan_execution_audit(plan: Dict[str, Any], **extra: Any) -> Dict[st
     }
 
 
+def _active_reversal_watch(database: DatabaseService, *, symbol: str) -> Dict[str, Any]:
+    try:
+        recent = database.get_recent_trades(limit=20)
+    except Exception:
+        recent = []
+    for trade in recent or []:
+        if normalize_symbol(trade.get("symbol") or symbol) != normalize_symbol(symbol):
+            continue
+        snapshot = trade.get("signal_snapshot") or {}
+        if isinstance(snapshot, str):
+            try:
+                import json as _json
+                snapshot = _json.loads(snapshot)
+            except Exception:
+                snapshot = {}
+        if not isinstance(snapshot, dict):
+            snapshot = {}
+        watch = snapshot.get("reversal_watch") or {}
+        if not isinstance(watch, dict) or not watch:
+            continue
+        if not bool(watch.get("active", True)):
+            continue
+        direction = str(watch.get("direction") or "").upper()
+        expires_at = _parse_datetime(watch.get("expires_at"))
+        if direction in {"BUY", "SELL"} and (expires_at is None or expires_at > datetime.now(timezone.utc)):
+            return dict(watch)
+    return {}
+
+
 def _plan_field_changed(prev: Dict[str, Any], curr: Dict[str, Any], key: str, *, symbol: str, min_change_points: float) -> bool:
     try:
         old_v = float(prev.get(key))
@@ -2073,6 +2102,11 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                     all_results["smc"]["setup_structure"] = processed_candidates[0]
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to process setup-memory state transitions: %s", exc)
+        try:
+            all_results["reversal_watch"] = _active_reversal_watch(database, symbol=symbol)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to load active reversal watch for %s: %s", symbol, exc)
+            all_results["reversal_watch"] = {}
 
         # Phase 1 foundation: build a morning/session plan BEFORE the move.
         # This is planning-only for now; later phases can translate PRIMARY /
