@@ -379,7 +379,7 @@ def test_execution_readiness_constrains_fallback_when_support_is_missing() -> No
         macro={"bias": "BEARISH_GOLD", "confidence": 66},
     )
     assert readiness["state"] == "MAP_ONLY"
-    assert "no execution-support" in readiness["reason"].lower()
+    assert "fallback map has insufficient execution support" in readiness["reason"].lower()
 
 
 def test_session_planner_breaks_authority_tie_with_structure_and_sweep_objective(tmp_path: Path) -> None:
