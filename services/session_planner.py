@@ -1043,14 +1043,31 @@ class SessionPlannerService:
             reason = f"{support_count} execution-support agents confirmed the mapped direction"
         elif available_count > 0 and (has_smc_alignment or support_count >= 1 or has_macro_confirmation or setup_state in {"ENTRY_ARMED", "POI_MARKED"}):
             state = "WATCH_EXECUTION"
-            reason = "map is valid but still waiting for stronger execution confirmation"
+            if has_smc_alignment and not support_count >= 2:
+                reason = f"SMC aligns {direction} ({smc_conf:.0f}%) but only {support_count} execution-support agent(s) qualified"
+            elif has_macro_confirmation and support_count < 2:
+                reason = f"macro confirms {direction} but only {support_count} execution-support agent(s) qualified"
+            elif support_count == 1:
+                reason = f"only 1 execution-support agent qualified for {direction}; waiting for another confirmer"
+            elif opposition_count > 0:
+                reason = f"execution context is mixed: {support_count} support vs {opposition_count} opposition"
+            else:
+                reason = "map is valid but still waiting for stronger execution confirmation"
         else:
             state = "MAP_ONLY"
-            reason = "map exists, but no execution-support alignment is present"
+            if support_count == 0 and not has_smc_alignment and not has_macro_confirmation:
+                reason = "no execution-support alignment: SMC, macro, and qualified agents do not confirm the map"
+            elif support_count == 0:
+                reason = "no qualified execution-support agents are aligned with the mapped direction"
+            else:
+                reason = "map exists, but no execution-support alignment is present"
 
         if planner_source == "fallback_day_map" and opposition_count > support_count and not has_smc_alignment:
             state = "MAP_ONLY"
-            reason = "fallback map is opposed by execution layer context"
+            reason = f"fallback map is opposed by execution layer context ({support_count} support vs {opposition_count} opposition)"
+        elif planner_source == "fallback_day_map" and not has_smc_alignment and not has_macro_confirmation and support_count < 2:
+            state = "MAP_ONLY"
+            reason = f"fallback map has insufficient execution support: support={support_count}, smc_aligned={has_smc_alignment}, macro_confirmed={has_macro_confirmation}"
 
         return {
             "state": state,
