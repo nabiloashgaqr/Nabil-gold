@@ -67,6 +67,7 @@ class SessionPlannerService:
         liquidity = smc.get("liquidity", {}) or {}
         dealing_range = smc.get("dealing_range", {}) or {}
         zone_context = str(smc.get("zone") or "")
+        reversal_watch = all_results.get("reversal_watch") or {}
         current_price = self._f(all_results.get("current_price"), 0.0)
 
         now = datetime.now(timezone.utc)
@@ -151,6 +152,7 @@ class SessionPlannerService:
             "market_objective": market_objective.get("objective"),
             "market_objective_label": market_objective.get("label"),
             "market_objective_direction": market_objective.get("direction"),
+            "reversal_watch": reversal_watch if isinstance(reversal_watch, dict) else {},
         }
 
         if not session.get("trading_allowed", True) or not session.get("allow_signals", True):
@@ -185,6 +187,7 @@ class SessionPlannerService:
                 liquidity=liquidity,
                 dealing_range=dealing_range,
                 zone_context=zone_context,
+                reversal_watch=reversal_watch if isinstance(reversal_watch, dict) else {},
                 current_price=current_price,
                 all_results=all_results,
             )
@@ -232,6 +235,7 @@ class SessionPlannerService:
                 liquidity=liquidity,
                 dealing_range=dealing_range,
                 zone_context=zone_context,
+                reversal_watch=reversal_watch if isinstance(reversal_watch, dict) else {},
                 current_price=current_price,
                 all_results=all_results,
             )
@@ -475,6 +479,7 @@ class SessionPlannerService:
         liquidity: Dict[str, Any],
         dealing_range: Dict[str, Any],
         zone_context: str,
+        reversal_watch: Dict[str, Any],
         current_price: float,
         all_results: Dict[str, Any],
     ) -> Dict[str, Any]:
@@ -485,6 +490,7 @@ class SessionPlannerService:
             market_structure=market_structure,
             recent_sweep=(liquidity.get("recent_sweep") or {}) if isinstance(liquidity, dict) else {},
             zone_context=zone_context,
+            reversal_watch=reversal_watch if isinstance(reversal_watch, dict) else {},
         )
         fallback["authority_state"] = authority["state"]
         fallback["authority_direction"] = authority["direction"]
@@ -697,11 +703,13 @@ class SessionPlannerService:
         market_structure: Dict[str, Any],
         recent_sweep: Dict[str, Any],
         zone_context: str,
+        reversal_watch: Dict[str, Any],
     ) -> Dict[str, Any]:
         dirs = {
             "daily_bias": self._bias_to_direction(daily_bias.get("bias")),
             "macro": self._macro_to_direction(macro.get("bias") if isinstance(macro, dict) else None),
             "structure": self._trend_to_direction(str((market_structure or {}).get("trend") or "")),
+            "reversal_watch": str((reversal_watch or {}).get("direction") or "").upper() or None,
         }
         counts = {"BUY": 0, "SELL": 0}
         sources = {"BUY": [], "SELL": []}
