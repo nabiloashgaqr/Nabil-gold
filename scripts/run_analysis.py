@@ -367,18 +367,23 @@ def _resolve_reward_target(
     target_price: float,
     candidate: Dict[str, Any] | None,
     min_rr: float,
-) -> tuple[float, str | None]:
-    """Find a structural target that clears the minimum reward-to-risk.
+) -> tuple[float, float, str | None]:
+    """Pick TP1 and TP2 from the liquidity map.
 
-    The mapped liquidity is preferred. When it sits closer than min_rr allows,
-    look further along the same side of the liquidity map for the next level
-    that does qualify. If none exists, return a rejection reason instead of
-    inventing a target: fabricating a distance to manufacture an acceptable RR
-    is how a 0.58R trade was published as 2.25R.
+    Returns (tp1, tp2, rejection_reason).
+
+    The nearest mapped liquidity is a real place price is drawn to, so it makes
+    a good first target even when it sits close. Viability is judged on TP2 --
+    the level the trade is actually held for -- rather than on TP1, because
+    requiring the first target alone to clear min_rr rejected sound structural
+    setups whose stop had been widened by the risk floor.
+
+    Targets are still never invented: TP2 must be an actual level from the
+    liquidity map or the plan, otherwise the leg is rejected.
     """
     risk = abs(entry_price - stop_loss)
     if risk <= 0 or entry_price <= 0:
-        return target_price, None
+        return target_price, target_price, None
 
     def _rr(level: float) -> float:
         return abs(level - entry_price) / risk
@@ -386,32 +391,36 @@ def _resolve_reward_target(
     def _is_ahead(level: float) -> bool:
         return level > entry_price if direction == "BUY" else level < entry_price
 
-    if target_price > 0 and _is_ahead(target_price) and _rr(target_price) >= min_rr:
-        return target_price, None
-
+    # Collect every structural level ahead of us, nearest first.
     levels: List[float] = []
+    if target_price > 0 and _is_ahead(target_price):
+        levels.append(target_price)
     details = (candidate or {}).get("details") or {}
     liquidity_map = details.get("liquidity") if isinstance(details, dict) else {}
     side_key = "buy_side" if direction == "BUY" else "sell_side"
     if isinstance(liquidity_map, dict):
         for raw in liquidity_map.get(side_key) or []:
             level = _safe_float(raw, 0.0)
-            if level > 0:
+            if level > 0 and _is_ahead(level):
                 levels.append(level)
     for key in ("secondary_target", "extended_target", "next_liquidity", "target_price_2"):
         level = _safe_float((candidate or {}).get(key), 0.0)
-        if level > 0:
+        if level > 0 and _is_ahead(level):
             levels.append(level)
 
-    qualifying = sorted(
-        (lv for lv in levels if _is_ahead(lv) and _rr(lv) >= min_rr),
-        key=lambda lv: abs(lv - entry_price),
-    )
+    ordered = sorted(set(levels), key=lambda lv: abs(lv - entry_price))
+    qualifying = [lv for lv in ordered if _rr(lv) >= min_rr]
+
     if qualifying:
-        return qualifying[0], None
+        tp2 = qualifying[0]
+        # TP1 is the nearest real level short of TP2; if none exists, take a
+        # partial at half the distance rather than inventing a new structure.
+        nearer = [lv for lv in ordered if abs(lv - entry_price) < abs(tp2 - entry_price)]
+        tp1 = nearer[0] if nearer else round((entry_price + tp2) / 2.0, 2)
+        return tp1, tp2, None
 
     mapped_rr = _rr(target_price) if target_price > 0 and _is_ahead(target_price) else 0.0
-    return 0.0, (
+    return 0.0, 0.0, (
         f"target liquidity {target_price:.2f} is only {mapped_rr:.2f}R from entry "
         f"(minimum {min_rr:.2f}R) and no further qualifying liquidity exists"
     )
@@ -435,6 +444,26 @@ def _planner_trade_levels(
     floor_applied = False
 
     adjusted_stop = float(stop_loss)
+    structural_points = abs(price_to_points(entry_price - adjusted_stop, symbol=symbol))
+
+    # The floor exists because gold can travel 50-100 points in seconds, so a
+    # stop pinned to a narrow POI is noise-bait. But a single fixed distance
+    # ignores how volatile the session actually is: on XAU it engaged on every
+    # plan, multiplying structural risk by up to 18x and pushing reward-to-risk
+    # below the minimum even for sound setups.
+    #
+    # Scale it instead. The structural stop already embeds an ATR buffer, so a
+    # multiple of it tracks volatility, bounded so it can neither collapse to
+    # the POI width nor exceed the configured ceiling.
+    floor_cfg = (risk_cfg.get("dynamic_sl_floor") or {}) if isinstance(risk_cfg, dict) else {}
+    if bool(floor_cfg.get("enabled", False)) and structural_points > 0:
+        multiplier = _safe_float(floor_cfg.get("structural_multiplier"), 3.0) or 3.0
+        hard_min = _safe_float(floor_cfg.get("min_points"), 150.0)
+        hard_max = _safe_float(floor_cfg.get("max_points"), min_sl_points or 400.0)
+        scaled = max(hard_min, min(structural_points * multiplier, hard_max))
+        min_sl_points = scaled
+        min_sl_distance = points_to_price(scaled, symbol=symbol)
+
     if min_sl_distance > 0 and abs(entry_price - adjusted_stop) < min_sl_distance:
         adjusted_stop = entry_price - min_sl_distance if direction == "BUY" else entry_price + min_sl_distance
         floor_applied = True
@@ -445,7 +474,7 @@ def _planner_trade_levels(
     # beyond a target that was only 40 pts away, and a 2.25R label on a trade
     # whose real reward-to-risk was 0.58.
     min_rr = _safe_float(risk_cfg.get("min_rr_ratio"), 1.5) or 1.5
-    resolved_target, reject_reason = _resolve_reward_target(
+    tp1, tp2, reject_reason = _resolve_reward_target(
         direction, entry_price, adjusted_stop, target_price, candidate, min_rr
     )
     if reject_reason:
@@ -460,9 +489,8 @@ def _planner_trade_levels(
             "reject_reason": reject_reason,
             "min_sl_distance_points": round(min_sl_points, 1),
         }
-    if resolved_target != target_price:
+    if tp2 != target_price:
         target_method = "extended_liquidity"
-    tp1, tp2, _ = _plan_targets(direction, entry_price, adjusted_stop, resolved_target)
     if floor_applied and target_method == "mapped_target":
         target_method = "mapped_target_with_floored_sl"
 
