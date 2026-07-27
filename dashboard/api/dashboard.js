@@ -107,7 +107,79 @@ function stopOutcome(t, pnl) {
   return 'SL_BE';
 }
 
-function normalizeTrade(t) {
+// ─── Public response shaping ──────────────────────────────────────────────
+// The trades table stores signal_snapshot as the ENTIRE decision object:
+// session_plan (primary/standby POI zones, dominance and return-probability
+// scores, target liquidity, invalidation, manual_plan labels, plan narrative,
+// supporting/opposing agents, execution readiness, day archetype), plus
+// setup_context, planner_execution_gate and agent_details.
+//
+// This endpoint is unauthenticated. Spreading the raw row published that
+// entire proprietary decision model to anyone who called it -- not just data,
+// but the strategy itself: where the POIs are, how they are scored, and which
+// thresholds gate execution.
+//
+// So the boundary is an explicit allowlist. New database columns are NOT
+// exposed by default; they must be added here deliberately.
+const PUBLIC_TRADE_FIELDS = [
+  'id', 'symbol', 'type', 'side', 'status', 'result',
+  'entry_price', 'stop_loss', 'initial_stop_loss', 'tp1', 'tp2',
+  'confidence', 'trading_mode', 'paper_trading',
+  'current_price', 'current_pnl', 'current_pnl_points',
+  'final_pnl', 'final_pnl_points', 'close_price',
+  'planned_rr', 'planned_risk_points', 'planned_tp2_points',
+  'order_kind', 'order_type',
+  'entry_time', 'created_at', 'closed_at', 'close_time', 'updated_at', 'last_updated',
+  'session_label', 'news_status_at_entry',
+  'regime_composite', 'volatility_regime', 'market_phase',
+  'sl_moved_to_entry', 'partial_close', 'pending_cycles',
+];
+
+// The dashboard reads four narrow values from the snapshot, each of which
+// already has a top-level column fallback. Surface only those, flattened, so
+// the UI keeps working without shipping the decision model.
+function publicSnapshotFields(row) {
+  let snap = row.signal_snapshot;
+  if (typeof snap === 'string') {
+    try { snap = JSON.parse(snap); } catch { snap = null; }
+  }
+  if (!snap || typeof snap !== 'object') return {};
+  const out = {};
+  const session = snap.session_info || {};
+  if (session.current_session) out.session_label = session.current_session;
+  const rule = (snap.news_context || {}).rule_based || {};
+  const news = rule.market_status || rule.status;
+  if (news) out.news_status_at_entry = news;
+  const tech = (snap.market_context || {}).technical_regime || {};
+  if (tech.volatility_regime) out.volatility_regime = tech.volatility_regime;
+  if (tech.market_phase) out.market_phase = tech.market_phase;
+  const rr = (snap.signal || {}).rr_ratio ?? (snap.signal || {}).tp2_rr;
+  if (rr !== undefined && rr !== null) out.planned_rr_fallback = Number(rr) || 0;
+  return out;
+}
+
+function toPublicTrade(row) {
+  const src = row || {};
+  const derived = publicSnapshotFields(src);
+  const out = {};
+  for (const key of PUBLIC_TRADE_FIELDS) {
+    if (src[key] !== undefined) out[key] = src[key];
+  }
+  // Snapshot-derived values only fill gaps; real columns always win.
+  for (const [key, value] of Object.entries(derived)) {
+    if (key === 'planned_rr_fallback') {
+      if (out.planned_rr === undefined || out.planned_rr === null || Number(out.planned_rr) === 0) {
+        out.planned_rr = value;
+      }
+      continue;
+    }
+    if (out[key] === undefined || out[key] === null || out[key] === '') out[key] = value;
+  }
+  return out;
+}
+
+function normalizeTrade(rawTrade) {
+  const t = toPublicTrade(rawTrade);
   const status = String(t.status || 'UNKNOWN').toUpperCase();
   const rawPnl = t.final_pnl ?? t.current_pnl_points ?? t.current_pnl ?? t.pnl ?? 0;
   const pnl = normalizePnlByStatus(status, rawPnl);
@@ -455,11 +527,22 @@ module.exports = async function handler(req, res) {
       }).catch(() => []),
     ]);
 
+    // Agent performance is derived server-side from the raw rows, because the
+    // per-agent vote breakdown lives inside signal_snapshot and must not cross
+    // the boundary. Only the aggregate leaves this function.
+    const agentPerformance = computeAgentPerformance(
+      (closedRaw || []).map(r => ({
+        ...r,
+        pnl: normalizePnlByStatus(String(r.status || 'UNKNOWN').toUpperCase(),
+                                  r.final_pnl ?? r.current_pnl_points ?? r.current_pnl ?? r.pnl ?? 0),
+      })),
+      agentWeights || [],
+    );
+
     const closedTrades = (closedRaw || []).map(normalizeTrade);
     const activeRows = (liveRaw || []).map(normalizeTrade);
     const liveTrades = activeRows.filter(t => LIVE_STATUSES.includes(String(t.status || '').toUpperCase()));
     const pendingOrders = activeRows.filter(t => PENDING_STATUSES.includes(String(t.status || '').toUpperCase()));
-    const agentPerformance = computeAgentPerformance(closedTrades, agentWeights || []);
 
     return json(res, 200, {
       ok: true,
