@@ -360,6 +360,63 @@ def _plan_targets(direction: str, entry_price: float, stop_loss: float, target_p
 
 
 
+def _resolve_reward_target(
+    direction: str,
+    entry_price: float,
+    stop_loss: float,
+    target_price: float,
+    candidate: Dict[str, Any] | None,
+    min_rr: float,
+) -> tuple[float, str | None]:
+    """Find a structural target that clears the minimum reward-to-risk.
+
+    The mapped liquidity is preferred. When it sits closer than min_rr allows,
+    look further along the same side of the liquidity map for the next level
+    that does qualify. If none exists, return a rejection reason instead of
+    inventing a target: fabricating a distance to manufacture an acceptable RR
+    is how a 0.58R trade was published as 2.25R.
+    """
+    risk = abs(entry_price - stop_loss)
+    if risk <= 0 or entry_price <= 0:
+        return target_price, None
+
+    def _rr(level: float) -> float:
+        return abs(level - entry_price) / risk
+
+    def _is_ahead(level: float) -> bool:
+        return level > entry_price if direction == "BUY" else level < entry_price
+
+    if target_price > 0 and _is_ahead(target_price) and _rr(target_price) >= min_rr:
+        return target_price, None
+
+    levels: List[float] = []
+    details = (candidate or {}).get("details") or {}
+    liquidity_map = details.get("liquidity") if isinstance(details, dict) else {}
+    side_key = "buy_side" if direction == "BUY" else "sell_side"
+    if isinstance(liquidity_map, dict):
+        for raw in liquidity_map.get(side_key) or []:
+            level = _safe_float(raw, 0.0)
+            if level > 0:
+                levels.append(level)
+    for key in ("secondary_target", "extended_target", "next_liquidity", "target_price_2"):
+        level = _safe_float((candidate or {}).get(key), 0.0)
+        if level > 0:
+            levels.append(level)
+
+    qualifying = sorted(
+        (lv for lv in levels if _is_ahead(lv) and _rr(lv) >= min_rr),
+        key=lambda lv: abs(lv - entry_price),
+    )
+    if qualifying:
+        return qualifying[0], None
+
+    mapped_rr = _rr(target_price) if target_price > 0 and _is_ahead(target_price) else 0.0
+    return 0.0, (
+        f"target liquidity {target_price:.2f} is only {mapped_rr:.2f}R from entry "
+        f"(minimum {min_rr:.2f}R) and no further qualifying liquidity exists"
+    )
+
+
 def _planner_trade_levels(
     config: Dict[str, Any],
     *,
@@ -368,6 +425,7 @@ def _planner_trade_levels(
     stop_loss: float,
     target_price: float,
     symbol: str,
+    candidate: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     risk_cfg = (config.get("risk_settings") or {}) if isinstance(config, dict) else {}
     min_sl_points = _safe_float(risk_cfg.get("min_sl_distance_points"), 0.0)
@@ -379,19 +437,34 @@ def _planner_trade_levels(
     adjusted_stop = float(stop_loss)
     if min_sl_distance > 0 and abs(entry_price - adjusted_stop) < min_sl_distance:
         adjusted_stop = entry_price - min_sl_distance if direction == "BUY" else entry_price + min_sl_distance
-        sl_mult = _safe_float(risk_cfg.get("atr_multiplier_sl"), 2.0) or 2.0
-        tp1_ratio = (_safe_float(risk_cfg.get("atr_multiplier_tp1"), 2.5) or 2.5) / sl_mult
-        tp2_ratio = (_safe_float(risk_cfg.get("atr_multiplier_tp2"), 4.5) or 4.5) / sl_mult
-        if direction == "BUY":
-            tp1 = entry_price + min_sl_distance * tp1_ratio
-            tp2 = entry_price + min_sl_distance * tp2_ratio
-        else:
-            tp1 = entry_price - min_sl_distance * tp1_ratio
-            tp2 = entry_price - min_sl_distance * tp2_ratio
         floor_applied = True
-        target_method = "rr_from_floored_sl"
-    else:
-        tp1, tp2, _ = _plan_targets(direction, entry_price, adjusted_stop, target_price)
+
+    # Targets must be anchored to structure. Widening the stop to the risk
+    # floor used to trigger a purely ratio-based target (floor x ATR multiple),
+    # which discarded the mapped liquidity entirely -- publishing TP1 460 pts
+    # beyond a target that was only 40 pts away, and a 2.25R label on a trade
+    # whose real reward-to-risk was 0.58.
+    min_rr = _safe_float(risk_cfg.get("min_rr_ratio"), 1.5) or 1.5
+    resolved_target, reject_reason = _resolve_reward_target(
+        direction, entry_price, adjusted_stop, target_price, candidate, min_rr
+    )
+    if reject_reason:
+        return {
+            "entry_price": round(entry_price, 2),
+            "stop_loss": round(adjusted_stop, 2),
+            "tp1": 0.0,
+            "tp2": 0.0,
+            "rr": 0.0,
+            "floor_applied": floor_applied,
+            "target_method": "rejected_insufficient_reward",
+            "reject_reason": reject_reason,
+            "min_sl_distance_points": round(min_sl_points, 1),
+        }
+    if resolved_target != target_price:
+        target_method = "extended_liquidity"
+    tp1, tp2, _ = _plan_targets(direction, entry_price, adjusted_stop, resolved_target)
+    if floor_applied and target_method == "mapped_target":
+        target_method = "mapped_target_with_floored_sl"
 
     risk = abs(adjusted_stop - entry_price)
     if max_rr > 0 and risk > 0:
@@ -513,7 +586,16 @@ def _build_plan_ladder_decision(
         stop_loss=stop_loss,
         target_price=target_price,
         symbol=symbol,
+        candidate=candidate,
     )
+    if levels.get("reject_reason"):
+        logger.info(
+            "Session-plan leg rejected for %s %s: %s",
+            symbol,
+            direction,
+            levels.get("reject_reason"),
+        )
+        return None
     stop_loss = levels["stop_loss"]
     order_type = f"{direction}_MARKET" if force_market else _planned_order_type(config, direction, entry_price, current_price, symbol)
     if order_type.endswith("MARKET") and not force_market:
