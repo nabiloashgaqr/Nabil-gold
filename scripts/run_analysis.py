@@ -1079,10 +1079,19 @@ def _execute_session_plan_ladder(
     config: Dict[str, Any],
 ) -> int:
     planner_cfg = (config.get("session_planner") or {}) if isinstance(config, dict) else {}
+    # Every exit from this function is logged. A plan can be published while no
+    # order appears for several independent reasons, and silent returns made
+    # that impossible to diagnose from the run output alone.
     if not bool(planner_cfg.get("create_pending_orders_from_plan", True)):
+        logger.info("Session-plan ladder skipped: create_pending_orders_from_plan is disabled")
         return 0
     plan = base_decision.get("session_plan") or {}
     if not isinstance(plan, dict) or not plan.get("plan_ready"):
+        logger.info(
+            "Session-plan ladder skipped: plan not ready (status=%s, reason=%s)",
+            (plan or {}).get("plan_status") if isinstance(plan, dict) else "no-plan",
+            (plan or {}).get("plan_reason") if isinstance(plan, dict) else "no session_plan on decision",
+        )
         return 0
     readiness = (plan.get("execution_readiness") or {}) if isinstance(plan.get("execution_readiness"), dict) else {}
     readiness_state = str(readiness.get("state") or "")
@@ -1110,12 +1119,18 @@ def _execute_session_plan_ladder(
             t for t in symbol_open_trades
             if str(t.get("status") or "").upper() != "PENDING"
         ]
-    if any(str(t.get("status") or "").upper() in {"OPEN", "PARTIAL", "TP1_HIT"} for t in symbol_open_trades):
+    live_now = [t for t in symbol_open_trades if str(t.get("status") or "").upper() in {"OPEN", "PARTIAL", "TP1_HIT"}]
+    if live_now:
+        logger.info(
+            "Session-plan ladder skipped: %s live trade(s) already open on %s",
+            len(live_now), symbol,
+        )
         return 0
 
     primary = plan.get("primary_poi") or {}
     standby = plan.get("standby_poi") or {}
     if not isinstance(primary, dict) or not primary:
+        logger.info("Session-plan ladder skipped: plan carries no primary POI")
         return 0
 
     # Terminal-state guard at the execution boundary. The planner already
