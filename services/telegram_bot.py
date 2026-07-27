@@ -119,6 +119,16 @@ class TelegramService:
         for key in agent_details:
             if key not in ordered_keys:
                 ordered_keys.append(key)
+        # Only votes at or above agent_min_confidence count toward admission.
+        # Rendering a 67% vote identically to an 84% one made the message show
+        # four green agents while the header said "3 qualified agents".
+        sig_cfg = (self.config.get("signal_requirements") or {}) if isinstance(self.config, dict) else {}
+        try:
+            min_agent_conf = float(sig_cfg.get("agent_min_confidence", 70) or 70)
+        except (TypeError, ValueError):
+            min_agent_conf = 70.0
+        side = str(decision.get("decision") or (decision.get("signal") or {}).get("type") or "").upper()
+
         for key in ordered_keys:
             detail = agent_details.get(key)
             if not isinstance(detail, dict):
@@ -128,10 +138,37 @@ class TelegramService:
             if direction in {"NEUTRAL", "HOLD", "NO_TRADE", ""}:
                 direction = "WAIT"
             confidence = detail.get("confidence")
+            try:
+                conf_value = float(confidence)
+            except (TypeError, ValueError):
+                conf_value = None
             emoji = marker.get(direction, "🟡")
             conf_text = f" {confidence}%" if confidence is not None else ""
-            lines.append(f"{emoji} <b>{html.escape(label)}</b>{html.escape(conf_text)}")
+
+            note = ""
+            if key == "macro_fundamental":
+                # Macro states a view on gold, not on this trade. Its percentage
+                # is confidence in its own direction, which may be the opposite
+                # of the signal being published.
+                if side in {"BUY", "SELL"} and direction in {"BUY", "SELL"} and direction != side:
+                    note = f" — {direction} (opposes this {side})"
+                elif direction in {"BUY", "SELL"}:
+                    note = f" — {direction} (supports)"
+            elif conf_value is not None and direction in {"BUY", "SELL"}:
+                if conf_value >= min_agent_conf:
+                    emoji = "✅" if direction == side else "⛔"
+                    note = "" if direction == side else " — opposes"
+                else:
+                    note = f" — below {min_agent_conf:.0f}% threshold"
+
+            lines.append(f"{emoji} <b>{html.escape(label)}</b>{html.escape(conf_text)}{html.escape(note)}")
             signals = detail.get("signals") or []
+            if not signals:
+                # Some agents (multitimeframe) emit only a summary, which left
+                # them looking unexplained next to fully-reasoned peers.
+                summary = str(detail.get("summary") or "").strip()
+                if summary:
+                    signals = [summary]
             for sig in signals[:3]:
                 text = self._friendly_signal_text(sig)
                 lines.append(f"  • {text}")
