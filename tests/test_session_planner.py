@@ -587,3 +587,40 @@ def test_plan_execution_scales_with_archetype_conviction(tmp_path: Path) -> None
     assert low["plan_ready"] is False
     assert low["plan_status"] == "WATCH_ONLY"
     assert "conviction" in str(low["plan_reason"]).lower()
+
+
+def test_plan_carries_the_liquidity_map_to_execution(tmp_path: Path) -> None:
+    """Execution reads TP1/TP2 from these pools, so the plan must ship them.
+
+    _compact_candidate dropped `details` entirely, so every leg reached the
+    target resolver with only the single nearest level. Plans published
+    normally but produced no orders: with no qualifying second target the leg
+    was rejected for insufficient reward.
+    """
+    service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True}})
+    service.storage_path = tmp_path / "plans.json"
+    results = _results()
+    results["smc"]["liquidity"]["sell_side"] = [3990.0, 3965.0, 3940.0]
+    for candidate in results["smc"]["setup_candidates"]:
+        candidate.setdefault("details", {})["liquidity"] = results["smc"]["liquidity"]
+
+    plan = service.build_plan(results, persist=False)
+    assert plan["plan_ready"] is True
+    liquidity = ((plan["primary_poi"].get("details") or {}).get("liquidity") or {})
+    assert liquidity.get("sell_side") == [3990.0, 3965.0, 3940.0]
+
+
+def test_compact_candidate_keeps_liquidity_but_drops_diagnostics() -> None:
+    """Only the liquidity block travels; the rest of details stays behind."""
+    service = SessionPlannerService({"symbol": "XAU/USD"})
+    compact = service._compact_candidate({
+        "id": "C1",
+        "entry_price": 4000.0,
+        "details": {
+            "liquidity": {"sell_side": [3990.0], "buy_side": []},
+            "poi": {"mitigation_status": "FRESH"},
+            "dealing_range": {"high": 4050.0},
+        },
+    })
+    assert compact["details"] == {"liquidity": {"sell_side": [3990.0], "buy_side": []}}
+    assert "poi" not in compact["details"]
