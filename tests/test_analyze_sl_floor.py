@@ -89,3 +89,40 @@ def test_string_snapshots_are_parsed() -> None:
     trade = _trade("A", mae=-30)
     trade["signal_snapshot"] = _json.dumps(trade["signal_snapshot"])
     assert len(analyse([trade], "XAU/USD")["rows"]) == 1
+
+
+def test_exclusions_are_counted_not_silently_dropped() -> None:
+    """4 analysable out of 86 must not look like an analysis of 86."""
+    trades = [_trade("A", mae=-30)]
+    no_plan = _trade("B", mae=-30)
+    no_plan["signal_snapshot"] = {}
+    trades.append(no_plan)
+    trades.append(_trade("C", mae=-30, status="PENDING"))
+    trades.append({**_trade("D", mae=-30), "symbol": "EUR/USD"})
+
+    result = analyse(trades, "XAU/USD")
+    assert len(result["rows"]) == 1
+    assert result["total"] == 4
+    assert result["skipped"]["no_structural_stop"] == 1
+    assert result["skipped"]["not_closed"] == 1
+    assert result["skipped"]["other_symbol"] == 1
+
+
+def test_verdict_is_withheld_below_the_minimum_sample(capsys) -> None:
+    """A percentage from four trades is noise, and must not be stated as fact."""
+    from scripts.analyze_sl_floor import report
+
+    report(analyse([_trade(f"T{i}", mae=-15) for i in range(4)], "XAU/USD"))
+    out = capsys.readouterr().out
+    assert "NOT ENOUGH DATA" in out
+    assert "dead weight" not in out
+    assert "doing real work" not in out
+
+
+def test_verdict_is_given_once_the_sample_is_large_enough(capsys) -> None:
+    from scripts.analyze_sl_floor import report
+
+    report(analyse([_trade(f"T{i}", mae=-15) for i in range(25)], "XAU/USD"))
+    out = capsys.readouterr().out
+    assert "NOT ENOUGH DATA" not in out
+    assert "dead weight" in out
