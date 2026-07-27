@@ -1,0 +1,75 @@
+name: 📏 SL Floor Analysis
+
+# Answers one question from history already recorded: is the minimum stop
+# distance (risk_settings.min_sl_distance_points) protecting trades, or just
+# inflating risk?
+#
+# Read-only. It pulls closed trades, compares the structural stop the planner
+# derived against the stop that actually shipped, and checks the recorded
+# adverse excursion to see whether the tighter stop would have survived.
+# Nothing is written back to the database and no signals are sent.
+
+concurrency:
+  group: sl-floor-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "How many recent trades to pull"
+        required: false
+        default: "500"
+        type: string
+      symbol:
+        description: "Instrument to analyse"
+        required: false
+        default: "XAU/USD"
+        type: string
+
+jobs:
+  sl-floor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: 📦 Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: 📏 Analyse the stop-loss floor
+        run: |
+          python scripts/analyze_sl_floor.py \
+            --limit "${{ github.event.inputs.limit || '500' }}" \
+            --symbol "${{ github.event.inputs.symbol || 'XAU/USD' }}" \
+            --out storage/sl_floor_report.txt
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+      - name: 📋 Publish the verdict to the run summary
+        if: always()
+        run: |
+          {
+            echo "## 📏 SL Floor Analysis"
+            echo ""
+            echo '```'
+            cat storage/sl_floor_report.txt 2>/dev/null || echo "No report was produced — check the step above."
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 📤 Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sl-floor-report
+          path: storage/sl_floor_report.txt
+          if-no-files-found: warn
