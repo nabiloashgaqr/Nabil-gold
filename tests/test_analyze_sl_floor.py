@@ -142,7 +142,7 @@ def test_path_split_separates_planner_from_other_entries(capsys) -> None:
     out = capsys.readouterr().out
     assert "planner path" in out
     assert "other paths" in out
-    assert "indicative, not conclusive" in out
+    assert "profit factor withheld" in out
 
 
 def test_trailing_exits_are_counted_as_wins_not_losses(capsys) -> None:
@@ -154,3 +154,68 @@ def test_trailing_exits_are_counted_as_wins_not_losses(capsys) -> None:
     _print_outcomes([trailing_win, real_loss], "XAU/USD")
     out = capsys.readouterr().out
     assert "Wins 1 · Losses 1" in out
+
+
+def test_profit_factor_is_withheld_on_a_small_sample(capsys) -> None:
+    """PF divides by gross loss, so a near-zero denominator inflates it.
+
+    Four planner trades losing 1.9 points in total reported a profit factor of
+    33, which collapsed to 3.2 if one trade lost 18 points more. Points per
+    trade is stable at that size; PF is not.
+    """
+    from scripts.analyze_sl_floor import _print_outcomes
+
+    trades = [_trade("P0", mae=-30, pnl=63.9, status="TP2_HIT")]
+    for i in range(3):
+        trades.append(_trade(f"P{i+1}", mae=-30, pnl=-0.6, status="SL_HIT"))
+
+    _print_outcomes(trades, "XAU/USD")
+    out = capsys.readouterr().out
+    assert "n/a" in out
+    assert "33" not in out.split("pts/trade")[1].split("\n")[1]
+    assert "pts/trade" in out
+    assert "profit factor withheld" in out
+
+
+def test_non_overlapping_paths_are_flagged_as_consecutive_eras(capsys) -> None:
+    """The planner went live recently; earlier trades used agent consensus.
+
+    Comparing their totals compares two eras, not two strategies, so the tool
+    must say when the paths never traded in the same week.
+    """
+    from scripts.analyze_sl_floor import _print_outcomes
+
+    trades = []
+    for day in range(1, 15):
+        legacy = _trade(f"O{day}", mae=-30, pnl=100, status="SL_HIT")
+        legacy["signal_snapshot"] = {}
+        legacy["closed_at"] = f"2026-07-{day:02d}T12:00:00Z"
+        trades.append(legacy)
+    for day in (22, 23):
+        recent = _trade(f"P{day}", mae=-30, pnl=50, status="TP2_HIT")
+        recent["closed_at"] = f"2026-07-{day}T12:00:00Z"
+        trades.append(recent)
+
+    _print_outcomes(trades, "XAU/USD")
+    out = capsys.readouterr().out
+    assert "When each path traded" in out
+    assert "never traded in the same week" in out
+    assert "not comparable" in out
+
+
+def test_overlapping_paths_report_shared_weeks(capsys) -> None:
+    from scripts.analyze_sl_floor import _print_outcomes
+
+    trades = []
+    for day in (1, 2, 9, 10):
+        legacy = _trade(f"O{day}", mae=-30, pnl=100, status="SL_HIT")
+        legacy["signal_snapshot"] = {}
+        legacy["closed_at"] = f"2026-07-{day:02d}T12:00:00Z"
+        trades.append(legacy)
+        planner = _trade(f"P{day}", mae=-30, pnl=80, status="TP2_HIT")
+        planner["closed_at"] = f"2026-07-{day:02d}T12:00:00Z"
+        trades.append(planner)
+
+    _print_outcomes(trades, "XAU/USD")
+    out = capsys.readouterr().out
+    assert "Weeks where both paths traded: 2" in out
