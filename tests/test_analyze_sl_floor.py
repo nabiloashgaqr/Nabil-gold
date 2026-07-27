@@ -126,3 +126,31 @@ def test_verdict_is_given_once_the_sample_is_large_enough(capsys) -> None:
     out = capsys.readouterr().out
     assert "NOT ENOUGH DATA" not in out
     assert "dead weight" in out
+
+
+def test_path_split_separates_planner_from_other_entries(capsys) -> None:
+    """Routing more volume to the planner requires knowing it is better."""
+    from scripts.analyze_sl_floor import _print_outcomes
+
+    # TP1_HIT is an open status, so use terminal ones here.
+    planner_win = _trade("P1", mae=-30, pnl=500, status="TP2_HIT")
+    planner_loss = _trade("P2", mae=-30, pnl=-100, status="SL_HIT")
+    other = _trade("O1", mae=-30, pnl=200, status="SL_HIT")
+    other["signal_snapshot"] = {}
+
+    _print_outcomes([planner_win, planner_loss, other], "XAU/USD")
+    out = capsys.readouterr().out
+    assert "planner path" in out
+    assert "other paths" in out
+    assert "indicative, not conclusive" in out
+
+
+def test_trailing_exits_are_counted_as_wins_not_losses(capsys) -> None:
+    """SL_HIT is reused for trailing exits; only pnl distinguishes them."""
+    from scripts.analyze_sl_floor import _print_outcomes
+
+    trailing_win = _trade("A", mae=-30, pnl=250, status="SL_HIT")
+    real_loss = _trade("B", mae=-30, pnl=-400, status="SL_HIT")
+    _print_outcomes([trailing_win, real_loss], "XAU/USD")
+    out = capsys.readouterr().out
+    assert "Wins 1 · Losses 1" in out
