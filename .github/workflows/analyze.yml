@@ -24,7 +24,32 @@ on:
           - "true"
 
 jobs:
+  # SAFETY GATE: never run live analysis on a red test suite.
+  # A failing suite means an execution-path invariant is broken; shipping
+  # signals from that state is how a silent regression reaches Telegram.
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 📦 Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: 🧪 Test suite must be green before any live signal
+        run: |
+          python -m pytest tests/ -q
+
   analyze:
+    needs: guard
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
