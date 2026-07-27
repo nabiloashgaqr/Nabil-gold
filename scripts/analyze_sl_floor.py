@@ -190,6 +190,52 @@ def _path_stats(trades: List[Dict[str, Any]], symbol: str, planner: bool) -> Dic
     }
 
 
+def _trade_date(trade: Dict[str, Any]) -> str:
+    for key in ("closed_at", "close_time", "created_at", "entry_time", "updated_at"):
+        value = str(trade.get(key) or "")
+        if len(value) >= 10:
+            return value[:10]
+    return ""
+
+
+def _print_era_timeline(trades: List[Dict[str, Any]], symbol: str) -> None:
+    """Show when each path traded, because they may not overlap in time.
+
+    The planner path went live recently; before that every entry came from
+    agent consensus. Comparing their aggregates therefore compares two eras --
+    a long, settled one against a short, new one -- not two strategies running
+    side by side. Weeks in which only one path traded cannot support a claim
+    that either is better.
+    """
+    weeks: Dict[str, Dict[str, int]] = {}
+    for trade in trades:
+        if symbol and str(trade.get("symbol") or "") != symbol:
+            continue
+        day = _trade_date(trade)
+        if not day:
+            continue
+        bucket = weeks.setdefault(day[:7] + " w" + str((int(day[8:10]) - 1) // 7 + 1),
+                                  {"planner": 0, "other": 0})
+        bucket["planner" if _structural_stop(trade) > 0 else "other"] += 1
+
+    if len(weeks) < 2:
+        return
+    print("─── When each path traded ───")
+    print(f"{'week':<14}{'planner':>9}{'other':>8}")
+    overlap = 0
+    for label in sorted(weeks):
+        counts = weeks[label]
+        if counts["planner"] and counts["other"]:
+            overlap += 1
+        print(f"{label:<14}{counts['planner']:>9}{counts['other']:>8}")
+    if overlap == 0:
+        print("  The paths never traded in the same week: these are consecutive")
+        print("  eras, so their totals are not comparable.")
+    else:
+        print(f"  Weeks where both paths traded: {overlap}")
+    print()
+
+
 def _print_path_split(trades: List[Dict[str, Any]], symbol: str) -> None:
     """Compare the planner path against everything else.
 
@@ -201,12 +247,33 @@ def _print_path_split(trades: List[Dict[str, Any]], symbol: str) -> None:
     other = _path_stats(trades, symbol, planner=False)
     if not planner["total"] and not other["total"]:
         return
-    print(f"{'':<16}{'trades':>8}{'win rate':>10}{'net pts':>10}{'PF':>8}")
+    # Net points per trade is the honest comparator here. Profit factor divides
+    # by gross loss, so a path that happened to lose almost nothing yet reports
+    # an enormous ratio -- 4 planner trades losing 1.9 points total produced a
+    # PF of 33 that collapsed to 3.2 if a single trade lost 18 points more.
+    # It is suppressed below MIN_SAMPLE_FOR_VERDICT rather than shown as fact.
+    print(f"{'':<16}{'trades':>8}{'win rate':>10}{'net pts':>10}{'pts/trade':>11}{'PF':>9}")
     for label, st in (("planner path", planner), ("other paths", other)):
-        pf = "inf" if st["pf"] == float("inf") else f"{st['pf']:.2f}"
-        print(f"{label:<16}{st['total']:>8}{st['win_rate']:>9.0f}%{st['net']:>10.0f}{pf:>8}")
-    if 0 < planner["total"] < 20:
-        print(f"  (planner sample is {planner['total']} trades — indicative, not conclusive)")
+        if not st["total"]:
+            continue
+        per_trade = st["net"] / st["total"]
+        if st["total"] < MIN_SAMPLE_FOR_VERDICT:
+            pf = "n/a"
+        elif st["pf"] == float("inf"):
+            pf = "inf"
+        else:
+            pf = f"{st['pf']:.2f}"
+        print(f"{label:<16}{st['total']:>8}{st['win_rate']:>9.0f}%"
+              f"{st['net']:>10.0f}{per_trade:>11.1f}{pf:>9}")
+
+    small = [lbl for lbl, st in (("planner", planner), ("other", other))
+             if 0 < st["total"] < MIN_SAMPLE_FOR_VERDICT]
+    if small:
+        print(f"  ({' and '.join(small)} sample below {MIN_SAMPLE_FOR_VERDICT} trades — "
+              "profit factor withheld; compare pts/trade instead)")
+        print("  A newer path also carries survivorship risk: it has met fewer")
+        print("  market conditions, so a like-for-like read needs both paths")
+        print("  trading over the same weeks. See the timeline above.")
     print()
 
 
@@ -245,6 +312,7 @@ def _print_outcomes(trades: List[Dict[str, Any]], symbol: str) -> None:
 
     if not closed:
         return
+    _print_era_timeline(trades, symbol)
     print("─── Outcomes across all entry paths ───")
     _print_path_split(trades, symbol)
     print(f"Filled and closed             : {closed}")
