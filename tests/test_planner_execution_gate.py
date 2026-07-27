@@ -143,3 +143,59 @@ def test_planner_execution_gate_blocks_without_required_admission() -> None:
     gate = ra._planner_execution_gate(decision, _config())
     assert gate["allow"] is False
     assert "requires 3 qualified agents or 2 agents + macro/gemini" in gate["reason"]
+
+
+def test_gate_admits_a_ready_plan_when_live_consensus_reads_wait() -> None:
+    """The planner maps a direction in advance and waits at a level.
+
+    Live consensus therefore often reads WAIT while a confirmed map exists.
+    Requiring decision to be directional closed the gate before the agents were
+    counted, so a READY map was published every cycle and no pending order was
+    ever created.
+    """
+    decision = {
+        "decision": "WAIT",
+        "session_plan": {"plan_ready": True, "session_bias": "SELL"},
+        "agent_details": {
+            "technical": {"direction": "WAIT", "confidence": 44},
+            "classical": {"direction": "SELL", "confidence": 75},
+            "smc": {"direction": "SELL", "confidence": 82},
+            "price_action": {"direction": "SELL", "confidence": 73},
+            "multitimeframe": {"direction": "WAIT", "confidence": 20},
+        },
+    }
+    gate = ra._planner_execution_gate(decision, _config())
+    assert gate["allow"] is True
+    assert gate["kind"] == "THREE_AGENT_ADMISSION"
+    assert gate["support_count"] == 3
+
+
+def test_gate_still_requires_agent_support_under_the_plan_fallback() -> None:
+    """Falling back to the mapped bias must not bypass the agent count."""
+    decision = {
+        "decision": "WAIT",
+        "session_plan": {"plan_ready": True, "session_bias": "SELL"},
+        "agent_details": {
+            "technical": {"direction": "WAIT", "confidence": 44},
+            "classical": {"direction": "SELL", "confidence": 75},
+            "smc": {"direction": "WAIT", "confidence": 30},
+            "price_action": {"direction": "WAIT", "confidence": 20},
+            "multitimeframe": {"direction": "WAIT", "confidence": 20},
+        },
+    }
+    assert ra._planner_execution_gate(decision, _config())["allow"] is False
+
+
+def test_gate_does_not_fall_back_to_an_unready_plan() -> None:
+    decision = {
+        "decision": "WAIT",
+        "session_plan": {"plan_ready": False, "session_bias": "SELL"},
+        "agent_details": {
+            "classical": {"direction": "SELL", "confidence": 75},
+            "smc": {"direction": "SELL", "confidence": 82},
+            "price_action": {"direction": "SELL", "confidence": 73},
+        },
+    }
+    gate = ra._planner_execution_gate(decision, _config())
+    assert gate["allow"] is False
+    assert "no approved directional admission" in gate["reason"]
