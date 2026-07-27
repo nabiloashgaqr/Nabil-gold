@@ -119,9 +119,28 @@ def test_agent_votes_have_direction_markers():
 def test_signal_includes_trade_management_rule():
     text = _capture_signal(_full_decision())
     assert "Management:" in text
+    # Numbers must come from the profile the engine will actually apply, not a
+    # hardcoded default. _full_decision() carries no setup type, so it falls
+    # back to default_profile (150/40/150).
     assert "SL → entry after +150 pts" in text
     assert "Trail gap 150 pts / step 40 pts" in text
     assert "check 5m" in text
+
+
+def test_signal_management_text_matches_the_engine_profile():
+    """A reversal setup must not advertise the default profile's numbers.
+
+    Regression guard: the management line was hardcoded to 150/40/150 while
+    the engine applied 120/30/100 for LIQUIDITY_REVERSAL, so every reversal
+    signal published three wrong numbers.
+    """
+    decision = _full_decision()
+    decision["setup_type"] = "LIQUIDITY_REVERSAL"
+    decision["setup_context"] = {**(decision.get("setup_context") or {}), "setup_type": "LIQUIDITY_REVERSAL"}
+    text = _capture_signal(decision)
+    assert "SL → entry after +100 pts" in text
+    assert "Trail gap 120 pts / step 30 pts" in text
+    assert "+150 pts" not in text
 
 
 def test_pending_order_signal_explicitly_says_not_active_yet():

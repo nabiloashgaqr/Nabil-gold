@@ -215,17 +215,47 @@ def test_session_plan_ladder_applies_minimum_sl_floor_to_pending_orders(tmp_path
         "atr_multiplier_tp2": 4.5,
         "max_rr_ratio": 4.0,
     }
+    # The floor widens risk from $2.79 to $40 while the mapped liquidity is
+    # only $42.70 away, leaving 1.07R against a 1.5R minimum. No further
+    # liquidity is mapped, so the leg must be rejected rather than shipped
+    # with an invented target that manufactures an acceptable ratio.
     created = ra._execute_session_plan_ladder(decision, {"symbol": "XAU/USD"}, [], db, telegram, cfg)
-    assert created == 2
+    assert created == 0
+    assert load_trades(db.local_path) == []
+
+
+def test_session_plan_ladder_extends_to_further_liquidity_when_mapped_target_is_too_close(tmp_path: Path) -> None:
+    """A close target must not be inflated; a real further level may be used."""
+    db = _db(tmp_path)
+    telegram = _Telegram()
+    decision = _base_decision()
+    decision["session_plan"]["session_bias"] = "BUY"
+    primary = decision["session_plan"]["primary_poi"]
+    primary["direction"] = "BUY"
+    primary["entry_price"] = 4042.43
+    primary["stop_loss"] = 4039.64
+    primary["target_price"] = 4085.13
+    primary["target_liquidity"] = 4085.13
+    # A genuine higher liquidity pool exists at 4110.00 -> 1.69R after the floor.
+    primary["details"] = {"liquidity": {"buy_side": [4085.13, 4110.00]}}
+    cfg = _config()
+    cfg["session_planner"]["create_pending_orders_from_plan"] = True
+    cfg["risk_settings"] = {
+        "min_sl_distance_points": 400,
+        "atr_multiplier_sl": 2.0,
+        "atr_multiplier_tp1": 2.5,
+        "atr_multiplier_tp2": 4.5,
+        "max_rr_ratio": 4.0,
+        "min_rr_ratio": 1.5,
+    }
+    created = ra._execute_session_plan_ladder(decision, {"symbol": "XAU/USD"}, [], db, telegram, cfg)
+    assert created >= 1
     trades = load_trades(db.local_path)
-    primary = next(t for t in trades if ((t.get("signal_snapshot") or {}).get("setup_context") or {}).get("pending_plan_role") == "PRIMARY")
-    assert primary["stop_loss"] == 4002.43
-    assert primary["initial_stop_loss"] == 4002.43
-    assert primary["tp1"] == 4092.43
-    assert primary["tp2"] == 4132.43
-    assert primary["planned_risk_points"] == 400.0
-    assert primary["planned_tp2_points"] == 900.0
-    assert primary["planned_rr"] == 2.25
+    leg = next(t for t in trades if ((t.get("signal_snapshot") or {}).get("setup_context") or {}).get("pending_plan_role") == "PRIMARY")
+    assert leg["stop_loss"] == 4002.43
+    # TP2 is the real further pool, not a ratio-derived invention.
+    assert leg["tp2"] == 4110.00
+    assert leg["tp1"] <= leg["tp2"]
 
 
 def test_session_plan_ladder_display_confidence_is_capped_below_100(tmp_path: Path) -> None:

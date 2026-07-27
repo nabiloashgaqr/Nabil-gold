@@ -20,7 +20,9 @@ def test_signal_phase6_compact_context_and_rr_line():
     })
 
     text = captured["text"]
-    assert "Planned RR:</b> 3.0R" in text
+    # RR is reported per target: entry 4000, SL 3980 (risk 20), TP1 4030
+    # (1.50R), TP2 4060 (3.00R). The old single figure showed only TP2.
+    assert "Planned RR:</b> 1.50R (TP1) / 3.00R (TP2)" in text
     assert "Session: London / Europe Midday · HIGH" in text
     assert "News: CAUTION / HIGH" in text
 
