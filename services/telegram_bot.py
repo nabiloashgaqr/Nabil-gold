@@ -663,7 +663,12 @@ class TelegramService:
             if objective_alignment == "COUNTER_OBJECTIVE_REVERSAL_CONFIRMED":
                 lines.append("⚠️ Counter-objective reversal — main leg only")
         if quality:
-            lines.append(f"🏅 Quality: {html.escape(str(quality.get('grade', '')))} {html.escape(str(quality.get('score', '')))}".rstrip())
+            quality_label = "Setup quality" if planner_led else "Quality"
+            lines.append(f"🏅 {html.escape(quality_label)}: {html.escape(str(quality.get('grade', '')))} {html.escape(str(quality.get('score', '')))}".rstrip())
+        if planner_led:
+            planner_quality = decision.get("planner_quality") or {}
+            if isinstance(planner_quality, dict) and planner_quality.get("score") not in {None, ""}:
+                lines.append(f"🧭 Planner score: {html.escape(str(planner_quality.get('grade') or '--'))} {html.escape(str(planner_quality.get('score')))}")
         strength_line = self._session_plan_signal_strength_line(decision) if planner_led else self._signal_strength_line(decision)
         if strength_line:
             lines.append(strength_line)
@@ -822,7 +827,7 @@ class TelegramService:
         if "NEWS_HOLD" in events:
             notes.append("Pending order touched during a blocked news window; activation was paused until post-news recheck.")
         if "PENDING_CANCELLED" in events:
-            notes.append("Pending order was cancelled after post-news revalidation failed (invalidated, drift too large, or RR degraded).")
+            notes.append("Pending order was cancelled before activation because the mapped execution conditions were no longer valid.")
         if "EXIT_WARNING" in events:
             notes.append("Exit/risk warning: trade is moving adversely or risk conditions changed.")
         if "LONG_RUNNING" in events:
