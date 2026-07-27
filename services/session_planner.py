@@ -24,6 +24,10 @@ from utils.instruments import price_to_points, points_to_price
 
 
 class SessionPlannerService:
+    # Terminal setup-memory states (see services/setup_memory.py). A candidate
+    # in any of these states is finished and can never be planned or executed.
+    TERMINAL_SETUP_STATES = {"INVALIDATED", "EXPIRED", "ENTRY_TRIGGERED"}
+
     def __init__(self, config: Dict[str, Any] | None = None) -> None:
         self.config = config or {}
         cfg = (self.config.get("session_planner") or {}) if isinstance(self.config, dict) else {}
@@ -41,6 +45,9 @@ class SessionPlannerService:
         self.standby_min_distance_points = float(cfg.get("standby_min_distance_points", 60) or 60)
         self.max_primary_zone_width_points = float(cfg.get("max_primary_zone_width_points", 260) or 260)
         self.max_standby_zone_width_points = float(cfg.get("max_standby_zone_width_points", 220) or 220)
+        # Floor as well as ceiling: a zone narrower than the spread cannot be
+        # traded, so a 2-point "entry zone" is a formatting artefact, not a plan.
+        self.min_zone_width_points = float(cfg.get("min_zone_width_points", 0) or 0)
         self.min_main_rr_for_ready = float(cfg.get("min_main_rr_for_ready", (self.config.get("risk_settings", {}) or {}).get("min_rr_ratio", 1.5)) or 1.5)
         self.min_supporting_agents_for_ready = int(cfg.get("min_supporting_agents_for_ready", 2) or 2)
         self.max_opposing_agents_for_ready = int(cfg.get("max_opposing_agents_for_ready", 1) or 1)
@@ -137,6 +144,7 @@ class SessionPlannerService:
             "day_archetype_confidence": 0,
             "day_archetype_reason": None,
             "preferred_execution_family": None,
+            "execution_readiness": {"state": "MAP_ONLY", "reason": "execution not evaluated yet"},
             "primary_rationale": [],
             "standby_rationale": [],
             "plan_narrative": None,
@@ -343,6 +351,16 @@ class SessionPlannerService:
             base["notes"] = planner_notes
             return base
 
+        execution_readiness = self._execution_readiness(
+            planner_source="setup_candidates",
+            direction=direction,
+            primary=primary,
+            standby=standby,
+            all_results=all_results,
+            preferred_execution_family=smc_preferred_execution_family,
+            macro=macro if isinstance(macro, dict) else {},
+        )
+
         scenario_type = str(primary.get("setup_type") or "SCENARIO")
         scenario_id = self._scenario_id(symbol, direction, scenario_type, session_label, now)
         plan_id = f"PLAN::{scenario_id}"
@@ -432,6 +450,7 @@ class SessionPlannerService:
                 "day_archetype_confidence": round(smc_archetype_confidence, 1),
                 "day_archetype_reason": smc_archetype_reason or None,
                 "preferred_execution_family": smc_preferred_execution_family or None,
+                "execution_readiness": execution_readiness,
                 "planner_confidence": planner_score,
                 "planner_grade": self._grade(planner_score),
                 "supporting_agents": quality_diag.get("supporting_agents", []),
@@ -615,6 +634,21 @@ class SessionPlannerService:
             fallback["plan_reason"] = f"fallback planner score {planner_score:.1f} below {self.min_plan_score:.1f}"
             fallback["notes"] = planner_notes
             return fallback
+        execution_readiness = self._execution_readiness(
+            planner_source="fallback_day_map",
+            direction=direction,
+            primary=primary,
+            standby=standby,
+            all_results=all_results,
+            preferred_execution_family=smc_preferred_execution_family,
+            macro=macro,
+        )
+        if execution_readiness.get("state") not in {"PENDING_EXECUTION_READY", "MARKET_EXECUTION_READY"}:
+            fallback["plan_status"] = "WATCH_ONLY"
+            fallback["plan_reason"] = f"fallback day map has no execution readiness: {execution_readiness.get('reason') or execution_readiness.get('state')}"
+            fallback["execution_readiness"] = execution_readiness
+            fallback["notes"] = planner_notes + [str(execution_readiness.get("reason") or execution_readiness.get("state") or "execution readiness blocked")]
+            return fallback
 
         scenario_type = str(primary.get("setup_type") or "DAY_MAP_FALLBACK")
         scenario_id = self._scenario_id(symbol, direction, scenario_type, session_label, now)
@@ -705,6 +739,7 @@ class SessionPlannerService:
                 "day_archetype_confidence": round(smc_archetype_confidence, 1),
                 "day_archetype_reason": smc_archetype_reason or None,
                 "preferred_execution_family": smc_preferred_execution_family or None,
+                "execution_readiness": execution_readiness,
                 "planner_confidence": planner_score,
                 "planner_grade": self._grade(planner_score),
                 "supporting_agents": quality_diag.get("supporting_agents", []),
@@ -971,6 +1006,88 @@ class SessionPlannerService:
             "opposing_agents": opposing,
         }
 
+    def _execution_readiness(
+        self,
+        *,
+        planner_source: str,
+        direction: str,
+        primary: Dict[str, Any],
+        standby: Dict[str, Any] | None,
+        all_results: Dict[str, Any],
+        preferred_execution_family: str,
+        macro: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        diag = self._agent_alignment_summary(direction, all_results)
+        support_count = int(diag.get("support_count", 0) or 0)
+        opposition_count = int(diag.get("opposition_count", 0) or 0)
+        available_count = int(diag.get("available_count", 0) or 0)
+        supporting_agents = list(diag.get("supporting_agents", []) or [])
+        smc_result = all_results.get("smc", {}) or {}
+        smc_signal = str(smc_result.get("signal") or smc_result.get("direction") or "WAIT").upper()
+        smc_conf = self._f(smc_result.get("confidence"), 0.0)
+        has_smc_alignment = smc_signal == direction and smc_conf >= max(55.0, self.agent_alignment_min_confidence - 10.0)
+        macro_bias = self._macro_to_direction(macro.get("bias") if isinstance(macro, dict) else None)
+        macro_conf = self._f(macro.get("confidence"), 0.0) if isinstance(macro, dict) else 0.0
+        macro_min = float((((self.config.get("signal_requirements") or {}).get("two_agent_entry") or {}).get("macro_confirmation") or {}).get("min_confidence", 55) or 55)
+        has_macro_confirmation = macro_bias == direction and macro_conf >= macro_min
+        trigger_state = str(primary.get("trigger_state") or "").upper()
+        trigger_ready = bool(primary.get("trigger_ready")) or trigger_state in {"REJECTION_CONFIRMED", "FAILED_RECLAIM_CONFIRMED", "CONTINUATION_BREAKDOWN_CONFIRMED"}
+        setup_state = str(primary.get("setup_state") or "").upper()
+        same_box_ladder = self._same_box_ladder_pair(primary, standby)
+        preferred_execution_family = str(preferred_execution_family or "").upper()
+
+        if trigger_ready and support_count >= 2 and (has_smc_alignment or has_macro_confirmation):
+            state = "MARKET_EXECUTION_READY" if preferred_execution_family in {"FAILED_RECLAIM_CONTINUATION", "CONTINUATION_BREAKDOWN"} or trigger_state in {"FAILED_RECLAIM_CONFIRMED", "CONTINUATION_BREAKDOWN_CONFIRMED", "REJECTION_CONFIRMED"} else "PENDING_EXECUTION_READY"
+            reason = f"trigger {trigger_state or 'READY'} with {support_count} execution-support agents"
+        elif support_count >= 2 and (has_smc_alignment or has_macro_confirmation):
+            state = "PENDING_EXECUTION_READY"
+            reason = f"{support_count} execution-support agents confirmed the mapped direction"
+        elif available_count > 0 and (has_smc_alignment or support_count >= 1 or has_macro_confirmation or setup_state in {"ENTRY_ARMED", "POI_MARKED"}):
+            state = "WATCH_EXECUTION"
+            if has_smc_alignment and not support_count >= 2:
+                reason = f"SMC aligns {direction} ({smc_conf:.0f}%) but only {support_count} execution-support agent(s) qualified"
+            elif has_macro_confirmation and support_count < 2:
+                reason = f"macro confirms {direction} but only {support_count} execution-support agent(s) qualified"
+            elif support_count == 1:
+                reason = f"only 1 execution-support agent qualified for {direction}; waiting for another confirmer"
+            elif opposition_count > 0:
+                reason = f"execution context is mixed: {support_count} support vs {opposition_count} opposition"
+            else:
+                reason = "map is valid but still waiting for stronger execution confirmation"
+        else:
+            state = "MAP_ONLY"
+            if support_count == 0 and not has_smc_alignment and not has_macro_confirmation:
+                reason = "no execution-support alignment: SMC, macro, and qualified agents do not confirm the map"
+            elif support_count == 0:
+                reason = "no qualified execution-support agents are aligned with the mapped direction"
+            else:
+                reason = "map exists, but no execution-support alignment is present"
+
+        if planner_source == "fallback_day_map" and opposition_count > support_count and not has_smc_alignment:
+            state = "MAP_ONLY"
+            reason = f"fallback map is opposed by execution layer context ({support_count} support vs {opposition_count} opposition)"
+        elif planner_source == "fallback_day_map" and not has_smc_alignment and not has_macro_confirmation and support_count < 2:
+            state = "MAP_ONLY"
+            reason = f"fallback map has insufficient execution support: support={support_count}, smc_aligned={has_smc_alignment}, macro_confirmed={has_macro_confirmation}"
+
+        return {
+            "state": state,
+            "reason": reason,
+            "support_count": support_count,
+            "opposition_count": opposition_count,
+            "available_count": available_count,
+            "supporting_agents": supporting_agents,
+            "opposing_agents": list(diag.get("opposing_agents", []) or []),
+            "has_smc_alignment": has_smc_alignment,
+            "has_macro_confirmation": has_macro_confirmation,
+            "trigger_state": trigger_state,
+            "trigger_ready": bool(trigger_ready),
+            "setup_state": setup_state,
+            "same_box_ladder": bool(same_box_ladder),
+            "preferred_execution_family": preferred_execution_family or None,
+            "planner_source": planner_source,
+        }
+
     def _plan_quality_guard(
         self,
         *,
@@ -987,6 +1104,8 @@ class SessionPlannerService:
         diagnostics["main_rr"] = round(self._f(primary_execution.get("rr_ratio"), 0.0), 2)
         if diagnostics["primary_zone_width_points"] > self.max_primary_zone_width_points:
             return False, f"main area too wide ({diagnostics['primary_zone_width_points']:.0f} pts)", diagnostics
+        if self.min_zone_width_points > 0 and 0 < diagnostics["primary_zone_width_points"] < self.min_zone_width_points:
+            return False, f"main area too narrow ({diagnostics['primary_zone_width_points']:.0f} pts) to be executable", diagnostics
         if standby and diagnostics["standby_zone_width_points"] > self.max_standby_zone_width_points:
             return False, f"add area too wide ({diagnostics['standby_zone_width_points']:.0f} pts)", diagnostics
         diagnostics["same_box_ladder"] = self._same_box_ladder_pair(primary, standby)
@@ -1126,6 +1245,13 @@ class SessionPlannerService:
         for raw in candidates or []:
             if not isinstance(raw, dict):
                 continue
+            # A terminal setup state is a fact, not a score. INVALIDATED /
+            # EXPIRED setups are dead theses and must never be ranked into a
+            # day map: a -20 mitigation penalty is trivially outweighed by
+            # direction/sweep/trend bonuses, which is how a dead setup could
+            # previously reach role PRIMARY and ship a live pending order.
+            if str(raw.get("setup_state") or "").upper() in self.TERMINAL_SETUP_STATES:
+                continue
             candidate = deepcopy(raw)
             score = self._candidate_priority_score(
                 candidate,
@@ -1257,6 +1383,20 @@ class SessionPlannerService:
         primary_zone = self._zone_payload(primary)
         if primary_zone and standby_entry > 0:
             if float(primary_zone.get("low", 0)) <= standby_entry <= float(primary_zone.get("high", 0)):
+                return None
+        # An "add" leg must improve a thesis that is still alive. If the add
+        # entry sits beyond the main leg's stop loss, the only price path that
+        # fills it is: main fills -> main stopped out -> price keeps going ->
+        # add fills. That is averaging into a thesis the market already
+        # rejected, shipped to the user under a "main then add" label.
+        primary_stop = self._f(primary.get("stop_loss"), 0.0)
+        direction = str(primary.get("direction") or standby.get("direction") or "").upper()
+        if primary_stop > 0 and standby_entry > 0 and direction in {"BUY", "SELL"}:
+            beyond_invalidation = (
+                (direction == "BUY" and standby_entry <= primary_stop)
+                or (direction == "SELL" and standby_entry >= primary_stop)
+            )
+            if beyond_invalidation:
                 return None
         return standby
 
