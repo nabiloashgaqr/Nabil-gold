@@ -160,6 +160,56 @@ def analyse(trades: List[Dict[str, Any]], symbol: str) -> Dict[str, Any]:
     return {"rows": rows, "skipped": skipped, "statuses": statuses, "total": len(trades)}
 
 
+def _path_stats(trades: List[Dict[str, Any]], symbol: str, planner: bool) -> Dict[str, Any]:
+    wins = losses = be = 0
+    gross_win = gross_loss = 0.0
+    for trade in trades:
+        if symbol and str(trade.get("symbol") or "") != symbol:
+            continue
+        status = str(trade.get("status") or "").upper()
+        if status in {"PENDING", "OPEN", "PARTIAL", "TP1_HIT", "CANCELLED", "EXPIRED"}:
+            continue
+        if (_structural_stop(trade) > 0) != planner:
+            continue
+        pnl = _f(trade.get("final_pnl") or trade.get("final_pnl_points"))
+        if pnl > 0:
+            wins += 1
+            gross_win += pnl
+        elif pnl < 0:
+            losses += 1
+            gross_loss += abs(pnl)
+        else:
+            be += 1
+    total = wins + losses + be
+    return {
+        "total": total, "wins": wins, "losses": losses, "be": be,
+        "gross_win": gross_win, "gross_loss": gross_loss,
+        "net": gross_win - gross_loss,
+        "win_rate": (wins / total * 100) if total else 0.0,
+        "pf": (gross_win / gross_loss) if gross_loss else float("inf") if gross_win else 0.0,
+    }
+
+
+def _print_path_split(trades: List[Dict[str, Any]], symbol: str) -> None:
+    """Compare the planner path against everything else.
+
+    Deciding whether to route more volume through the planner requires knowing
+    whether the planner is actually better. With a small planner sample this is
+    indicative only, and is labelled as such rather than presented as proof.
+    """
+    planner = _path_stats(trades, symbol, planner=True)
+    other = _path_stats(trades, symbol, planner=False)
+    if not planner["total"] and not other["total"]:
+        return
+    print(f"{'':<16}{'trades':>8}{'win rate':>10}{'net pts':>10}{'PF':>8}")
+    for label, st in (("planner path", planner), ("other paths", other)):
+        pf = "inf" if st["pf"] == float("inf") else f"{st['pf']:.2f}"
+        print(f"{label:<16}{st['total']:>8}{st['win_rate']:>9.0f}%{st['net']:>10.0f}{pf:>8}")
+    if 0 < planner["total"] < 20:
+        print(f"  (planner sample is {planner['total']} trades — indicative, not conclusive)")
+    print()
+
+
 def _print_outcomes(trades: List[Dict[str, Any]], symbol: str) -> None:
     """Summarise how trades actually ended, across every entry path.
 
@@ -196,6 +246,7 @@ def _print_outcomes(trades: List[Dict[str, Any]], symbol: str) -> None:
     if not closed:
         return
     print("─── Outcomes across all entry paths ───")
+    _print_path_split(trades, symbol)
     print(f"Filled and closed             : {closed}")
     print(f"  from the planner path       : {planner} ({planner/closed*100:.0f}%)")
     print(f"  from other paths            : {closed - planner} ({(closed-planner)/closed*100:.0f}%)")
