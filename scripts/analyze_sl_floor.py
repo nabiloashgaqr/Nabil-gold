@@ -87,28 +87,54 @@ def _adverse_points(trade: Dict[str, Any]) -> float | None:
     return abs(value) if value <= 0 else 0.0
 
 
+# A verdict drawn from a handful of trades is a coin toss wearing a suit.
+MIN_SAMPLE_FOR_VERDICT = 20
+
+
 def analyse(trades: List[Dict[str, Any]], symbol: str) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
+    # Every exclusion is counted. Silently dropping rows is how an analysis of
+    # 4 trades gets mistaken for an analysis of 86.
+    skipped: Dict[str, int] = {
+        "other_symbol": 0,
+        "not_closed": 0,
+        "no_structural_stop": 0,
+        "missing_prices": 0,
+        "no_side": 0,
+    }
+    statuses: Dict[str, int] = {}
+
     for trade in trades:
         if symbol and str(trade.get("symbol") or "") != symbol:
+            skipped["other_symbol"] += 1
             continue
         status = str(trade.get("status") or trade.get("result") or "").upper()
+        statuses[status or "(blank)"] = statuses.get(status or "(blank)", 0) + 1
         if status in {"PENDING", "OPEN", "CANCELLED", "EXPIRED", ""}:
+            skipped["not_closed"] += 1
             continue
 
         entry = _f(trade.get("entry_price"))
         shipped_stop = _f(trade.get("initial_stop_loss") or trade.get("stop_loss"))
         structural_stop = _structural_stop(trade)
-        if entry <= 0 or shipped_stop <= 0 or structural_stop <= 0:
+        if entry <= 0 or shipped_stop <= 0:
+            skipped["missing_prices"] += 1
+            continue
+        if structural_stop <= 0:
+            # The planner did not record a session_plan on this trade, so the
+            # pre-floor stop is unknown. Common for non-planner entry paths.
+            skipped["no_structural_stop"] += 1
             continue
 
         side = str(trade.get("type") or trade.get("side") or "").upper()
         if side not in {"BUY", "SELL"}:
+            skipped["no_side"] += 1
             continue
 
         shipped_risk = abs(price_to_points(entry - shipped_stop, symbol=symbol))
         structural_risk = abs(price_to_points(entry - structural_stop, symbol=symbol))
         if structural_risk <= 0:
+            skipped["missing_prices"] += 1
             continue
 
         pnl = _f(trade.get("final_pnl") or trade.get("final_pnl_points") or trade.get("current_pnl_points"))
@@ -131,11 +157,39 @@ def analyse(trades: List[Dict[str, Any]], symbol: str) -> Dict[str, Any]:
             "won": pnl > 0,
             "structural_hit": structural_hit,
         })
-    return {"rows": rows}
+    return {"rows": rows, "skipped": skipped, "statuses": statuses, "total": len(trades)}
+
+
+def _print_coverage(result: Dict[str, Any]) -> None:
+    """Show what was excluded, so the sample can be judged before the verdict."""
+    total = result.get("total", 0)
+    rows = result["rows"]
+    skipped = result.get("skipped", {})
+    print(f"Trades pulled                 : {total}")
+    print(f"Analysable (closed, with plan): {len(rows)}"
+          + (f"  ({len(rows)/total*100:.0f}%)" if total else ""))
+    labels = {
+        "other_symbol": "different symbol",
+        "not_closed": "still open / pending / cancelled",
+        "no_structural_stop": "no planner stop recorded (non-planner entry)",
+        "missing_prices": "missing entry or stop price",
+        "no_side": "no trade direction",
+    }
+    excluded = {k: v for k, v in skipped.items() if v}
+    if excluded:
+        print("Excluded:")
+        for key, count in sorted(excluded.items(), key=lambda kv: -kv[1]):
+            print(f"    {count:>4}  {labels.get(key, key)}")
+    statuses = result.get("statuses") or {}
+    if statuses:
+        top = sorted(statuses.items(), key=lambda kv: -kv[1])[:6]
+        print("Status mix: " + ", ".join(f"{k}={v}" for k, v in top))
+    print()
 
 
 def report(result: Dict[str, Any]) -> None:
     rows = result["rows"]
+    _print_coverage(result)
     if not rows:
         print("No closed trades carried both a structural and a shipped stop.")
         print("The planner must have written session_plan into signal_snapshot")
@@ -174,6 +228,17 @@ def report(result: Dict[str, Any]) -> None:
 
     print()
     print("VERDICT")
+    if len(judged) < MIN_SAMPLE_FOR_VERDICT:
+        print(f"  NOT ENOUGH DATA — {len(judged)} judged trade(s), need {MIN_SAMPLE_FOR_VERDICT}.")
+        print("  Percentages on a sample this small are noise: one trade moves")
+        print("  them by tens of points. What the sample does establish is the")
+        print(f"  inflation itself ({mid:.1f}x median), which is a property of the")
+        print("  configuration, not of the outcomes.")
+        print()
+        print("  To widen it, check the excluded counts above: if most trades")
+        print("  lack a planner stop, the floor question only applies to the")
+        print("  planner path and the rest were never affected by it.")
+        return
     waste_rate = len(wasted) / len(judged)
     if waste_rate >= 0.8:
         print(f"  The tighter stop would have survived {waste_rate*100:.0f}% of the time.")
