@@ -339,6 +339,7 @@ class SessionPlannerService:
             stop_loss=self._f(primary.get("stop_loss"), 0.0),
             target_price=self._f(primary.get("target_liquidity") or primary.get("target_price"), 0.0),
             symbol=symbol,
+            candidate=primary,
         )
         quality_ok, quality_reason, quality_diag = self._plan_quality_guard(
             direction=direction,
@@ -391,6 +392,7 @@ class SessionPlannerService:
             stop_loss=self._f(primary.get("stop_loss"), 0.0),
             target_price=self._f(primary.get("target_liquidity") or primary.get("target_price"), 0.0),
             symbol=symbol,
+            candidate=primary,
         )
         standby_execution = self._execution_levels(
             direction=direction,
@@ -398,6 +400,7 @@ class SessionPlannerService:
             stop_loss=self._f(standby.get("stop_loss"), 0.0),
             target_price=self._f(standby.get("target_liquidity") or standby.get("target_price"), 0.0),
             symbol=symbol,
+            candidate=standby,
         ) if standby else None
         expected_path = self._expected_path(direction, primary, liquidity, dealing_range, current_price)
         day_objective, day_objective_label = self._day_objective(
@@ -633,6 +636,7 @@ class SessionPlannerService:
             stop_loss=self._f(primary.get("stop_loss"), 0.0),
             target_price=self._f(primary.get("target_liquidity") or primary.get("target_price"), 0.0),
             symbol=symbol,
+            candidate=primary,
         )
         quality_ok, quality_reason, quality_diag = self._plan_quality_guard(
             direction=direction,
@@ -696,6 +700,7 @@ class SessionPlannerService:
             stop_loss=self._f(primary.get("stop_loss"), 0.0),
             target_price=self._f(primary.get("target_liquidity") or primary.get("target_price"), 0.0),
             symbol=symbol,
+            candidate=primary,
         )
         standby_execution = self._execution_levels(
             direction=direction,
@@ -703,6 +708,7 @@ class SessionPlannerService:
             stop_loss=self._f(standby.get("stop_loss"), 0.0),
             target_price=self._f(standby.get("target_liquidity") or standby.get("target_price"), 0.0),
             symbol=symbol,
+            candidate=standby,
         ) if standby else None
         expected_path = self._expected_path(direction, primary, liquidity, dealing_range, current_price)
         day_objective, day_objective_label = self._day_objective(
@@ -1708,7 +1714,50 @@ class SessionPlannerService:
         stop_loss: float,
         target_price: float,
         symbol: str,
+        candidate: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
+        """Price a leg using the same rules execution will apply.
+
+        This used to be a second, older implementation of the levels maths: it
+        widened the stop to the fixed floor and then derived targets from ATR
+        multiples. Execution had since moved to liquidity-derived targets and a
+        scaled floor, so the two disagreed -- the planner published a READY map
+        with invented targets while execution rejected the very same leg for
+        insufficient reward, and no order was ever created.
+
+        Delegating keeps one source of truth: whatever the map shows is what
+        the order will carry, and a leg execution would refuse is never
+        advertised as ready.
+        """
+        try:
+            from scripts.run_analysis import _planner_trade_levels
+
+            levels = _planner_trade_levels(
+                self.config,
+                direction=direction,
+                entry_price=entry_price,
+                stop_loss=stop_loss,
+                target_price=target_price,
+                symbol=symbol,
+                candidate=candidate,
+            )
+            rr = self._f(levels.get("rr"), 0.0)
+            return {
+                "entry_price": levels.get("entry_price"),
+                "stop_loss": levels.get("stop_loss"),
+                "tp1": levels.get("tp1"),
+                "tp2": levels.get("tp2"),
+                "rr_ratio": rr,
+                "floor_applied": bool(levels.get("floor_applied")),
+                "target_method": levels.get("target_method"),
+                "reject_reason": levels.get("reject_reason"),
+                "min_sl_distance_points": levels.get("min_sl_distance_points"),
+            }
+        except ImportError:
+            # Fall back to the local maths if the execution module is not
+            # importable (kept so the planner stays usable standalone).
+            pass
+
         risk_cfg = (self.config.get("risk_settings") or {}) if isinstance(self.config, dict) else {}
         min_sl_points = self._f(risk_cfg.get("min_sl_distance_points"), 0.0)
         min_sl_distance = points_to_price(min_sl_points, symbol) if min_sl_points > 0 else 0.0
