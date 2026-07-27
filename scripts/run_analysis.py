@@ -478,6 +478,33 @@ def _planner_display_confidence(
     return round(max(50.0, min(cap, display_confidence)), 1)
 
 
+def _planner_leg_execution_ready(
+    base_decision: Dict[str, Any],
+    plan: Dict[str, Any],
+    candidate: Dict[str, Any],
+    config: Dict[str, Any],
+    *,
+    direction: str,
+    symbol: str,
+) -> Dict[str, Any]:
+    setup_state = str(candidate.get("setup_state") or "").upper()
+    if setup_state in {"INVALIDATED", "EXPIRED"}:
+        return {"allow": False, "reason": f"setup state {setup_state} is not executable"}
+    selection_role = str(candidate.get("selection_role") or "").upper()
+    revisit = str(candidate.get("expected_revisit_window") or "").upper()
+    current_price = _safe_float(base_decision.get("current_price"), 0.0)
+    entry_price = _safe_float(candidate.get("entry_price"), 0.0)
+    distance_points = abs(price_to_points(entry_price - current_price, symbol=symbol)) if entry_price > 0 and current_price > 0 else 0.0
+    pending_freshness_cfg = (config.get("pending_freshness") or {}) if isinstance(config, dict) else {}
+    stale_excursion = float(pending_freshness_cfg.get("stale_after_excursion_points", 250) or 250)
+    max_far_add_distance = min(220.0, stale_excursion * 0.85)
+    if selection_role in {"STANDBY", "ADD_ON"} and revisit == "LOW" and distance_points >= max_far_add_distance:
+        return {
+            "allow": False,
+            "reason": f"{selection_role} leg blocked: revisit LOW and distance {distance_points:.0f} pts is too far for an add leg",
+        }
+    return {"allow": True, "distance_points": round(distance_points, 1)}
+
 
 def _build_plan_ladder_decision(
     base_decision: Dict[str, Any],
@@ -545,8 +572,12 @@ def _build_plan_ladder_decision(
                 f"Morning/session planner prepared this pending thesis before the move.",
             ],
             "quality": {
-                "grade": plan.get("planner_grade") or candidate.get("quality_grade") or "B",
-                "score": max(_safe_float(plan.get("planner_confidence"), 0.0), _safe_float(candidate.get("quality_score"), 0.0)),
+                "grade": candidate.get("quality_grade") or ((candidate.get("setup_quality") or {}).get("grade") if isinstance(candidate.get("setup_quality"), dict) else None) or "B",
+                "score": _safe_float(candidate.get("quality_score"), _safe_float((candidate.get("setup_quality") or {}).get("score"), 0.0)),
+            },
+            "planner_quality": {
+                "grade": plan.get("planner_grade") or "--",
+                "score": _safe_float(plan.get("planner_confidence"), 0.0),
             },
             "session_plan": deepcopy(plan),
         }
@@ -897,6 +928,19 @@ def _execute_session_plan_ladder(
         ladder_decision.setdefault("reasons", []).append(f"Planner admission: {gate.get('reason')}")
         role = _decision_ladder_role(ladder_decision)
         if any(_trade_scenario_id(t) == _decision_scenario_id(ladder_decision) and _trade_ladder_role(t) == role for t in staged_trades):
+            continue
+        leg_readiness = _planner_leg_execution_ready(
+            base_decision,
+            plan,
+            ladder_decision.get("setup_context") or {},
+            config,
+            direction=str(ladder_decision.get("decision") or ""),
+            symbol=symbol,
+        )
+        if not leg_readiness.get("allow"):
+            logger.info("Session-plan ladder %s blocked by leg execution filter for %s: %s", role, symbol, leg_readiness.get("reason"))
+            if role in {"PRIMARY", "STARTER"}:
+                return created
             continue
         duplicate_reason = duplicate_signal_reason(ladder_decision, database, config)
         if duplicate_reason:
