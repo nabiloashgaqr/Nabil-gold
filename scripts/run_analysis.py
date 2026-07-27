@@ -179,6 +179,10 @@ _SETUP_STATE_RANK = {
     "EXPIRED": 5,
 }
 
+# Terminal setup-memory states: a candidate here is a finished thesis and must
+# never produce a live order. Mirrors SessionPlannerService.TERMINAL_SETUP_STATES.
+TERMINAL_SETUP_STATES = {"INVALIDATED", "EXPIRED", "ENTRY_TRIGGERED"}
+
 
 def _trade_setup_context(trade: Dict[str, Any]) -> Dict[str, Any]:
     snap = trade.get("signal_snapshot") or {}
@@ -544,9 +548,20 @@ def _build_plan_ladder_decision(
                 *([f"Planner SL floored to {levels.get('min_sl_distance_points', 0):.0f} points minimum risk distance."] if levels.get("floor_applied") else []),
                 f"Morning/session planner prepared this pending thesis before the move.",
             ],
+            # Two different measurements, reported separately instead of being
+            # blended. Mixing them (grade from the plan, score from max() of
+            # both scales) produced nonsense like "C 100.0" -- a plan graded C
+            # displaying a POI score of 100.
             "quality": {
-                "grade": plan.get("planner_grade") or candidate.get("quality_grade") or "B",
-                "score": max(_safe_float(plan.get("planner_confidence"), 0.0), _safe_float(candidate.get("quality_score"), 0.0)),
+                "grade": candidate.get("quality_grade") or plan.get("planner_grade") or "B",
+                "score": _safe_float(
+                    candidate.get("quality_score"),
+                    _safe_float(plan.get("planner_confidence"), 0.0),
+                ),
+            },
+            "planner_quality": {
+                "grade": plan.get("planner_grade") or "B",
+                "score": _safe_float(plan.get("planner_confidence"), 0.0),
             },
             "session_plan": deepcopy(plan),
         }
@@ -762,6 +777,72 @@ def _planner_execution_gate(decision: Dict[str, Any], config: Dict[str, Any]) ->
     }
 
 
+def _add_leg_rejection_reason(
+    plan: Dict[str, Any],
+    primary: Dict[str, Any],
+    standby: Dict[str, Any],
+    config: Dict[str, Any],
+) -> str | None:
+    """Reject an add leg that cannot honestly improve a live main thesis.
+
+    Two independent failure modes are checked at the execution boundary,
+    because a plan may be persisted and replayed after the planner ran:
+
+    1. The add entry sits beyond the main leg's stop loss. The only price path
+       that fills it is main-fills -> main-stopped -> price continues, i.e.
+       averaging into a rejected thesis while labelled "main then add".
+    2. The add is both far away and structurally unlikely to be revisited, so
+       it occupies a pending slot it will never use.
+    """
+    direction = str(plan.get("session_bias") or primary.get("direction") or standby.get("direction") or "").upper()
+    if direction not in {"BUY", "SELL"}:
+        return None
+
+    add_entry = _safe_float(standby.get("entry_price"), 0.0)
+    # Compare against the stop the main order will actually ship with, not the
+    # raw structural stop: the risk floor can widen it substantially, and the
+    # floored level is the real invalidation point for the live order.
+    main_stop = _safe_float(primary.get("stop_loss"), 0.0)
+    main_entry = _safe_float(primary.get("entry_price"), 0.0)
+    main_target = _safe_float(primary.get("target_price") or primary.get("target_liquidity"), 0.0)
+    if main_entry > 0 and main_stop > 0 and main_target > 0:
+        try:
+            main_stop = _safe_float(
+                _planner_trade_levels(
+                    config,
+                    direction=direction,
+                    entry_price=main_entry,
+                    stop_loss=main_stop,
+                    target_price=main_target,
+                    symbol=str(plan.get("symbol") or config.get("symbol", "XAU/USD")),
+                ).get("stop_loss"),
+                main_stop,
+            )
+        except Exception:  # noqa: BLE001 - fall back to the structural stop
+            pass
+    if add_entry > 0 and main_stop > 0:
+        beyond_invalidation = (
+            (direction == "BUY" and add_entry <= main_stop)
+            or (direction == "SELL" and add_entry >= main_stop)
+        )
+        if beyond_invalidation:
+            return (
+                f"add entry {add_entry:.2f} is beyond the main invalidation {main_stop:.2f} "
+                f"({direction}); filling it would average into a rejected thesis"
+            )
+
+    planner_cfg = (config.get("session_planner") or {}) if isinstance(config, dict) else {}
+    min_reach = _safe_float(planner_cfg.get("min_add_leg_return_probability", 25.0), 25.0)
+    reach = _safe_float(standby.get("return_probability_score"), 0.0)
+    revisit = str(standby.get("expected_revisit_window") or "").upper()
+    if revisit == "LOW" and reach < min_reach:
+        return (
+            f"add leg revisit window is LOW with reach {reach:.1f} below {min_reach:.1f}; "
+            "price is not expected to return to this area"
+        )
+    return None
+
+
 def _split_execution_decisions(
     base_decision: Dict[str, Any],
     plan: Dict[str, Any],
@@ -842,6 +923,11 @@ def _execute_session_plan_ladder(
     plan = base_decision.get("session_plan") or {}
     if not isinstance(plan, dict) or not plan.get("plan_ready"):
         return 0
+    readiness = (plan.get("execution_readiness") or {}) if isinstance(plan.get("execution_readiness"), dict) else {}
+    readiness_state = str(readiness.get("state") or "")
+    if readiness_state and readiness_state not in {"PENDING_EXECUTION_READY", "MARKET_EXECUTION_READY"}:
+        logger.info("Session-plan ladder blocked by execution readiness: %s", readiness.get("reason") or readiness_state or "unknown")
+        return 0
     gate = _planner_execution_gate(base_decision, config)
     if not gate.get("allow"):
         logger.info("Session-plan ladder blocked: %s", gate.get("reason"))
@@ -870,6 +956,29 @@ def _execute_session_plan_ladder(
     standby = plan.get("standby_poi") or {}
     if not isinstance(primary, dict) or not primary:
         return 0
+
+    # Terminal-state guard at the execution boundary. The planner already
+    # filters these out when ranking, but a plan can be persisted, replayed
+    # from a snapshot, or invalidated between planning and execution -- so the
+    # leg that actually creates orders must re-check rather than trust the map.
+    if str(primary.get("setup_state") or "").upper() in TERMINAL_SETUP_STATES:
+        logger.info(
+            "Session-plan ladder blocked: primary leg is in terminal state %s",
+            primary.get("setup_state"),
+        )
+        return 0
+    if isinstance(standby, dict) and standby and str(standby.get("setup_state") or "").upper() in TERMINAL_SETUP_STATES:
+        logger.info(
+            "Session-plan add leg dropped: standby is in terminal state %s",
+            standby.get("setup_state"),
+        )
+        standby = {}
+
+    if isinstance(standby, dict) and standby:
+        drop_reason = _add_leg_rejection_reason(plan, primary, standby, config)
+        if drop_reason:
+            logger.info("Session-plan add leg dropped: %s", drop_reason)
+            standby = {}
 
     split_decisions = _split_execution_decisions(base_decision, plan, primary, standby if isinstance(standby, dict) else None, config)
     if split_decisions:
@@ -1500,6 +1609,8 @@ def _session_plan_execution_audit(plan: Dict[str, Any], **extra: Any) -> Dict[st
         "preferred_execution_family": plan.get("preferred_execution_family"),
         "objective_alignment": plan.get("objective_alignment"),
         "same_box_ladder": bool(plan.get("same_box_ladder") or manual_plan.get("same_box_ladder")),
+        "execution_readiness_state": str(((plan.get("execution_readiness") or {}) if isinstance(plan.get("execution_readiness"), dict) else {}).get("state") or ""),
+        "execution_readiness_reason": str(((plan.get("execution_readiness") or {}) if isinstance(plan.get("execution_readiness"), dict) else {}).get("reason") or ""),
         "reversal_watch_active": bool((plan.get("reversal_watch") or {}).get("active")) if isinstance(plan.get("reversal_watch"), dict) else False,
         "primary_entry_price": plan.get("primary_entry_price") or primary.get("entry_price"),
         "standby_entry_price": plan.get("standby_entry_price") or standby.get("entry_price"),
