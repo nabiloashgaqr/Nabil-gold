@@ -295,6 +295,8 @@ def test_pending_freshness_marks_stale_after_large_excursion_without_fill() -> N
         },
         "order_execution": {"entry_style": "hybrid", "pending_order_max_cycles": 99, "pending_expire_after_hours": 24},
     })
+    # The order was created when price was 4006.0 and the market has since run
+    # 460 points away to 3960.0 without ever filling it: genuinely stale.
     trade = base_trade(
         type="SELL",
         status="PENDING",
@@ -302,7 +304,10 @@ def test_pending_freshness_marks_stale_after_large_excursion_without_fill() -> N
         entry_price=4006.0,
         tp1=3990.0,
         tp2=3965.0,
-        signal_snapshot={"session_info": {"current_session": "London + New York Afternoon"}},
+        signal_snapshot={
+            "session_info": {"current_session": "London + New York Afternoon"},
+            "pending_runtime": {"creation_price": 4006.0},
+        },
     )
     result = manager.evaluate_trade(trade, 3960.0, candle_high=3965.0, candle_low=3958.0)
     runtime = result["updates"]["signal_snapshot"]["pending_runtime"]
@@ -311,6 +316,52 @@ def test_pending_freshness_marks_stale_after_large_excursion_without_fill() -> N
     assert runtime["revalidation_required"] is True
     assert runtime["max_excursion_points"] >= 460.0
     assert runtime["target_progress_pct"] >= 60.0
+
+
+def test_far_pending_order_is_not_stale_in_a_quiet_market() -> None:
+    """A distant LIMIT order must not be cancelled just for being distant.
+
+    Regression guard: staleness was previously measured as distance-to-entry,
+    so a pullback order placed far from price was born STALE and cancelled on
+    its first evaluation cycle even though the market had barely moved.
+    """
+    manager = OpenTradesManager({
+        "schedule": {"timezone": "Asia/Hebron"},
+        "pending_freshness": {
+            "enabled": True,
+            "aging_after_hours": 2,
+            "stale_after_hours": 6,
+            "stale_after_excursion_points": 250,
+            "stale_after_target_progress_pct": 60,
+            "mark_revalidation_required_on_session_change": False,
+        },
+        "order_execution": {"entry_style": "hybrid", "pending_order_max_cycles": 99, "pending_expire_after_hours": 24},
+    })
+    # ADD leg 310 points below price, created 6 minutes ago; price has moved
+    # only 1.4 points since. Nothing about this is stale.
+    trade = base_trade(
+        type="BUY",
+        status="PENDING",
+        order_type="BUY_LIMIT",
+        entry_price=4055.92,
+        stop_loss=4015.92,
+        tp1=4105.92,
+        tp2=4145.92,
+        entry_time=(datetime.now(timezone.utc) - timedelta(minutes=6)).isoformat(),
+        signal_snapshot={
+            "session_info": {"current_session": "London + New York Afternoon"},
+            "setup_context": {"pending_plan_role": "STANDBY"},
+            "session_plan": {"plan_id": "PLAN::TEST", "session_bias": "BUY"},
+            "pending_runtime": {"creation_price": 4086.89},
+        },
+    )
+    result = manager.evaluate_trade(trade, 4086.75, candle_high=4087.2, candle_low=4086.0)
+    runtime = result["updates"]["signal_snapshot"]["pending_runtime"]
+    assert result["new_status"] == "PENDING"
+    assert result["events"] == []
+    assert runtime["freshness_state"] == "FRESH"
+    assert runtime["revalidation_required"] is False
+    assert runtime["max_excursion_points"] < 5.0
 
 
 def test_pending_freshness_marks_revalidation_required_after_plan_expiry() -> None:
@@ -363,6 +414,8 @@ def test_planner_pending_is_cancelled_immediately_once_it_becomes_stale() -> Non
             "session_info": {"current_session": "London + New York Afternoon"},
             "setup_context": {"pending_plan_role": "PRIMARY", "selection_role": "PRIMARY"},
             "session_plan": {"scenario_id": "SCENARIO::A", "session_bias": "SELL"},
+            # Created at 4006.0; market has since run 460 pts away to 3960.0.
+            "pending_runtime": {"creation_price": 4006.0},
         },
     )
     result = manager.evaluate_trade(trade, 3960.0, candle_high=3965.0, candle_low=3958.0)
