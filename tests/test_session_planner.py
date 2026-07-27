@@ -446,9 +446,12 @@ def test_session_planner_removes_add_area_when_it_overlaps_main(tmp_path: Path) 
     service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True}})
     service.storage_path = tmp_path / "session_plans.json"
     results = _results()
+    # A SELL needs its stop above entry and its target below it. The original
+    # values were inverted; the old levels maths never read them because it
+    # derived targets from the risk floor instead.
     results["smc"]["setup_candidates"] = [
-        _candidate("PRIMARY", entry_price=4020.0, stop_loss=3980.0, target_price=4110.0),
-        _candidate("STANDBY", entry_price=4021.0, stop_loss=3981.0, target_price=4111.0),
+        _candidate("PRIMARY", entry_price=4020.0, stop_loss=4060.0, target_price=3930.0),
+        _candidate("STANDBY", entry_price=4021.0, stop_loss=4061.0, target_price=3929.0),
     ]
     results["smc"]["setup_candidates"][1]["poi_zone"] = {"top": 4022.0, "bottom": 4019.0}
     plan = service.build_plan(results)
@@ -624,3 +627,49 @@ def test_compact_candidate_keeps_liquidity_but_drops_diagnostics() -> None:
     })
     assert compact["details"] == {"liquidity": {"sell_side": [3990.0], "buy_side": []}}
     assert "poi" not in compact["details"]
+
+
+def test_planner_levels_match_execution_levels_exactly() -> None:
+    """The published map must be the order that gets placed.
+
+    These were two separate implementations. The planner widened the stop to
+    the fixed floor and derived targets from ATR multiples, while execution had
+    moved to liquidity-derived targets and a scaled floor. The map advertised
+    READY with invented levels and execution then refused the same leg, so
+    plans were published and no orders ever appeared.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+    from scripts.run_analysis import _planner_trade_levels
+
+    config = _json.loads((_Path(__file__).resolve().parents[1] / "config.json").read_text())
+    service = SessionPlannerService(config)
+    candidate = {"details": {"liquidity": {"sell_side": [4064.74, 4030.0, 3985.15]}}}
+    args = dict(direction="SELL", entry_price=4075.15, stop_loss=4079.0,
+                target_price=4064.74, symbol="XAU/USD")
+
+    planned = service._execution_levels(candidate=candidate, **args)
+    executed = _planner_trade_levels(config, candidate=candidate, **args)
+
+    assert planned["stop_loss"] == executed["stop_loss"]
+    assert planned["tp1"] == executed["tp1"]
+    assert planned["tp2"] == executed["tp2"]
+    assert planned["rr_ratio"] == executed["rr"]
+    # And the targets are real pools, not ratio-derived numbers.
+    assert planned["tp1"] == 4064.74
+    assert planned["tp2"] == 4030.0
+
+
+def test_planner_marks_a_leg_execution_would_reject() -> None:
+    """A leg execution refuses must not be advertised as a ready map."""
+    import json as _json
+    from pathlib import Path as _Path
+
+    config = _json.loads((_Path(__file__).resolve().parents[1] / "config.json").read_text())
+    service = SessionPlannerService(config)
+    levels = service._execution_levels(
+        direction="SELL", entry_price=4075.15, stop_loss=4079.0,
+        target_price=4064.74, symbol="XAU/USD", candidate={},
+    )
+    assert levels["reject_reason"]
+    assert levels["rr_ratio"] == 0.0
