@@ -393,3 +393,73 @@ def test_session_plan_ladder_blocked_without_admission_gate(tmp_path: Path) -> N
     assert created == 0
     assert load_trades(db.local_path) == []
     assert telegram.sent == []
+
+
+# ─── Liquidity-based targets and the dynamic stop floor ────────────────────
+
+
+def _levels(stop_loss: float, target: float, liquidity=None, cfg_overrides=None):
+    cfg = _config()
+    cfg["risk_settings"] = {
+        "min_sl_distance_points": 400,
+        "min_rr_ratio": 1.5,
+        "atr_multiplier_sl": 2.0,
+        "atr_multiplier_tp1": 2.5,
+        "atr_multiplier_tp2": 4.5,
+        "max_rr_ratio": 4.0,
+        **(cfg_overrides or {}),
+    }
+    candidate = {"details": {"liquidity": {"sell_side": liquidity}}} if liquidity else {}
+    return ra._planner_trade_levels(
+        cfg, direction="SELL", entry_price=4075.15, stop_loss=stop_loss,
+        target_price=target, symbol="XAU/USD", candidate=candidate,
+    )
+
+
+def test_near_liquidity_becomes_tp1_while_tp2_carries_the_reward_test() -> None:
+    """A close first target must not disqualify a structurally sound plan.
+
+    Judging viability on TP1 rejected real setups whose stop had been widened
+    by the floor, even though a further mapped pool made the trade worthwhile.
+    """
+    levels = _levels(4079.0, 4064.74, liquidity=[4064.74, 4030.00, 3985.15])
+    assert not levels.get("reject_reason")
+    assert levels["tp1"] == 4064.74, "the near pool is a real target, not discarded"
+    assert levels["tp2"] in {4030.00, 3985.15}
+    assert levels["rr"] >= 1.5
+
+
+def test_targets_are_never_invented_when_no_further_liquidity_exists() -> None:
+    levels = _levels(4079.0, 4064.74, liquidity=None)
+    assert levels.get("reject_reason")
+    assert "no further qualifying liquidity" in levels["reject_reason"]
+
+
+def test_dynamic_floor_scales_risk_with_structure() -> None:
+    """A tight POI should not inherit the full fixed floor."""
+    dynamic = _levels(
+        4079.0, 4064.74, liquidity=[4064.74, 4030.00],
+        cfg_overrides={"dynamic_sl_floor": {"enabled": True, "structural_multiplier": 3.0,
+                                            "min_points": 150, "max_points": 400}},
+    )
+    risk = round((dynamic["stop_loss"] - 4075.15) * 10)
+    assert risk == 150, "structural 38 pts x3 is below the 150 pt lower bound"
+    assert dynamic["rr"] > 2.0
+
+
+def test_dynamic_floor_is_bounded_by_max_points() -> None:
+    wide = _levels(
+        4090.0, 4064.74, liquidity=[4064.74, 3985.15],
+        cfg_overrides={"dynamic_sl_floor": {"enabled": True, "structural_multiplier": 3.0,
+                                            "min_points": 150, "max_points": 400}},
+    )
+    risk = round((wide["stop_loss"] - 4075.15) * 10)
+    assert risk == 400, "148 pts x3 exceeds the ceiling and must be capped"
+
+
+def test_dynamic_floor_disabled_keeps_the_fixed_behaviour() -> None:
+    fixed = _levels(
+        4079.0, 4064.74, liquidity=[4064.74, 3985.15],
+        cfg_overrides={"dynamic_sl_floor": {"enabled": False}},
+    )
+    assert round((fixed["stop_loss"] - 4075.15) * 10) == 400
