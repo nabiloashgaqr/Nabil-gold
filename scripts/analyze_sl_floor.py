@@ -160,6 +160,56 @@ def analyse(trades: List[Dict[str, Any]], symbol: str) -> Dict[str, Any]:
     return {"rows": rows, "skipped": skipped, "statuses": statuses, "total": len(trades)}
 
 
+def _print_outcomes(trades: List[Dict[str, Any]], symbol: str) -> None:
+    """Summarise how trades actually ended, across every entry path.
+
+    The floor question only touches planner trades, but the status mix showed
+    something that matters more: which paths are trading at all, and how they
+    resolve. SL_HIT is also used for trailing exits, so status alone cannot
+    separate a full loss from a protected win -- result and pnl are needed.
+    """
+    closed, planner, wins, losses, breakeven = 0, 0, 0, 0, 0
+    gross_win, gross_loss = 0.0, 0.0
+    never_filled = 0
+    for trade in trades:
+        if symbol and str(trade.get("symbol") or "") != symbol:
+            continue
+        status = str(trade.get("status") or "").upper()
+        if status in {"PENDING", "OPEN", "PARTIAL", "TP1_HIT"}:
+            continue
+        if status in {"CANCELLED", "EXPIRED"}:
+            never_filled += 1
+            continue
+        closed += 1
+        if _structural_stop(trade) > 0:
+            planner += 1
+        pnl = _f(trade.get("final_pnl") or trade.get("final_pnl_points"))
+        if pnl > 0:
+            wins += 1
+            gross_win += pnl
+        elif pnl < 0:
+            losses += 1
+            gross_loss += abs(pnl)
+        else:
+            breakeven += 1
+
+    if not closed:
+        return
+    print("─── Outcomes across all entry paths ───")
+    print(f"Filled and closed             : {closed}")
+    print(f"  from the planner path       : {planner} ({planner/closed*100:.0f}%)")
+    print(f"  from other paths            : {closed - planner} ({(closed-planner)/closed*100:.0f}%)")
+    if never_filled:
+        print(f"Never filled (cancelled/expired): {never_filled}")
+    print(f"Wins {wins} · Losses {losses} · Breakeven {breakeven}"
+          f"   (win rate {wins/closed*100:.0f}%)")
+    net = gross_win - gross_loss
+    print(f"Gross +{gross_win:.0f} pts / -{gross_loss:.0f} pts   net {net:+.0f} pts")
+    if gross_loss > 0:
+        print(f"Profit factor                 : {gross_win/gross_loss:.2f}")
+    print()
+
+
 def _print_coverage(result: Dict[str, Any]) -> None:
     """Show what was excluded, so the sample can be judged before the verdict."""
     total = result.get("total", 0)
@@ -275,6 +325,7 @@ def main() -> int:
         print("No trades returned. Nothing to analyse.")
         return 1
     result = analyse(trades, args.symbol)
+    _print_outcomes(trades, args.symbol)
     report(result)
 
     if args.out:
@@ -284,6 +335,7 @@ def main() -> int:
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
             print(f"Pulled {len(trades)} trades")
+            _print_outcomes(trades, args.symbol)
             report(result)
         out_path = Path(args.out)
         out_path.parent.mkdir(parents=True, exist_ok=True)
