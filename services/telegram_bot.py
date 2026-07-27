@@ -184,7 +184,23 @@ class TelegramService:
         session_bias = str(plan.get("session_bias") or decision.get("decision") or "WAIT").upper()
         execution = str(plan.get("execution_preference") or "planner-led").replace("_", " ").title()
         conf_text = f" {float(confidence):.1f}%" if confidence not in {None, ""} else ""
-        return f"🧭 Planner-led day map — {session_bias} {grade}{conf_text} · authority {authority} · {execution}"
+        line = f"🧭 Planner-led day map — {session_bias} {grade}{conf_text} · authority {authority} · {execution}"
+        # Surface how much conviction the day archetype carries, since it now
+        # decides whether an add leg is permitted at all.
+        conviction = plan.get("archetype_conviction") or {}
+        if isinstance(conviction, dict) and conviction.get("level"):
+            level = str(conviction.get("level"))
+            archetype = str(conviction.get("archetype") or "").replace("_", " ").title()
+            score = conviction.get("score")
+            bits = [f"conviction {level}"]
+            if archetype:
+                bits.append(archetype + (f" {score:.0f}%" if isinstance(score, (int, float)) and score else ""))
+            if conviction.get("family_aligned") is False:
+                bits.append("setup contradicts archetype")
+            if not conviction.get("allow_add_leg", True):
+                bits.append("main leg only")
+            line += "\n🎯 " + html.escape(" · ".join(bits))
+        return line
 
     def _signal_strength_line(self, decision: Dict[str, Any]) -> str | None:
         classic = decision.get("classic") or {}

@@ -48,6 +48,10 @@ class SessionPlannerService:
         # Floor as well as ceiling: a zone narrower than the spread cannot be
         # traded, so a 2-point "entry zone" is a formatting artefact, not a plan.
         self.min_zone_width_points = float(cfg.get("min_zone_width_points", 0) or 0)
+        conviction_cfg = (cfg.get("archetype_conviction") or {}) if isinstance(cfg, dict) else {}
+        self.archetype_conviction_enabled = bool(conviction_cfg.get("enabled", True))
+        self.archetype_high_conviction = float(conviction_cfg.get("high_conviction_confidence", 75) or 75)
+        self.archetype_medium_conviction = float(conviction_cfg.get("medium_conviction_confidence", 60) or 60)
         self.min_main_rr_for_ready = float(cfg.get("min_main_rr_for_ready", (self.config.get("risk_settings", {}) or {}).get("min_rr_ratio", 1.5)) or 1.5)
         self.min_supporting_agents_for_ready = int(cfg.get("min_supporting_agents_for_ready", 2) or 2)
         self.max_opposing_agents_for_ready = int(cfg.get("max_opposing_agents_for_ready", 1) or 1)
@@ -144,6 +148,7 @@ class SessionPlannerService:
             "day_archetype_confidence": 0,
             "day_archetype_reason": None,
             "preferred_execution_family": None,
+            "archetype_conviction": None,
             "execution_readiness": {"state": "MAP_ONLY", "reason": "execution not evaluated yet"},
             "primary_rationale": [],
             "standby_rationale": [],
@@ -312,6 +317,22 @@ class SessionPlannerService:
         standby = self._validated_standby(primary, standby, symbol=symbol)
         if objective_alignment == "COUNTER_OBJECTIVE_REVERSAL_CONFIRMED":
             standby = None
+
+        conviction = self._archetype_conviction(
+            archetype=smc_archetype,
+            archetype_confidence=smc_archetype_confidence,
+            preferred_execution_family=smc_preferred_execution_family,
+            primary=primary,
+        )
+        if not conviction["allow_execution"]:
+            base["plan_status"] = "WATCH_ONLY"
+            base["plan_reason"] = f"archetype conviction is LOW: {'; '.join(conviction['reasons'])}"
+            base["archetype_conviction"] = conviction
+            base["notes"] = list(conviction["reasons"])
+            return base
+        if not conviction["allow_add_leg"] and standby:
+            # Medium conviction earns the main thesis, not a second leg on it.
+            standby = None
         primary_execution_preview = self._execution_levels(
             direction=direction,
             entry_price=self._f(primary.get("entry_price"), 0.0),
@@ -427,6 +448,7 @@ class SessionPlannerService:
             {
                 "plan_ready": True,
                 "plan_status": "READY",
+                "archetype_conviction": conviction,
                 "planner_source": "setup_candidates",
                 "authority_state": "CONFIRMED",
                 "authority_direction": direction,
@@ -590,6 +612,21 @@ class SessionPlannerService:
             )
             standby = self._validated_standby(primary, standby, symbol=symbol)
 
+        conviction = self._archetype_conviction(
+            archetype=smc_archetype,
+            archetype_confidence=smc_archetype_confidence,
+            preferred_execution_family=smc_preferred_execution_family,
+            primary=primary,
+        )
+        if not conviction["allow_execution"]:
+            fallback["plan_status"] = "WATCH_ONLY"
+            fallback["plan_reason"] = f"archetype conviction is LOW: {'; '.join(conviction['reasons'])}"
+            fallback["archetype_conviction"] = conviction
+            fallback["notes"] = list(conviction["reasons"])
+            return fallback
+        if not conviction["allow_add_leg"] and standby:
+            standby = None
+
         primary_execution_preview = self._execution_levels(
             direction=direction,
             entry_price=self._f(primary.get("entry_price"), 0.0),
@@ -719,6 +756,7 @@ class SessionPlannerService:
             {
                 "plan_ready": True,
                 "plan_status": "READY",
+                "archetype_conviction": conviction,
                 "planner_source": "fallback_day_map",
                 "scenario_id": scenario_id,
                 "plan_id": plan_id,
@@ -1532,6 +1570,80 @@ class SessionPlannerService:
         if trigger_score < max(self.min_trigger_score, 60.0):
             return False, f"trigger score {trigger_score:.1f} is below reversal proof threshold"
         return True, "reversal proof confirmed"
+
+    # ─── Archetype conviction ────────────────────────────────────────────
+    # The SMC layer classifies the day (continuation after sweep, failed
+    # reclaim, reversal, range) with a confidence and a preferred execution
+    # family. That judgement was recorded and displayed but never consulted:
+    # day_archetype_confidence appeared in no gate, so a 58%-confidence day
+    # whose setup contradicted the archetype still earned a full main+add
+    # ladder, identical to a 90% day whose setup agreed with it.
+    #
+    # Conviction converts that reading into how much execution is warranted:
+    #   HIGH   -> full ladder (main + add)
+    #   MEDIUM -> main leg only
+    #   LOW    -> map only, no orders
+    ARCHETYPE_FAMILY_SETUPS = {
+        "MITIGATION_LADDER": {"LIQUIDITY_REVERSAL", "ORDER_BLOCK_PULLBACK", "STRUCTURE_CONTINUATION"},
+        "FAILED_RECLAIM_CONTINUATION": {"FAILED_RECLAIM_CONTINUATION", "STRUCTURE_CONTINUATION"},
+        "CONTINUATION_BREAKDOWN": {"CONTINUATION_BREAKDOWN", "STRUCTURE_CONTINUATION"},
+        "REVERSAL_MAP": {"LIQUIDITY_REVERSAL", "REVERSAL_ATTEMPT"},
+    }
+
+    def _archetype_conviction(
+        self,
+        *,
+        archetype: str,
+        archetype_confidence: float,
+        preferred_execution_family: str,
+        primary: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        setup_type = str((primary or {}).get("setup_type") or "").upper()
+        family = str(preferred_execution_family or "").upper()
+        reasons: List[str] = []
+
+        if not self.archetype_conviction_enabled:
+            return {
+                "level": "HIGH",
+                "score": round(archetype_confidence, 1),
+                "allow_add_leg": True,
+                "allow_execution": True,
+                "family_aligned": True,
+                "reasons": ["archetype conviction disabled"],
+            }
+
+        expected = self.ARCHETYPE_FAMILY_SETUPS.get(family)
+        # An unmapped family cannot be judged, so it is not held against the plan.
+        family_aligned = True if not expected or not setup_type else setup_type in expected
+        if expected and setup_type and not family_aligned:
+            reasons.append(f"setup {setup_type} does not match {family} archetype")
+
+        if not archetype or archetype_confidence <= 0:
+            level = "MEDIUM"
+            reasons.append("no day archetype was classified")
+        elif archetype_confidence >= self.archetype_high_conviction and family_aligned:
+            level = "HIGH"
+            reasons.append(f"{archetype} at {archetype_confidence:.0f}% with an aligned setup")
+        elif archetype_confidence >= self.archetype_medium_conviction:
+            level = "MEDIUM"
+            reasons.append(
+                f"{archetype} at {archetype_confidence:.0f}%"
+                + ("" if family_aligned else " with a contradicting setup")
+            )
+        else:
+            level = "LOW"
+            reasons.append(f"{archetype} conviction {archetype_confidence:.0f}% is below {self.archetype_medium_conviction:.0f}%")
+
+        return {
+            "level": level,
+            "score": round(archetype_confidence, 1),
+            "allow_add_leg": level == "HIGH",
+            "allow_execution": level != "LOW",
+            "family_aligned": family_aligned,
+            "archetype": archetype or None,
+            "preferred_execution_family": family or None,
+            "reasons": reasons,
+        }
 
     def _execution_preference(
         self,
