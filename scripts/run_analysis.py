@@ -1081,6 +1081,67 @@ def _split_execution_decisions(
 
 
 
+def _revive_recent_ready_plan(
+    database: Any,
+    config: Dict[str, Any],
+    *,
+    symbol: str,
+    now: datetime,
+) -> Dict[str, Any] | None:
+    """Reuse a still-valid day map when this cycle could not rebuild one.
+
+    Plans are rebuilt from scratch every cycle and never persisted for reuse,
+    so a map only ever gets one chance to place its orders: the cycle that
+    produced it. If price had not yet reached a workable distance in that
+    cycle, or agents briefly disagreed in the next one, the map was silently
+    forgotten -- which is why a confirmed A+ plan could be published and no
+    order ever appear.
+
+    A day map is a standing thesis with an explicit lifetime (plan_expires_at),
+    so an unexpired one remains actionable. Reviving it changes nothing about
+    the checks that follow: the admission gate, reward test, duplicate filter
+    and price-distance rule all still run against live prices.
+    """
+    planner_cfg = (config.get("session_planner") or {}) if isinstance(config, dict) else {}
+    if not bool(planner_cfg.get("revive_unexpired_plans", True)):
+        return None
+    try:
+        rows = database.get_recent_session_plans(limit=12, symbol=symbol, plan_ready_only=True)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to load recent session plans for revival: %s", exc)
+        return None
+
+    for row in rows or []:
+        payload = row.get("payload") if isinstance(row, dict) else None
+        if isinstance(payload, str):
+            import json as _json
+            try:
+                payload = _json.loads(payload)
+            except (ValueError, TypeError):
+                payload = None
+        if not isinstance(payload, dict) or not payload.get("plan_ready"):
+            continue
+        expires_at = _parse_datetime(str(payload.get("plan_expires_at") or ""))
+        if not expires_at or now >= expires_at:
+            continue
+        if not (payload.get("primary_poi") or {}):
+            continue
+        age_minutes = 0.0
+        created = _parse_datetime(str(row.get("analysis_run_at") or payload.get("created_at") or ""))
+        if created:
+            age_minutes = max(0.0, (now - created).total_seconds() / 60.0)
+        logger.info(
+            "Reusing unexpired %s day map for %s (built %.0f min ago, expires %s); "
+            "this cycle could not rebuild one",
+            payload.get("session_bias"), symbol, age_minutes, payload.get("plan_expires_at"),
+        )
+        revived = deepcopy(payload)
+        revived["revived_from_snapshot"] = True
+        revived["revived_age_minutes"] = round(age_minutes, 1)
+        return revived
+    return None
+
+
 def _execute_session_plan_ladder(
     base_decision: Dict[str, Any],
     all_results: Dict[str, Any],
@@ -1098,12 +1159,25 @@ def _execute_session_plan_ladder(
         return 0
     plan = base_decision.get("session_plan") or {}
     if not isinstance(plan, dict) or not plan.get("plan_ready"):
-        logger.info(
-            "Session-plan ladder skipped: plan not ready (status=%s, reason=%s)",
-            (plan or {}).get("plan_status") if isinstance(plan, dict) else "no-plan",
-            (plan or {}).get("plan_reason") if isinstance(plan, dict) else "no session_plan on decision",
+        # A map that could not be rebuilt this cycle is not necessarily gone:
+        # agents drift in and out of agreement minute to minute, while the
+        # thesis it expressed has its own lifetime. Fall back to the most
+        # recent unexpired one before giving up.
+        revived = _revive_recent_ready_plan(
+            database, config, symbol=str(base_decision.get("symbol") or config.get("symbol", "XAU/USD")),
+            now=datetime.now(timezone.utc),
         )
-        return 0
+        if not revived:
+            logger.info(
+                "Session-plan ladder skipped: plan not ready (status=%s, reason=%s) "
+                "and no unexpired day map to fall back on",
+                (plan or {}).get("plan_status") if isinstance(plan, dict) else "no-plan",
+                (plan or {}).get("plan_reason") if isinstance(plan, dict) else "no session_plan on decision",
+            )
+            return 0
+        plan = revived
+        base_decision = deepcopy(base_decision)
+        base_decision["session_plan"] = revived
     readiness = (plan.get("execution_readiness") or {}) if isinstance(plan.get("execution_readiness"), dict) else {}
     readiness_state = str(readiness.get("state") or "")
     if readiness_state and readiness_state not in {"PENDING_EXECUTION_READY", "MARKET_EXECUTION_READY"}:
