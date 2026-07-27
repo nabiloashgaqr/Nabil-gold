@@ -530,14 +530,21 @@ def _planner_display_confidence(
     min_agent_conf = float(sig_cfg.get("agent_min_confidence", 70) or 70)
     details = base_decision.get("agent_details") or {}
     support_confidences: List[float] = []
+    oppose_confidences: List[float] = []
     for key in ["technical", "classical", "smc", "price_action", "multitimeframe"]:
         detail = (details or {}).get(key)
         if not isinstance(detail, dict):
             continue
         agent_direction = str(detail.get("direction") or "WAIT").upper()
         agent_confidence = _safe_float(detail.get("confidence"), 0.0)
-        if agent_direction == direction and agent_confidence >= min_agent_conf:
+        if agent_confidence < min_agent_conf:
+            continue
+        if agent_direction == direction:
             support_confidences.append(agent_confidence)
+        elif agent_direction in {"BUY", "SELL"}:
+            # A qualified agent voting the other way is evidence against the
+            # thesis and is weighted with the same threshold as a supporter.
+            oppose_confidences.append(agent_confidence)
 
     dominance = _safe_float(candidate.get("thesis_dominance_score"), 0.0)
     quality_score = _safe_float(candidate.get("quality_score"), _safe_float((candidate.get("setup_quality") or {}).get("score"), 0.0))
@@ -547,9 +554,30 @@ def _planner_display_confidence(
     else:
         display_confidence = max(dominance, quality_score * 0.80, 60.0)
 
+    # Symmetry: confirmation adds, contradiction subtracts.
+    #
+    # Only agreement moved this number before. A qualified agent voting the
+    # opposite way at 95% produced exactly the same confidence as an
+    # unqualified one at 27%, and a macro read opposing the trade at 90% cost
+    # nothing while a supporting one added 2.0. Every disagreement in the
+    # system was silently rounded down to zero, so the published figure only
+    # ever described the evidence that agreed with the trade.
     context_confirmation = _planner_context_confirmation(base_decision, config, direction)
     if len(support_confidences) >= 2 and context_confirmation.get("allow"):
         display_confidence += 2.0
+
+    if oppose_confidences:
+        avg_oppose = sum(oppose_confidences) / len(oppose_confidences)
+        # Scale with both how many disagree and how strongly, so two strong
+        # opponents cost more than one marginal one.
+        display_confidence -= (avg_oppose / 100.0) * 6.0 * len(oppose_confidences)
+
+    macro_direction = _macro_direction_for(base_decision)
+    macro_bias = str(macro_direction.get("bias") or "").upper()
+    macro_side = {"BULLISH_GOLD": "BUY", "BEARISH_GOLD": "SELL"}.get(macro_bias)
+    macro_conf = _safe_float(macro_direction.get("confidence"), 0.0)
+    if macro_side and macro_side != direction and macro_conf > 0:
+        display_confidence -= 5.0 if macro_conf >= 80 else 3.0 if macro_conf >= 55 else 1.5
 
     cap = 95.0 if len(support_confidences) >= 3 else 92.0 if len(support_confidences) >= 2 else 88.0
     return round(max(50.0, min(cap, display_confidence)), 1)
@@ -701,6 +729,18 @@ def _build_plan_ladder_decision(
 
 
 
+def _macro_direction_for(decision: Dict[str, Any]) -> Dict[str, Any]:
+    """Read the macro bias payload, wherever this decision carries it."""
+    news_context = decision.get("news_context") or {}
+    macro_agent = (news_context.get("macro") or {}) if isinstance(news_context, dict) else {}
+    macro_direction = (macro_agent.get("macro_direction") or {}) if isinstance(macro_agent, dict) else {}
+    if not macro_direction:
+        market_context = decision.get("market_context") or {}
+        if isinstance(market_context, dict):
+            macro_direction = market_context.get("macro_direction") or {}
+    return macro_direction if isinstance(macro_direction, dict) else {}
+
+
 def _planner_context_confirmation(decision: Dict[str, Any], config: Dict[str, Any], side: str) -> Dict[str, Any]:
     sig_cfg = (config.get("signal_requirements") or {}) if isinstance(config, dict) else {}
     two_agent_cfg = (sig_cfg.get("two_agent_entry") or {}) if isinstance(sig_cfg, dict) else {}
@@ -773,22 +813,33 @@ def _planner_execution_gate(decision: Dict[str, Any], config: Dict[str, Any]) ->
     details = decision.get("agent_details") or {}
     support_count = 0
     support_agents: list[str] = []
+    oppose_agents: list[str] = []
     for key in ["technical", "classical", "smc", "price_action", "multitimeframe"]:
         detail = (details or {}).get(key)
         if not isinstance(detail, dict):
             continue
         direction = str(detail.get("direction") or "WAIT").upper()
         confidence = _safe_float(detail.get("confidence"), 0.0)
-        if direction == side and confidence >= min_agent_conf:
+        if confidence < min_agent_conf:
+            continue
+        if direction == side:
             support_count += 1
             support_agents.append(key)
+        elif direction in {"BUY", "SELL"}:
+            oppose_agents.append(key)
 
+    # Opposition is reported, not enforced, here. The planner already applies
+    # max_opposing_agents_for_ready when building the map; adding a second
+    # veto at this layer would silently change which signals are admitted.
+    # Surfacing the dissent keeps the audit trail honest and lets the
+    # confidence figure price it in.
     if support_count >= min_agents:
         return {
             "allow": True,
             "kind": "THREE_AGENT_ADMISSION",
             "support_count": support_count,
             "support_agents": support_agents,
+            "oppose_agents": oppose_agents,
             "reason": f"{support_count} qualified agents aligned with the mapped direction",
         }
 
