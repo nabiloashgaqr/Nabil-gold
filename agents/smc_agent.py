@@ -736,6 +736,15 @@ class SMCAgent(BaseAgent):
                     "poi": poi,
                     "trigger": trigger,
                     "dealing_range": dealing_range,
+                    # Execution derives TP1/TP2 from these pools, so the whole
+                    # map travels with the candidate rather than just the single
+                    # nearest level in target_liquidity. Without it a plan whose
+                    # first pool sits close has no qualifying second target and
+                    # is rejected before an order is ever created.
+                    "liquidity": {
+                        "buy_side": [round(self._f(x), 2) for x in (liquidity.get("buy_side") or []) if self._f(x) > 0],
+                        "sell_side": [round(self._f(x), 2) for x in (liquidity.get("sell_side") or []) if self._f(x) > 0],
+                    },
                     "selection": {
                         "poi_quality_score": round(poi_quality_score, 1),
                         "return_probability_score": round(return_probability_score, 1),
