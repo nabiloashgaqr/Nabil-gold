@@ -437,7 +437,13 @@
         "description_min_add_leg_return_probability": "الحد الأدنى لاحتمال عودة السعر (reach) لرجل الإضافة عندما تكون نافذة العودة LOW. رجل بعيدة باحتمال عودة ضعيف تحجز خانة أمر معلق بلا فائدة.",
         "description_zone_width_vs_sl_floor": "عرض المنطقة يجب أن يسمح بوقف خسارة هيكلي يتجاوز min_sl_distance_points (400) وإلا تُفعَّل أرضية الوقف في كل خطة فتتطابق كل الإشارات على نفس الهندسة (-400/+500/+900). رُفع من 260/220 إلى 450 لكسر هذا التطابق.",
         "min_zone_width_points": 12,
-        "description_min_zone_width_points": "أضيق منطقة مقبولة. أقل من هذا تكون المنطقة أضيق من السبريد (max_spread_points=5) فتصبح غير قابلة للتنفيذ."
+        "description_min_zone_width_points": "أضيق منطقة مقبولة. أقل من هذا تكون المنطقة أضيق من السبريد (max_spread_points=5) فتصبح غير قابلة للتنفيذ.",
+        "archetype_conviction": {
+            "enabled": true,
+            "high_conviction_confidence": 75,
+            "medium_conviction_confidence": 60,
+            "description": "طبقة الاقتناع بنمط اليوم: HIGH (ثقة ≥75 + توافق الـ setup مع العائلة المفضلة) تسمح بالتنفيذ الكامل main+add · MEDIUM (60-74 أو تعارض) تسمح بالرجل الرئيسية فقط · LOW (<60) خريطة للمراقبة بلا أوامر. قبلها كانت day_archetype_confidence تُخزَّن وتُعرض بلا أي أثر على القرار."
+        }
     },
     "session_plan_delivery": {
         "enabled": true,
