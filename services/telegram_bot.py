@@ -274,6 +274,86 @@ class TelegramService:
         plan = snap.get("session_plan") or {}
         return self._execution_leg_label(setup, plan, direction=str(trade.get("type") or trade.get("side") or ""))
 
+    def _planned_rr_line(self, signal: Dict[str, Any], rr: Any) -> str | None:
+        """Render RR per target instead of a single TP2-only figure.
+
+        Breakeven protection moves the stop to entry well before TP2, so an
+        exit at or near TP1 is the more likely outcome. Publishing only the
+        TP2 ratio overstates the expected return of every signal.
+        """
+        entry = signal.get("entry", {}) or {}
+        try:
+            entry_price = float(entry.get("price") or 0)
+            stop_loss = float(signal.get("stop_loss") or 0)
+            tp1 = float(signal.get("tp1") or 0)
+            tp2 = float(signal.get("tp2") or 0)
+        except (TypeError, ValueError):
+            entry_price = stop_loss = tp1 = tp2 = 0.0
+        risk = abs(entry_price - stop_loss)
+        if risk > 0 and tp1 > 0 and tp2 > 0:
+            rr1 = abs(tp1 - entry_price) / risk
+            rr2 = abs(tp2 - entry_price) / risk
+            return f"• <b>Planned RR:</b> {rr1:.2f}R (TP1) / {rr2:.2f}R (TP2)"
+        if rr:
+            return f"• <b>Planned RR:</b> {html.escape(str(rr))}R (TP2)"
+        return None
+
+    def _management_lines(self, decision: Dict[str, Any], signal: Dict[str, Any]) -> List[str]:
+        """Describe protection/trailing using the profile the engine will apply.
+
+        These were previously hardcoded to 150/40/150, which is the
+        default_profile. In practice every real setup type maps to a different
+        profile (reversal 120/30/100, continuation 170/45/170, range
+        110/25/90), so the published numbers were wrong for every signal.
+        """
+        trailing = 150.0
+        step = 40.0
+        breakeven = 150.0
+        try:
+            from agents.open_trades_manager import OpenTradesManager
+            from utils.helpers import load_config
+
+            # Always resolve against production trade_management settings. A
+            # caller may construct this service with a partial config (tests,
+            # ad-hoc scripts); the numbers we publish must still describe what
+            # the live engine will do, not a fallback that exists nowhere.
+            mgmt_config = self.config
+            if not (isinstance(self.config, dict) and self.config.get("trade_management")):
+                try:
+                    mgmt_config = load_config()
+                except Exception:  # noqa: BLE001
+                    mgmt_config = self.config
+
+            setup_context = decision.get("setup_context") or {}
+            # Pass only what selects a profile. Forwarding the whole risk /
+            # signal payload would let per-trade overrides leak in and change
+            # the advertised numbers away from the profile itself.
+            risk = decision.get("risk") or {}
+            probe_risk = (
+                {"management_profile": risk.get("management_profile")}
+                if isinstance(risk, dict) and risk.get("management_profile")
+                else {}
+            )
+            probe = {
+                "signal_snapshot": {
+                    "setup_context": setup_context,
+                    "setup_type": decision.get("setup_type") or setup_context.get("setup_type"),
+                    "risk": probe_risk,
+                }
+            }
+            params = OpenTradesManager(mgmt_config)._management_params(
+                probe, symbol=str(decision.get("symbol") or mgmt_config.get("symbol", "XAU/USD"))
+            )
+            trailing = float(params.get("trailing_distance_points", trailing) or trailing)
+            step = float(params.get("trailing_step_points", step) or step)
+            breakeven = float(params.get("early_breakeven_points", breakeven) or breakeven)
+        except Exception:  # noqa: BLE001 - never block a signal on formatting
+            pass
+        return [
+            f"• <b>Protection:</b> SL → entry after +{breakeven:.0f} pts before TP1",
+            f"• <b>Management:</b> Trail gap {trailing:.0f} pts / step {step:.0f} pts · check 5m",
+        ]
+
     def _setup_lines(self, decision: Dict[str, Any], signal: Dict[str, Any]) -> List[str]:
         setup = decision.get("setup_context") or {}
         if not isinstance(setup, dict):
@@ -711,10 +791,13 @@ class TelegramService:
             if curr > 0:
                 lines.append(f"• <b>Current price:</b> {curr:.2f} · {pts:.0f} pts to activation")
             lines.append(f"• <b>Activation:</b> This trade activates only when {html.escape(activation)}")
-        if rr:
-            lines.append(f"• <b>Planned RR:</b> {html.escape(str(rr))}R")
-        lines.append("• <b>Protection:</b> SL → entry after +150 pts before TP1")
-        lines.append("• <b>Management:</b> Trail gap 150 pts / step 40 pts · check 5m")
+        # Report RR per target. The single number was always the TP2 ratio,
+        # but breakeven protection makes an exit at or near TP1 the likelier
+        # outcome, so showing only TP2 overstates the expected return.
+        rr_line = self._planned_rr_line(signal, rr)
+        if rr_line:
+            lines.append(rr_line)
+        lines.extend(self._management_lines(decision, signal))
         setup_lines = self._setup_lines(decision, signal)
         if setup_lines:
             lines.extend(setup_lines)
@@ -822,12 +905,30 @@ class TelegramService:
                 return self.EVENT_LABELS.get(event, event.replace("_", " ").title())
         return self.EVENT_LABELS.get(events[0], events[0].replace("_", " ").title()) if events else "Trade Update"
 
-    def _event_notes(self, events: List[str]) -> List[str]:
+    # Each cancellation path gets its own sentence. Nine distinct guards can
+    # cancel a pending order; collapsing them into one generic note made it
+    # impossible to tell which guard fired when reviewing a paper-trading run.
+    CANCEL_REASON_NOTES = {
+        "PLAN_STALE": "Pending order was cancelled because the market moved away from the map without filling it.",
+        "OPPOSITE_PLAN_GUARD": "Pending order was cancelled because a confirmed plan in the opposite direction took over.",
+        "RR_BELOW_MINIMUM": "Pending order was cancelled because its planned reward-to-risk fell below the minimum.",
+        "LATE_TOUCH_REVALIDATION_FAILED": "Entry was touched late, and revalidation failed (no fresh confirmation, drift too large, or RR degraded).",
+        "MARKET_CONVERSION_BLOCKED": "Pending order was cancelled because converting it to a market entry was not allowed.",
+        "AUTO_CONVERSION_BLOCKED": "Pending order was cancelled after automatic market conversion was blocked.",
+        "POST_NEWS_REVALIDATION_FAILED": "Pending order was cancelled after post-news revalidation failed (invalidated, drift too large, or RR degraded).",
+    }
+
+    def _event_notes(self, events: List[str], cancel_reason_code: str | None = None) -> List[str]:
         notes = []
         if "NEWS_HOLD" in events:
             notes.append("Pending order touched during a blocked news window; activation was paused until post-news recheck.")
         if "PENDING_CANCELLED" in events:
-            notes.append("Pending order was cancelled before activation because the mapped execution conditions were no longer valid.")
+            notes.append(
+                self.CANCEL_REASON_NOTES.get(
+                    str(cancel_reason_code or "").upper(),
+                    "Pending order was cancelled before activation because the mapped execution conditions were no longer valid.",
+                )
+            )
         if "EXIT_WARNING" in events:
             notes.append("Exit/risk warning: trade is moving adversely or risk conditions changed.")
         if "LONG_RUNNING" in events:
@@ -967,7 +1068,7 @@ class TelegramService:
                 lines.append(f"• <b>Cancellation reason:</b> {self._clean_text(cancel_reason)}")
         if any(e in events for e in {"MANUAL_CLOSE", "THESIS_SCALE_OUT"}) and primary_reason:
             lines.append(f"• <b>Exit reason:</b> {self._clean_text(primary_reason)}")
-        notes = self._event_notes(events)
+        notes = self._event_notes(events, str(evaluation.get("cancel_reason_code") or ""))
         if notes:
             lines.append("──────────────────")
             for note in notes:
