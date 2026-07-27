@@ -11,7 +11,7 @@ sys.path.append(str(ROOT))
 
 from agents.open_trades_manager import OpenTradesManager
 from services.database import DatabaseService
-from utils.helpers import load_trades, save_trades
+from utils.helpers import canonical_session_label, load_trades, save_trades
 
 
 def base_trade(**overrides):
@@ -601,6 +601,12 @@ def test_planner_pending_does_not_auto_convert_to_market_when_cycle_limit_hits()
         signal_snapshot={
             "setup_context": {"pending_plan_role": "PRIMARY", "selection_role": "PRIMARY", "scenario_id": "SCENARIO::A"},
             "session_plan": {"scenario_id": "SCENARIO::A", "session_bias": "SELL", "plan_ready": True},
+            # Pin the session and creation price so this asserts the cycle-limit
+            # rule rather than the wall clock: with a live label the order was
+            # cancelled for "session changed" whenever the suite ran outside the
+            # London + New York window.
+            "session_info": {"current_session": canonical_session_label(datetime.now(timezone.utc), "Asia/Hebron")},
+            "pending_runtime": {"creation_price": 4118.97},
         },
     )
     result = manager.evaluate_trade(trade, 4118.97, candle_high=4121.67, candle_low=4116.24)
