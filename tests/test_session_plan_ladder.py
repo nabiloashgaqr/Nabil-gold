@@ -463,3 +463,86 @@ def test_dynamic_floor_disabled_keeps_the_fixed_behaviour() -> None:
         cfg_overrides={"dynamic_sl_floor": {"enabled": False}},
     )
     assert round((fixed["stop_loss"] - 4075.15) * 10) == 400
+
+
+# ─── Reviving an unexpired day map ─────────────────────────────────────────
+
+
+def _saved_plan_row(plan: dict, *, age_minutes: float = 25.0, expired: bool = False) -> dict:
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    payload = dict(plan)
+    payload["plan_expires_at"] = (
+        (now - timedelta(hours=1)) if expired else (now + timedelta(hours=4))
+    ).isoformat()
+    return {"analysis_run_at": (now - timedelta(minutes=age_minutes)).isoformat(), "payload": payload}
+
+
+class _DBWithPlans:
+    """Wraps the local test database and serves saved plan snapshots."""
+
+    def __init__(self, rows, tmp_path):
+        self._rows = rows
+        self._db = _db(tmp_path)
+        self.local_path = self._db.local_path
+
+    def get_recent_session_plans(self, **_kw):
+        return self._rows
+
+    def __getattr__(self, name):
+        return getattr(self._db, name)
+
+
+def test_unexpired_plan_is_revived_when_this_cycle_cannot_rebuild(tmp_path: Path) -> None:
+    """A day map is a standing thesis, not a one-cycle opportunity.
+
+    Plans are rebuilt each cycle and never reused, so a map only ever had the
+    single cycle that produced it in which to place orders. If agents briefly
+    disagreed on the next run, a confirmed and unexpired map was silently
+    dropped.
+    """
+    ready = _base_decision()["session_plan"]
+    db = _DBWithPlans([_saved_plan_row(ready)], tmp_path)
+    telegram = _Telegram()
+
+    decision = _base_decision()
+    decision["session_plan"] = {
+        "plan_ready": False,
+        "plan_status": "WATCH_ONLY",
+        "plan_reason": "only 1 supporting agents for the mapped direction",
+    }
+    created = ra._execute_session_plan_ladder(decision, {"symbol": "XAU/USD"}, [], db, telegram, _config())
+    assert created >= 1, "the unexpired map should still be actionable"
+
+
+def test_expired_plan_is_not_revived(tmp_path: Path) -> None:
+    ready = _base_decision()["session_plan"]
+    db = _DBWithPlans([_saved_plan_row(ready, expired=True)], tmp_path)
+    decision = _base_decision()
+    decision["session_plan"] = {"plan_ready": False, "plan_status": "WATCH_ONLY", "plan_reason": "agents disagreed"}
+    assert ra._execute_session_plan_ladder(decision, {"symbol": "XAU/USD"}, [], db, _Telegram(), _config()) == 0
+
+
+def test_revival_can_be_disabled(tmp_path: Path) -> None:
+    ready = _base_decision()["session_plan"]
+    db = _DBWithPlans([_saved_plan_row(ready)], tmp_path)
+    cfg = _config()
+    cfg["session_planner"]["revive_unexpired_plans"] = False
+    decision = _base_decision()
+    decision["session_plan"] = {"plan_ready": False, "plan_status": "WATCH_ONLY", "plan_reason": "agents disagreed"}
+    assert ra._execute_session_plan_ladder(decision, {"symbol": "XAU/USD"}, [], db, _Telegram(), cfg) == 0
+
+
+def test_a_ready_plan_this_cycle_is_never_replaced_by_an_older_one(tmp_path: Path) -> None:
+    """Revival is a fallback, not a preference."""
+    stale = _base_decision()["session_plan"]
+    stale["scenario_id"] = "SCENARIO::OLD"
+    db = _DBWithPlans([_saved_plan_row(stale)], tmp_path)
+    decision = _base_decision()  # carries a ready plan already
+    ra._execute_session_plan_ladder(decision, {"symbol": "XAU/USD"}, [], db, _Telegram(), _config())
+    trades = load_trades(db.local_path)
+    assert trades, "current plan should have produced orders"
+    for trade in trades:
+        sid = ((trade.get("signal_snapshot") or {}).get("session_plan") or {}).get("scenario_id")
+        assert sid != "SCENARIO::OLD"
