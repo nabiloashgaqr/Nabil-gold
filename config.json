@@ -54,7 +54,14 @@
         "max_open_trades": 3,
         "max_daily_signals": 50,
         "description_max_open_trades_daily_signals": "حد أقصى 3 صفقات مفتوحة (الأصلية + تعزيزين). max_daily_signals=50 بدون حد يومي صارم.",
-        "description_max_rr_ratio": "سقف R:R لتجنب أهداف TP2 غير واقعية في الإشارات التجريبية/الحية"
+        "description_max_rr_ratio": "سقف R:R لتجنب أهداف TP2 غير واقعية في الإشارات التجريبية/الحية",
+        "dynamic_sl_floor": {
+            "enabled": true,
+            "structural_multiplier": 3.0,
+            "min_points": 150,
+            "max_points": 400,
+            "description": "أرضية وقف تتنفس مع السوق بدل 400 نقطة ثابتة. تُحسب = الوقف الهيكلي × 3 (الوقف الهيكلي يتضمن بافر ATR أصلًا)، محصورة بين 150 و400 نقطة. الثابتة 400 كانت تُفعَّل في كل خطة ذهب فتضخّم المخاطرة حتى 18 ضعفًا وتُسقط RR تحت الحد الأدنى حتى للإعدادات السليمة. اضبط enabled=false للعودة للسلوك الثابت."
+        }
     },
     "signal_requirements": {
         "min_agents_agree": 3,
