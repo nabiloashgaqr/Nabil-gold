@@ -499,3 +499,91 @@ def test_session_planner_blocks_when_main_rr_is_too_low(tmp_path: Path) -> None:
     assert plan["plan_ready"] is False
     assert plan["plan_status"] == "WATCH_ONLY"
     assert "rr" in str(plan["plan_reason"]).lower()
+
+
+# ─── Archetype conviction ──────────────────────────────────────────────────
+
+
+def _conviction(archetype: str, confidence: float, family: str, setup_type: str, **cfg):
+    planner_cfg = {"enabled": True}
+    if cfg:
+        planner_cfg["archetype_conviction"] = cfg
+    service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": planner_cfg})
+    return service._archetype_conviction(
+        archetype=archetype,
+        archetype_confidence=confidence,
+        preferred_execution_family=family,
+        primary={"setup_type": setup_type},
+    )
+
+
+def test_high_conviction_archetype_earns_the_full_ladder() -> None:
+    result = _conviction("CONTINUATION_AFTER_SWEEP_DAY", 90.0, "MITIGATION_LADDER", "LIQUIDITY_REVERSAL")
+    assert result["level"] == "HIGH"
+    assert result["allow_execution"] is True
+    assert result["allow_add_leg"] is True
+
+
+def test_low_conviction_archetype_blocks_execution_entirely() -> None:
+    """A day the system cannot classify with conviction is a map, not a trade."""
+    result = _conviction("CONTINUATION_AFTER_SWEEP_DAY", 58.0, "MITIGATION_LADDER", "LIQUIDITY_REVERSAL")
+    assert result["level"] == "LOW"
+    assert result["allow_execution"] is False
+    assert result["allow_add_leg"] is False
+
+
+def test_setup_contradicting_the_archetype_is_capped_at_main_leg() -> None:
+    """High confidence is not enough when the setup argues with the archetype."""
+    result = _conviction("CONTINUATION_AFTER_SWEEP_DAY", 80.0, "MITIGATION_LADDER", "RANGE_FADE")
+    assert result["level"] == "MEDIUM"
+    assert result["family_aligned"] is False
+    assert result["allow_execution"] is True
+    assert result["allow_add_leg"] is False
+
+
+def test_unmapped_execution_family_is_not_held_against_the_plan() -> None:
+    result = _conviction("SOME_NEW_DAY", 85.0, "BRAND_NEW_FAMILY", "LIQUIDITY_REVERSAL")
+    assert result["family_aligned"] is True
+    assert result["level"] == "HIGH"
+
+
+def test_archetype_conviction_thresholds_are_configurable() -> None:
+    strict = _conviction(
+        "CONTINUATION_AFTER_SWEEP_DAY", 80.0, "MITIGATION_LADDER", "LIQUIDITY_REVERSAL",
+        enabled=True, high_conviction_confidence=85, medium_conviction_confidence=70,
+    )
+    assert strict["level"] == "MEDIUM"
+
+
+def test_archetype_conviction_can_be_disabled() -> None:
+    off = _conviction(
+        "CONTINUATION_AFTER_SWEEP_DAY", 10.0, "MITIGATION_LADDER", "RANGE_FADE",
+        enabled=False,
+    )
+    assert off["level"] == "HIGH"
+    assert off["allow_add_leg"] is True
+
+
+def test_plan_execution_scales_with_archetype_conviction(tmp_path: Path) -> None:
+    """End to end: the same map yields ladder, main-only, or nothing."""
+    def _plan(confidence: float):
+        service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True}})
+        service.storage_path = tmp_path / f"plans_{confidence}.json"
+        results = _results()
+        results["smc"]["day_archetype_confidence"] = confidence
+        return service.build_plan(results, persist=False)
+
+    high = _plan(90)
+    assert high["plan_ready"] is True
+    assert high["archetype_conviction"]["level"] == "HIGH"
+    assert high["standby_poi"] is not None
+
+    medium = _plan(65)
+    assert medium["plan_ready"] is True
+    assert medium["archetype_conviction"]["level"] == "MEDIUM"
+    assert medium["standby_poi"] is None, "medium conviction must not earn an add leg"
+
+    low = _plan(40)
+    assert low["plan_ready"] is False
+    assert low["plan_status"] == "WATCH_ONLY"
+    assert "conviction" in str(low["plan_reason"]).lower()
