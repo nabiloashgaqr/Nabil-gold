@@ -672,7 +672,9 @@ class TelegramService:
             lines.append(f"🎯 <b>Market objective:</b> {html.escape(market_objective_label)}")
         if objective_label and objective_label != market_objective_label:
             lines.append(f"🧩 <b>Plan type:</b> {html.escape(objective_label)}")
-        elif objective_label:
+        elif objective_label and not market_objective_label:
+            # Only stand in for the market objective when there isn't one;
+            # printing both when they are identical repeated the same sentence.
             lines.append(f"🎯 <b>Objective:</b> {html.escape(objective_label)}")
         if execution_priority_label:
             lines.append(f"🧭 <b>Execution priority:</b> {html.escape(execution_priority_label)}")
