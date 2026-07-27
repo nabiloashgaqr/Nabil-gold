@@ -1448,10 +1448,14 @@ class OpenTradesManager(BaseAgent):
             snapshot["pending_runtime"] = runtime
             base_updates["signal_snapshot"] = snapshot
 
+        # Anchor the market price at the moment this pending order was first
+        # evaluated. Staleness is measured against this anchor, so it survives
+        # across cycles and cannot be confused with distance-to-entry.
         _persist_runtime(
             touch_detection_source=market_source or None,
             touch_detection_source_reliable=touch_source_reliable,
             touch_detection_waiting_for_reliable_ohlc=bool(theoretical_touch and not touch_source_reliable),
+            creation_price=self._f(runtime.get("creation_price"), 0.0) or round(current_price, 2),
         )
 
         def _invalidated() -> bool:
@@ -1504,15 +1508,45 @@ class OpenTradesManager(BaseAgent):
                 or canonical_session_label(self._parse_dt(str(trade.get("entry_time") or trade.get("created_at") or "")) or now, tz_name)
             )
             current_session = canonical_session_label(now, tz_name)
-            favorable_excursion_points = max(0.0, calculate_pips(entry, current_price, trade_type, symbol))
-            max_excursion_points = max(self._f(runtime.get("max_excursion_points"), 0.0), favorable_excursion_points)
+            # How far price has travelled AWAY from us since the order was
+            # created. This is the staleness signal: it means the market moved
+            # on without filling us.
+            #
+            # It must NOT be measured from the entry price. Distance-to-entry
+            # is a property of where the order was placed, not of market
+            # movement, so measuring it that way made every LIMIT order beyond
+            # the threshold "stale" the instant it was created -- a far pullback
+            # order was cancelled on its first evaluation cycle in a flat
+            # market, reporting hundreds of points of movement that never
+            # happened.
+            creation_price = self._f(runtime.get("creation_price"), 0.0)
+            if creation_price <= 0:
+                creation_price = current_price
+            drift_points = abs(calculate_pips(creation_price, current_price, trade_type, symbol))
+            max_excursion_points = max(self._f(runtime.get("max_excursion_points"), 0.0), drift_points)
+            # Distance still to travel before the order can fill. Used only for
+            # target-path progress, never as a staleness trigger.
+            distance_to_entry_points = max(0.0, calculate_pips(entry, current_price, trade_type, symbol))
             planned_target_points = 0.0
             for target in (tp1_price, tp2):
                 if target > 0:
                     planned_target_points = abs(calculate_pips(entry, target, trade_type, symbol))
                     if planned_target_points > 0:
                         break
-            progress_pct = (max_excursion_points / planned_target_points * 100.0) if planned_target_points > 0 else 0.0
+            # Target-path progress: how much of the planned move the market has
+            # already completed without us, measured from where the order was
+            # created toward the target.
+            #
+            # Distance-to-entry is explicitly NOT progress. For a pullback
+            # LIMIT, price sitting far above a BUY entry means the move has not
+            # started, yet treating that gap as "62% of the path covered"
+            # cancelled the order for the very setup it was waiting for.
+            path_travelled_points = 0.0
+            if planned_target_points > 0:
+                first_target = next((t for t in (tp1_price, tp2) if t > 0), 0.0)
+                if first_target > 0:
+                    path_travelled_points = max(0.0, calculate_pips(creation_price, current_price, trade_type, symbol))
+            progress_pct = (path_travelled_points / planned_target_points * 100.0) if planned_target_points > 0 else 0.0
             plan = snapshot.get("session_plan") or {}
             plan_expiry = self._parse_dt(str((plan.get("plan_expires_at") if isinstance(plan, dict) else None) or runtime.get("plan_expires_at") or ""))
             reasons: List[str] = []
