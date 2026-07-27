@@ -191,13 +191,39 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--limit", type=int, default=500, help="how many recent trades to pull")
     parser.add_argument("--symbol", default="XAU/USD", help="restrict to one instrument")
+    parser.add_argument("--out", default="", help="also write the report to this file")
     args = parser.parse_args()
 
     config = load_config()
     database = DatabaseService(config)
+
+    # An empty local fallback would produce a confident "no data" verdict that
+    # says nothing about the real history, so be explicit about the source.
+    if not getattr(database, "use_supabase", False):
+        print("⚠️  Supabase is not configured; reading the local fallback file.")
+        print("    Set SUPABASE_URL and SUPABASE_KEY to analyse the real history.\n")
+
     trades = database.get_recent_trades(limit=args.limit)
-    print(f"Pulled {len(trades)} trades\n")
-    report(analyse(trades, args.symbol))
+    print(f"Pulled {len(trades)} trades from "
+          f"{'Supabase' if getattr(database, 'use_supabase', False) else 'local storage'}\n")
+    if not trades:
+        print("No trades returned. Nothing to analyse.")
+        return 1
+    result = analyse(trades, args.symbol)
+    report(result)
+
+    if args.out:
+        import contextlib
+        import io
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            print(f"Pulled {len(trades)} trades")
+            report(result)
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(buffer.getvalue(), encoding="utf-8")
+        print(f"\nReport written to {out_path}")
     return 0
 
 
