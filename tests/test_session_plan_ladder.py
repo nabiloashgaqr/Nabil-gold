@@ -258,6 +258,60 @@ def test_session_plan_ladder_extends_to_further_liquidity_when_mapped_target_is_
     assert leg["tp1"] <= leg["tp2"]
 
 
+def _confidence_with(classical, multitimeframe, macro=(None, 0)):
+    decision = _base_decision()
+    decision["decision"] = "BUY"
+    decision["session_plan"]["session_bias"] = "BUY"
+    decision["agent_details"] = {
+        "technical": {"direction": "BUY", "confidence": 92},
+        "smc": {"direction": "BUY", "confidence": 76},
+        "price_action": {"direction": "BUY", "confidence": 84},
+        "classical": classical,
+        "multitimeframe": multitimeframe,
+    }
+    decision["news_context"] = {
+        "rule_based": {"can_trade": True, "market_status": "SAFE"},
+        "macro": {"macro_direction": {"bias": macro[0], "confidence": macro[1]}},
+    }
+    candidate = {"thesis_dominance_score": 64.0, "quality_score": 92.0}
+    return ra._planner_display_confidence(decision, {}, candidate, _config(), direction="BUY")
+
+
+def test_display_confidence_penalises_qualified_opposing_agents() -> None:
+    """Disagreement must move the number, not just agreement.
+
+    Only supporting votes were summed, so a qualified agent voting the other
+    way at 95% produced the same confidence as an unqualified one at 27%.
+    """
+    neutral = _confidence_with({"direction": "WAIT", "confidence": 27}, {"direction": "WAIT", "confidence": 67})
+    one_weak = _confidence_with({"direction": "SELL", "confidence": 72}, {"direction": "WAIT", "confidence": 67})
+    one_strong = _confidence_with({"direction": "SELL", "confidence": 95}, {"direction": "WAIT", "confidence": 67})
+    two_strong = _confidence_with({"direction": "SELL", "confidence": 95}, {"direction": "SELL", "confidence": 93})
+
+    assert one_weak < neutral, "a qualified opponent must cost confidence"
+    assert one_strong < one_weak, "a stronger opponent must cost more"
+    assert two_strong < one_strong, "two opponents must cost more than one"
+
+
+def test_display_confidence_ignores_unqualified_opposition() -> None:
+    """Below-threshold votes are noise on both sides, not evidence."""
+    neutral = _confidence_with({"direction": "WAIT", "confidence": 27}, {"direction": "WAIT", "confidence": 67})
+    unqualified_opponent = _confidence_with({"direction": "SELL", "confidence": 40}, {"direction": "WAIT", "confidence": 67})
+    assert unqualified_opponent == neutral
+
+
+def test_display_confidence_is_symmetric_for_macro() -> None:
+    """Supporting macro added 2.0 while opposing macro cost nothing."""
+    neutral = _confidence_with({"direction": "WAIT", "confidence": 27}, {"direction": "WAIT", "confidence": 67})
+    supporting = _confidence_with({"direction": "WAIT", "confidence": 27}, {"direction": "WAIT", "confidence": 67}, macro=("BULLISH_GOLD", 70))
+    opposing = _confidence_with({"direction": "WAIT", "confidence": 27}, {"direction": "WAIT", "confidence": 67}, macro=("BEARISH_GOLD", 69))
+    strongly_opposing = _confidence_with({"direction": "WAIT", "confidence": 27}, {"direction": "WAIT", "confidence": 67}, macro=("BEARISH_GOLD", 92))
+
+    assert supporting > neutral
+    assert opposing < neutral
+    assert strongly_opposing < opposing
+
+
 def test_session_plan_ladder_display_confidence_is_capped_below_100(tmp_path: Path) -> None:
     decision = _base_decision()
     decision["session_plan"]["planner_confidence"] = 100

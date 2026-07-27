@@ -446,3 +446,39 @@ def test_smc_liquidity_terms_are_subscriber_friendly():
     assert "Buy-side liquidity sweep" not in text
     assert "Sell-side liquidity sweep" not in text
     assert "Sweep above recent highs detected (STRONG) - bearish reversal context" in text
+
+
+def test_votes_distinguish_qualified_agents_and_opposing_macro():
+    """The header claims N qualified agents; the list must show exactly N.
+
+    A 67% vote used to render identically to an 84% one, so a message saying
+    "3 qualified agents" displayed four green ticks. Macro also reports
+    confidence in its own direction, which may oppose the published side.
+    """
+    service = TelegramService({"telegram": {"bot_token": None, "chat_id": None}})
+    lines = service._votes_lines({
+        "decision": "BUY",
+        "agent_details": {
+            "technical": {"label": "Technical", "direction": "BUY", "confidence": 92},
+            "smc": {"label": "SMC", "direction": "BUY", "confidence": 76},
+            "price_action": {"label": "Price Action", "direction": "BUY", "confidence": 84},
+            "multitimeframe": {"label": "Multi-Timeframe", "direction": "BUY", "confidence": 67},
+            "macro_fundamental": {"label": "Macro / Fundamental", "direction": "SELL", "confidence": 69},
+        },
+    })
+    text = "\n".join(lines)
+    assert text.count("✅") == 3
+    assert "below 70% threshold" in text
+    assert "opposes this BUY" in text
+
+
+def test_votes_fall_back_to_summary_when_agent_has_no_signals():
+    service = TelegramService({"telegram": {"bot_token": None, "chat_id": None}})
+    lines = service._votes_lines({
+        "decision": "BUY",
+        "agent_details": {
+            "multitimeframe": {"label": "Multi-Timeframe", "direction": "BUY", "confidence": 80,
+                               "signals": [], "summary": "H1 and H4 aligned bullish"},
+        },
+    })
+    assert any("H1 and H4 aligned bullish" in ln for ln in lines)
