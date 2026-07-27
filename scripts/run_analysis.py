@@ -832,6 +832,17 @@ def _planner_context_confirmation(decision: Dict[str, Any], config: Dict[str, An
 
 def _planner_execution_gate(decision: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
     side = str(decision.get("decision") or "").upper()
+    # The planner is a separate admission path: it maps a direction in advance
+    # and waits at a level, rather than reacting to the current bar. The live
+    # consensus therefore often reads WAIT while a confirmed map exists, and
+    # falling back to the mapped bias is what lets those pending orders be
+    # placed at all. Without it a READY map is published every cycle and no
+    # order is ever created, because the gate closes before the agents are
+    # even counted. The count below still has to pass on its own.
+    if side not in {"BUY", "SELL"}:
+        plan = decision.get("session_plan") or {}
+        if isinstance(plan, dict) and plan.get("plan_ready"):
+            side = str(plan.get("session_bias") or plan.get("authority_direction") or "").upper()
     if side not in {"BUY", "SELL"}:
         return {"allow": False, "reason": "no approved directional admission"}
 
@@ -1162,6 +1173,18 @@ def _execute_session_plan_ladder(
     else:
         primary_decision = _build_plan_ladder_decision(base_decision, plan, primary, config)
         if not primary_decision:
+            # Most often the market has walked into the mapped area, so the leg
+            # prices as MARKET rather than a pending order and this function
+            # declines it. Say so, instead of returning zero in silence.
+            entry_price = _safe_float(primary.get("entry_price"), 0.0)
+            current_price = _safe_float(base_decision.get("current_price"), 0.0)
+            distance = abs(price_to_points(entry_price - current_price, symbol=symbol)) if entry_price and current_price else 0.0
+            logger.info(
+                "Session-plan ladder skipped: primary leg produced no pending order "
+                "(entry %.2f vs price %.2f, %.0f pts apart; inside the market threshold "
+                "means it would execute now rather than rest as a pending order)",
+                entry_price, current_price, distance,
+            )
             return 0
         plan_decisions = [primary_decision] + ([ _build_plan_ladder_decision(base_decision, plan, standby, config) ] if isinstance(standby, dict) and standby else [])
 
