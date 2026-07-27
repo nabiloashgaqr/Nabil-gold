@@ -236,6 +236,57 @@ def test_session_plan_ladder_display_confidence_is_capped_below_100(tmp_path: Pa
     assert ladder is not None
     assert ladder["confidence"] < 100
     assert ladder["confidence"] <= 95
+    assert ladder["quality"]["grade"] == "B"
+    assert ladder["quality"]["score"] == 76
+    assert ladder["planner_quality"]["grade"] == "B"
+    assert ladder["planner_quality"]["score"] == 100
+
+
+def test_session_plan_ladder_blocks_invalidated_primary_leg(tmp_path: Path) -> None:
+    db = _db(tmp_path)
+    telegram = _Telegram()
+    decision = _base_decision()
+    decision["session_plan"]["primary_poi"]["setup_state"] = "INVALIDATED"
+    created = ra._execute_session_plan_ladder(decision, {"symbol": "XAU/USD"}, [], db, telegram, _config())
+    assert created == 0
+    assert load_trades(db.local_path) == []
+
+
+def test_session_plan_ladder_skips_low_revisit_very_far_add_leg(tmp_path: Path) -> None:
+    db = _db(tmp_path)
+    telegram = _Telegram()
+    decision = _base_decision()
+    decision["current_price"] = 4086.89
+    decision["session_plan"]["primary_poi"]["direction"] = "BUY"
+    decision["session_plan"]["standby_poi"] = {
+        **_candidate("STANDBY", 4055.92, 4015.92, 4145.92),
+        "direction": "BUY",
+        "selection_role": "STANDBY",
+        "expected_revisit_window": "LOW",
+        "return_probability_score": 8.0,
+        "quality_grade": "A+",
+        "quality_score": 100.0,
+    }
+    decision["session_plan"]["primary_poi"] = {
+        **_candidate("PRIMARY", 4100.28, 4060.28, 4190.28),
+        "direction": "BUY",
+        "selection_role": "PRIMARY",
+    }
+    decision["session_plan"]["session_bias"] = "BUY"
+    decision["decision"] = "BUY"
+    decision["agent_details"] = {
+        "technical": {"label": "Technical", "direction": "BUY", "confidence": 92},
+        "classical": {"label": "Classical", "direction": "WAIT", "confidence": 27},
+        "smc": {"label": "SMC", "direction": "BUY", "confidence": 76},
+        "price_action": {"label": "Price Action", "direction": "BUY", "confidence": 84},
+        "multitimeframe": {"label": "Multi-Timeframe", "direction": "BUY", "confidence": 67},
+    }
+    decision["news_context"] = {"rule_based": {"can_trade": True, "market_status": "SAFE"}, "macro": {"macro_direction": {"bias": "BULLISH_GOLD", "confidence": 64}}}
+    created = ra._execute_session_plan_ladder(decision, {"symbol": "XAU/USD"}, [], db, telegram, _config())
+    trades = load_trades(db.local_path)
+    assert created == 1
+    roles = [str(((t.get("signal_snapshot") or {}).get("setup_context") or {}).get("pending_plan_role")) for t in trades]
+    assert roles == ["PRIMARY"]
 
 
 def test_session_plan_ladder_blocked_without_admission_gate(tmp_path: Path) -> None:

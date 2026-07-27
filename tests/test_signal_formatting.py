@@ -182,6 +182,7 @@ def test_pending_cancelled_event_surfaces_specific_reason():
     text = _capture_text("send_trade_events", trade, ["PENDING_CANCELLED"], 3992.76, 0.0, evaluation)
     assert "Cancellation reason:" in text
     assert "Auto market conversion blocked" in text
+    assert "mapped execution conditions were no longer valid" in text
 
 
 def test_pending_activation_can_show_delayed_touch_revalidation_reason():
@@ -241,6 +242,41 @@ def test_pending_market_conversion_message_is_explicit_not_touch_fill():
     assert "converted to MARKET and is now live" in text
     assert "touched its trigger and is now live" not in text
     assert "Auto market conversion" in text
+
+
+def test_planner_led_signal_shows_setup_quality_and_planner_score_separately():
+    decision = {
+        "decision": "BUY",
+        "confidence": 79.0,
+        "current_price": 4086.89,
+        "symbol": "XAU/USD",
+        "entry_mode": "session_plan_ladder",
+        "entry_path": 3,
+        "quality": {"grade": "A+", "score": 100.0},
+        "planner_quality": {"grade": "C", "score": 67.7},
+        "signal": {
+            "type": "BUY",
+            "entry": {"price": 4055.92, "low": 4055.81, "high": 4056.03, "kind": "LIMIT", "order_type": "BUY_LIMIT", "current_price": 4086.89, "distance_points": 310.0},
+            "stop_loss": 4015.92,
+            "tp1": 4105.92,
+            "tp2": 4145.92,
+            "rr_ratio": 2.25,
+            "entry_kind": "LIMIT",
+            "order_type": "BUY_LIMIT",
+        },
+        "session_plan": {
+            "plan_ready": True,
+            "session_bias": "BUY",
+            "planner_confidence": 67.7,
+            "planner_grade": "C",
+            "authority_state": "CONFIRMED",
+            "execution_preference": "LADDER_PENDING",
+        },
+        "trade_id": "TRADE_QUAL_FIX",
+    }
+    text = _capture_signal(decision)
+    assert "Setup quality: A+ 100.0" in text
+    assert "Planner score: C 67.7" in text
 
 
 def test_pending_governance_can_announce_replacement_blocked():
