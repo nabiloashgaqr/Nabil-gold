@@ -2015,7 +2015,18 @@ class SessionPlannerService:
             "objective_alignment",
             "objective_direction",
         }
-        return {key: candidate.get(key) for key in keep if key in candidate}
+        compact = {key: candidate.get(key) for key in keep if key in candidate}
+        # Carry the liquidity map through. Execution derives TP1/TP2 from these
+        # levels, so dropping them left every leg with a single nearby target
+        # and no qualifying second one -- the plan published fine but produced
+        # no orders. Only the liquidity block is kept; the rest of `details`
+        # is diagnostic weight that does not belong in a persisted plan.
+        details = candidate.get("details")
+        if isinstance(details, dict):
+            liquidity = details.get("liquidity")
+            if isinstance(liquidity, dict) and liquidity:
+                compact["details"] = {"liquidity": liquidity}
+        return compact
 
     @staticmethod
     def _zone_payload(candidate: Dict[str, Any] | None) -> Dict[str, Any] | None:
