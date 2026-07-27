@@ -24,32 +24,7 @@ on:
           - "true"
 
 jobs:
-  # SAFETY GATE: never run live analysis on a red test suite.
-  # A failing suite means an execution-path invariant is broken; shipping
-  # signals from that state is how a silent regression reaches Telegram.
-  guard:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: 📥 Checkout
-        uses: actions/checkout@v4
-
-      - name: 🐍 Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: 📦 Install Dependencies
-        run: |
-          pip install -r requirements.txt
-
-      - name: 🧪 Test suite must be green before any live signal
-        run: |
-          python -m pytest tests/ -q
-
   analyze:
-    needs: guard
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -66,6 +41,26 @@ jobs:
       - name: 📦 Install Dependencies
         run: |
           pip install -r requirements.txt
+
+      # SAFETY GATE: never emit live signals from a broken execution path.
+      #
+      # This runs inside the analyze job on purpose. A separate `guard` job
+      # would add a second runner boot + checkout + pip install to a workflow
+      # that fires every 5 minutes (~288 runs/day), roughly doubling both the
+      # Actions minutes and the latency before a signal is sent -- unacceptable
+      # for gold, which can move 50-100 points in seconds.
+      #
+      # Scope is limited to the execution-path suites that decide whether an
+      # order is created, priced, or cancelled. Full-suite coverage belongs in
+      # tests.yml, which already runs on every push and pull_request.
+      - name: 🛡️ Execution-path invariants must hold
+        run: |
+          python -m pytest -q -x \
+            tests/test_session_plan_ladder.py \
+            tests/test_session_planner.py \
+            tests/test_open_trades_manager.py \
+            tests/test_planner_execution_gate.py \
+            tests/test_day_map_sanity.py
 
       - name: 🔎 Validate Production Setup
         run: |
