@@ -83,6 +83,72 @@ def collect(trades: List[Dict[str, Any]], min_confidence: float) -> Dict[str, An
     return {"stats": stats, "closed": closed, "without_details": without_details}
 
 
+def confidence_curve(trades: List[Dict[str, Any]], agent: str) -> List[Dict[str, Any]]:
+    """Accuracy for one agent at rising confidence thresholds.
+
+    A proposal to let an agent trade alone above some confidence only makes
+    sense if its accuracy actually improves as confidence rises. If a high
+    reading is no more reliable than a middling one, the number is not
+    measuring conviction and the threshold buys nothing.
+    """
+    rows = []
+    for bar in (60.0, 68.0, 75.0, 80.0, 85.0, 90.0):
+        n = right = 0
+        pnl = 0.0
+        for trade in trades:
+            status = str(trade.get("status") or "").upper()
+            if status in {"PENDING", "OPEN", "PARTIAL", "TP1_HIT", "CANCELLED", "EXPIRED", ""}:
+                continue
+            side = str(trade.get("type") or trade.get("side") or "").upper()
+            if side not in {"BUY", "SELL"}:
+                continue
+            detail = (_snapshot(trade).get("agent_details") or {}).get(agent)
+            if not isinstance(detail, dict):
+                continue
+            direction = str(detail.get("direction") or detail.get("signal") or "").upper()
+            confidence = _f(detail.get("confidence"))
+            if direction not in {"BUY", "SELL"} or confidence < bar:
+                continue
+            trade_pnl = _f(trade.get("final_pnl") or trade.get("final_pnl_points"))
+            n += 1
+            agreed = direction == side
+            if agreed == (trade_pnl > 0):
+                right += 1
+            pnl += trade_pnl if agreed else -trade_pnl
+        rows.append({"bar": bar, "n": n, "right": right, "pnl": pnl,
+                     "accuracy": (right / n * 100) if n else 0.0})
+    return rows
+
+
+def report_curve(trades: List[Dict[str, Any]], agent: str) -> None:
+    rows = confidence_curve(trades, agent)
+    if not any(r["n"] for r in rows):
+        print(f"No qualified {agent} opinions found.")
+        return
+    print(f"─── {agent}: does accuracy improve with confidence? ───")
+    print(f"{'threshold':>10}{'calls':>7}{'accuracy':>10}{'net pts':>10}")
+    for r in rows:
+        acc = f"{r['accuracy']:.0f}%" if r["n"] else "—"
+        print(f"{r['bar']:>9.0f}%{r['n']:>7}{acc:>10}{r['pnl']:>10.0f}")
+    usable = [r for r in rows if r["n"] >= 10]
+    if len(usable) >= 2:
+        first, last = usable[0], usable[-1]
+        delta = last["accuracy"] - first["accuracy"]
+        print()
+        if delta >= 10:
+            print(f"  Accuracy rises {delta:+.0f} pts with confidence: the score carries")
+            print("  real information, so a higher bar is meaningful.")
+        elif delta <= -10:
+            print(f"  Accuracy FALLS {delta:+.0f} pts as confidence rises: high readings")
+            print("  are less reliable than moderate ones. Raising the bar would")
+            print("  select the worst calls, not the best.")
+        else:
+            print(f"  Accuracy is flat ({delta:+.0f} pts) across thresholds: the confidence")
+            print("  number does not separate good calls from bad, so gating on it")
+            print("  changes which trades are taken without improving them.")
+    print()
+
+
 def report(result: Dict[str, Any], min_confidence: float) -> None:
     stats = result["stats"]
     print(f"Closed trades examined        : {result['closed']}")
@@ -155,6 +221,9 @@ def main() -> int:
 
     result = collect(trades, args.min_confidence)
     report(result, args.min_confidence)
+    print()
+    for agent in sorted(result["stats"], key=lambda a: -result["stats"][a]["n"])[:3]:
+        report_curve(trades, agent)
 
     if args.out:
         buffer = io.StringIO()
