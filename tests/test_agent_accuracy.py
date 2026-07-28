@@ -91,3 +91,51 @@ def test_weak_record_does_not_support_solo_entry(capsys) -> None:
     report(collect(trades, 68.0), 68.0)
     out = capsys.readouterr().out
     assert "not justified by this data" in out
+
+
+# ─── Does confidence actually mean anything? ───────────────────────────────
+
+
+def _call(won: bool, confidence: float, agent: str = "smc"):
+    """A trade where the agent argued SELL; correctness follows the outcome."""
+    return {
+        "status": "SL_HIT",
+        "type": "SELL",
+        "final_pnl": 100.0 if won else -100.0,
+        "signal_snapshot": {"agent_details": {agent: {"direction": "SELL", "confidence": confidence}}},
+    }
+
+
+def test_curve_detects_confidence_that_carries_information(capsys) -> None:
+    """Gating on confidence only helps if higher readings are more reliable."""
+    from scripts.analyze_agent_accuracy import report_curve
+
+    trades = [_call(i % 2 == 0, 70.0) for i in range(20)]
+    trades += [_call(i < 12, 85.0) for i in range(14)]
+    report_curve(trades, "smc")
+    out = capsys.readouterr().out
+    assert "Accuracy rises" in out
+    assert "a higher bar is meaningful" in out
+
+
+def test_curve_warns_when_high_confidence_is_worse(capsys) -> None:
+    """A raised bar can select an agent's worst calls rather than its best."""
+    from scripts.analyze_agent_accuracy import report_curve
+
+    trades = [_call(i < 15, 70.0) for i in range(20)]
+    trades += [_call(i < 4, 85.0) for i in range(14)]
+    report_curve(trades, "smc")
+    out = capsys.readouterr().out
+    assert "Accuracy FALLS" in out
+    assert "select the worst calls" in out
+
+
+def test_curve_reports_flat_confidence_as_uninformative(capsys) -> None:
+    from scripts.analyze_agent_accuracy import report_curve
+
+    trades = [_call(i % 2 == 0, 70.0) for i in range(20)]
+    trades += [_call(i % 2 == 0, 85.0) for i in range(14)]
+    report_curve(trades, "smc")
+    out = capsys.readouterr().out
+    assert "flat" in out
+    assert "does not separate good calls from bad" in out
