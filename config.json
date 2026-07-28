@@ -118,6 +118,13 @@
             "session_liquidity_bonus": 6,
             "description": "Select primary and standby pending thesis by combining POI quality, return probability, and thesis dominance."
         },
+        "map_persistence": {
+            "enabled": true,
+            "max_age_minutes": 60,
+            "require_structure_bias": true,
+            "description": "المناطق (order blocks / FVG) حقائق في الرسم البياني، أما اتجاه SMC فتسمية تتقلب كلما عبرت الدرجة حد ±4 بسبب بنود قرب صغيرة. اشتقاق الخريطة من التسمية وحدها يجعلها تُحذف عند كل تقلب — 76% من الدورات بلا خريطة إطلاقاً. مع التفعيل تبقى الخريطة ما دام الهيكل ذا انحياز واضح (BULLISH/BEARISH).",
+            "description_max_age_minutes": "حد عمر الخريطة المشتقة من الهيكل. القياس على شهر: المناطق خلال أول 60 دقيقة تحقق 31% نجاح بمتوسط 211 نقطة، وتنخفض إلى 14% بعد 4 ساعات. الاحتفاظ المفتوح يضر."
+        },
         "trigger_logic": {
             "rejection_wick_body_ratio": 0.75,
             "confirm_close_position": 0.55,
