@@ -2091,6 +2091,44 @@ def _pending_age_hours(trade: Dict[str, Any]) -> float:
     return max(0.0, (datetime.now(timezone.utc) - ref).total_seconds() / 3600.0)
 
 
+def _notify_blocked_directional_signal(
+    *,
+    telegram: Any,
+    decision: Dict[str, Any],
+    all_results: Dict[str, Any],
+    database: DatabaseService,
+    config: Dict[str, Any],
+    send_hourly_now: bool,
+    stage: str,
+    reason: Any,
+) -> None:
+    """Report a directional decision that was generated and then suppressed.
+
+    The hourly status lives on the WAIT branch, so a BUY/SELL cycle that is
+    blocked downstream produces no signal and no status: the operator cannot
+    tell a quiet market from a filtered opportunity. This keeps the existing
+    filters intact and only restores visibility, honouring the same hourly
+    cadence so a 5-minute loop cannot flood the channel.
+    """
+    if not send_hourly_now:
+        return
+    try:
+        side = str(decision.get("decision") or decision.get("signal") or "").upper()
+        symbol = str(decision.get("symbol") or all_results.get("symbol") or "")
+        reason_text = str(reason or "").strip() or "no reason recorded"
+        header = (
+            "🚫 <b>Signal generated then blocked</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 {html.escape(symbol)} — <b>{html.escape(side)}</b>\n"
+            f"🛑 Stage: {html.escape(stage)}\n"
+            f"<b>Reason:</b>\n• {html.escape(reason_text)}\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+        )
+        telegram.send_message(header + _build_market_status_message(decision, all_results, database, config))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to send blocked-signal status for %s: %s", decision.get("symbol"), exc)
+
+
 def _build_market_status_message(
     decision: Dict[str, Any],
     all_results: Dict[str, Any],
@@ -2890,9 +2928,19 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             adaptive_action = str(adaptive.get("action") or "ALLOW_NEW")
             if adaptive_action == "KEEP_PENDING":
                 logger.info("Adaptive execution kept pending for %s %s: %s", decision_type, symbol, adaptive.get("reason"))
+                _notify_blocked_directional_signal(
+                    telegram=telegram, decision=decision, all_results=all_results,
+                    database=database, config=config, send_hourly_now=send_hourly_now,
+                    stage="adaptive execution — kept pending", reason=adaptive.get("reason"),
+                )
                 return
             if adaptive_action == "NO_TRADE_MISSED_MOVE":
                 logger.info("Adaptive execution skipped %s %s as missed move: %s", decision_type, symbol, adaptive.get("reason"))
+                _notify_blocked_directional_signal(
+                    telegram=telegram, decision=decision, all_results=all_results,
+                    database=database, config=config, send_hourly_now=send_hourly_now,
+                    stage="adaptive execution — missed move", reason=adaptive.get("reason"),
+                )
                 return
             if adaptive_action in {"PROMOTE_TO_MARKET", "REPLACE_WITH_CONTINUATION"}:
                 decision = adaptive.get("decision") or decision
@@ -2909,6 +2957,11 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             decision["day_map_sanity"] = day_map_review
             if str(day_map_review.get("action") or "ALLOW") != "ALLOW":
                 logger.info("Day-map sanity blocked %s for %s: %s", decision_type, symbol, day_map_review.get("reason"))
+                _notify_blocked_directional_signal(
+                    telegram=telegram, decision=decision, all_results=all_results,
+                    database=database, config=config, send_hourly_now=send_hourly_now,
+                    stage="day-map sanity", reason=day_map_review.get("reason"),
+                )
                 return
 
             # Cross-path distance check (applies to BOTH Path 1 and Path 2),
@@ -2920,6 +2973,11 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 _cross_block = _cross_path_distance_check(decision, database, config, cross_distance_points=_cross_pts)
                 if _cross_block:
                     logger.info("Cross-path distance blocked: %s", _cross_block)
+                    _notify_blocked_directional_signal(
+                        telegram=telegram, decision=decision, all_results=all_results,
+                        database=database, config=config, send_hourly_now=send_hourly_now,
+                        stage="cross-path distance", reason=_cross_block,
+                    )
                     return
 
             if adaptive_action in {"PROMOTE_TO_MARKET", "REPLACE_WITH_CONTINUATION"}:
@@ -2938,6 +2996,11 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             action = str(governance.get("action") or "ALLOW_NEW")
             if action == "KEEP_EXISTING_PENDING":
                 logger.info("Pending governor blocked new %s for %s: %s", decision_type, symbol, governance.get("reason"))
+                _notify_blocked_directional_signal(
+                    telegram=telegram, decision=decision, all_results=all_results,
+                    database=database, config=config, send_hourly_now=send_hourly_now,
+                    stage="pending governor", reason=governance.get("reason"),
+                )
                 return
             if action in {"REPLACE_PENDING", "CANCEL_PENDING_ALLOW_NEW"}:
                 logger.info("Pending governor action for %s %s: %s", decision_type, symbol, governance.get("reason"))
@@ -2970,6 +3033,11 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                         )
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("Failed to send re-entry blocked message: %s", exc)
+                _notify_blocked_directional_signal(
+                    telegram=telegram, decision=decision, all_results=all_results,
+                    database=database, config=config, send_hourly_now=send_hourly_now,
+                    stage="duplicate / re-entry filter", reason=duplicate_reason,
+                )
                 return
             trade_id = database.new_trade_id()
             decision["trade_id"] = trade_id
