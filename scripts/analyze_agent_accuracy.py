@@ -117,9 +117,17 @@ def report(result: Dict[str, Any], min_confidence: float) -> None:
         print("  per trade at this size.")
     elif accuracy >= SOLO_ACCURACY_BAR and best["pnl"] > 0:
         print(f"  {best_name}: {accuracy:.0f}% accuracy across {int(best['n'])} calls, "
-              f"{best['pnl']:+.0f} pts net.")
-        print("  That record supports giving it a dedicated solo admission path,")
-        print("  gated at a higher confidence than the group threshold.")
+              f"{best['pnl']:+.0f} pts net — the strongest record here.")
+        print()
+        print("  Read this as a ranking, not as a licence to trade alone. Every")
+        print("  trade in this sample was chosen by group consensus, so each agent")
+        print("  is being scored on setups it was never asked to pick. An agent")
+        print("  trading solo would take a different, larger and unfiltered set,")
+        print("  and its accuracy there is unmeasured.")
+        print()
+        print("  What the sample does support: weighting this agent more heavily")
+        print("  inside the existing consensus, and questioning any agent that")
+        print("  ranks far below it while holding structural authority.")
     else:
         print(f"  {best_name} leads but at {accuracy:.0f}% accuracy and {best['pnl']:+.0f} pts.")
         print(f"  No agent clears {SOLO_ACCURACY_BAR:.0f}% with a positive return on a")
