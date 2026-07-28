@@ -59,7 +59,9 @@ class SMCAgent(BaseAgent):
             confidence = self._confidence(score, liquidity.get("recent_sweep", {}).get("occurred", False), direction)
             entry_suggestion = self._entry_suggestion(direction if direction in {"BUY", "SELL"} else (objective_direction or "NEUTRAL"), current_price, atr, order_blocks, liquidity, dealing_range)
             setup_candidates = []
-            for candidate_direction in self._candidate_direction_pool(direction, objective_direction):
+            scored_pool = self._candidate_direction_pool(direction, objective_direction)
+            full_pool = scored_pool or self._persisted_direction_pool(scored_pool, market_structure)
+            for candidate_direction in full_pool:
                 setup_candidates.extend(
                     self._build_setup_candidates(
                         symbol=str(market_data.get("symbol", "XAU/USD")),
@@ -80,6 +82,12 @@ class SMCAgent(BaseAgent):
                     )
                 )
             setup_candidates = self._merge_setup_candidates(setup_candidates)
+            # A map kept alive by structure alone is only trustworthy while its
+            # zones are recent; reaction quality decays sharply with zone age.
+            if not scored_pool and full_pool:
+                setup_candidates = self._enforce_map_age_limit(setup_candidates, recent)
+                for candidate in setup_candidates:
+                    candidate["map_source"] = "STRUCTURAL_PERSISTENCE"
             setup_structure = setup_candidates[0] if setup_candidates else {
                 "setup_type": "NONE",
                 "setup_state": "DETECTED",
@@ -462,6 +470,21 @@ class SMCAgent(BaseAgent):
         return None
 
     @staticmethod
+    def _structural_direction(market_structure: Dict[str, Any]) -> str | None:
+        """Directional bias implied by market structure alone.
+
+        Order blocks and liquidity pools are properties of the chart, not of the
+        current label. Structure is a slower-moving signal than the score, so it
+        is what keeps a POI map addressable while the score oscillates.
+        """
+        trend = str((market_structure or {}).get("trend") or "").upper()
+        if trend == "BULLISH":
+            return "BUY"
+        if trend == "BEARISH":
+            return "SELL"
+        return None
+
+    @staticmethod
     def _candidate_direction_pool(score_direction: str, objective_direction: str | None) -> List[str]:
         directions: List[str] = []
         if score_direction in {"BUY", "SELL"}:
@@ -469,6 +492,59 @@ class SMCAgent(BaseAgent):
         if objective_direction in {"BUY", "SELL"} and objective_direction not in directions:
             directions.append(objective_direction)
         return directions
+
+    def _persisted_direction_pool(
+        self,
+        scored_pool: List[str],
+        market_structure: Dict[str, Any] | None,
+    ) -> List[str]:
+        """Fall back to structural bias when the score yields no direction.
+
+        The score crosses its +-4 cutoff on sub-point terms such as FVG or order
+        block proximity, which toggle when price drifts a few points. Deriving
+        the map exclusively from that label discards zones the market still
+        respects, so structure is accepted as a slower-moving fallback source.
+        """
+        if scored_pool or not self._map_persistence_enabled():
+            return scored_pool
+        structural = self._structural_direction(market_structure or {})
+        return [structural] if structural else []
+
+    def _map_persistence_cfg(self) -> Dict[str, Any]:
+        engine = (self.config.get("smc_engine", {}) or {}) if isinstance(self.config, dict) else {}
+        cfg = engine.get("map_persistence") or {}
+        return cfg if isinstance(cfg, dict) else {}
+
+    def _map_persistence_enabled(self) -> bool:
+        return bool(self._map_persistence_cfg().get("enabled", False))
+
+    def _enforce_map_age_limit(
+        self,
+        candidates: List[Dict[str, Any]],
+        candles: List[Candle],
+    ) -> List[Dict[str, Any]]:
+        """Drop structurally-carried candidates whose POI is older than the cap.
+
+        Reaction quality falls off with zone age, so an unbounded carry would
+        keep feeding the planner zones the market has already worked through.
+        A candidate with no readable timestamp is kept: age cannot be proven.
+        """
+        max_age = float(self._map_persistence_cfg().get("max_age_minutes", 60) or 0)
+        if max_age <= 0 or not candidates or not candles:
+            return candidates
+        reference = self._parse_dt(candles[-1].get("time"))
+        if reference is None:
+            return candidates
+        kept: List[Dict[str, Any]] = []
+        for candidate in candidates:
+            created = self._parse_dt(candidate.get("created_at"))
+            if created is None:
+                kept.append(candidate)
+                continue
+            age_minutes = (reference - created).total_seconds() / 60.0
+            if age_minutes <= max_age:
+                kept.append(candidate)
+        return kept
 
     @staticmethod
     def _merge_setup_candidates(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
