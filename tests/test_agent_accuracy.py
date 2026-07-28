@@ -73,11 +73,16 @@ def test_verdict_is_withheld_below_the_minimum_sample(capsys) -> None:
     assert "supports giving it a dedicated solo admission path" not in out
 
 
-def test_strong_record_on_a_sufficient_sample_supports_solo_entry(capsys) -> None:
+def test_strong_record_is_reported_as_a_ranking_not_a_licence(capsys) -> None:
+    """Every trade here was picked by consensus, so no agent is being scored
+    on setups it chose. A strong record ranks an agent; it cannot show how it
+    would perform selecting trades alone."""
     trades = [_trade(100.0, "SELL", smc="SELL") for _ in range(22)]
     report(collect(trades, 68.0), 68.0)
     out = capsys.readouterr().out
-    assert "supports giving it a dedicated solo admission path" in out
+    assert "strongest record here" in out
+    assert "ranking, not as a licence to trade alone" in out
+    assert "chosen by group consensus" in out
 
 
 def test_weak_record_does_not_support_solo_entry(capsys) -> None:
