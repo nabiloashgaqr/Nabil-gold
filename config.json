@@ -443,8 +443,8 @@
         "min_add_leg_return_probability": 25,
         "description_min_add_leg_return_probability": "الحد الأدنى لاحتمال عودة السعر (reach) لرجل الإضافة عندما تكون نافذة العودة LOW. رجل بعيدة باحتمال عودة ضعيف تحجز خانة أمر معلق بلا فائدة.",
         "description_zone_width_vs_sl_floor": "عرض المنطقة يجب أن يسمح بوقف خسارة هيكلي يتجاوز min_sl_distance_points (400) وإلا تُفعَّل أرضية الوقف في كل خطة فتتطابق كل الإشارات على نفس الهندسة (-400/+500/+900). رُفع من 260/220 إلى 450 لكسر هذا التطابق.",
-        "min_zone_width_points": 12,
-        "description_min_zone_width_points": "أضيق منطقة مقبولة. أقل من هذا تكون المنطقة أضيق من السبريد (max_spread_points=5) فتصبح غير قابلة للتنفيذ.",
+        "min_zone_width_points": 6,
+        "description_min_zone_width_points": "أضيق منطقة POI مقبولة بالنقاط. الأمر يُوضع عند سعر دخول واحد لا عبر المنطقة كلها، فالعرض لا يمنع التنفيذ — الغرض فقط استبعاد مناطق منهارة أضيق من السبريد (max_spread_points=5). خُفض من 12 إلى 6 لأن 12 كان تقديرًا بلا بيانات وحجب مناطق سليمة عرضها 10 نقاط.",
         "archetype_conviction": {
             "enabled": true,
             "high_conviction_confidence": 75,
