@@ -2091,6 +2091,76 @@ def _pending_age_hours(trade: Dict[str, Any]) -> float:
     return max(0.0, (datetime.now(timezone.utc) - ref).total_seconds() / 3600.0)
 
 
+def _report_data_outage(telegram: Any, config: Dict[str, Any], symbol: str, reason: str) -> None:
+    """Announce a cycle abandoned before analysis could run.
+
+    A data failure returns before any decision exists, so the normal status
+    message cannot be built. Staying silent here is indistinguishable from a
+    quiet market, which hides an outage that may already be hours long.
+    """
+    if not should_send_hourly_status(config):
+        return
+    try:
+        telegram.send_message(
+            "⚠️ <b>SmartSignal — Analysis skipped</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 {html.escape(str(symbol))}\n"
+            "🎯 Decision: NONE (cycle stopped before analysis)\n\n"
+            f"<b>Reason:</b>\n• {html.escape(str(reason))}\n"
+            "━━━━━━━━━━━━━━━━━━━━"
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to send data-outage status for %s: %s", symbol, exc)
+
+
+class _HourlyStatusDelivery:
+    """Guarantee the hourly status is sent exactly once per analysis cycle.
+
+    The status send used to sit on the WAIT branch at the end of the function.
+    Any of the fourteen earlier `return` statements — a directional decision, a
+    filter, a data problem — skipped it entirely, so an hour could pass with no
+    message and a green workflow. This tracker is armed once the cycle knows a
+    status is due and flushed from a `finally` block, so no exit path can
+    swallow it. `send_once` keeps a real trade signal from being duplicated by
+    a status message in the same cycle.
+    """
+
+    def __init__(self, telegram: Any, config: Dict[str, Any]) -> None:
+        self.telegram = telegram
+        self.config = config
+        self.due = False
+        self.sent = False
+        self.decision: Dict[str, Any] = {}
+        self.all_results: Dict[str, Any] = {}
+        self.database: Any = None
+        self.note: str | None = None
+
+    def arm(self, *, decision, all_results, database, note=None) -> None:
+        self.due = True
+        self.decision = decision or {}
+        self.all_results = all_results or {}
+        self.database = database
+        if note:
+            self.note = str(note)
+
+    def mark_sent(self) -> None:
+        self.sent = True
+
+    def flush(self) -> None:
+        if not self.due or self.sent or self.database is None:
+            return
+        self.sent = True
+        try:
+            body = _build_market_status_message(
+                self.decision, self.all_results, self.database, self.config
+            )
+            if self.note:
+                body = f"{html.escape(self.note)}\n{body}"
+            self.telegram.send_message(body)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to send hourly status: %s", exc)
+
+
 def _notify_blocked_directional_signal(
     *,
     telegram: Any,
@@ -2101,30 +2171,29 @@ def _notify_blocked_directional_signal(
     send_hourly_now: bool,
     stage: str,
     reason: Any,
+    delivery: Any = None,
 ) -> None:
-    """Report a directional decision that was generated and then suppressed.
+    """Annotate the pending hourly status with why a directional signal stopped.
 
-    The hourly status lives on the WAIT branch, so a BUY/SELL cycle that is
-    blocked downstream produces no signal and no status: the operator cannot
-    tell a quiet market from a filtered opportunity. This keeps the existing
-    filters intact and only restores visibility, honouring the same hourly
-    cadence so a 5-minute loop cannot flood the channel.
+    Delivery itself is owned by `_HourlyStatusDelivery`, so this only records
+    the stage and reason; the message goes out even if this is never called.
     """
     if not send_hourly_now:
         return
-    try:
-        side = str(decision.get("decision") or decision.get("signal") or "").upper()
-        symbol = str(decision.get("symbol") or all_results.get("symbol") or "")
-        reason_text = str(reason or "").strip() or "no reason recorded"
-        header = (
-            "🚫 <b>Signal generated then blocked</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            f"📊 {html.escape(symbol)} — <b>{html.escape(side)}</b>\n"
-            f"🛑 Stage: {html.escape(stage)}\n"
-            f"<b>Reason:</b>\n• {html.escape(reason_text)}\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
+    side = str(decision.get("decision") or decision.get("signal") or "").upper()
+    reason_text = str(reason or "").strip() or "no reason recorded"
+    note = f"🚫 {side} signal blocked at {stage} — {reason_text}"
+    if delivery is not None:
+        delivery.arm(
+            decision=decision, all_results=all_results,
+            database=database, note=note,
         )
-        telegram.send_message(header + _build_market_status_message(decision, all_results, database, config))
+        return
+    try:
+        telegram.send_message(
+            html.escape(note) + "\n"
+            + _build_market_status_message(decision, all_results, database, config)
+        )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to send blocked-signal status for %s: %s", decision.get("symbol"), exc)
 
@@ -2420,6 +2489,7 @@ def _check_and_send_post_news(
 
 async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
     telegram = TelegramService(config)
+    status_delivery = _HourlyStatusDelivery(telegram, config)
     try:
         database = DatabaseService(config)
         symbol = str(config.get("symbol", "XAU/USD"))
@@ -2450,7 +2520,12 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             return
         market_data = MarketDataService(config)
         data = market_data.get_gold_data()
-        if not data: return
+        if not data:
+            _report_data_outage(
+                telegram, config, symbol,
+                "No market data returned (provider quota, rate limit, or outage).",
+            )
+            return
         integrity = data.get("source_integrity") or {}
         logger.info(
             "Market data integrity for %s: source=%s type=%s grade=%s signal_generation=%s pending_activation=%s",
@@ -2467,6 +2542,10 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 symbol,
                 integrity.get("source") or data.get("source"),
             )
+            _report_data_outage(
+                telegram, config, symbol,
+                f"Data source '{integrity.get('source') or data.get('source')}' cannot support signal generation.",
+            )
             return
         # Global price sanity — reject obviously corrupt ticks before analysis
         _cp = float(data.get('current_price', 0))
@@ -2478,6 +2557,10 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 'PRICE SANITY FAILED (analysis): %s price=%.2f outside [%.0f-%.0f]. '
                 'Skipping cycle — data provider glitch.',
                 _sym, _cp, _sane_min, _sane_max,
+            )
+            _report_data_outage(
+                telegram, config, symbol,
+                f"Price {_cp:.2f} failed the sanity range [{_sane_min:.0f}-{_sane_max:.0f}].",
             )
             return
         persisted_macro_context = database.get_macro_context()
@@ -2823,6 +2906,10 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 decision.setdefault("reasons", []).append(str(authority_review.get("reason") or "Directional authority allowed regime flip"))
 
         send_hourly_now = should_send_hourly_status(config)
+        # Arm as soon as the cycle has a decision: every later exit is covered
+        # by the flush in `finally`, whatever branch it takes.
+        if send_hourly_now:
+            status_delivery.arm(decision=decision, all_results=all_results, database=database)
         session_plan_ready_for_delivery = bool((all_results.get("session_plan") or {}).get("plan_ready")) and bool(_session_plan_delivery_cfg(config).get("enabled", True))
         if (decision_type in {"BUY", "SELL"}) or (decision_type == "WAIT" and send_hourly_now) or session_plan_ready_for_delivery:
             try:
@@ -2921,6 +3008,8 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 logger.warning("Failed to merge planner gate audit: %s", audit_exc)
         if ladder_created:
             logger.info("Session-plan ladder created %s pending order(s) for %s", ladder_created, symbol)
+            # The ladder sends its own pending-order alerts.
+            status_delivery.mark_sent()
             return
         if decision_type in {"BUY", "SELL"}:
             symbol_trades = [t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol]
@@ -2930,7 +3019,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 logger.info("Adaptive execution kept pending for %s %s: %s", decision_type, symbol, adaptive.get("reason"))
                 _notify_blocked_directional_signal(
                     telegram=telegram, decision=decision, all_results=all_results,
-                    database=database, config=config, send_hourly_now=send_hourly_now,
+                    database=database, config=config, send_hourly_now=send_hourly_now, delivery=status_delivery,
                     stage="adaptive execution — kept pending", reason=adaptive.get("reason"),
                 )
                 return
@@ -2938,7 +3027,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 logger.info("Adaptive execution skipped %s %s as missed move: %s", decision_type, symbol, adaptive.get("reason"))
                 _notify_blocked_directional_signal(
                     telegram=telegram, decision=decision, all_results=all_results,
-                    database=database, config=config, send_hourly_now=send_hourly_now,
+                    database=database, config=config, send_hourly_now=send_hourly_now, delivery=status_delivery,
                     stage="adaptive execution — missed move", reason=adaptive.get("reason"),
                 )
                 return
@@ -2959,7 +3048,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 logger.info("Day-map sanity blocked %s for %s: %s", decision_type, symbol, day_map_review.get("reason"))
                 _notify_blocked_directional_signal(
                     telegram=telegram, decision=decision, all_results=all_results,
-                    database=database, config=config, send_hourly_now=send_hourly_now,
+                    database=database, config=config, send_hourly_now=send_hourly_now, delivery=status_delivery,
                     stage="day-map sanity", reason=day_map_review.get("reason"),
                 )
                 return
@@ -2975,7 +3064,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                     logger.info("Cross-path distance blocked: %s", _cross_block)
                     _notify_blocked_directional_signal(
                         telegram=telegram, decision=decision, all_results=all_results,
-                        database=database, config=config, send_hourly_now=send_hourly_now,
+                        database=database, config=config, send_hourly_now=send_hourly_now, delivery=status_delivery,
                         stage="cross-path distance", reason=_cross_block,
                     )
                     return
@@ -2998,7 +3087,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 logger.info("Pending governor blocked new %s for %s: %s", decision_type, symbol, governance.get("reason"))
                 _notify_blocked_directional_signal(
                     telegram=telegram, decision=decision, all_results=all_results,
-                    database=database, config=config, send_hourly_now=send_hourly_now,
+                    database=database, config=config, send_hourly_now=send_hourly_now, delivery=status_delivery,
                     stage="pending governor", reason=governance.get("reason"),
                 )
                 return
@@ -3035,7 +3124,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                         logger.warning("Failed to send re-entry blocked message: %s", exc)
                 _notify_blocked_directional_signal(
                     telegram=telegram, decision=decision, all_results=all_results,
-                    database=database, config=config, send_hourly_now=send_hourly_now,
+                    database=database, config=config, send_hourly_now=send_hourly_now, delivery=status_delivery,
                     stage="duplicate / re-entry filter", reason=duplicate_reason,
                 )
                 return
@@ -3044,6 +3133,9 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             delivered = False
             try:
                 delivered = bool(telegram.send_signal(decision))
+                if delivered:
+                    # The trade alert already carries this cycle's context.
+                    status_delivery.mark_sent()
             except Exception as exc:  # noqa: BLE001
                 telegram.send_error_alert(f"Signal delivery failed: {exc}")
                 return
@@ -3075,9 +3167,11 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 telegram.send_error_alert("Signal delivery failed: Telegram returned False; trade was not saved.")
         elif decision_type == "WAIT":
             if send_hourly_now:
-                telegram.send_message(_build_market_status_message(decision, all_results, database, config))
+                status_delivery.arm(decision=decision, all_results=all_results, database=database)
     except Exception as exc:
         telegram.send_error_alert(str(exc))
+    finally:
+        status_delivery.flush()
 
 def _cross_path_distance_check(
     decision: Dict[str, Any],
