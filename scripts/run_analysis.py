@@ -2091,7 +2091,13 @@ def _pending_age_hours(trade: Dict[str, Any]) -> float:
     return max(0.0, (datetime.now(timezone.utc) - ref).total_seconds() / 3600.0)
 
 
-def _report_data_outage(telegram: Any, config: Dict[str, Any], symbol: str, reason: str) -> None:
+def _report_data_outage(
+    telegram: Any,
+    config: Dict[str, Any],
+    symbol: str,
+    reason: str,
+    delivery: Any = None,
+) -> None:
     """Announce a cycle abandoned before analysis could run.
 
     A data failure returns before any decision exists, so the normal status
@@ -2100,6 +2106,9 @@ def _report_data_outage(telegram: Any, config: Dict[str, Any], symbol: str, reas
     """
     if not should_send_hourly_status(config):
         return
+    # This outage note replaces the generic hourly status for this cycle.
+    if delivery is not None:
+        delivery.mark_sent()
     try:
         telegram.send_message(
             "⚠️ <b>SmartSignal — Analysis skipped</b>\n"
@@ -2147,15 +2156,42 @@ class _HourlyStatusDelivery:
         self.sent = True
 
     def flush(self) -> None:
-        if not self.due or self.sent or self.database is None:
+        if not self.due or self.sent:
             return
         self.sent = True
-        try:
-            body = _build_market_status_message(
-                self.decision, self.all_results, self.database, self.config
+        # A cycle can be armed and then die before the database handle is
+        # attached, or die inside the message builder itself (Supabase down,
+        # a malformed trade row). Both used to end in silence, which is the
+        # exact failure this class exists to prevent: an hour with no message
+        # and a green workflow. Fall back to a minimal note that needs no
+        # database and no formatting.
+        body = None
+        if self.database is not None:
+            try:
+                body = _build_market_status_message(
+                    self.decision, self.all_results, self.database, self.config
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to build hourly status message: %s", exc)
+        if body is None:
+            symbol = str(
+                self.decision.get("symbol")
+                or self.all_results.get("symbol")
+                or self.config.get("symbol")
+                or "XAU/USD"
             )
-            if self.note:
-                body = f"{html.escape(self.note)}\n{body}"
+            decision_txt = str(self.decision.get("decision") or "UNKNOWN").upper()
+            body = (
+                "🟡 <b>SmartSignal — Market Status</b>\n━━━━━━━━━━━━━━━━━━━━\n"
+                f"📊 {html.escape(symbol)}\n"
+                f"🎯 Decision: {html.escape(decision_txt)}\n\n"
+                "<i>Full status unavailable this cycle "
+                "(database or formatting error — see workflow log).</i>\n"
+                "━━━━━━━━━━━━━━━━━━━━"
+            )
+        if self.note:
+            body = f"{html.escape(self.note)}\n{body}"
+        try:
             self.telegram.send_message(body)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to send hourly status: %s", exc)
@@ -2493,6 +2529,17 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
     try:
         database = DatabaseService(config)
         symbol = str(config.get("symbol", "XAU/USD"))
+        # Arm immediately, not 400 lines later at the decision. An agent that
+        # raises, a market-data timeout, or a Supabase error all abort the
+        # cycle long before a decision exists; without this the `finally`
+        # flush has nothing to send and the hour passes silently. The payload
+        # is upgraded in place once the real decision is known.
+        if should_send_hourly_status(config):
+            status_delivery.arm(
+                decision={"symbol": symbol, "decision": "PENDING"},
+                all_results={"symbol": symbol},
+                database=database,
+            )
         normalized_symbol = normalize_symbol(symbol)
         open_trades_snapshot = database.get_open_trades()
         has_symbol_active_trades = any(normalize_symbol(t.get("symbol") or symbol) == normalized_symbol for t in open_trades_snapshot)
@@ -2516,14 +2563,17 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             except Exception: pass
             
             if should_send_hourly_status(config) and not post_news_was_sent:
+                status_delivery.mark_sent()
                 telegram.send_message("🟡 <b>SmartSignal — Market Status</b>\n━━━━━━━━━━━━━━━━━━━━\n📈 Price: N/A\n🎯 Decision: WAIT\n📊 Outside trading hours\n\n<b>Reason:</b>\n• Outside trading hours\n━━━━━━━━━━━━━━━━━━━━")
+            if post_news_was_sent:
+                status_delivery.mark_sent()
             return
         market_data = MarketDataService(config)
         data = market_data.get_gold_data()
         if not data:
             _report_data_outage(
-                telegram, config, symbol,
-                "No market data returned (provider quota, rate limit, or outage).",
+                telegram, config, symbol, delivery=status_delivery,
+                reason="No market data returned (provider quota, rate limit, or outage).",
             )
             return
         integrity = data.get("source_integrity") or {}
@@ -2543,8 +2593,8 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 integrity.get("source") or data.get("source"),
             )
             _report_data_outage(
-                telegram, config, symbol,
-                f"Data source '{integrity.get('source') or data.get('source')}' cannot support signal generation.",
+                telegram, config, symbol, delivery=status_delivery,
+                reason=f"Data source '{integrity.get('source') or data.get('source')}' cannot support signal generation.",
             )
             return
         # Global price sanity — reject obviously corrupt ticks before analysis
@@ -2559,8 +2609,8 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 _sym, _cp, _sane_min, _sane_max,
             )
             _report_data_outage(
-                telegram, config, symbol,
-                f"Price {_cp:.2f} failed the sanity range [{_sane_min:.0f}-{_sane_max:.0f}].",
+                telegram, config, symbol, delivery=status_delivery,
+                reason=f"Price {_cp:.2f} failed the sanity range [{_sane_min:.0f}-{_sane_max:.0f}].",
             )
             return
         persisted_macro_context = database.get_macro_context()
@@ -3168,7 +3218,26 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         elif decision_type == "WAIT":
             if send_hourly_now:
                 status_delivery.arm(decision=decision, all_results=all_results, database=database)
+            else:
+                # Silence here is intentional, but it used to be indistinguishable
+                # from a bug. Record which gate closed so a missing status can be
+                # explained from the run log alone.
+                notif = config.get("notifications", {}) or {}
+                logger.info(
+                    "Market status suppressed for %s: WAIT with status gate off "
+                    "(event=%s, SEND_STATUS_ON_MANUAL=%s, hourly_status=%s, "
+                    "send_no_signal_updates=%s)",
+                    symbol,
+                    os.environ.get("GITHUB_EVENT_NAME") or "local",
+                    os.environ.get("SEND_STATUS_ON_MANUAL") or "unset",
+                    notif.get("hourly_status", False),
+                    notif.get("send_no_signal_updates", False),
+                )
     except Exception as exc:
+        # Without the traceback a crash here is invisible: the workflow still
+        # prints nothing but the Telegram alert text, which is rarely enough
+        # to locate the failing line.
+        logger.exception("Analysis cycle failed for %s", config.get("symbol", "unknown"))
         telegram.send_error_alert(str(exc))
     finally:
         status_delivery.flush()
