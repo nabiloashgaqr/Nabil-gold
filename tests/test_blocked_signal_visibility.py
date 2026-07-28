@@ -81,4 +81,4 @@ def test_status_message_is_appended_after_the_header() -> None:
     telegram = _Telegram()
     _notify(telegram)
     body = telegram.messages[0]
-    assert body.index("Signal generated then blocked") < body.index("Market Status")
+    assert body.index("signal blocked at") < body.index("Market Status")
