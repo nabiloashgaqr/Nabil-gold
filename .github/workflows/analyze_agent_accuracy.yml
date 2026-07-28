@@ -1,0 +1,72 @@
+name: 🎯 Agent Accuracy
+
+# Measures each agent's standalone record from closed trades, so a decision to
+# let one agent trade alone rests on its history rather than on impression.
+#
+# Read-only: pulls trades, computes accuracy, writes nothing back and sends
+# no signals.
+
+concurrency:
+  group: agent-accuracy-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "How many recent trades to pull"
+        required: false
+        default: "500"
+        type: string
+      min_confidence:
+        description: "Only count opinions at or above this confidence"
+        required: false
+        default: "68"
+        type: string
+
+jobs:
+  agent-accuracy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: 📦 Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: 🎯 Measure agent accuracy
+        run: |
+          python scripts/analyze_agent_accuracy.py \
+            --limit "${{ github.event.inputs.limit || '500' }}" \
+            --min-confidence "${{ github.event.inputs.min_confidence || '68' }}" \
+            --out storage/agent_accuracy.txt
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+      - name: 📋 Publish to the run summary
+        if: always()
+        run: |
+          {
+            echo "## 🎯 Agent Accuracy"
+            echo ""
+            echo '```'
+            cat storage/agent_accuracy.txt 2>/dev/null || echo "No report produced — check the step above."
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 📤 Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-accuracy
+          path: storage/agent_accuracy.txt
+          if-no-files-found: warn
