@@ -76,7 +76,8 @@ jobs:
             tests/test_llm_model_fallback.py \
             tests/test_revived_plan_expiry.py \
             tests/test_thesis_objective_distance.py \
-            tests/test_revived_plan_reauthorisation.py
+            tests/test_revived_plan_reauthorisation.py \
+            tests/test_pending_fill_requires_live_touch.py
 
       - name: 🔎 Validate Production Setup
         run: |
