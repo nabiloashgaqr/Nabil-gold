@@ -68,7 +68,8 @@ jobs:
             tests/test_execution_reject_is_honoured.py \
             tests/test_signal_final_validation.py \
             tests/test_cross_path_distance.py \
-            tests/test_no_ignored_results.py
+            tests/test_no_ignored_results.py \
+            tests/test_message_truthfulness.py
 
       - name: 🔎 Validate Production Setup
         run: |
