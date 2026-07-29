@@ -227,6 +227,32 @@ def _report(window_label: str, rows: List[Dict[str, Any]], config: Dict[str, Any
             print(f"    → the planner is barely forming {'SELL' if heavier == 'BUY' else 'BUY'} "
                   f"theses at all, not merely refusing them.")
 
+    # Which gate kills each direction?
+    #
+    # The counts above showed 25 SELL maps refused against 0 published, while
+    # BUY published 11 of 14. That is a pattern, but the reason list is
+    # aggregated across every refusal, so there was no way to see whether SELL
+    # maps die at a different gate than BUY maps -- and without that, fixing
+    # the imbalance means guessing which gate to touch.
+    #
+    # Directionless refusals are deliberately excluded: they were rejected
+    # upstream of the direction decision, so attributing them to a side would
+    # invent a pattern that is not in the data.
+    directional = [r for r in refused if _side(r) in {"BUY", "SELL"}]
+    if directional:
+        print("\n  Why each direction is refused")
+        for side in ("SELL", "BUY"):
+            subset = [r for r in directional if _side(r) == side]
+            if not subset:
+                continue
+            print(f"    {side}  ({len(subset)} refused)")
+            per_side = Counter(
+                _reason_family(str(r.get("plan_reason") or "")) for r in subset
+            )
+            for label, count in per_side.most_common(5):
+                share = count / len(subset) * 100
+                print(f"      {count:4d}  {share:5.1f}%  {label}")
+
     # The dominance question.
     doms: List[float] = []
     rps: List[float] = []
