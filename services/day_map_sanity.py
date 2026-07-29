@@ -22,6 +22,15 @@ class DayMapSanityService:
         # on signal-delivery should not start failing because no planner exists.
         self.enabled = bool(cfg.get("enabled", False))
         self.block_when_plan_not_ready = bool(cfg.get("block_when_plan_not_ready", True))
+        # Opt-in strict mode. `block_when_plan_not_ready` was being read as
+        # "no map => no trade", which turned a missing second opinion into a
+        # veto: across a 300-cycle sample 294 cycles (98%) carried no ready
+        # map, almost always because the planner had refused its own map on
+        # archetype conviction. Operators who genuinely want planner-only
+        # trading can still say so explicitly here.
+        self.require_day_map_for_all_entries = bool(
+            cfg.get("require_day_map_for_all_entries", False)
+        )
         self.entry_zone_tolerance_points = float(cfg.get("entry_zone_tolerance_points", 40) or 40)
         self.require_planner_execution_for_extreme_poi = bool(cfg.get("require_planner_execution_for_extreme_poi", True))
         self.allowed_execution_modes_for_extreme_poi = set(
@@ -40,12 +49,26 @@ class DayMapSanityService:
         if not isinstance(session_plan, dict):
             session_plan = {}
         if not bool(session_plan.get("plan_ready", False)):
-            if self.block_when_plan_not_ready:
+            # A map that does not exist holds no opinion to contradict. This
+            # branch used to refuse every directional signal while the planner
+            # had nothing ready, so on 2026-07-29 a SELL consensus of 87.3%
+            # with zero qualified opposition was turned away for the absence
+            # of a second opinion rather than any disagreement with one -- on
+            # a day the market fell 310 points.
+            #
+            # Every other admission check still runs: the planner gate, the
+            # opposition ceiling, duplicate and pending governors, the
+            # cross-path distance rule and final validation. This only stops
+            # silence from being counted as dissent.
+            if self.block_when_plan_not_ready and self.require_day_map_for_all_entries:
                 return {
                     "action": "BLOCK_NO_DAY_MAP",
                     "reason": "no confirmed day map is ready for this symbol yet",
                 }
-            return {"action": "ALLOW", "reason": None}
+            return {
+                "action": "ALLOW",
+                "reason": "no day map is active, so there is no mapped view to contradict",
+            }
 
         authority_state = str(session_plan.get("authority_state") or "").upper()
         authority_direction = str(session_plan.get("authority_direction") or "").upper()
@@ -53,6 +76,21 @@ class DayMapSanityService:
             return {
                 "action": "BLOCK_DIRECTION_MISMATCH",
                 "reason": f"confirmed {authority_direction} day map does not allow a {side} execution path here",
+            }
+
+        # Zone discipline is an instruction from the map about where its own
+        # thesis may be executed. A map whose authority was never earned --
+        # WEAK or CONFLICTED -- has already lost the right to veto the
+        # opposite direction at the authority layer, and must not reimpose
+        # that veto here by declaring the other side "outside its zones".
+        # It keeps full force over trades that agree with it.
+        if authority_state not in {"CONFIRMED"} and authority_direction in {"BUY", "SELL"} and side != authority_direction:
+            return {
+                "action": "ALLOW",
+                "reason": (
+                    f"day map is {authority_state.lower() or 'unconfirmed'} and does not "
+                    f"hold authority over an opposing {side} execution"
+                ),
             }
 
         adaptive = decision.get("adaptive_execution") or {}

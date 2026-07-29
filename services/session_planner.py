@@ -447,15 +447,61 @@ class SessionPlannerService:
         if primary_execution.get("floor_applied"):
             manual_plan["risk_note"] = f"Execution stop normalized to the configured {primary_execution.get('min_sl_distance_points', 0):.0f}-point minimum."
 
+        # Authority is a claim about independent agreement, so it has to be
+        # resolved from the evidence rather than asserted by the path that
+        # produced the candidate.
+        #
+        # This branch used to write "CONFIRMED" as a literal, derived from a
+        # single SMC setup candidate, while `_resolve_authority` -- which
+        # counts daily bias, macro, structure and the reversal watch -- was
+        # only ever called on the fallback path. The stamp is not cosmetic:
+        # DirectionalAuthorityService cancels any opposing signal while it
+        # reads CONFIRMED, and DayMapSanityService blocks any execution whose
+        # side disagrees with it.
+        #
+        # On 2026-07-29 that literal cancelled a SELL consensus of 87.3% with
+        # zero qualified opposition, on a day the market fell 310 points.
+        # Deriving the stamp costs nothing when the evidence agrees, and is
+        # the whole point when it does not.
+        main_authority = self._resolve_authority(
+            daily_bias=daily_bias,
+            macro=macro if isinstance(macro, dict) else {},
+            market_structure=market_structure,
+            recent_sweep=recent_sweep,
+            zone_context=zone_context,
+            reversal_watch=reversal_watch if isinstance(reversal_watch, dict) else {},
+        )
+        authority_direction = str(main_authority.get("direction") or "").upper()
+        if main_authority.get("state") == "CONFIRMED" and authority_direction == direction:
+            authority_state = "CONFIRMED"
+            authority_reason = (
+                f"{main_authority.get('reason')}; primary setup candidate agrees"
+            )
+        elif authority_direction and authority_direction != direction:
+            # The map may still be planned and published, but it does not get
+            # to silence the other side while the evidence points that way.
+            authority_state = "WEAK"
+            authority_reason = (
+                f"planned {direction} map is not backed by day-map authority: "
+                f"{main_authority.get('reason')}"
+            )
+        else:
+            authority_state = "WEAK"
+            authority_reason = (
+                f"primary setup candidate accepted with alignment from "
+                f"{', '.join(alignment['sources']) or 'setup context'}; "
+                f"independent authority {str(main_authority.get('state') or 'UNKNOWN').lower()}"
+            )
+
         base.update(
             {
                 "plan_ready": True,
                 "plan_status": "READY",
                 "archetype_conviction": conviction,
                 "planner_source": "setup_candidates",
-                "authority_state": "CONFIRMED",
+                "authority_state": authority_state,
                 "authority_direction": direction,
-                "authority_reason": f"primary setup candidate accepted with alignment from {', '.join(alignment['sources']) or 'setup context'}",
+                "authority_reason": authority_reason,
                 "scenario_id": scenario_id,
                 "plan_id": plan_id,
                 "session_bias": direction,
@@ -841,15 +887,50 @@ class SessionPlannerService:
             if objective_direction in {"BUY", "SELL"}:
                 objective_sources = list(sources.get(objective_direction, []))
                 objective_sources.append("market_objective_tiebreak")
+                # The tiebreak reads structure_trend, the sweep and the
+                # premium/discount zone -- every one of them produced by SMC.
+                # When the tie is between SMC's own structure and a source
+                # outside it, letting the objective decide lets SMC vote twice
+                # and call the result unanimous.
+                #
+                # On 2026-07-29 that is exactly what happened: daily bias read
+                # BEARISH at 95% against a BULLISH structure, the objective
+                # broke the 1-1 tie for BUY, and the plan was stamped CONFIRMED
+                # on a single aligned source. That stamp then cancelled an
+                # 87.3% SELL consensus which had no opposition at all, and the
+                # published BUY lost 198 points on a day the move was -310.
+                #
+                # A tiebreak may still choose a direction to plan around, but a
+                # direction chosen by the tied party cannot also carry the
+                # authority to veto everyone else. Authority is downgraded to
+                # WEAK unless the objective side independently satisfies the
+                # configured alignment floor.
+                objective_count = counts.get(objective_direction, 0)
+                tiebreak_is_self_referential = "structure" in sources.get(
+                    objective_direction, []
+                )
+                earned = (
+                    objective_count >= self.min_authority_alignment_count
+                    and not tiebreak_is_self_referential
+                )
+                opposing = "SELL" if objective_direction == "BUY" else "BUY"
+                reason = (
+                    "day-map authority tie resolved by market objective: "
+                    f"{objective.get('label') or objective_direction}"
+                )
+                if not earned:
+                    reason += (
+                        f"; authority WEAK — the tiebreak is derived from structure, "
+                        f"which is one of the tied sides, and only {objective_count} "
+                        f"independent source(s) back {objective_direction} against "
+                        f"{', '.join(sources.get(opposing, [])) or opposing}"
+                    )
                 return {
-                    "state": "CONFIRMED",
+                    "state": "CONFIRMED" if earned else "WEAK",
                     "direction": objective_direction,
                     "sources": objective_sources,
-                    "count": counts.get(objective_direction, 0),
-                    "reason": (
-                        "day-map authority tie resolved by market objective: "
-                        f"{objective.get('label') or objective_direction}"
-                    ),
+                    "count": objective_count,
+                    "reason": reason,
                 }
             return {
                 "state": "CONFLICTED",
