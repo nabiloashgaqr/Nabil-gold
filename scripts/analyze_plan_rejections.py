@@ -182,9 +182,50 @@ def _report(window_label: str, rows: List[Dict[str, Any]], config: Dict[str, Any
 
     families = Counter(_reason_family(str(r.get("plan_reason") or "")) for r in refused)
     if families:
+        shown = families.most_common(12)
         print("\n  Why refused")
-        for label, count in families.most_common(8):
+        for label, count in shown:
             print(f"    {count:4d}  {_bar(count, len(refused))}  {label}")
+        # The tail used to vanish silently. With only eight rows printed, 69
+        # of 270 refusals were invisible, and the reason that matters can sit
+        # anywhere in that tail.
+        remainder = len(refused) - sum(c for _, c in shown)
+        if remainder > 0:
+            print(f"    {remainder:4d}  {'·' * 32}  (all other reasons)")
+
+    # Which direction is the system refusing to map?
+    #
+    # A report of 300 cycles published eleven maps and every one was BUY, on a
+    # day gold fell from 4048 to 3996 with a 95% bearish daily bias. Counting
+    # only the published side hid that completely: the refusals are where the
+    # missing direction lives.
+    def _side(row: Dict[str, Any]) -> str:
+        payload = row.get("payload")
+        if isinstance(payload, str):
+            import json as _json
+            try:
+                payload = _json.loads(payload)
+            except (ValueError, TypeError):
+                payload = None
+        candidate = (
+            row.get("session_bias")
+            or row.get("authority_direction")
+            or (payload or {}).get("session_bias")
+            or (payload or {}).get("authority_direction")
+        )
+        return str(candidate or "none").upper()
+
+    refused_sides = Counter(_side(r) for r in refused)
+    if refused_sides:
+        print("\n  Direction of refused maps")
+        for label, count in refused_sides.most_common():
+            print(f"    {count:4d}  {_bar(count, len(refused))}  {label}")
+        buy = refused_sides.get("BUY", 0)
+        sell = refused_sides.get("SELL", 0)
+        if buy + sell > 0 and min(buy, sell) / max(buy, sell, 1) < 0.25:
+            heavier = "BUY" if buy > sell else "SELL"
+            print(f"    → the planner is barely forming {'SELL' if heavier == 'BUY' else 'BUY'} "
+                  f"theses at all, not merely refusing them.")
 
     # The dominance question.
     doms: List[float] = []
