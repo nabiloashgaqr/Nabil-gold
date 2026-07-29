@@ -184,10 +184,41 @@ class OpenTradesManager(BaseAgent):
             "early_breakeven_points": self.early_breakeven_points,
             "min_breakeven_rr": self.min_breakeven_rr,
         }
+        # Precedence: an explicit root setting beats a profile default.
+        #
+        # The profile used to be applied unconditionally. Because config.json's
+        # default_profile repeats every root key verbatim, the root values were
+        # dead: driving trailing_distance_points from 60 to 400 produced
+        # byte-identical exits, since 150 was reinstated on every evaluation.
+        # That is the dead-gate pattern in config form -- a real setting that
+        # nothing reads -- and it makes any attempt to measure or tune exits
+        # report pure noise.
+        #
+        # The rule is deliberately narrow: the root outranks default_profile
+        # and nothing else.
+        #
+        # default_profile means "the ordinary case", which is precisely what
+        # the root already expresses, so a duplicate there can only shadow.
+        # The specialised profiles are different in kind: reversal_profile
+        # setting early_breakeven_points to 100 against a root of 150 is a
+        # deliberate statement that reversals deserve earlier protection, and
+        # a broader presence rule would silently delete that behaviour --
+        # which it did, until two existing tests caught it.
         override = self.profile_overrides.get(profile) or {}
+        root = self.management if isinstance(self.management, dict) else {}
+        # Root keys that carry a different name from the parameter they set.
+        root_aliases = {
+            "trailing_enabled": "trailing_stop_enabled",
+            "auto_be": "auto_move_sl_to_entry_after_tp1",
+            "trailing_min_profit_lock_points": "trailing_min_profit_lock",
+        }
+        root_outranks = profile == "default_profile"
         for key in list(params.keys()):
-            if key in override:
-                params[key] = override[key]
+            if key not in override:
+                continue
+            if root_outranks and (key in root or root_aliases.get(key) in root):
+                continue
+            params[key] = override[key]
         params["symbol"] = symbol
         return params
 
