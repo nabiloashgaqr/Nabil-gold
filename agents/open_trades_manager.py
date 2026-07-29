@@ -1655,10 +1655,21 @@ class OpenTradesManager(BaseAgent):
                 state = "REVALIDATION_REQUIRED"
                 revalidation_required = True
                 reasons.append("session plan expired")
-            elif self.pending_freshness_revalidation_on_session_change and created_session and current_session != created_session:
-                state = "REVALIDATION_REQUIRED"
-                revalidation_required = True
-                reasons.append(f"session changed: {created_session} -> {current_session}")
+            # A session rollover used to mark the order REVALIDATION_REQUIRED,
+            # which the cancellation branch below treats as a death sentence.
+            #
+            # On 2026-07-29 that killed a SELL LIMIT 42 minutes after it was
+            # placed: 103 points from activation, 0% of the target path
+            # covered, six hours of allowance untouched. Its only offence was
+            # that the clock crossed from "London + New York Afternoon" into
+            # "New York Evening". Price later traded back to within four
+            # points of the entry that no longer existed.
+            #
+            # Staleness is a statement about the market, not about the hour.
+            # The three checks below measure it directly -- waiting time, how
+            # far price travelled without filling, and how much of the planned
+            # path was covered -- and an expired plan is handled above. A
+            # boundary on the clock adds nothing they do not already cover.
             elif hours_open >= self.pending_freshness_stale_after_hours:
                 state = "STALE"
                 revalidation_required = True
