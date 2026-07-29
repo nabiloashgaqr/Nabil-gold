@@ -48,6 +48,7 @@ class DatabaseService:
         self.session_plans_path = root / "storage" / "session_plans.json"
         self.analyst_labels_path = root / "storage" / "analyst_labels.json"
         self.analyst_comparisons_path = root / "storage" / "analyst_comparisons.json"
+        self.decision_audit_path = root / "storage" / "decision_audit.json"
         self.client: Client | None = None
         self.use_supabase = False
 
@@ -486,6 +487,85 @@ class DatabaseService:
         )[:500]
         save_trades(rows, self.session_plans_path)
         return snapshot_id
+
+    def save_decision_audit(self, entry: Dict[str, Any]) -> str:
+        """Record why a cycle ended where it did.
+
+        Until now a blocked signal existed only as a log line in a workflow
+        run that scrolls away. Answering "how many signals did the cross-path
+        filter stop this week, and were they right to stop?" meant reading
+        Actions output by hand, so nobody asked.
+
+        Rows are written for refusals as well as deliveries, because the
+        refusals are the interesting half: a filter that blocks everything and
+        a filter that blocks nothing both look healthy in a trade table.
+        """
+        if not isinstance(entry, dict) or not entry:
+            return ""
+        now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        audit_id = str(
+            entry.get("id")
+            or f"AUDIT_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}_{uuid.uuid4().hex[:8]}"
+        )
+        payload = {
+            "id": audit_id,
+            "symbol": entry.get("symbol"),
+            "stage": entry.get("stage"),
+            "outcome": entry.get("outcome"),
+            "side": entry.get("side"),
+            "reason": entry.get("reason"),
+            "entry_price": entry.get("entry_price"),
+            "stop_loss": entry.get("stop_loss"),
+            "tp1": entry.get("tp1"),
+            "tp2": entry.get("tp2"),
+            "tp1_rr": entry.get("tp1_rr"),
+            "tp2_rr": entry.get("tp2_rr"),
+            "confidence": entry.get("confidence"),
+            "support_count": entry.get("support_count"),
+            "oppose_count": entry.get("oppose_count"),
+            "entry_mode": entry.get("entry_mode"),
+            "trade_id": entry.get("trade_id"),
+            "created_at": now_iso,
+        }
+        if self.use_supabase and self.client:
+            try:
+                self.client.table("decision_audit").insert(payload).execute()
+                return audit_id
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning(
+                    "Failed to insert decision audit in Supabase, falling back local: %s", exc
+                )
+        rows = load_trades(self.decision_audit_path)
+        rows.append(payload)
+        rows = sorted(rows, key=lambda row: str(row.get("created_at") or ""), reverse=True)[:2000]
+        save_trades(rows, self.decision_audit_path)
+        return audit_id
+
+    def get_recent_decision_audits(
+        self,
+        *,
+        limit: int = 500,
+        symbol: str | None = None,
+        since: str | None = None,
+    ) -> List[Dict[str, Any]]:
+        """Read back the decision trail for reporting."""
+        if self.use_supabase and self.client:
+            try:
+                query = self.client.table("decision_audit").select("*").order("created_at", desc=True).limit(limit)
+                if symbol:
+                    query = query.eq("symbol", str(symbol))
+                if since:
+                    query = query.gte("created_at", str(since))
+                return list(query.execute().data or [])
+            except Exception as exc:  # noqa: BLE001
+                self.logger.error("Failed to fetch decision audits from Supabase: %s", exc)
+        rows = load_trades(self.decision_audit_path)
+        if symbol:
+            rows = [row for row in rows if str(row.get("symbol") or "") == str(symbol)]
+        if since:
+            rows = [row for row in rows if str(row.get("created_at") or "") >= str(since)]
+        rows.sort(key=lambda row: str(row.get("created_at") or ""), reverse=True)
+        return rows[:limit]
 
     def get_recent_session_plans(
         self,
