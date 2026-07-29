@@ -43,6 +43,8 @@
     "risk_settings": {
         "min_confidence": 65,
         "min_rr_ratio": 1.5,
+        "min_tp1_rr": 0.8,
+        "description_min_tp1_rr": "أدنى مكافأة/مخاطرة للهدف الأول. بلوغ TP1 ينقل الستوب للدخول، فهدف أول قريب جداً (0.03R) كان يضمن: لمس فوري ثم ستوب على الدخول ثم خروج بأول ارتداد. المستوى الأقرب من هذا الحد يُتخطى لا يُرفض.",
         "default_risk_percent": 1.0,
         "atr_multiplier_sl": 2.0,
         "atr_multiplier_tp1": 2.5,
@@ -203,6 +205,8 @@
         "trailing_step_points": 40,
         "description_trailing_stop": "Trailing gap 150pts ($15) متناسب مع SL=400pts. خطوة 40pts تقلل التحديثات غير الضرورية بالضوضا.",
         "early_breakeven_points": 150,
+        "min_breakeven_rr": 0.5,
+        "description_min_breakeven_rr": "أدنى مسافة (بالـ R) تقطعها الصفقة قبل أن يسمح بلوغ TP1 بنقل الستوب للدخول. صفقة لمست TP1 عند 0.16R نُقل ستوبها فوراً فخرجت بأول ارتداد. المقياس بالـ R لا بالنقاط ليصحّ عبر الأدوات وعروض الستوب.",
         "description_early_breakeven": "early_breakeven_points=150: عند وصول الصفقة إلى +150 نقطة (15$) يُنقل الستوب إلى الدخول فوراً. بعدها يبدأ Trailing بفجوة 150pts.",
         "profiles": {
             "default_profile": {
@@ -305,6 +309,10 @@
     },
     "llm_review": {
         "enabled": true,
+        "model": "gemini-2.5-flash-lite",
+        "description_model": "النموذج المستخدم. flash-lite حصته اليومية ~1000 طلب مقابل ~250 لـ flash — وهو ما سبّب HTTP 429 الدائم. يمكن تجاوزه بمتغير البيئة GEMINI_MODEL.",
+        "max_retry_delay_seconds": 20,
+        "description_max_retry_delay_seconds": "سقف الانتظار بين المحاولات. يُستخدم مع 429 من نوع RPM فقط؛ أما RPD (الحصة اليومية) فيتوقف فوراً بلا انتظار.",
         "max_retries": 3,
         "retry_delay_seconds": 3,
         "description": "Gemini independent review. max_retries applies to all calls (signal, news, reports, learning). retry_delay_seconds is base delay with exponential backoff."
@@ -698,6 +706,8 @@
         "starter_risk_share": 0.4,
         "add_on_risk_share": 0.6,
         "starter_max_zone_progress_pct": 45,
+        "convert_touched_zone_to_market": true,
+        "description_convert_touched_zone_to_market": "حين يبلغ السعر المنطقة المرسومة تُنفَّذ الرِجل ماركت بدل إلغائها. سابقاً كانت تُرفض بالكامل عند التسعير كـ MARKET، فلا يُنشأ أمر إلا والسعر بعيد، ويُرفض التنفيذ في اللحظة الصحيحة. كل بوابات المخاطرة والتكرار تبقى سارية.",
         "description": "Phase C: when the planner classifies a zone as EXTREME_POI and price is already inside the first half of the zone, create a starter market entry plus an add-on pending order under one scenario family and one shared risk budget."
     },
     "strategy_profiles": {
