@@ -1,0 +1,128 @@
+name: ▶️ Run Script (any script, on demand)
+
+# One place to run any script in scripts/ from the Actions tab.
+#
+# Two ways to use it:
+#   1. Pick a name from the "script" dropdown (the common ones).
+#   2. Leave the dropdown on "custom" and type any path in "custom_script",
+#      e.g. scripts/analyze_sl_floor.py
+#
+# Extra command-line arguments go in "args", e.g. --limit 300 --since 2026-07-29T08:00:00Z
+#
+# All repository secrets are exported, so database- and Telegram-backed
+# scripts work. Scripts that need none simply ignore them.
+
+concurrency:
+  group: run-script-${{ github.ref }}
+  cancel-in-progress: false
+
+on:
+  workflow_dispatch:
+    inputs:
+      script:
+        description: "Which script to run"
+        required: true
+        default: "prove_chart_to_order"
+        type: choice
+        options:
+          # --- proofs: no database, no orders, no Telegram ---
+          - prove_chart_to_order
+          - prove_direction_veto
+          - prove_1221_end_to_end
+          - prove_map_retirement
+          # --- reports and diagnostics: read the database ---
+          - analyze_plan_rejections
+          - analyze_agent_accuracy
+          - analyze_sl_floor
+          - run_analyst_comparison
+          - run_daily_report
+          - run_weekly_report
+          - run_tuning_advisor
+          - validate_setup
+          # --- type your own path in custom_script ---
+          - custom
+      custom_script:
+        description: "Path to run when script = custom (e.g. scripts/run_backtest.py)"
+        required: false
+        default: ""
+        type: string
+      args:
+        description: "Arguments passed to the script (e.g. --limit 300)"
+        required: false
+        default: ""
+        type: string
+      run_tests_first:
+        description: "Run the execution-path tests before the script"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 📦 Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: 🛡️ Execution-path tests
+        if: ${{ github.event.inputs.run_tests_first == 'true' }}
+        run: |
+          python -m pytest -q \
+            tests/test_swing_sweep_detection.py \
+            tests/test_reversal_floor_is_earned.py \
+            tests/test_archetype_floors_are_earned.py \
+            tests/test_authority_is_earned.py \
+            tests/test_authority_is_falsifiable.py \
+            tests/test_day_map_veto_scope.py
+
+      - name: ▶️ Run script
+        env:
+          SCRIPT: ${{ github.event.inputs.script }}
+          CUSTOM_SCRIPT: ${{ github.event.inputs.custom_script }}
+          ARGS: ${{ github.event.inputs.args }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TWELVEDATA_API_KEY: ${{ secrets.TWELVEDATA_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ "$SCRIPT" = "custom" ]; then
+            TARGET="$CUSTOM_SCRIPT"
+          else
+            TARGET="scripts/${SCRIPT}.py"
+          fi
+
+          if [ -z "$TARGET" ]; then
+            echo "::error::script = custom but custom_script is empty."
+            exit 1
+          fi
+          if [ ! -f "$TARGET" ]; then
+            echo "::error::$TARGET does not exist in this checkout."
+            echo "Available scripts:"
+            ls scripts/*.py | sed 's|^|  |'
+            exit 1
+          fi
+
+          echo "════════════════════════════════════════════════════"
+          echo "  $TARGET $ARGS"
+          echo "════════════════════════════════════════════════════"
+          # shellcheck disable=SC2086
+          python "$TARGET" $ARGS
+
+      - name: ✅ Done
+        if: always()
+        run: echo "Finished '${{ github.event.inputs.script }}'."
