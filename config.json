@@ -500,10 +500,12 @@
         "contrarian_min_agents_for_lower_confidence": 3
     },
     "dynamic_risk_management": {
-        "enabled": false,
+        "enabled": true,
+        "description_enabled": "قاطع الحماية على مستوى الحساب. كان false والنتيجة تُحسب بلا أثر: النظام لا يتوقف مهما خسر. مُفعّل الآن وموصول قبل مسارَي التنفيذ (سلّم المخطِّط والمسار المباشر).",
         "warn_after_losses": 2,
         "halt_after_losses": 3,
-        "daily_loss_limit_points": 1000,
+        "daily_loss_limit_points": 450,
+        "description_daily_loss_limit_points": "450 نقطة = 45$ ≈ ثلاث صفقات بستوب 150 نقطة، متسق مع halt_after_losses=3. كان 1000 أي بلا إيقاف يومي عملياً.",
         "recent_trades_limit": 20,
         "recent_losses_caution": 2,
         "normal_min_quality_score": 0,
