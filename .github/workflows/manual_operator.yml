@@ -24,6 +24,7 @@ on:
           - release_readiness
           - operations_pipeline
           - backtest_benchmark
+          - plan_rejections
       send_status:
         description: "For analysis only: send WAIT / market status"
         required: false
@@ -167,6 +168,9 @@ jobs:
               ;;
             operations_pipeline)
               python scripts/run_operations_pipeline.py --timeframe "$TF" --outputsize "$OUTPUTSIZE" --window "$WINDOW" --step "$STEP" --horizon "$HORIZON" --max-trades "$MAX_TRADES" $TELEGRAM_FLAG
+              ;;
+            plan_rejections)
+              python scripts/analyze_plan_rejections.py --limit 300
               ;;
             backtest_benchmark)
               python scripts/run_backtest.py --benchmark --timeframe "$TF" --outputsize "$OUTPUTSIZE" --window "$WINDOW" --step "$STEP" --horizon "$HORIZON" --max-trades "$MAX_TRADES" $TELEGRAM_FLAG
