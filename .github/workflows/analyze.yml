@@ -77,7 +77,9 @@ jobs:
             tests/test_revived_plan_expiry.py \
             tests/test_thesis_objective_distance.py \
             tests/test_revived_plan_reauthorisation.py \
-            tests/test_pending_fill_requires_live_touch.py
+            tests/test_pending_fill_requires_live_touch.py \
+            tests/test_authority_is_earned.py \
+            tests/test_day_map_veto_scope.py
 
       - name: 🔎 Validate Production Setup
         run: |
