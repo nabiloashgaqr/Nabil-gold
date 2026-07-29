@@ -719,7 +719,10 @@
         "require_reversal_setup_for_flip": true,
         "require_rejection_confirmed_for_flip": true,
         "require_fresh_sweep_for_flip": true,
-        "description": "Phase D: when the day map has a confirmed direction, weak local opposite-direction ideas are blocked. Only a strong reversal / regime-flip setup may override the day map."
+        "description": "Phase D: when the day map has a confirmed direction, weak local opposite-direction ideas are blocked. Only a strong reversal / regime-flip setup may override the day map.",
+        "allow_live_book_retirement": true,
+        "min_agents_to_retire_map": 3,
+        "description_live_book_retirement": "تقاعد الخريطة بالكتاب الحيّ. شروط الانقلاب الخمسة أعلاه تصف طريقاً واحداً لإسقاط الخريطة: إعداد انعكاسي برفض مؤكَّد وكنس موافق. حركة استمرارية عكس خريطة قديمة لا تحققها مهما بلغت قوتها، فكانت الخريطة غير قابلة للدحض من الوكلاء الذين تدّعي تلخيصهم. التقاعد ضيّق عمداً: يحتاج نفس الأغلبية المؤهلة التي يحتاجها قبول خطة جديدة (min_agents_to_retire_map)، وصفر وكيل مؤهل ما زال يدافع عن الخريطة، ولا صفقات حيّة عليها — الصفقات المفتوحة تُدار بوقفها وأهدافها ولا تُعاكَس بإشارة جديدة. اضبطه false للعودة لسيادة الخريطة المطلقة."
     },
     "day_map_sanity": {
         "enabled": true,
@@ -861,5 +864,11 @@
             "duplicate_zone_points": 100,
             "description_oil_risk_profile": "Balanced WTI profile: 1 point = $0.01, SL floor 120 pts ($1.20), breakeven at +70 pts ($0.70), trailing gap 70 pts and step 25 pts."
         }
-    ]
+    ],
+    "analyst_scoreboard": {
+        "enabled": true,
+        "tie_band_points": 0,
+        "description": "لوحة النتيجة بالنقاط. طبقة التقطير الحالية تقيس هل رأى النظام نفس الرسم (اتجاه/نمط/منطقة) — لا من ربح. في 29 يوليو كانت قراءة النظام للرسم مقبولة ومع ذلك خسر 198 نقطة بينما التقط المحلل 314. تُحسب النقاط للطرفين بنفس القاعدة: خطة المحلل من دخوله ووقفه وأهدافه مقابل مدى ما بعد النشر، وصفقات النظام من تعبئتها وإغلاقها الفعليين. عدم التداول في يوم رابح = صفر لا 'بلا نتيجة'.",
+        "description_tie_band_points": "فجوة ضمن هذا النطاق تُعدّ تعادلاً. صفر = أي فارق يُحسب."
+    }
 }
