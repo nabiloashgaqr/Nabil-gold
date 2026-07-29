@@ -1542,11 +1542,28 @@ class SessionPlannerService:
             self._f(primary.get("target_price"), 0.0),
             self._f(dealing_range.get("midpoint"), 0.0) if isinstance(dealing_range, dict) else 0.0,
         ]
-        ahead = (
-            (lambda level: level > entry_ref) if direction == "BUY"
-            else (lambda level: level < entry_ref)
+        # Ahead is necessary but not sufficient. A level six points from entry
+        # is technically in front of the trade and passes a direction test,
+        # yet a plan showing "TP1 4047.76" above a thesis reading "target
+        # 4029.33" contradicts itself in the same message. Require the stated
+        # objective to be far enough to be worth narrating.
+        min_objective_points = self._f(
+            (self.config.get("session_planner") or {}).get("min_thesis_objective_points"), 30.0
         )
-        target = next((level for level in candidates if level > 0 and ahead(level)), None)
+        symbol = str(primary.get("symbol") or self.config.get("symbol", "XAU/USD"))
+
+        def _usable(level: float) -> bool:
+            if level <= 0:
+                return False
+            if direction == "BUY" and level <= entry_ref:
+                return False
+            if direction == "SELL" and level >= entry_ref:
+                return False
+            if entry_ref <= 0 or min_objective_points <= 0:
+                return True
+            return abs(self._price_to_points(level - entry_ref, symbol=symbol)) >= min_objective_points
+
+        target = next((level for level in candidates if _usable(level)), None)
 
         objective = f"target {target}" if target else "target the next mapped liquidity ahead"
         if direction == "SELL":
