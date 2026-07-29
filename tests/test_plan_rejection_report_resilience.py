@@ -123,3 +123,57 @@ def test_refusals_without_parsable_numbers_do_not_break_the_report(capsys) -> No
     assert "refused   : 8" in out
     # No dominance section is fine; the report must simply finish.
     assert out.strip().endswith("=" * 62) or "=" in out
+
+
+# ── Why is one direction refused? ──────────────────────────────────────────
+
+def test_report_breaks_refusals_down_per_direction(capsys) -> None:
+    """25 SELL maps refused and 0 published is a pattern, not noise.
+
+    The direction summary showed the imbalance but not its cause: reasons are
+    counted across all refusals together, so there was no way to tell whether
+    SELL maps die at a different gate than BUY maps. Without that, fixing the
+    imbalance means guessing which gate to touch.
+
+    Failure injection: removing the per-direction breakdown makes this fail.
+    """
+    rows = (
+        [_row(False, "counter-objective SELL plan lacks reversal proof: "
+                     "trigger state is UNCONFIRMED") for _ in range(20)]
+        + [_row(False, "archetype conviction is LOW: x") for _ in range(5)]
+        + [_row(False, "reward-to-risk below floor") for _ in range(3)]
+    )
+    for r in rows[:20]:
+        r["session_bias"] = "SELL"
+    for r in rows[20:25]:
+        r["session_bias"] = "SELL"
+    for r in rows[25:]:
+        r["session_bias"] = "BUY"
+
+    report._report("test", rows, CONFIG)
+    out = capsys.readouterr().out
+
+    assert "Why each direction is refused" in out, (
+        f"the report must attribute reasons per direction; got:\n{out}"
+    )
+    # The dominant SELL reason must be visible under SELL.
+    sell_block = out.split("SELL")[1] if "SELL" in out else ""
+    assert "reversal proof" in out.lower(), (
+        "the reason blocking SELL maps must be named"
+    )
+
+
+def test_direction_breakdown_skips_directionless_refusals(capsys) -> None:
+    """Rows refused before a bias was assigned carry no direction to attribute.
+
+    96% of refusals in the live report were NONE -- rejected upstream of the
+    direction decision. Listing them under a direction would invent a pattern
+    that is not there.
+    """
+    rows = [_row(False, "day-map authority conflicted") for _ in range(30)]
+    report._report("test", rows, CONFIG)
+    out = capsys.readouterr().out
+
+    assert "Direction of refused maps" in out
+    # With no directional rows there is nothing to attribute.
+    assert "Why each direction is refused" not in out or "NONE" in out
