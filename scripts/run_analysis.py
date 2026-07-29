@@ -539,6 +539,96 @@ def _planner_trade_levels(
 
 
 
+def validate_signal_before_send(decision: Dict[str, Any], config: Dict[str, Any]) -> List[str]:
+    """Final arithmetic check on a finished signal. Returns violations.
+
+    Every execution fault found so far was individually invisible and jointly
+    obvious: a first target 5 points from entry against a 150-point stop, a
+    protection threshold that could never be reached before that target, a
+    stop distance quoted from config rather than from the trade, a thesis
+    whose stated objective sat on the wrong side of the entry.
+
+    None of them needed market knowledge to catch -- only for someone to
+    check the finished numbers against each other once. That is what this
+    does, at the single point where a signal becomes real.
+
+    A non-empty list means the signal is arithmetically incoherent and must
+    not be sent or saved. It is deliberately not a strategy opinion: it only
+    rejects what cannot be true.
+    """
+    violations: List[str] = []
+
+    side = str(decision.get("decision") or "").upper()
+    if side not in {"BUY", "SELL"}:
+        return violations
+
+    symbol = str(decision.get("symbol") or config.get("symbol", "XAU/USD"))
+    signal = decision.get("signal") or {}
+    if not isinstance(signal, dict) or not signal:
+        return ["signal payload is missing"]
+
+    entry_info = signal.get("entry") or {}
+    entry = _safe_float(entry_info.get("price") if isinstance(entry_info, dict) else None, 0.0)
+    if entry <= 0:
+        entry = _safe_float(decision.get("current_price"), 0.0)
+    stop = _safe_float(signal.get("stop_loss"), 0.0)
+    tp1 = _safe_float(signal.get("tp1"), 0.0)
+    tp2 = _safe_float(signal.get("tp2"), 0.0)
+
+    if entry <= 0 or stop <= 0:
+        return [f"entry ({entry}) and stop ({stop}) must both be positive"]
+
+    ahead = (lambda level: level > entry) if side == "BUY" else (lambda level: level < entry)
+    behind = (lambda level: level < entry) if side == "BUY" else (lambda level: level > entry)
+
+    # 1. Geometry. A stop on the wrong side is not a stop.
+    if not behind(stop):
+        violations.append(
+            f"stop {stop:.2f} is not protective for a {side} entered at {entry:.2f}"
+        )
+    for label, level in (("tp1", tp1), ("tp2", tp2)):
+        if level > 0 and not ahead(level):
+            violations.append(
+                f"{label} {level:.2f} is not ahead of a {side} entered at {entry:.2f}"
+            )
+
+    risk_points = abs(price_to_points(entry - stop, symbol=symbol))
+    if risk_points <= 0:
+        violations.append("risk distance is zero; the stop sits on the entry")
+        return violations
+
+    # 2. Reward. Reaching TP1 arms the breakeven stop, so a token first target
+    #    converts a correct call into a flat trade.
+    risk_cfg = (config.get("risk_settings") or {}) if isinstance(config, dict) else {}
+    min_tp1_rr = _safe_float(risk_cfg.get("min_tp1_rr"), 0.0)
+    min_rr = _safe_float(risk_cfg.get("min_rr_ratio"), 0.0)
+    tp1_rr = abs(price_to_points(tp1 - entry, symbol=symbol)) / risk_points if tp1 > 0 else 0.0
+    tp2_rr = abs(price_to_points(tp2 - entry, symbol=symbol)) / risk_points if tp2 > 0 else 0.0
+
+    if min_tp1_rr > 0 and tp1 > 0 and tp1_rr < min_tp1_rr:
+        violations.append(
+            f"tp1 is only {tp1_rr:.2f}R from entry (minimum {min_tp1_rr:.2f}R); "
+            "reaching it would arm breakeven before the trade has travelled"
+        )
+    if min_rr > 0 and tp2 > 0 and tp2_rr < min_rr:
+        violations.append(f"tp2 is only {tp2_rr:.2f}R from entry (minimum {min_rr:.2f}R)")
+    if tp1 > 0 and tp2 > 0 and abs(tp2 - entry) < abs(tp1 - entry):
+        violations.append("tp2 is nearer than tp1")
+
+    # 3. Coherence between protection and the first target. A breakeven trigger
+    #    beyond TP1 can never fire in the order the message describes.
+    tm_cfg = (config.get("trade_management") or {}) if isinstance(config, dict) else {}
+    breakeven_points = _safe_float(tm_cfg.get("early_breakeven_points"), 0.0)
+    tp1_points = abs(price_to_points(tp1 - entry, symbol=symbol)) if tp1 > 0 else 0.0
+    if breakeven_points > 0 and tp1_points > 0 and breakeven_points >= tp1_points:
+        violations.append(
+            f"breakeven trigger (+{breakeven_points:.0f} pts) is not reachable before "
+            f"tp1 ({tp1_points:.0f} pts away); the promised protection cannot apply"
+        )
+
+    return violations
+
+
 def _candidate_zone_bounds(candidate: Dict[str, Any]) -> tuple[float, float] | None:
     zone = candidate.get("poi_zone") or {}
     if isinstance(zone, dict) and zone.get("top") is not None and zone.get("bottom") is not None:
@@ -1381,6 +1471,15 @@ def _execute_session_plan_ladder(
         duplicate_reason = duplicate_signal_reason(ladder_decision, database, config)
         if duplicate_reason:
             logger.info("Session-plan ladder %s blocked for %s: %s", role, symbol, duplicate_reason)
+            if role in {"PRIMARY", "STARTER"}:
+                return created
+            continue
+        ladder_violations = validate_signal_before_send(ladder_decision, config)
+        if ladder_violations:
+            logger.error(
+                "Session-plan ladder %s failed final validation for %s: %s",
+                role, symbol, "; ".join(ladder_violations),
+            )
             if role in {"PRIMARY", "STARTER"}:
                 return created
             continue
@@ -3327,6 +3426,19 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                     telegram=telegram, decision=decision, all_results=all_results,
                     database=database, config=config, send_hourly_now=send_hourly_now, delivery=status_delivery,
                     stage="duplicate / re-entry filter", reason=duplicate_reason,
+                )
+                return
+            signal_violations = validate_signal_before_send(decision, config)
+            if signal_violations:
+                logger.error(
+                    "Signal validation failed for %s %s: %s",
+                    decision_type, symbol, "; ".join(signal_violations),
+                )
+                _notify_blocked_directional_signal(
+                    telegram=telegram, decision=decision, all_results=all_results,
+                    database=database, config=config, send_hourly_now=send_hourly_now,
+                    delivery=status_delivery,
+                    stage="final validation", reason="; ".join(signal_violations),
                 )
                 return
             trade_id = database.new_trade_id()
