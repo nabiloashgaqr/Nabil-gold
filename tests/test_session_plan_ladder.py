@@ -184,7 +184,10 @@ def test_session_plan_extreme_poi_split_execution_creates_market_starter_and_pen
     decision["session_plan"]["primary_poi"]["poi_low"] = 4020.0
     decision["session_plan"]["primary_poi"]["poi_high"] = 4045.0
     decision["session_plan"]["primary_poi"]["entry_price"] = 4032.5
-    decision["session_plan"]["standby_poi"]["entry_price"] = 4030.0
+    # The add-on entry must sit clear of its own stop (4030.0). Overriding it
+    # to exactly the stop produced a zero-risk SELL leg -- any tick against it
+    # would be an instant exit -- which the pre-send validator now refuses.
+    decision["session_plan"]["standby_poi"]["entry_price"] = 4025.0
     created = ra._execute_session_plan_ladder(decision, {"symbol": "XAU/USD"}, [], db, telegram, _config())
     assert created == 2
     trades = load_trades(db.local_path)
