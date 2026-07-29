@@ -79,7 +79,9 @@ jobs:
             tests/test_revived_plan_reauthorisation.py \
             tests/test_pending_fill_requires_live_touch.py \
             tests/test_authority_is_earned.py \
-            tests/test_day_map_veto_scope.py
+            tests/test_day_map_veto_scope.py \
+            tests/test_authority_is_falsifiable.py \
+            tests/test_analyst_scoreboard.py
 
       - name: 🔎 Validate Production Setup
         run: |
