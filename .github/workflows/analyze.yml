@@ -73,7 +73,9 @@ jobs:
             tests/test_decision_audit.py \
             tests/test_selective_memory_and_moment.py \
             tests/test_reversal_after_sweep_archetype.py \
-            tests/test_llm_model_fallback.py
+            tests/test_llm_model_fallback.py \
+            tests/test_revived_plan_expiry.py \
+            tests/test_thesis_objective_distance.py
 
       - name: 🔎 Validate Production Setup
         run: |
