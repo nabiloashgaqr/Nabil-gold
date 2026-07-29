@@ -307,6 +307,28 @@
         "description_contextual_weights": "Phase 5 foundation: when enough history exists, DecisionAgent can blend setup/session/regime-specific learned weights on top of the static strategy profile.",
         "description": "نظام التعلم الذكي لتحديث أوزان الوكلاء"
     },
+    "moment_quality": {
+        "enabled": true,
+        "description": "معامل ظروف اللحظة يضرب حجم المركز فقط — لا يفتح صفقة ولا يمنعها. مدخل تحجيم بصلاحية رفض يصير بوابة قبول ثانية غير مختبَرة.",
+        "min_multiplier": 0.5,
+        "low_session_factor": 0.75,
+        "medium_session_factor": 0.9,
+        "news_caution_factor": 0.8,
+        "news_danger_factor": 0.6,
+        "extreme_volatility_factor": 0.75,
+        "low_volatility_factor": 0.85
+    },
+    "setup_performance": {
+        "enabled": true,
+        "description": "ذاكرة انتقائية: تفحص أداء نفس النمط في نفس الجلسة قبل الإرسال. تخفض الثقة على نمط ضعيف ولا ترفعها أبداً على نمط جيد — الذاكرة التي تضخّم القناعة هي طريق الإفراط في الملاءمة.",
+        "lookback_trades": 60,
+        "min_samples": 4,
+        "poor_win_rate_pct": 40,
+        "max_confidence_penalty": 12,
+        "veto_win_rate_pct": 0,
+        "description_veto": "0 = لا رفض قاطع، خصم ثقة فقط. ارفعه (مثلاً 15) لتفعيل الرفض عند سجل كارثي.",
+        "veto_min_samples": 6
+    },
     "llm_review": {
         "enabled": true,
         "model": "gemini-2.5-flash-lite",
