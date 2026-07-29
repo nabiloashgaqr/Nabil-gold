@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Any, Dict, List
 
 import requests
@@ -22,16 +23,91 @@ class GeminiReviewService:
 
     API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
+    # Set when the daily request quota (RPD) is exhausted. That quota resets at
+    # midnight Pacific, so every remaining call in this process is guaranteed to
+    # fail: retrying them only burns wall-clock time. A run used to spend 36s of
+    # its 71s sleeping between retries that could not possibly succeed.
+    _daily_quota_exhausted = False
+    _daily_quota_reason = ""
+
+    @classmethod
+    def reset_quota_state(cls) -> None:
+        """Clear the daily-quota latch (new process, or tests)."""
+        cls._daily_quota_exhausted = False
+        cls._daily_quota_reason = ""
+
     def __init__(self, config: Dict[str, Any] | None = None) -> None:
         self.config = config or {}
         self.api_key = os.environ.get("GEMINI_API_KEY") or ""
-        self.model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+        llm_cfg = self.config.get("llm_review") or {}
+        # Flash-Lite by default: the analysis cycle runs every 5 minutes and
+        # makes up to four review calls each time, which overruns the ~250
+        # requests/day free-tier allowance of gemini-2.5-flash roughly twofold
+        # and produced a permanent HTTP 429. Flash-Lite carries a ~1000/day
+        # allowance on the same key, which covers the real call volume.
+        # Override with GEMINI_MODEL, or llm_review.model in config.json.
+        self.model = (
+            os.environ.get("GEMINI_MODEL")
+            or str(llm_cfg.get("model") or "").strip()
+            or "gemini-2.5-flash-lite"
+        )
         self.enabled = bool(self.api_key)
         self.timeout = int(os.environ.get("GEMINI_TIMEOUT_SECONDS", "20") or 20)
-        llm_cfg = self.config.get("llm_review") or {}
         self.max_retries = int(llm_cfg.get("max_retries", 3))
         self.retry_delay = int(llm_cfg.get("retry_delay_seconds", 3))
+        # A per-minute 429 is worth waiting out; the ceiling keeps a single
+        # review from stalling a 5-minute analysis cycle.
+        self.max_retry_delay = int(llm_cfg.get("max_retry_delay_seconds", 20) or 20)
         self.session = requests.Session()
+
+    # ---- 429 classification ------------------------------------------------
+
+    @staticmethod
+    def _classify_429(resp: Any) -> tuple[str, int | None]:
+        """Tell a daily quota (RPD) apart from a per-minute one (RPM).
+
+        Both arrive as HTTP 429, but they need opposite handling: RPM clears in
+        seconds, RPD not until midnight Pacific. Treating them alike is why a
+        run retried for 36 seconds against a quota that had no chance of
+        clearing. Returns the kind plus any server-advised delay.
+        """
+        body = ""
+        try:
+            body = (resp.text or "")[:2000]
+        except Exception:  # noqa: BLE001
+            body = ""
+        lowered = body.lower()
+
+        retry_after: int | None = None
+        header = {}
+        try:
+            header = resp.headers or {}
+        except Exception:  # noqa: BLE001
+            header = {}
+        raw_header = header.get("Retry-After") or header.get("retry-after")
+        if raw_header:
+            try:
+                retry_after = int(float(str(raw_header).strip()))
+            except (TypeError, ValueError):
+                retry_after = None
+        if retry_after is None:
+            match = re.search(r'"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"', body)
+            if match:
+                try:
+                    retry_after = int(float(match.group(1)))
+                except (TypeError, ValueError):
+                    retry_after = None
+
+        daily_markers = (
+            "perday", "per day", "requestsperday", "free_tier_requests",
+            "generaterequestsperdayperproject",
+        )
+        if any(marker in lowered for marker in daily_markers):
+            return "daily", retry_after
+        # A very long advised wait is a daily bucket in all but name.
+        if retry_after is not None and retry_after >= 120:
+            return "daily", retry_after
+        return "minute", retry_after
 
     def review_signal(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Independent expert review of a trade setup — macro aware."""
@@ -192,6 +268,12 @@ class GeminiReviewService:
 
     def _generate_json(self, prompt: str, kind: str = "generic") -> Dict[str, Any]:
         import time as _time
+        # Short-circuit: the daily quota is gone, so this call cannot succeed.
+        if GeminiReviewService._daily_quota_exhausted:
+            reason = GeminiReviewService._daily_quota_reason or "daily quota exhausted"
+            logger.info("Gemini %s skipped: %s", kind, reason)
+            return self._unavailable(reason, kind=kind)
+
         last_error = ""
         for attempt in range(1, self.max_retries + 1):
             try:
@@ -199,6 +281,33 @@ class GeminiReviewService:
                 resp = self.session.post(url, params={"key": self.api_key}, json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}}, timeout=self.timeout)
                 if resp.status_code != 200:
                     last_error = f"HTTP {resp.status_code}"
+                    if resp.status_code == 429:
+                        quota_kind, retry_after = self._classify_429(resp)
+                        if quota_kind == "daily":
+                            reason = (
+                                f"daily quota exhausted (RPD) on model {self.model}; "
+                                "resets at midnight Pacific"
+                            )
+                            GeminiReviewService._daily_quota_exhausted = True
+                            GeminiReviewService._daily_quota_reason = reason
+                            logger.warning(
+                                "Gemini %s: %s — skipping remaining LLM calls this run",
+                                kind, reason,
+                            )
+                            return self._unavailable(reason, kind=kind)
+                        last_error = "HTTP 429 (rate limited)"
+                        if attempt < self.max_retries:
+                            # Honour the server's advice; otherwise back off
+                            # exponentially rather than linearly.
+                            delay = retry_after if retry_after is not None else self.retry_delay * (2 ** (attempt - 1))
+                            delay = max(1, min(int(delay), self.max_retry_delay))
+                            logger.warning(
+                                "Gemini %s attempt %d/%d rate limited (RPM) — retry in %ds",
+                                kind, attempt, self.max_retries, delay,
+                            )
+                            _time.sleep(delay)
+                            continue
+                        return self._unavailable(last_error, kind=kind)
                     if attempt < self.max_retries:
                         delay = self.retry_delay * attempt
                         logger.warning("Gemini %s attempt %d/%d failed: %s — retry in %ds", kind, attempt, self.max_retries, last_error, delay)
