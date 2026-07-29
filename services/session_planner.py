@@ -1526,12 +1526,32 @@ class SessionPlannerService:
         dealing_range: Dict[str, Any],
         current_price: float,
     ) -> str:
-        target = primary.get("target_liquidity") or primary.get("target_price")
         sweep = (liquidity.get("recent_sweep") or {}) if isinstance(liquidity, dict) else {}
         ref = str(sweep.get("reference_type") or "liquidity").replace("_", " ")
+        entry_ref = self._f(primary.get("entry_price"), 0.0) or self._f(current_price, 0.0)
+
+        # The narrated objective has to sit ahead of the entry, or the thesis
+        # contradicts the trade it describes. When the mapped target is
+        # missing this used to fall back to the dealing-range midpoint -- a
+        # structural landmark, not a target -- which can easily lie *behind*
+        # the entry. A live BUY was published as "hold above 4026.71 and
+        # target 4029.33" against a 4029.64 entry: a stated objective three
+        # points below the price being bought.
+        candidates = [
+            self._f(primary.get("target_liquidity"), 0.0),
+            self._f(primary.get("target_price"), 0.0),
+            self._f(dealing_range.get("midpoint"), 0.0) if isinstance(dealing_range, dict) else 0.0,
+        ]
+        ahead = (
+            (lambda level: level > entry_ref) if direction == "BUY"
+            else (lambda level: level < entry_ref)
+        )
+        target = next((level for level in candidates if level > 0 and ahead(level)), None)
+
+        objective = f"target {target}" if target else "target the next mapped liquidity ahead"
         if direction == "SELL":
-            return f"Premium-to-discount sell path: reject after {ref} sweep, hold below {primary.get('stop_loss')} and target {target or dealing_range.get('midpoint') or current_price}."
-        return f"Discount-to-premium buy path: react after {ref} sweep, hold above {primary.get('stop_loss')} and target {target or dealing_range.get('midpoint') or current_price}."
+            return f"Premium-to-discount sell path: reject after {ref} sweep, hold below {primary.get('stop_loss')} and {objective}."
+        return f"Discount-to-premium buy path: react after {ref} sweep, hold above {primary.get('stop_loss')} and {objective}."
 
     def _market_objective(self, *, structure_trend: str, recent_sweep: Dict[str, Any], zone_context: str) -> Dict[str, Any]:
         structure_trend = str(structure_trend or "RANGING").upper()

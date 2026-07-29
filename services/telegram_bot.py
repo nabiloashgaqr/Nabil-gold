@@ -402,8 +402,34 @@ class TelegramService:
             breakeven = float(params.get("early_breakeven_points", breakeven) or breakeven)
         except Exception:  # noqa: BLE001 - never block a signal on formatting
             pass
+        # Describe the protection that will actually run. Two conditions gate
+        # it, and stating only the points threshold produced a promise the
+        # engine could not keep: a signal announced "SL → entry after +170 pts
+        # before TP1" while TP1 sat 22 points away, so the +170 trigger could
+        # never fire before the target it was supposed to precede.
+        protection = f"• <b>Protection:</b> SL → entry after +{breakeven:.0f} pts"
+        try:
+            from utils.instruments import price_to_points
+
+            symbol = str(decision.get("symbol") or "XAU/USD")
+            entry_price = float((signal.get("entry") or {}).get("price")
+                                or decision.get("current_price") or 0)
+            stop_price = float(signal.get("stop_loss") or 0)
+            tp1_price = float(signal.get("tp1") or 0)
+            if entry_price > 0 and tp1_price > 0:
+                tp1_pts = abs(price_to_points(tp1_price - entry_price, symbol=symbol))
+                if breakeven > 0 and tp1_pts > 0 and breakeven < tp1_pts:
+                    protection += " (before TP1)"
+                elif tp1_pts > 0:
+                    protection += f" (TP1 is {tp1_pts:.0f} pts away — partial close first)"
+            mgmt = (mgmt_config.get("trade_management") or {}) if isinstance(mgmt_config, dict) else {}
+            min_be_rr = float(mgmt.get("min_breakeven_rr") or 0)
+            if min_be_rr > 0 and entry_price > 0 and stop_price > 0:
+                protection += f" · needs ≥{min_be_rr:.2f}R travelled"
+        except Exception:  # noqa: BLE001 - never block a signal on formatting
+            protection += " before TP1"
         return [
-            f"• <b>Protection:</b> SL → entry after +{breakeven:.0f} pts before TP1",
+            protection,
             f"• <b>Management:</b> Trail gap {trailing:.0f} pts / step {step:.0f} pts · check 5m",
         ]
 
@@ -786,6 +812,14 @@ class TelegramService:
         if planner_led and isinstance(planner_gate, dict) and planner_gate.get("allow"):
             gate_reason = str(planner_gate.get("reason") or "Planner execution admitted").strip()
             lines.append(f"✅ Admission: {html.escape(gate_reason)}")
+            # Admission reported only the agents that agreed. A signal headed
+            # "3 qualified agents aligned" listed three more disagreeing a few
+            # lines below, which read as a contradiction rather than a
+            # tolerated minority. State the dissent on the same line.
+            dissent = planner_gate.get("oppose_agents") or []
+            if isinstance(dissent, list) and dissent:
+                labels = ", ".join(str(name).replace("_", " ") for name in dissent)
+                lines.append(f"⚠️ Dissent: {len(dissent)} qualified agent(s) opposed — {html.escape(labels)}")
         if planner_led:
             plan = decision.get("session_plan") or {}
             market_objective_label = str(((plan.get("manual_plan") or {}).get("market_objective_label") if isinstance(plan, dict) else "") or plan.get("market_objective_label") or "").strip()
@@ -819,10 +853,20 @@ class TelegramService:
         leg_label = self._execution_leg_label(decision.get("setup_context") or {}, decision.get("session_plan") or {}, direction=trade_type)
         if leg_label:
             lines.append(f"• <b>Execution leg:</b> {html.escape(leg_label)}")
+        # A target trimmed by the max_rr ceiling is a computed boundary, not a
+        # level the market is drawn to. Publishing it unmarked implied a
+        # structural objective: a TP2 landing on exactly 4.00R was presented
+        # the same way as one sitting on a real liquidity pool.
+        tp2_note = ""
+        target_method = str(signal.get("target_method") or "")
+        if "max_rr_cap" in target_method:
+            tp2_note = " <i>(capped at max R:R — not a liquidity level)</i>"
+        elif "extended_liquidity" in target_method:
+            tp2_note = " <i>(extended to the next pool)</i>"
         lines.extend([
             f"• <b>Stop Loss:</b> {self._money(signal.get('stop_loss'), symbol)}",
             f"• <b>TP1:</b> {self._money(signal.get('tp1'), symbol)}",
-            f"• <b>TP2:</b> {self._money(signal.get('tp2'), symbol)}",
+            f"• <b>TP2:</b> {self._money(signal.get('tp2'), symbol)}{tp2_note}",
         ])
         if order_kind.endswith("LIMIT") or order_kind.endswith("STOP"):
             try:
