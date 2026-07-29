@@ -1284,6 +1284,7 @@ def _revive_recent_ready_plan(
     *,
     symbol: str,
     now: datetime,
+    base_decision: Dict[str, Any] | None = None,
 ) -> Dict[str, Any] | None:
     """Reuse a still-valid day map when this cycle could not rebuild one.
 
@@ -1323,6 +1324,34 @@ def _revive_recent_ready_plan(
             continue
         if not (payload.get("primary_poi") or {}):
             continue
+
+        # Re-authorise against the agents as they are *now*.
+        #
+        # The snapshot carries its own verdict -- authority CONFIRMED, an
+        # archetype scored 86%, planner grade A+ -- and those fields were
+        # replayed unchallenged. A live signal therefore went out headed
+        # "3 qualified agents aligned" while the same message listed
+        # Technical, Price Action and Multi-Timeframe all opposing, because
+        # the stamp was hours old and the agents had since turned.
+        #
+        # Reviving a thesis is not the same as re-approving it: the map may
+        # keep its shape, but the permission to trade it has to be earned
+        # again from the current book. Refusing here leaves the cycle with no
+        # plan, which is the correct outcome when the market has moved against
+        # the map.
+        revived_bias = str(payload.get("session_bias") or payload.get("authority_direction") or "").upper()
+        if base_decision is not None and revived_bias in {"BUY", "SELL"}:
+            recheck = _planner_execution_gate(
+                {**base_decision, "decision": revived_bias, "session_plan": payload},
+                config,
+            )
+            if not recheck.get("allow"):
+                logger.info(
+                    "Revived %s day map for %s rejected on re-authorisation: %s",
+                    revived_bias, symbol, recheck.get("reason"),
+                )
+                continue
+
         age_minutes = 0.0
         created = _parse_datetime(str(row.get("analysis_run_at") or payload.get("created_at") or ""))
         if created:
@@ -1387,6 +1416,9 @@ def _execute_session_plan_ladder(
         revived = _revive_recent_ready_plan(
             database, config, symbol=str(base_decision.get("symbol") or config.get("symbol", "XAU/USD")),
             now=datetime.now(timezone.utc),
+            # Carries this cycle's agent_details so the snapshot is re-judged
+            # against the live book rather than its own stored verdict.
+            base_decision=base_decision,
         )
         if not revived:
             logger.info(
