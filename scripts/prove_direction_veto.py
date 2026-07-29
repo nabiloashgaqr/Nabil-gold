@@ -89,30 +89,49 @@ def step_1_consensus(config: dict) -> dict:
 
 
 def step_2_authority(config: dict, decision: dict) -> dict:
+    """What the day map did to that decision, then and now.
+
+    This step originally passed no agent book, which is what the authority
+    layer received before Phase B: the five voting agents could not reach it,
+    so no amount of live disagreement could retire a stale map. Re-running it
+    that way still reproduces the original refusal, and that is the point --
+    but printing only that reading makes today's system look unchanged.
+
+    So both are shown: the call as it was made on 2026-07-29, and the same
+    call with the live book attached, which is what runs now.
+    """
     print("STEP 2 — what the day-map authority did to that decision")
     print("-" * 62)
-    review = DirectionalAuthorityService(config).review(
-        {
-            "decision": decision["decision"],
-            "confidence": decision["confidence"],
-            "symbol": "XAU/USD",
-            # The SELL was a continuation of bearish structure, not a
-            # reversal-graded setup, so the flip conditions cannot be met.
-            "setup_context": {"setup_type": "STRUCTURE_CONTINUATION",
-                              "trigger_state": "DETECTED",
-                              "trigger_score": 0.0,
-                              "sweep_side": "buy_side"},
-        },
-        SESSION_PLAN,
-        [],
+    base_decision = {
+        "decision": decision["decision"],
+        "confidence": decision["confidence"],
+        "symbol": "XAU/USD",
+        # The SELL was a continuation of bearish structure, not a
+        # reversal-graded setup, so the flip conditions cannot be met.
+        "setup_context": {"setup_type": "STRUCTURE_CONTINUATION",
+                          "trigger_state": "DETECTED",
+                          "trigger_score": 0.0,
+                          "sweep_side": "buy_side"},
+    }
+
+    service = DirectionalAuthorityService(config)
+    review = service.review(base_decision, SESSION_PLAN, [])
+    print("  THEN — the agent book never reached this gate:")
+    print(f"    action : {review.get('action')}")
+    print(f"    reason : {review.get('reason')}")
+    print()
+
+    now = service.review(
+        {**base_decision, "agent_details": AGENT_DETAILS}, dict(SESSION_PLAN), []
     )
-    print(f"  action : {review.get('action')}")
-    print(f"  reason : {review.get('reason')}")
+    print("  NOW  — the same call, with the live book attached:")
+    print(f"    action : {now.get('action')}")
+    print(f"    reason : {now.get('reason')}")
     print()
-    if review.get("action") == "BLOCK_OPPOSITE_LOCAL":
-        print("  => decision is overwritten to WAIT and signal is emptied")
-        print("     (scripts/run_analysis.py, directional authority block)")
-    print()
+    if now.get("action") == "ALLOW_MAP_RETIRED":
+        print("    => three qualified agents read SELL and none defend the BUY")
+        print("       map, so the map is retired instead of vetoing them.")
+        print()
     return review
 
 
@@ -142,8 +161,8 @@ def step_3_today(config: dict) -> None:
 
     print()
     print("  BUY  : blocked by the opposition gate (the fix that shipped).")
-    print("  SELL : blocked earlier, by the day map, before it ever reaches here.")
-    print("  Net result: the correct trade is refused and nothing is published.")
+    print("  SELL : admitted here — and no longer stopped upstream either,")
+    print("         because the live book now retires the opposing map.")
     print()
 
 
@@ -155,7 +174,7 @@ def step_4_vote_count_is_not_the_constraint(config: dict) -> None:
     """
     print("STEP 4 — does changing the required agent count rescue the trade?")
     print("-" * 62)
-    authority = DirectionalAuthorityService(config)
+    print("  (shown against the pre-Phase-B veto, which had no agent book)")
     for required in (1, 2, 3):
         cfg = json.loads(json.dumps(config))
         cfg.setdefault("signal_requirements", {})["min_agents_agree"] = required
@@ -164,7 +183,7 @@ def step_4_vote_count_is_not_the_constraint(config: dict) -> None:
             "session": AGENT_BOOK["session"],
             "indicators": {},
         })
-        review = authority.review(
+        review = DirectionalAuthorityService(cfg).review(
             {
                 "decision": decision["decision"],
                 "confidence": decision["confidence"],
@@ -182,8 +201,10 @@ def step_4_vote_count_is_not_the_constraint(config: dict) -> None:
         print(f"  min_agents_agree={required} -> consensus "
               f"{decision['decision']} @ {decision['confidence']}% -> {outcome}")
     print()
-    print("  The veto never reads the agent count, so the number of agreeing")
-    print("  agents cannot change this outcome. The vote is not the constraint.")
+    print("  The veto never read the agent count, so the number of agreeing")
+    print("  agents could not change this outcome. The vote was never the")
+    print("  constraint -- which is why Phase B changed what the map may")
+    print("  veto, rather than how many agents are required.")
     print()
 
 
@@ -203,7 +224,13 @@ def main() -> None:
     print("=" * 62)
     print("  The voting system produced the winning answer.")
     print("  A day map derived from SMC alone vetoed it.")
-    print("  Replacing the vote would discard the one component that was right.")
+    print("  Replacing the vote would have discarded the one component that")
+    print("  was right, so the map's authority was fixed instead:")
+    print("    Phase A — a map must earn its CONFIRMED stamp from evidence.")
+    print("    Phase B — a decisive live book retires a map that has gone stale.")
+    print()
+    print("  Run scripts/prove_chart_to_order.py to see the current behaviour")
+    print("  end to end, starting from candles rather than from this replay.")
     print()
 
 
