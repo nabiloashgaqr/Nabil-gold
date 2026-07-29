@@ -173,8 +173,23 @@ def test_leg_executes_at_market_when_price_reaches_the_area() -> None:
     assert leg["entry_mode"] == "session_plan_ladder_market"
 
 
-def test_leg_still_rests_as_pending_when_price_is_away() -> None:
-    """Conversion must not swallow ordinary pending placement."""
+def test_leg_above_market_with_an_unprotective_stop_is_refused() -> None:
+    """Conversion must not swallow ordinary pending placement.
+
+    UPDATED after stop entries were removed. This previously asserted
+    BUY_STOP: a BUY mapped at 4029.64 while price sat at 4024.49 used to rest
+    above the market as a stop order.
+
+    Stop entries are gone -- they buy strength and sell weakness, which is the
+    shape that lost 198 points on 2026-07-29. The replacement is a market fill
+    at the better price: 4024.49 instead of 4029.64, five points cheaper.
+
+    The raw mapped stop of 4026.71 would sit above that fill, but the dynamic
+    risk floor widens it to 4009.49 before the leg is built, so the executed
+    trade is properly protected. The refusal path exists for plans the floor
+    cannot rescue; it is exercised in
+    test_unprotective_stop_blocks_a_market_conversion below.
+    """
     from scripts.run_analysis import _build_plan_ladder_decision
 
     plan, candidate = _plan_and_candidate()
@@ -183,8 +198,32 @@ def test_leg_still_rests_as_pending_when_price_is_away() -> None:
     leg = _build_plan_ladder_decision(base, plan, candidate, CONFIG)
 
     assert leg is not None
-    assert leg["signal"]["order_type"] == "BUY_STOP"
-    assert leg["entry_mode"] == "session_plan_ladder"
+    assert leg["signal"]["order_type"] == "BUY_MARKET"
+    assert leg["signal"]["order_type"] != "BUY_STOP"
+    # Filled better than the mapped level, and genuinely protected.
+    assert leg["signal"]["entry"]["price"] == 4024.49
+    assert leg["signal"]["stop_loss"] < leg["signal"]["entry"]["price"]
+
+
+def test_unprotective_stop_blocks_a_market_conversion() -> None:
+    """A plan whose stop cannot protect a market fill is refused outright.
+
+    With stop entries removed there is no way to wait above the market, so a
+    leg that would open beyond its own invalidation must not be created.
+    """
+    from scripts.run_analysis import _planned_order_type
+
+    # BUY mapped at 4042.43 with a 4039.64 stop while price is far below.
+    order = _planned_order_type(
+        CONFIG, "BUY", 4042.43, 3992.76, "XAU/USD", planned_stop=4039.64,
+    )
+    assert order == "NO_ENTRY"
+
+    # The mirror case on the sell side.
+    order = _planned_order_type(
+        CONFIG, "SELL", 4000.0, 4050.0, "XAU/USD", planned_stop=4002.0,
+    )
+    assert order == "NO_ENTRY"
 
 
 def test_converted_leg_still_respects_the_reward_gate() -> None:
@@ -202,4 +241,5 @@ def test_converted_leg_still_respects_the_reward_gate() -> None:
 def test_distant_price_still_produces_a_pending_order() -> None:
     """Conversion must not replace ordinary pending placement."""
     order_type = _planned_order_type(CONFIG, "BUY", 4029.64, 4024.49, "XAU/USD")
-    assert order_type == "BUY_STOP"
+    assert order_type in {"BUY_MARKET", "NO_ENTRY"}
+    assert order_type != "BUY_STOP", "stop entries were removed"

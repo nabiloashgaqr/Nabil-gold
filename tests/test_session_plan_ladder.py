@@ -228,7 +228,20 @@ def test_session_plan_ladder_applies_minimum_sl_floor_to_pending_orders(tmp_path
 
 
 def test_session_plan_ladder_extends_to_further_liquidity_when_mapped_target_is_too_close(tmp_path: Path) -> None:
-    """A close target must not be inflated; a real further level may be used."""
+    """A close target must not be inflated; a real further level may be used.
+
+    UPDATED after stop entries were removed. The BUY here is mapped at 4042.43
+    with a 4039.64 stop while price sits at 3992.76 -- roughly 500 points
+    below. That used to rest above the market as a BUY_STOP.
+
+    Stop entries are gone, and this plan cannot be converted either: its stop
+    is above the live price, so a market BUY would open past its own
+    invalidation. The leg is therefore refused, which is the correct outcome.
+
+    The target-extension logic this test was written for is unchanged and is
+    still covered by _resolve_reward_target's own tests; what is asserted here
+    now is that the ladder refuses rather than ships an unprotected entry.
+    """
     db = _db(tmp_path)
     telegram = _Telegram()
     decision = _base_decision()
@@ -252,13 +265,11 @@ def test_session_plan_ladder_extends_to_further_liquidity_when_mapped_target_is_
         "min_rr_ratio": 1.5,
     }
     created = ra._execute_session_plan_ladder(decision, {"symbol": "XAU/USD"}, [], db, telegram, cfg)
-    assert created >= 1
-    trades = load_trades(db.local_path)
-    leg = next(t for t in trades if ((t.get("signal_snapshot") or {}).get("setup_context") or {}).get("pending_plan_role") == "PRIMARY")
-    assert leg["stop_loss"] == 4002.43
-    # TP2 is the real further pool, not a ratio-derived invention.
-    assert leg["tp2"] == 4110.00
-    assert leg["tp1"] <= leg["tp2"]
+    assert created == 0, (
+        "a BUY whose stop sits above the live price cannot be filled at the "
+        "market, and stop entries are no longer permitted"
+    )
+    assert load_trades(db.local_path) == []
 
 
 def _confidence_with(classical, multitimeframe, macro=(None, 0)):
