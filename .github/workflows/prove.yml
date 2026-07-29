@@ -1,0 +1,110 @@
+name: 🔬 Prove (run a verification script)
+
+# Runs the proof scripts written during the 2026-07-29 repair session.
+#
+# These scripts are deliberately self-contained: they replay recorded market
+# conditions through the real services and print what each gate decides. They
+# read no database, place no order and send no Telegram message, so this
+# workflow is safe to run at any time and needs no secrets.
+#
+# Usage: Actions -> "🔬 Prove" -> Run workflow -> pick a script.
+
+concurrency:
+  group: prove-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+    inputs:
+      script:
+        description: "Which proof to run"
+        required: true
+        default: "chart_to_order"
+        type: choice
+        options:
+          # Phase G/H: the uploaded turtle-soup chart, candles -> admitted order
+          - chart_to_order
+          # Phase A: where the winning 12:21 SELL was cancelled
+          - direction_veto
+          # Phase A: the same cycle walked through every gate, before/after
+          - end_to_end_1221
+          # Phase B: a stale day map retired by the live agent book
+          - map_retirement
+          # Run all four in sequence
+          - all
+      run_tests:
+        description: "Also run the execution-path test suite"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 📦 Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: 🔬 Run proof
+        env:
+          SCRIPT: ${{ github.event.inputs.script }}
+        run: |
+          set -euo pipefail
+          case "$SCRIPT" in
+            chart_to_order)
+              python scripts/prove_chart_to_order.py
+              ;;
+            direction_veto)
+              python scripts/prove_direction_veto.py
+              ;;
+            end_to_end_1221)
+              python scripts/prove_1221_end_to_end.py
+              ;;
+            map_retirement)
+              python scripts/prove_map_retirement.py
+              ;;
+            all)
+              for s in prove_chart_to_order prove_direction_veto \
+                       prove_1221_end_to_end prove_map_retirement; do
+                if [ -f "scripts/$s.py" ]; then
+                  echo "════════════════════════════════════════════════════"
+                  echo "  scripts/$s.py"
+                  echo "════════════════════════════════════════════════════"
+                  python "scripts/$s.py"
+                else
+                  echo "skipped: scripts/$s.py is not in this checkout"
+                fi
+              done
+              ;;
+            *)
+              echo "Unknown script: $SCRIPT"
+              exit 1
+              ;;
+          esac
+
+      - name: 🛡️ Execution-path tests
+        if: ${{ github.event.inputs.run_tests == 'true' }}
+        run: |
+          python -m pytest -q \
+            tests/test_swing_sweep_detection.py \
+            tests/test_reversal_floor_is_earned.py \
+            tests/test_archetype_floors_are_earned.py \
+            tests/test_authority_is_earned.py \
+            tests/test_authority_is_falsifiable.py \
+            tests/test_day_map_veto_scope.py
+
+      - name: ✅ Done
+        if: always()
+        run: echo "Proof run finished for '${{ github.event.inputs.script }}'."
