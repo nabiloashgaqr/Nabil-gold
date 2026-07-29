@@ -313,3 +313,29 @@ def test_apply_retirement_ignores_other_verdicts() -> None:
     plan = dict(CONFIRMED_BUY_MAP)
     service.apply_retirement(plan, {"action": "BLOCK_OPPOSITE_LOCAL"})
     assert plan["authority_state"] == "CONFIRMED"
+
+
+def test_run_analysis_handles_the_retirement_verdict() -> None:
+    """The verdict must be acted on by the caller, not merely returned.
+
+    Found live on 2026-07-29: services/directional_authority.py shipped with
+    the retirement branch, but scripts/run_analysis.py did not. The service
+    returned ALLOW_MAP_RETIRED, nothing wrote it onto the plan, and
+    DayMapSanityService then refused the same signal one gate later because
+    authority_state still read CONFIRMED.
+
+    The outcome was safe -- nothing wrong was admitted -- but Phase B had no
+    effect whatsoever. This is the dead-gate pattern again, this time created
+    by a partial upload rather than by the code itself.
+    """
+    import scripts.run_analysis as analysis
+
+    source = Path(analysis.__file__).read_text(encoding="utf-8")
+    assert "ALLOW_MAP_RETIRED" in source, (
+        "run_analysis must handle the retirement verdict; without it the "
+        "authority layer retires a map and the next gate reinstates it"
+    )
+    assert "apply_retirement" in source, (
+        "the retirement must be written onto the plan, or the day-map sanity "
+        "gate will still read the stale CONFIRMED stamp"
+    )
