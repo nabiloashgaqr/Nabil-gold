@@ -61,6 +61,16 @@ class SMCAgent(BaseAgent):
             setup_candidates = []
             scored_pool = self._candidate_direction_pool(direction, objective_direction)
             full_pool = scored_pool or self._persisted_direction_pool(scored_pool, market_structure)
+            # A confirmed raid against the prevailing leg earns its own pool.
+            # Without this a reversal can only be mapped after the trend label
+            # has flipped, which is after the move.
+            reversal_direction = self._reversal_direction(
+                market_structure=market_structure,
+                liquidity=liquidity,
+                zone=zone,
+            )
+            if reversal_direction and reversal_direction not in full_pool:
+                full_pool = list(full_pool) + [reversal_direction]
             for candidate_direction in full_pool:
                 setup_candidates.extend(
                     self._build_setup_candidates(
@@ -492,6 +502,57 @@ class SMCAgent(BaseAgent):
         if objective_direction in {"BUY", "SELL"} and objective_direction not in directions:
             directions.append(objective_direction)
         return directions
+
+    def _reversal_direction(
+        self,
+        *,
+        market_structure: Dict[str, Any] | None,
+        liquidity: Dict[str, Any] | None,
+        zone: str,
+    ) -> str | None:
+        """Direction implied by a confirmed raid against the prevailing leg.
+
+        Both existing pools read direction from the trend: the score is
+        dominated by it, and the structural fallback *is* it. Structure is a
+        lagging description of where price has been, so a reversal -- a move
+        that ends the prevailing leg -- has no route to a candidate until the
+        trend label has already flipped, which is long after the entry.
+
+        The 2026-07-29 chart is the case in point: a buy-side raid above the
+        4047 swing, rejected back into premium, then 4040 -> 3996. The agent
+        detected the raid and the premium zone correctly, scored NEUTRAL, fell
+        back to the bullish structure, and produced BUY candidates only. Zero
+        SELL candidates existed, so every downstream gate this session fixed
+        was never consulted -- an empty list reaches no gate.
+
+        This opens the opposite direction only on evidence the chart has
+        already printed, not on a forecast:
+
+          - a raid that actually occurred, against the prevailing leg
+          - graded at least MODERATE, i.e. price closed back inside the level
+          - price sitting in the matching extreme (premium for a sell)
+
+        All three are required. The candidate this produces still faces POI
+        quality, dominance, return probability, archetype conviction, the
+        planner's own gates and the live opposition ceiling.
+        """
+        trend = str((market_structure or {}).get("trend") or "").upper()
+        sweep = (liquidity or {}).get("recent_sweep") or {}
+        if not sweep.get("occurred"):
+            return None
+        confirmation = str(sweep.get("confirmation") or "").upper()
+        if confirmation not in {"STRONG", "MODERATE"}:
+            return None
+        sweep_type = str(sweep.get("type") or "")
+        zone = str(zone or "").upper()
+
+        # A buy-side raid is liquidity taken above; the reversal it implies is
+        # down, and it is only credible from the premium half of the range.
+        if sweep_type == "buy_side" and zone == "PREMIUM" and trend in {"BULLISH", "RANGING"}:
+            return "SELL"
+        if sweep_type == "sell_side" and zone == "DISCOUNT" and trend in {"BEARISH", "RANGING"}:
+            return "BUY"
+        return None
 
     def _persisted_direction_pool(
         self,
