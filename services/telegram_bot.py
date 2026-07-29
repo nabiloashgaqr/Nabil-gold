@@ -1021,7 +1021,14 @@ class TelegramService:
     # cancel a pending order; collapsing them into one generic note made it
     # impossible to tell which guard fired when reviewing a paper-trading run.
     CANCEL_REASON_NOTES = {
-        "PLAN_STALE": "Pending order was cancelled because the market moved away from the map without filling it.",
+        # Deliberately does not claim the market moved. PLAN_STALE covers
+        # several measured conditions -- waiting time, excursion, path
+        # progress, an expired plan -- and the old wording asserted the
+        # excursion case for all of them. On 2026-07-29 an order cancelled 103
+        # points from activation was reported as "the market moved away",
+        # which was simply untrue. The specific measurement is already carried
+        # in the cancellation reason line above this note.
+        "PLAN_STALE": "Pending order was cancelled because its map is no longer fresh — see the reason above for which limit was reached.",
         "OPPOSITE_PLAN_GUARD": "Pending order was cancelled because a confirmed plan in the opposite direction took over.",
         "RR_BELOW_MINIMUM": "Pending order was cancelled because its planned reward-to-risk fell below the minimum.",
         "LATE_TOUCH_REVALIDATION_FAILED": "Entry was touched late, and revalidation failed (no fresh confirmation, drift too large, or RR degraded).",
