@@ -655,9 +655,14 @@ def test_planner_levels_match_execution_levels_exactly() -> None:
     assert planned["tp1"] == executed["tp1"]
     assert planned["tp2"] == executed["tp2"]
     assert planned["rr_ratio"] == executed["rr"]
-    # And the targets are real pools, not ratio-derived numbers.
-    assert planned["tp1"] == 4064.74
+    # TP2 stays a real pool rather than a ratio-derived number. TP1 no longer
+    # takes the 4064.74 pool: at 0.69R against the floored stop it sits inside
+    # normal noise, and touching it arms the breakeven stop before the trade
+    # has travelled. It is skipped in favour of a target worth acting on.
     assert planned["tp2"] == 4030.0
+    assert planned["tp1"] != 4064.74
+    tp1_rr = abs(4075.15 - planned["tp1"]) / abs(planned["stop_loss"] - 4075.15)
+    assert tp1_rr >= 0.8
 
 
 def test_planner_marks_a_leg_execution_would_reject() -> None:

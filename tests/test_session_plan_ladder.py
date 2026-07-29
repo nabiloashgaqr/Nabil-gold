@@ -421,12 +421,22 @@ def test_near_liquidity_becomes_tp1_while_tp2_carries_the_reward_test() -> None:
 
     Judging viability on TP1 rejected real setups whose stop had been widened
     by the floor, even though a further mapped pool made the trade worthwhile.
+
+    The plan still qualifies on TP2, but the near pool is no longer accepted as
+    TP1: at 0.69R it is close enough that touching it arms the breakeven stop
+    almost immediately, which is exactly how a correct BUY was closed flat.
+    A pool short of min_tp1_rr is skipped, not fatal.
     """
     levels = _levels(4079.0, 4064.74, liquidity=[4064.74, 4030.00, 3985.15])
     assert not levels.get("reject_reason")
-    assert levels["tp1"] == 4064.74, "the near pool is a real target, not discarded"
     assert levels["tp2"] in {4030.00, 3985.15}
     assert levels["rr"] >= 1.5
+
+    entry, stop = 4075.15, levels["stop_loss"]
+    risk = abs(stop - entry)
+    tp1_rr = abs(entry - levels["tp1"]) / risk
+    assert tp1_rr >= 0.8, f"TP1 at {tp1_rr:.2f}R would arm breakeven too early"
+    assert abs(entry - levels["tp1"]) < abs(entry - levels["tp2"])
 
 
 def test_targets_are_never_invented_when_no_further_liquidity_exists() -> None:
