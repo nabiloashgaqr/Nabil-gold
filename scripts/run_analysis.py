@@ -320,7 +320,14 @@ def _plan_execution_hierarchy(plan: Dict[str, Any], role: str) -> Dict[str, Any]
 
 
 
-def _planned_order_type(config: Dict[str, Any], direction: str, entry: float, current_price: float, symbol: str) -> str:
+def _planned_order_type(
+    config: Dict[str, Any],
+    direction: str,
+    entry: float,
+    current_price: float,
+    symbol: str,
+    planned_stop: float | None = None,
+) -> str:
     oe = config.get("order_execution", {}) or {}
     entry_style = str(oe.get("entry_style", "market")).lower()
     if entry_style in {"market", "fixed_risk"}:
@@ -331,10 +338,39 @@ def _planned_order_type(config: Dict[str, Any], direction: str, entry: float, cu
         threshold = points_to_price(_safe_float(oe.get("pending_threshold_points"), 20), symbol=symbol)
     if abs(entry - current_price) <= max(threshold, 0.01):
         return f"{direction}_MARKET"
+    # Entries are MARKET or LIMIT. Never STOP.
+    #
+    # A STOP entry buys above the market or sells below it -- it pays a worse
+    # price than the one available now, in exchange for waiting for the move
+    # to prove itself. That is chasing, and it is the shape of the 2026-07-29
+    # loss: BUY STOP at 4028.77 placed above the market while three qualified
+    # agents read SELL, filled into a 310-point decline.
+    #
+    # A LIMIT is the opposite trade: it sells into a rally or buys into a dip,
+    # always at a price better than the market. When the mapped level is on
+    # the wrong side to do that, the entry is taken at the market instead of
+    # waiting for a worse one. Nothing is skipped and nothing is chased.
+    #
+    # The market fill is only offered while the mapped stop still protects the
+    # live price. A plan whose stop sits between the market and its own entry
+    # -- price 3992 for a BUY mapped 4042/4039 -- cannot be repriced to the
+    # market without inverting the trade, so it is refused outright rather
+    # than shipped as an unprotected position. This is caught downstream by
+    # validate_signal_before_send too; declaring it here keeps the refusal
+    # legible instead of surfacing as a late validation error.
+    stop_loss = _safe_float(planned_stop, 0.0)
     if direction == "BUY":
-        return "BUY_LIMIT" if entry < current_price else "BUY_STOP"
+        if entry < current_price:
+            return "BUY_LIMIT"
+        if stop_loss > 0 and stop_loss >= current_price:
+            return "NO_ENTRY"
+        return "BUY_MARKET"
     if direction == "SELL":
-        return "SELL_LIMIT" if entry > current_price else "SELL_STOP"
+        if entry > current_price:
+            return "SELL_LIMIT"
+        if stop_loss > 0 and stop_loss <= current_price:
+            return "NO_ENTRY"
+        return "SELL_MARKET"
     return "UNKNOWN"
 
 
@@ -768,7 +804,16 @@ def _build_plan_ladder_decision(
         )
         return None
     stop_loss = levels["stop_loss"]
-    order_type = f"{direction}_MARKET" if force_market else _planned_order_type(config, direction, entry_price, current_price, symbol)
+    order_type = f"{direction}_MARKET" if force_market else _planned_order_type(
+        config, direction, entry_price, current_price, symbol, planned_stop=stop_loss,
+    )
+    if order_type == "NO_ENTRY":
+        logger.info(
+            "Session-plan leg skipped for %s %s: mapped stop %.2f does not "
+            "protect a market fill at %.2f, and a stop entry is not permitted",
+            symbol, direction, stop_loss, current_price,
+        )
+        return None
     # Price sitting inside the mapped area is the setup arriving, not a reason
     # to stand down. This branch used to return None whenever the leg priced as
     # MARKET, so a confirmed map produced an order only while price was still
