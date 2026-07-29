@@ -30,11 +30,28 @@ class GeminiReviewService:
     _daily_quota_exhausted = False
     _daily_quota_reason = ""
 
+    # Model availability is per-key, not per-doc: a published id can still be
+    # refused with 404. Once a working model is found, or all of them fail,
+    # remember it so the rest of the run does not repeat the discovery.
+    _resolved_model = ""
+    _model_unavailable = False
+    _model_unavailable_reason = ""
+
+    # Ordered by cost per call: the cheapest that answers wins.
+    DEFAULT_FALLBACK_MODELS = (
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-flash-latest",
+    )
+
     @classmethod
     def reset_quota_state(cls) -> None:
-        """Clear the daily-quota latch (new process, or tests)."""
+        """Clear the daily-quota and model latches (new process, or tests)."""
         cls._daily_quota_exhausted = False
         cls._daily_quota_reason = ""
+        cls._resolved_model = ""
+        cls._model_unavailable = False
+        cls._model_unavailable_reason = ""
 
     def __init__(self, config: Dict[str, Any] | None = None) -> None:
         self.config = config or {}
@@ -58,7 +75,24 @@ class GeminiReviewService:
         # A per-minute 429 is worth waiting out; the ceiling keeps a single
         # review from stalling a 5-minute analysis cycle.
         self.max_retry_delay = int(llm_cfg.get("max_retry_delay_seconds", 20) or 20)
+        # Candidates tried in order when the configured model is refused.
+        configured = llm_cfg.get("fallback_models")
+        self.fallback_models = [
+            str(m).strip() for m in (configured or self.DEFAULT_FALLBACK_MODELS) if str(m).strip()
+        ]
+        # A model already proven to work this run wins over the configured one.
+        if GeminiReviewService._resolved_model:
+            self.model = GeminiReviewService._resolved_model
+        self._attempted_models: List[str] = [self.model]
         self.session = requests.Session()
+
+    def _next_fallback_model(self) -> str | None:
+        """Next candidate not yet tried in this call chain."""
+        for candidate in self.fallback_models:
+            if candidate not in self._attempted_models:
+                self._attempted_models.append(candidate)
+                return candidate
+        return None
 
     # ---- 429 classification ------------------------------------------------
 
@@ -273,6 +307,11 @@ class GeminiReviewService:
             reason = GeminiReviewService._daily_quota_reason or "daily quota exhausted"
             logger.info("Gemini %s skipped: %s", kind, reason)
             return self._unavailable(reason, kind=kind)
+        # Every candidate already failed this run; do not re-discover that.
+        if GeminiReviewService._model_unavailable:
+            reason = GeminiReviewService._model_unavailable_reason or "no usable Gemini model"
+            logger.info("Gemini %s skipped: %s", kind, reason)
+            return self._unavailable(reason, kind=kind)
 
         last_error = ""
         for attempt in range(1, self.max_retries + 1):
@@ -281,6 +320,34 @@ class GeminiReviewService:
                 resp = self.session.post(url, params={"key": self.api_key}, json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}}, timeout=self.timeout)
                 if resp.status_code != 200:
                     last_error = f"HTTP {resp.status_code}"
+                    # A 404 means this model id does not exist for this key --
+                    # availability differs between accounts, so a name that is
+                    # valid in the docs can still be refused. Retrying cannot
+                    # help: the model will not appear three seconds later.
+                    #
+                    # This is the same fault the 429 handling was written to
+                    # fix, in a different disguise: treating a permanent
+                    # failure as a transient one burned 36 seconds per cycle.
+                    # Fall forward through the configured alternatives instead,
+                    # and remember the working one for the rest of the run.
+                    if resp.status_code == 404:
+                        nxt = self._next_fallback_model()
+                        if nxt:
+                            logger.warning(
+                                "Gemini %s: model %s unavailable for this key (404) — trying %s",
+                                kind, self.model, nxt,
+                            )
+                            self.model = nxt
+                            GeminiReviewService._resolved_model = nxt
+                            continue
+                        reason = (
+                            f"no usable Gemini model for this key; tried "
+                            f"{', '.join(self._attempted_models)}"
+                        )
+                        GeminiReviewService._model_unavailable = True
+                        GeminiReviewService._model_unavailable_reason = reason
+                        logger.error("Gemini %s: %s", kind, reason)
+                        return self._unavailable(reason, kind=kind)
                     if resp.status_code == 429:
                         quota_kind, retry_after = self._classify_429(resp)
                         if quota_kind == "daily":
