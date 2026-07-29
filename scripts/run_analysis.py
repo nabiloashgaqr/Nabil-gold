@@ -2999,8 +2999,20 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 except Exception as audit_exc:  # noqa: BLE001
                     logger.warning("Failed to merge session plan execution audit: %s", audit_exc)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to build session plan: %s", exc)
-            all_results["session_plan"] = {"enabled": True, "plan_ready": False, "plan_status": "ERROR", "plan_reason": str(exc)}
+            # 21 of the last 300 cycles died here with a bare
+            # "'NoneType' object has no attribute 'get'" and no traceback, so
+            # the failing line was unknowable from the logs. A crash rate of
+            # 7% is not a rounding error: those are cycles that produced no
+            # map at all, and nobody could see why.
+            logger.exception("Failed to build session plan for %s", symbol)
+            all_results["session_plan"] = {
+                "enabled": True,
+                "plan_ready": False,
+                "plan_status": "ERROR",
+                # Keep the type in the stored reason so the rejection report
+                # can separate real refusals from crashes at a glance.
+                "plan_reason": f"planner crashed: {type(exc).__name__}: {exc}",
+            }
             try:
                 session_plan_snapshot_id = database.save_session_plan(all_results["session_plan"], session_plan_context)
             except Exception as persist_exc:  # noqa: BLE001

@@ -58,8 +58,23 @@ def _bar(count: int, total: int, width: int = 32) -> str:
     return "█" * filled + "·" * (width - filled)
 
 
+def _is_crash(reason: str) -> bool:
+    """A crash is not a refusal, and counting them together hides both."""
+    text = (reason or "").lower()
+    return (
+        "planner crashed" in text
+        or "nonetype" in text
+        or "object has no attribute" in text
+        or "traceback" in text
+        or "keyerror" in text
+        or "indexerror" in text
+    )
+
+
 def _reason_family(reason: str) -> str:
     text = (reason or "").lower()
+    if _is_crash(reason):
+        return f"⚠ CRASH — {(reason or '')[:44]}"
     for needle, label in (
         ("too weak for planning", "primary thesis too weak"),
         ("archetype conviction", "archetype conviction LOW"),
@@ -98,8 +113,14 @@ def main() -> None:
     print("\n" + "=" * 62)
     print(f"PLAN REJECTION ANALYSIS — last {len(rows)} cycles")
     print("=" * 62)
+    crashes = [r for r in refused if _is_crash(str(r.get("plan_reason") or ""))]
+    genuine = [r for r in refused if r not in crashes]
+
     print(f"  published : {len(ready)}  ({len(ready) / len(rows) * 100:.1f}%)")
-    print(f"  refused   : {len(refused)}")
+    print(f"  refused   : {len(genuine)}")
+    if crashes:
+        print(f"  CRASHED   : {len(crashes)}  ({len(crashes) / len(rows) * 100:.1f}%)"
+              "  ← not refusals: cycles that produced no map at all")
 
     families = Counter(_reason_family(str(r.get("plan_reason") or "")) for r in refused)
     if families:
