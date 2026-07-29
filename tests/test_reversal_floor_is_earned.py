@@ -112,11 +112,25 @@ def test_uploaded_chart_qualifies_once_the_rejection_prints() -> None:
     )
     assert sells, "Phase G should already provide the SELL candidate"
 
-    # Still watching: raid confirmed, rejection not yet printed.
+    # Raid confirmed and price is at the level it just defended.
+    #
+    # UPDATED after the swept-level POI shipped. This previously asserted the
+    # map sat just under the bar at 59, which was correct while the only
+    # tradable zone was the range midpoint at 4027.50: price was 18 points
+    # away, the trigger read AWAY_FROM_POI, and no rejection could be observed
+    # from there. Publishing the raided 4047 level as a POI puts the entry
+    # where the rejection actually happens, so the trigger now reads
+    # TOUCH_NO_REJECTION with price at 4045 -- closer evidence, and the score
+    # rises on merit rather than because any threshold moved.
     watching = float(result.get("day_archetype_confidence") or 0)
-    assert 55 < watching < BAR, (
-        "before the rejection prints the map should sit just under the bar, "
-        f"not be dismissed at 55 (got {watching})"
+    assert watching >= BAR, (
+        "with price at the level it just raided, the thesis should clear the "
+        f"bar rather than sit under it (got {watching})"
+    )
+    swept = [c for c in sells if c.get("poi_type") == "swept_level"]
+    assert swept, "the raided level must be among the SELL candidates"
+    assert float(swept[0].get("entry_price") or 0) >= 4045.0, (
+        "the entry must sit at the defended level, not at the range midpoint"
     )
 
     # Price returns to the mapped level and rejects it.
