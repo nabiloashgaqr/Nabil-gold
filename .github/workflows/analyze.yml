@@ -82,7 +82,8 @@ jobs:
             tests/test_day_map_veto_scope.py \
             tests/test_authority_is_falsifiable.py \
             tests/test_analyst_scoreboard.py \
-            tests/test_exit_replay_harness.py
+            tests/test_exit_replay_harness.py \
+            tests/test_archetype_floors_are_earned.py
 
       - name: 🔎 Validate Production Setup
         run: |
