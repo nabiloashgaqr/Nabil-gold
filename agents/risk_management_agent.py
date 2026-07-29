@@ -364,10 +364,12 @@ class RiskManagementAgent(BaseAgent):
             if abs(entry - current) <= max(threshold, 0.01):
                 return f"{direction}_MARKET"
 
+        # Entries are MARKET or LIMIT. Never STOP -- see the note in
+        # scripts/run_analysis.py::_planned_order_type.
         if direction == "BUY":
-            return "BUY_LIMIT" if entry < current else "BUY_STOP"
+            return "BUY_LIMIT" if entry < current else "BUY_MARKET"
         if direction == "SELL":
-            return "SELL_LIMIT" if entry > current else "SELL_STOP"
+            return "SELL_LIMIT" if entry > current else "SELL_MARKET"
         return f"{direction}_MARKET"
 
     def _smart_entry(

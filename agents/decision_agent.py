@@ -739,10 +739,14 @@ class DecisionAgent(BaseAgent):
         threshold = float(oe.get("market_threshold_points" if entry_style == "hybrid" else "pending_threshold_points", 30) or 30) / (10.0 if entry_style == "hybrid" else 1.0)
         if abs(entry - current) <= max(threshold, 0.01):
             return f"{signal}_MARKET"
+        # Entries are MARKET or LIMIT. Never STOP -- see the note in
+        # scripts/run_analysis.py::_planned_order_type. A level that cannot be
+        # waited for at a better price is taken at the market rather than
+        # chased to a worse one.
         if signal == "BUY":
-            return "BUY_LIMIT" if entry < current else "BUY_STOP"
+            return "BUY_LIMIT" if entry < current else "BUY_MARKET"
         if signal == "SELL":
-            return "SELL_LIMIT" if entry > current else "SELL_STOP"
+            return "SELL_LIMIT" if entry > current else "SELL_MARKET"
         return "UNKNOWN"
 
     def _to_trade_decision(self, analysis: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
