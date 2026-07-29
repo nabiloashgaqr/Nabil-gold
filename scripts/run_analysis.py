@@ -11,7 +11,7 @@ import os
 import sys
 import html
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import Any, Dict, List
 
@@ -1335,6 +1335,30 @@ def _revive_recent_ready_plan(
         revived = deepcopy(payload)
         revived["revived_from_snapshot"] = True
         revived["revived_age_minutes"] = round(age_minutes, 1)
+        # An order created from this map is new, but it used to inherit the
+        # original map's expiry -- so a plan built at 02:00 produced a 07:41
+        # order that was already 71% through its life at birth, and the
+        # planner cancelled it at 10:14 as "session plan expired" after only
+        # 2.5 hours. Half an hour later the same area was republished, which
+        # reads as the system contradicting itself.
+        #
+        # The thesis is still the original one, so the map keeps its identity
+        # and its own age is recorded; what is refreshed is the deadline any
+        # order derived from it will be judged against. The order's own
+        # staleness window (pending_freshness.stale_after_hours) remains the
+        # binding limit, which is the check that should have governed all
+        # along.
+        planner_cfg = (config.get("session_planner") or {}) if isinstance(config, dict) else {}
+        expire_hours = _safe_float(planner_cfg.get("expire_after_hours"), 8.0) or 8.0
+        renewed = now + timedelta(hours=expire_hours)
+        revived["original_plan_expires_at"] = payload.get("plan_expires_at")
+        revived["plan_expires_at"] = renewed.replace(microsecond=0).isoformat()
+        revived["plan_expiry_renewed_on_revival"] = True
+        logger.info(
+            "Revived day map expiry renewed: %s -> %s (orders judged by their "
+            "own age, not the source map's)",
+            payload.get("plan_expires_at"), revived["plan_expires_at"],
+        )
         return revived
     return None
 
