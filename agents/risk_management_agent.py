@@ -12,6 +12,18 @@ from typing import Any, Dict, List, Tuple
 from agents.base_agent import BaseAgent
 from utils.helpers import calculate_pips, load_config, get_agent_weights
 from utils.instruments import points_to_price, price_to_points
+from services.moment_quality import MomentQualityService
+
+
+def _safe_moment(moment: Dict[str, Any]) -> float:
+    """Read the multiplier defensively; sizing must survive a bad payload."""
+    try:
+        value = float((moment or {}).get("multiplier", 1.0))
+    except (TypeError, ValueError):
+        return 1.0
+    if value <= 0 or value > 1.0:
+        return 1.0
+    return value
 
 class RiskManagementAgent(BaseAgent):
     """Evaluate risk parameters and approve/reject a potential trade."""
@@ -133,7 +145,16 @@ class RiskManagementAgent(BaseAgent):
             checks["trade_grade_filter"] = risk_profile["grade"] not in {"D", "F"}
             approved = all(checks.values())
             rejection_reason = None if approved else self._first_failed_reason(checks)
-            position_size = self._position_size(entry_price, stop_loss, risk_multiplier=risk_profile["risk_multiplier"])
+            # Grade sizes the setup; moment quality sizes the conditions it is
+            # being taken in. A dead Asia range and the London open are not the
+            # same trade even with an identical structure. Sizing only -- this
+            # can never open or refuse a position, because a sizing input with
+            # veto power becomes an untested second admission gate.
+            moment = MomentQualityService(self.config).review(results)
+            combined_multiplier = risk_profile["risk_multiplier"] * _safe_moment(moment)
+            position_size = self._position_size(
+                entry_price, stop_loss, risk_multiplier=combined_multiplier
+            )
 
             return {
                 "agent": self.name,
