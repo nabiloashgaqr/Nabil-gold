@@ -30,7 +30,9 @@ on:
           - end_to_end_1221
           # Phase B: a stale day map retired by the live agent book
           - map_retirement
-          # Run all four in sequence
+          # Why the 17:0x SELL thesis exit produced no BUY market entry
+          - exit_without_entry
+          # Run all five in sequence
           - all
       run_tests:
         description: "Also run the execution-path test suite"
@@ -75,9 +77,13 @@ jobs:
             map_retirement)
               python scripts/prove_map_retirement.py
               ;;
+            exit_without_entry)
+              python scripts/prove_exit_without_entry.py
+              ;;
             all)
               for s in prove_chart_to_order prove_direction_veto \
-                       prove_1221_end_to_end prove_map_retirement; do
+                       prove_1221_end_to_end prove_map_retirement \
+                       prove_exit_without_entry; do
                 if [ -f "scripts/$s.py" ]; then
                   echo "════════════════════════════════════════════════════"
                   echo "  scripts/$s.py"
