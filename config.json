@@ -621,12 +621,11 @@
             "BUY_MARKET",
             "SELL_MARKET",
             "BUY_LIMIT",
-            "SELL_LIMIT",
-            "BUY_STOP",
-            "SELL_STOP"
+            "SELL_LIMIT"
         ],
         "description": "Paper order classification only: market, limit, or stop based on entry vs current price.",
-        "pending_support_removed": false
+        "pending_support_removed": false,
+        "description_allowed_order_types": "أوامر الدخول: ماركت أو ليميت فقط. أُلغي BUY_STOP و SELL_STOP نهائياً. أمر STOP يشتري فوق السوق أو يبيع تحته — أي يدفع سعراً أسوأ من المتاح الآن مقابل انتظار تأكيد الحركة، وهذه مطاردة. صفقة 29 يوليو الخاسرة كانت بهذا الشكل: BUY STOP عند 4028.77 فوق السوق بينما ثلاثة وكلاء مؤهلين يقولون بيع، فامتلأت داخل هبوط 310 نقطة. أمر LIMIT عكسه: يبيع في القوة ويشتري في الضعف بسعر أفضل دائماً. حين يقع المستوى في الجهة التي لا تسمح بذلك، يُنفَّذ ماركت بالسعر الحالي بدل انتظار سعر أسوأ — لا صفقة تُهمَل ولا سعر يُطارَد."
     },
     "operation_mode": "classic_consensus",
     "operation_modes": {
