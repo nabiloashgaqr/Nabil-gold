@@ -88,7 +88,8 @@ jobs:
             tests/test_reversal_floor_is_earned.py \
             tests/test_swept_level_poi.py \
             tests/test_order_block_detection_window.py \
-            tests/test_no_stop_entry_orders.py
+            tests/test_no_stop_entry_orders.py \
+            tests/test_pending_survives_session_change.py
 
       - name: 🔎 Validate Production Setup
         run: |
