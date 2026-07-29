@@ -59,6 +59,10 @@ class OpenTradesManager(BaseAgent):
         # trailing/breakeven stop is left to manage the exit instead.
         self.keep_protected_winners_open = bool(self.management.get("keep_protected_winners_open", True))
         self.auto_be = bool(self.management.get("auto_move_sl_to_entry_after_tp1", True))
+        # Minimum travel, in R, before touching TP1 is allowed to arm the
+        # breakeven stop. Measured in R rather than points so it holds across
+        # instruments and stop widths.
+        self.min_breakeven_rr = float(self.management.get("min_breakeven_rr", 0.5) or 0.0)
 
         # Trailing stop + breakeven: read from trade_management first,
         # then instruments (per-symbol override), then trailing_stop (legacy).
@@ -169,6 +173,7 @@ class OpenTradesManager(BaseAgent):
             "trailing_step_points": self.trailing_step,
             "trailing_min_profit_lock_points": self.trailing_min_profit_lock,
             "early_breakeven_points": self.early_breakeven_points,
+            "min_breakeven_rr": self.min_breakeven_rr,
         }
         override = self.profile_overrides.get(profile) or {}
         for key in list(params.keys()):
@@ -690,10 +695,39 @@ class OpenTradesManager(BaseAgent):
             new_status = "TP1_HIT"
             events.append("TP1_HIT")
             partial_close = True
+            # Moving the stop to entry is only protection if the trade has
+            # actually travelled relative to what it is risking. A TP1 sitting
+            # 22 points away against a 133-point stop is 0.16R: price tags it
+            # within a candle, the stop snaps to entry, and ordinary noise
+            # closes a correct trade flat.
+            #
+            # The test is deliberately in R, not points. A fixed point
+            # threshold would defer breakeven on a perfectly sound 1R target
+            # simply because the instrument trades in smaller ranges.
             if bool(management["auto_be"]):
-                sl_moved_to_entry = True
-                new_stop_loss = entry  # actually persist breakeven, not just the flag
-                events.append("MOVE_SL_TO_BE")
+                min_be_rr = float(management.get("min_breakeven_rr") or 0.0)
+                # Measure against the stop the trade was opened with. The live
+                # stop may already have been trailed, which would understate
+                # the original risk and let a tiny target qualify.
+                risk_reference = (
+                    self._f(trade.get("initial_stop_loss"), 0.0) or stop_loss
+                )
+                risk_points = abs(
+                    calculate_pips(entry, risk_reference, trade_type, symbol)
+                ) if risk_reference else 0.0
+                travelled = abs(calculate_pips(entry, current_price, trade_type, symbol))
+                travelled_rr = (travelled / risk_points) if risk_points > 0 else 0.0
+                if min_be_rr > 0 and risk_points > 0 and travelled_rr < min_be_rr:
+                    self.logger.info(
+                        "Breakeven deferred for %s: TP1 touched at only %.2fR "
+                        "(needs %.2fR) — keeping the structural stop so the "
+                        "trade is not stopped out flat by noise",
+                        trade.get("id"), travelled_rr, min_be_rr,
+                    )
+                else:
+                    sl_moved_to_entry = True
+                    new_stop_loss = entry  # actually persist breakeven, not just the flag
+                    events.append("MOVE_SL_TO_BE")
         elif thesis_exit.get("scale_out"):
             new_status = "PARTIAL"
             partial_close = True
