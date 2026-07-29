@@ -933,11 +933,46 @@ def _planner_execution_gate(decision: Dict[str, Any], config: Dict[str, Any]) ->
         elif direction in {"BUY", "SELL"}:
             oppose_agents.append(key)
 
-    # Opposition is reported, not enforced, here. The planner already applies
-    # max_opposing_agents_for_ready when building the map; adding a second
-    # veto at this layer would silently change which signals are admitted.
-    # Surfacing the dissent keeps the audit trail honest and lets the
-    # confidence figure price it in.
+    # Opposition used to be reported here and enforced only by the planner,
+    # on the grounds that a second veto would be redundant. It is not: the
+    # planner tests opposition when it *builds* a map, while this gate is the
+    # last point that sees the agents as they are right now, immediately
+    # before an order is created. Those are different moments, and two paths
+    # exploit the gap:
+    #
+    #   - a revived map (_revive_recent_ready_plan) replays a snapshot built
+    #     hours earlier and never re-tests the current agent split;
+    #   - a WAIT cycle falls back to the plan's session_bias above, so the
+    #     agents are re-counted against a direction the live consensus did
+    #     not choose.
+    #
+    # The result was an admission printed as "3 qualified agents aligned"
+    # while three qualified agents were arguing the other way. Apply the same
+    # ceiling the planner uses, at the moment it actually matters.
+    planner_cfg = (config.get("session_planner") or {}) if isinstance(config, dict) else {}
+    # Default to the planner's own ceiling of 1. `or 0` would be wrong here:
+    # a config without a session_planner block would collapse the limit to
+    # zero and refuse any dissent at all.
+    _raw_max_opposing = planner_cfg.get("max_opposing_agents_for_ready", 1)
+    try:
+        max_opposing = int(_raw_max_opposing)
+    except (TypeError, ValueError):
+        max_opposing = 1
+    oppose_count = len(oppose_agents)
+    if oppose_count > max_opposing:
+        return {
+            "allow": False,
+            "kind": "OPPOSED_BY_LIVE_AGENTS",
+            "support_count": support_count,
+            "support_agents": support_agents,
+            "oppose_agents": oppose_agents,
+            "oppose_count": oppose_count,
+            "reason": (
+                f"{oppose_count} qualified agents oppose the mapped {side} "
+                f"(limit {max_opposing}): {', '.join(oppose_agents)}"
+            ),
+        }
+
     if support_count >= min_agents:
         return {
             "allow": True,
@@ -1011,6 +1046,11 @@ def _planner_execution_gate(decision: Dict[str, Any], config: Dict[str, Any]) ->
         "allow": False,
         "support_count": support_count,
         "support_agents": support_agents,
+        # Carry the dissent on the refusal too: a rejection that reports only
+        # the support count reads as "not quite enough agreement" when the
+        # real story may be active disagreement.
+        "oppose_agents": oppose_agents,
+        "oppose_count": len(oppose_agents),
         "reason": f"planner execution requires 3 qualified agents or 2 agents + macro/gemini; got {support_count}",
     }
 
