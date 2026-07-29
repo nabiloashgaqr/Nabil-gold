@@ -222,17 +222,44 @@ class SMCAgent(BaseAgent):
         if len(candles) < 12:
             return blocks
 
-        for index in range(2, len(candles) - 4):
+        # Scan up to the newest candle that has at least one closed bar after
+        # it. The bound used to be ``len - 4``, which stopped at ``len - 5``
+        # and meant the newest candle was never part of any block's impulse
+        # window -- a whole bar discarded for no stated reason.
+        #
+        # The impulse window itself is now elastic. Demanding three closed
+        # candles meant 45 minutes on a 15m chart before a block could be
+        # named, and gold regularly completes a leg inside two: measured on a
+        # reversal, the bearish block first appeared when price was already
+        # 180 points beyond it, and 410 points by the time the third candle
+        # closed. A block nobody can still trade is not a detection.
+        #
+        # The evidence standard is unchanged -- displacement must clear the
+        # same ``atr * 1.20`` threshold. What changes is that an unambiguous
+        # move is allowed to prove itself with fewer bars, and any block named
+        # that way is marked PROVISIONAL until the full window has closed.
+        impulse_threshold = max(atr * 1.20, 1.20)
+        for index in range(2, len(candles) - 1):
             candle = candles[index]
             open_price = self._f(candle.get("open"))
             close_price = self._f(candle.get("close"))
             high = self._f(candle.get("high"))
             low = self._f(candle.get("low"))
-            next_3 = candles[index + 1 : index + 4]
-            future_close = self._f(next_3[-1].get("close"))
-            impulse = abs(future_close - close_price)
-            if impulse < max(atr * 1.20, 1.20):
+            window = candles[index + 1 : index + 4]
+            if not window:
                 continue
+            # Take the furthest close reached so far rather than only the
+            # third one: a decisive first candle is not made less decisive by
+            # the two that have yet to print.
+            impulse = max(
+                abs(self._f(bar.get("close")) - close_price) for bar in window
+            )
+            if impulse < impulse_threshold:
+                continue
+            future_close = self._f(
+                max(window, key=lambda bar: abs(self._f(bar.get("close")) - close_price)).get("close")
+            )
+            confirmation_state = "CONFIRMED" if len(window) >= 3 else "PROVISIONAL"
 
             bearish_candle = close_price < open_price
             bullish_candle = close_price > open_price
@@ -247,6 +274,8 @@ class SMCAgent(BaseAgent):
 
             mitigation = self._mitigation_status(candles[index + 4 :], zone)
             mitigated = mitigation["status"] in {"MITIGATED", "INVALIDATED"}
+            # A provisional block has, by definition, no candles past its
+            # impulse window yet, so it cannot have been mitigated.
             displacement_quality = "STRONG" if impulse >= atr * 2.0 else "MODERATE" if impulse >= atr * 1.5 else "WEAK"
             strength = "strong" if displacement_quality == "STRONG" and mitigation["status"] == "FRESH" else "medium" if displacement_quality in {"STRONG", "MODERATE"} and mitigation["status"] != "INVALIDATED" else "weak"
             equilibrium = (zone["top"] + zone["bottom"]) / 2
@@ -261,6 +290,7 @@ class SMCAgent(BaseAgent):
                     "invalidated": mitigation["status"] == "INVALIDATED",
                     "strength": strength,
                     "displacement_quality": displacement_quality,
+                    "confirmation_state": confirmation_state,
                     "displacement_atr": round(impulse / max(atr, 0.01), 2),
                     "timeframe": timeframe,
                     "created_at": candle.get("time"),
