@@ -42,15 +42,23 @@ def _classify(
     *,
     confirmation: str = "MODERATE",
     quality: str = "STRONG",
-    zone: str = "PREMIUM",
+    zone: str = "EQUILIBRIUM",
     trigger: str = "REJECTION_CONFIRMED",
     dominance: float = 0.0,
     trend: str = "RANGING",
 ) -> dict:
     """Force the LIQUIDITY_REVERSAL_DAY branch and read its verdict.
 
-    ``trend`` defaults to RANGING so the earlier continuation and
-    reversal-after-sweep branches do not capture the case first.
+    ``trend`` is RANGING and ``zone`` is EQUILIBRIUM so the earlier branches
+    do not capture the case first.
+
+    UPDATED: ``zone`` was PREMIUM until the reversal branch widened to accept
+    MODERATE raids. RANGING + buy_side + PREMIUM satisfies
+    ``counter_trend_sweep``, so this fixture began landing on
+    REVERSAL_AFTER_SWEEP_DAY and stopped exercising the branch it was written
+    for. EQUILIBRIUM keeps it on the liquidity-reversal path; the zone credit
+    it loses is asserted separately in
+    ``test_mid_range_reversal_is_weaker_than_an_extreme_one``.
     """
     return SMCAgent(CONFIG)._day_archetype(
         direction="SELL",
@@ -191,11 +199,30 @@ def test_raid_grade_changes_the_score() -> None:
 
 
 def test_mid_range_reversal_is_weaker_than_an_extreme_one() -> None:
-    """Reverting from equilibrium is a weaker claim than from premium."""
-    premium = _classify(zone="PREMIUM")
-    equilibrium = _classify(zone="EQUILIBRIUM")
+    """Reverting from equilibrium is a weaker claim than from premium.
 
-    assert premium["confidence"] > equilibrium["confidence"]
+    Measured on ``_reversal_floor`` directly rather than through
+    ``_day_archetype``. Once the reversal branch accepted MODERATE raids, a
+    PREMIUM fixture stopped reaching LIQUIDITY_REVERSAL_DAY at all and landed
+    on REVERSAL_AFTER_SWEEP_DAY instead -- so comparing the two zones through
+    the classifier compared two different branches with different floors, and
+    measured branch selection rather than the zone credit it is checking.
+    """
+    agent = SMCAgent(CONFIG)
+    sweep = {"occurred": True, "type": "buy_side", "confirmation": "MODERATE"}
+
+    premium, _ = agent._reversal_floor(
+        recent_sweep=sweep, structure_quality="STRONG", zone="PREMIUM",
+        trigger_state="REJECTION_CONFIRMED",
+    )
+    equilibrium, _ = agent._reversal_floor(
+        recent_sweep=sweep, structure_quality="STRONG", zone="EQUILIBRIUM",
+        trigger_state="REJECTION_CONFIRMED",
+    )
+
+    assert premium > equilibrium, (
+        f"premium {premium} must outrank equilibrium {equilibrium}"
+    )
 
 
 def test_the_conviction_threshold_is_untouched() -> None:

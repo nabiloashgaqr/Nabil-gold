@@ -83,13 +83,42 @@ def test_a_ranging_structure_still_qualifies() -> None:
 
 # --- what must still be refused ------------------------------------------
 
-@pytest.mark.parametrize("confirmation", ["WEAK", "MODERATE", ""])
-def test_a_sweep_without_a_strong_rejection_is_refused(confirmation: str) -> None:
-    """STRONG is the detector's own label for closing back inside the level."""
+@pytest.mark.parametrize("confirmation", ["WEAK", ""])
+def test_a_sweep_without_a_confirmed_rejection_is_refused(confirmation: str) -> None:
+    """An unconfirmed raid never printed a reversal, so it is not one.
+
+    UPDATED: MODERATE was removed from this list.
+
+    The original reasoning was that STRONG is "the detector's own label for
+    closing back inside the level". Reading the detector shows that is true of
+    MODERATE as well -- both require ``close < level`` after the wick pierced
+    it, and they differ only in where the close sits inside the bar (far third
+    versus far half). The rejection has printed in both cases.
+
+    Live data settled it. Over 274 cycles, 64% of days fell to a fallback
+    archetype with a floor of 50, and every directional plan refused in that
+    window died at the conviction gate -- 25 of 25 SELL maps and 3 of 3 BUY
+    maps, all reporting "archetype conviction LOW". Excluding MODERATE was a
+    large share of that.
+
+    WEAK stays refused: there the close did not return inside the level, so no
+    reversal was printed at all. That distinction is the one that matters and
+    it is preserved.
+    """
     result = _archetype(confirmation=confirmation)
 
     assert result["name"] != "REVERSAL_AFTER_SWEEP_DAY"
     assert result["confidence"] < CONVICTION_BAR
+
+
+def test_a_moderate_rejection_is_classified_but_ranked_lower() -> None:
+    """MODERATE qualifies, and STRONG still outranks it."""
+    moderate = _archetype(confirmation="MODERATE")
+    strong = _archetype(confirmation="STRONG")
+
+    assert moderate["name"] == "REVERSAL_AFTER_SWEEP_DAY"
+    assert moderate["confidence"] >= CONVICTION_BAR
+    assert strong["confidence"] > moderate["confidence"]
 
 
 def test_the_wrong_half_of_the_range_is_refused() -> None:
