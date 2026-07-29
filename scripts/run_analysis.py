@@ -43,6 +43,7 @@ from services.adaptive_execution import AdaptiveExecutionService
 from services.directional_authority import DirectionalAuthorityService
 from services.day_map_sanity import DayMapSanityService
 from services.setup_memory import SetupMemoryService
+from services.setup_performance import SetupPerformanceService
 from services.session_planner import SessionPlannerService
 from utils.helpers import load_config, setup_logging, get_agent_weights
 from utils.instruments import enabled_instruments, config_for_instrument, normalize_symbol, price_to_points, points_to_price
@@ -3489,6 +3490,39 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                     stage="duplicate / re-entry filter", reason=duplicate_reason,
                 )
                 return
+            # Selective memory: how has this exact pattern done lately, in
+            # this session? The learning service already consumes the same
+            # rows nightly to retune agent weights, but nothing asked the
+            # question at the moment of execution -- so a setup could fail
+            # three times in a session and still be taken at full confidence
+            # the next morning.
+            try:
+                setup_review = SetupPerformanceService(database, config).review(decision)
+                decision["setup_performance"] = setup_review
+                penalty = _safe_float(setup_review.get("confidence_penalty"), 0.0)
+                if setup_review.get("veto"):
+                    logger.info(
+                        "Setup memory vetoed %s for %s: %s",
+                        decision_type, symbol, setup_review.get("reason"),
+                    )
+                    _notify_blocked_directional_signal(
+                        telegram=telegram, decision=decision, all_results=all_results,
+                        database=database, config=config, send_hourly_now=send_hourly_now,
+                        delivery=status_delivery,
+                        stage="setup memory", reason=setup_review.get("reason"),
+                    )
+                    return
+                if penalty > 0:
+                    before = _safe_float(decision.get("confidence"), 0.0)
+                    decision["confidence"] = round(max(0.0, before - penalty), 1)
+                    decision.setdefault("warnings", []).append(str(setup_review.get("reason")))
+                    logger.info(
+                        "Setup memory lowered confidence %.1f%% → %.1f%% for %s: %s",
+                        before, decision["confidence"], symbol, setup_review.get("reason"),
+                    )
+            except Exception as exc:  # noqa: BLE001 - memory must never block a trade
+                logger.warning("Setup performance review failed: %s", exc)
+
             signal_violations = validate_signal_before_send(decision, config)
             if signal_violations:
                 logger.error(
