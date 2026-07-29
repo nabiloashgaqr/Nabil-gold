@@ -73,6 +73,27 @@ async def main_async() -> int:
 
     final_report_text = result.get("report_text", "")
     stats_dict = result.get("stats") or {}
+
+    # Execution quality sits alongside the P&L summary because the two answer
+    # different questions. A week can look flat in the trade table while the
+    # system quietly refused every plan, or opened every one against dissent.
+    try:
+        from services.execution_metrics import build_execution_metrics, format_execution_metrics
+
+        metrics = build_execution_metrics(database, days=7)
+        metric_lines = format_execution_metrics(metrics)
+        if metric_lines:
+            final_report_text = "\n".join([final_report_text, "", *metric_lines])
+            result["report_text"] = final_report_text
+            result["execution_metrics"] = metrics
+            logger.info(
+                "📐 Execution metrics: %s decisions, plan→order %.1f%%, median TP1 %sR",
+                metrics.get("decisions_recorded"),
+                metrics.get("plan_to_order_rate_pct", 0.0),
+                metrics.get("median_tp1_rr"),
+            )
+    except Exception as exc:  # noqa: BLE001 - reporting must never break the run
+        logger.warning("Failed to append execution metrics: %s", exc)
     try:
         gemini = get_gemini_review_service(config)
         if not gemini.enabled:

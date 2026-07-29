@@ -1496,6 +1496,10 @@ def _execute_session_plan_ladder(
                 return created
             continue
         database.save_trade(ladder_decision)
+        _record_decision_audit(
+            database, ladder_decision, config,
+            stage="delivered", outcome="SENT", reason=f"planner ladder {role}",
+        )
         staged_trades.append(
             {
                 "id": trade_id,
@@ -2402,6 +2406,56 @@ class _HourlyStatusDelivery:
             logger.warning("Failed to send hourly status: %s", exc)
 
 
+def _record_decision_audit(
+    database: Any,
+    decision: Dict[str, Any],
+    config: Dict[str, Any],
+    *,
+    stage: str,
+    outcome: str,
+    reason: Any = None,
+) -> None:
+    """Write one row describing how this cycle ended.
+
+    Deliberately best-effort: an audit failure must never stop a trade or a
+    refusal from happening. The row carries the numbers needed to judge the
+    decision later -- the R-multiples especially, since a target too close to
+    entry was the fault that took longest to see.
+    """
+    if database is None:
+        return
+    try:
+        symbol = str(decision.get("symbol") or config.get("symbol", "XAU/USD"))
+        signal = decision.get("signal") or {}
+        entry_info = (signal.get("entry") or {}) if isinstance(signal, dict) else {}
+        entry = _safe_float(entry_info.get("price"), 0.0) or _safe_float(decision.get("current_price"), 0.0)
+        stop = _safe_float(signal.get("stop_loss"), 0.0) if isinstance(signal, dict) else 0.0
+        tp1 = _safe_float(signal.get("tp1"), 0.0) if isinstance(signal, dict) else 0.0
+        tp2 = _safe_float(signal.get("tp2"), 0.0) if isinstance(signal, dict) else 0.0
+        risk = abs(price_to_points(entry - stop, symbol=symbol)) if entry > 0 and stop > 0 else 0.0
+        gate = decision.get("planner_execution_gate") or {}
+        database.save_decision_audit({
+            "symbol": symbol,
+            "stage": stage,
+            "outcome": outcome,
+            "side": str(decision.get("decision") or "").upper(),
+            "reason": str(reason or "")[:500] or None,
+            "entry_price": round(entry, 2) if entry else None,
+            "stop_loss": round(stop, 2) if stop else None,
+            "tp1": round(tp1, 2) if tp1 else None,
+            "tp2": round(tp2, 2) if tp2 else None,
+            "tp1_rr": round(abs(price_to_points(tp1 - entry, symbol=symbol)) / risk, 2) if risk > 0 and tp1 > 0 else None,
+            "tp2_rr": round(abs(price_to_points(tp2 - entry, symbol=symbol)) / risk, 2) if risk > 0 and tp2 > 0 else None,
+            "confidence": _safe_float(decision.get("confidence"), 0.0) or None,
+            "support_count": gate.get("support_count") if isinstance(gate, dict) else None,
+            "oppose_count": gate.get("oppose_count") if isinstance(gate, dict) else None,
+            "entry_mode": decision.get("entry_mode"),
+            "trade_id": decision.get("trade_id"),
+        })
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to record decision audit (%s): %s", stage, exc)
+
+
 def _notify_blocked_directional_signal(
     *,
     telegram: Any,
@@ -2425,6 +2479,13 @@ def _notify_blocked_directional_signal(
     `should_send_status` defined and unused while the setting it reads did
     nothing.
     """
+    # Persist first, notify second. Telegram delivery is optional and gated by
+    # the status window; the audit trail is not. Recording only what was
+    # announced would leave the quiet refusals -- the majority -- invisible,
+    # which is how a filter can block every signal for a week unnoticed.
+    _record_decision_audit(
+        database, decision, config, stage=stage, outcome="BLOCKED", reason=reason,
+    )
     if not (send_hourly_now or should_send_status(config)):
         return
     side = str(decision.get("decision") or decision.get("signal") or "").upper()
@@ -3465,6 +3526,13 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Failed to cancel stale pending orders before saving new signal: %s", exc)
                 database.save_trade(decision)
+                # The delivered half of the trail. Without it the audit can
+                # count refusals but not the rate they represent.
+                _record_decision_audit(
+                    database, decision, config,
+                    stage="delivered", outcome="SENT",
+                    reason=decision.get("entry_mode"),
+                )
                 if decision.get("setup_id"):
                     try:
                         setup_memory.mark_entry_triggered(
