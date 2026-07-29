@@ -153,6 +153,24 @@ def _report(window_label: str, rows: List[Dict[str, Any]], config: Dict[str, Any
     print("\n" + "=" * 62)
     print(f"PLAN REJECTION ANALYSIS — {window_label}")
     print("=" * 62)
+
+    # An empty window used to divide by zero on the very next line, after the
+    # header had already been printed. The operator saw a report that started
+    # and then stopped -- no error, no explanation, looking exactly like an
+    # analysis that ran and found nothing to say. A diagnostic that fails
+    # silently is worse than none.
+    if not rows:
+        print("  No cycles in this window.")
+        print()
+        print("  Nothing was read back from the session_plans table for the")
+        print("  requested range. Either no analysis cycle has written a plan")
+        print("  yet, or every row fell outside --since / --split-at.")
+        print()
+        print("  Check: does session_plans contain rows, and do they carry an")
+        print("  analysis_run_at timestamp inside the window you asked for?")
+        print("=" * 62)
+        return
+
     crashes = [r for r in refused if _is_crash(str(r.get("plan_reason") or ""))]
     genuine = [r for r in refused if r not in crashes]
 
