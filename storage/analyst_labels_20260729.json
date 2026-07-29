@@ -1,1 +1,22 @@
-
+[
+  {
+    "id": "LABEL_20260729_001",
+    "symbol": "XAU/USD",
+    "timeframe": "15m",
+    "analyst_name": "manual",
+    "bias": "SELL",
+    "setup_type": "LIQUIDITY_REVERSAL",
+    "sweep_side": "buy_side",
+    "poi_type": "order_block",
+    "poi_quality_grade": "A",
+    "intended_entry": 4040.0,
+    "invalidation": 4047.5,
+    "tp1": 4026.8,
+    "tp2": 4008.6,
+    "session_label": "London / Europe Midday",
+    "trade_decision": "TRADE",
+    "notes": "Sweep above 4047.5 then rejection. Bearish OB 4041.133. Targets 4026.799/4026.128 then 4008.586/4007.839. SSL marked below.",
+    "source": "manual_label",
+    "created_at": "2026-07-29T08:38:00+00:00"
+  }
+]
