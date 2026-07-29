@@ -23,6 +23,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.daily_report_agent import DailyReportAgent
 from services.analyst_distillation import AnalystDistillationService
+from services.analyst_scoreboard import AnalystScoreboardService
 from services.database import DatabaseService
 from services.day_map_metrics import summarize_day_map_execution
 from services.llm_review import get_gemini_review_service
@@ -238,6 +239,78 @@ def _trade_regime_label(trade: dict[str, Any]) -> str:
     market_context = _snapshot(trade).get("market_context") or {}
     tech = market_context.get("technical_regime") or {}
     return str(trade.get("volatility_regime") or tech.get("volatility_regime") or "UNKNOWN").upper()
+
+
+def _parse_iso(value: str) -> datetime | None:
+    """Parse an ISO timestamp, tolerating 'Z' and naive strings."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _post_label_range(
+    config: dict[str, Any],
+    labels: list[dict[str, Any]],
+    symbol: str,
+) -> dict[str, float]:
+    """High/low/last of the candles that closed after the earliest label.
+
+    The scoreboard scores an analyst plan against what happened *after* he
+    published it. Handing it the whole session's extremes silently rewrites
+    the order of events: on 2026-07-29 the analyst's invalidation sat at the
+    sweep high his thesis was built on, so a whole-day high would have marked
+    a +314 call as a stop-out.
+
+    Returns zeros when the range cannot be established. The scoreboard treats
+    a zero range as "not triggered" rather than guessing.
+    """
+    empty = {"high": 0.0, "low": 0.0, "last": 0.0}
+    if not labels:
+        return empty
+
+    earliest = None
+    for label in labels:
+        created = _parse_iso(str((label or {}).get("created_at") or ""))
+        if created and (earliest is None or created < earliest):
+            earliest = created
+    if earliest is None:
+        return empty
+
+    try:
+        from services.market_data import MarketDataService
+
+        payload = MarketDataService(config).get_ohlcv(
+            timeframe=str(config.get("entry_timeframe") or "15m"),
+        ) or {}
+        candles = list(payload.get("data") or [])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Post-label range unavailable for %s: %s", symbol, exc)
+        return empty
+
+    highs: list[float] = []
+    lows: list[float] = []
+    last = 0.0
+    for candle in candles:
+        stamp = _parse_iso(str(candle.get("time") or candle.get("datetime") or ""))
+        if stamp is None or stamp < earliest:
+            continue
+        try:
+            highs.append(float(candle.get("high")))
+            lows.append(float(candle.get("low")))
+            last = float(candle.get("close") or last)
+        except (TypeError, ValueError):
+            continue
+
+    if not highs or not lows:
+        return empty
+    return {"high": max(highs), "low": min(lows), "last": last}
 
 
 def _daily_enrichment_summary(closed_trades: list[dict[str, Any]]) -> dict[str, Any]:
@@ -555,6 +628,38 @@ def main() -> None:
         if analyst_lines:
             lines.append("🧠 <b>Analyst Overlap</b>")
             lines.extend(analyst_lines)
+            lines.append("")
+
+        # Overlap says whether we saw the same chart. It does not say who was
+        # right: on 2026-07-29 the system's read of the chart was defensible
+        # and it still finished 512 points behind the analyst. Report the
+        # points too, so "did we beat him?" is a number rather than a feeling.
+        scoreboard_lines: list[str] = []
+        try:
+            scoreboard = AnalystScoreboardService(config)
+            if scoreboard.enabled:
+                symbol = str(config.get("symbol", "XAU/USD"))
+                labels = database.get_analyst_labels(limit=20, symbol=symbol)
+                # Score each label against the range that came *after* it was
+                # published. Whole-day extremes cannot express sequencing, and
+                # using them stops an analyst out on the very sweep his thesis
+                # was built on.
+                day_range = _post_label_range(config, labels, symbol)
+                board = scoreboard.score_day(
+                    labels=labels,
+                    trades=today_trades,
+                    market_high=day_range["high"],
+                    market_low=day_range["low"],
+                    symbol=symbol,
+                    current_price=day_range["last"] or None,
+                )
+                stats["analyst_scoreboard"] = board
+                scoreboard_lines = scoreboard.build_report_lines(board)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Analyst scoreboard unavailable for daily report: %s", exc)
+        if scoreboard_lines:
+            lines.append("🏁 <b>Head-to-Head (points)</b>")
+            lines.extend(scoreboard_lines)
             lines.append("")
 
         management_brief_lines = _daily_management_brief_lines(config, day_map_execution, stats.get("analyst_overlap") or {})
