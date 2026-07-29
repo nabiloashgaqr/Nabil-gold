@@ -674,6 +674,69 @@ class SMCAgent(BaseAgent):
 
         return floor, evidence
 
+    # Reversal-day conviction, earned like the continuation branch.
+    #
+    # This branch returned a flat 55 regardless of evidence -- five points
+    # below the planner's conviction bar -- so a reversal thesis with a real
+    # candidate was refused as LOW no matter how clean the setup was. The
+    # 2026-07-29 chart lands here whenever its raid grades MODERATE rather
+    # than STRONG: a valid SELL candidate existed and the map was still
+    # thrown away on a hard-coded number that read nothing.
+    #
+    # A reversal rests on one central fact -- the market rejected the level
+    # it raided -- so a printed rejection carries the largest credit here,
+    # more than it does for a continuation.
+    REVERSAL_BASE_FLOOR = 48.0
+    REVERSAL_SWEEP_CREDIT = {"STRONG": 8.0, "MODERATE": 6.0}
+    REVERSAL_TRIGGER_CREDIT = {
+        "REJECTION_CONFIRMED": 7.0,
+        "FAILED_RECLAIM_CONFIRMED": 7.0,
+        "AT_POI_WAIT_TRIGGER": 2.0,
+    }
+    REVERSAL_STRUCTURE_CREDIT = {"STRONG": 3.0, "MODERATE": 2.0}
+    REVERSAL_ZONE_CREDIT = 2.0
+
+    def _reversal_floor(
+        self,
+        *,
+        recent_sweep: Dict[str, Any],
+        structure_quality: str,
+        zone: str,
+        trigger_state: str,
+    ) -> Tuple[float, List[str]]:
+        """Derive a reversal day's floor from the evidence it confirmed."""
+        floor = self.REVERSAL_BASE_FLOOR
+        evidence: List[str] = []
+
+        confirmation = str((recent_sweep or {}).get("confirmation") or "").upper()
+        sweep_credit = self.REVERSAL_SWEEP_CREDIT.get(confirmation, 0.0)
+        floor += sweep_credit
+        evidence.append(
+            f"{confirmation.lower()} raid" if sweep_credit else "raid not confirmed"
+        )
+
+        trigger = str(trigger_state or "").upper()
+        trigger_credit = self.REVERSAL_TRIGGER_CREDIT.get(trigger, 0.0)
+        floor += trigger_credit
+        if trigger_credit >= 7.0:
+            evidence.append("rejection printed")
+        elif trigger_credit:
+            evidence.append("waiting at POI")
+        else:
+            evidence.append("no rejection yet")
+
+        quality = str(structure_quality or "").upper()
+        structure_credit = self.REVERSAL_STRUCTURE_CREDIT.get(quality, 0.0)
+        floor += structure_credit
+        if structure_credit:
+            evidence.append(f"{quality.lower()} structure")
+
+        if str(zone or "").upper() in {"PREMIUM", "DISCOUNT"}:
+            floor += self.REVERSAL_ZONE_CREDIT
+            evidence.append("extreme zone")
+
+        return floor, evidence
+
     def _day_archetype(
         self,
         *,
@@ -767,10 +830,19 @@ class SMCAgent(BaseAgent):
             }
 
         if top_setup == "LIQUIDITY_REVERSAL":
+            floor, evidence = self._reversal_floor(
+                recent_sweep=recent_sweep,
+                structure_quality=structure_quality,
+                zone=zone,
+                trigger_state=top_trigger,
+            )
             return {
                 "name": "LIQUIDITY_REVERSAL_DAY",
-                "confidence": min(88, round(max(55.0, top_conf))),
-                "reason": "liquidity reversal setup dominates the active thesis",
+                "confidence": min(88, round(max(floor, top_conf))),
+                "reason": (
+                    "liquidity reversal setup dominates the active thesis "
+                    f"({', '.join(evidence)})"
+                ),
                 "preferred_execution_family": "REVERSAL_MAP",
             }
         return {
