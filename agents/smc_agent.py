@@ -558,6 +558,61 @@ class SMCAgent(BaseAgent):
             merged.append(candidate)
         return merged
 
+    # Continuation-day conviction, earned rather than assumed.
+    #
+    # The branch used to return a flat 58 whatever the evidence, which sat
+    # just below the planner's 60 conviction bar. The effect was that a
+    # continuation day -- the branch requiring the *most* agreeing facts of
+    # any in this method -- was refused as LOW at its own floor whenever
+    # thesis dominance was weak, while FAILED_RECLAIM_DAY cleared the bar on
+    # a single trigger. "archetype conviction is LOW" was the largest single
+    # refusal reason across 300 cycles at 33%.
+    #
+    # Sweep confirmation was the sharpest omission: STRONG (price closed back
+    # inside the swept level) and WEAK (a bare poke through it) both scored
+    # 58, so the fact the entire thesis rests on carried no weight at all.
+    #
+    # The base stays deliberately below the bar so that structural alignment
+    # alone never qualifies. Reaching 60 requires confirmed evidence.
+    CONTINUATION_BASE_FLOOR = 52.0
+    CONTINUATION_SWEEP_CREDIT = {"STRONG": 9.0, "MODERATE": 5.0}
+    CONTINUATION_STRUCTURE_CREDIT = {"STRONG": 4.0, "MODERATE": 2.0}
+    CONTINUATION_ZONE_CREDIT = 2.0
+
+    def _continuation_floor(
+        self,
+        *,
+        recent_sweep: Dict[str, Any],
+        structure_quality: str,
+        zone: str,
+    ) -> Tuple[float, List[str]]:
+        """Derive a continuation day's floor from the evidence it confirmed."""
+        floor = self.CONTINUATION_BASE_FLOOR
+        evidence: List[str] = []
+
+        confirmation = str((recent_sweep or {}).get("confirmation") or "").upper()
+        sweep_credit = self.CONTINUATION_SWEEP_CREDIT.get(confirmation, 0.0)
+        floor += sweep_credit
+        evidence.append(
+            f"{confirmation.lower() or 'unconfirmed'} sweep"
+            if sweep_credit
+            else "sweep not confirmed"
+        )
+
+        quality = str(structure_quality or "").upper()
+        structure_credit = self.CONTINUATION_STRUCTURE_CREDIT.get(quality, 0.0)
+        floor += structure_credit
+        if structure_credit:
+            evidence.append(f"{quality.lower()} structure")
+
+        # An extreme zone is a stronger statement than equilibrium: price is
+        # discounted or at a premium, not merely mid-range.
+        if str(zone or "").upper() in {"PREMIUM", "DISCOUNT"}:
+            floor += self.CONTINUATION_ZONE_CREDIT
+            evidence.append("extreme zone")
+
+        return floor, evidence
+
     def _day_archetype(
         self,
         *,
@@ -591,18 +646,23 @@ class SMCAgent(BaseAgent):
                 "reason": "continuation breakdown confirmed with follow-through",
                 "preferred_execution_family": "CONTINUATION_BREAKDOWN",
             }
-        if trend == "BULLISH" and sweep_type == "sell_side" and zone in {"DISCOUNT", "EQUILIBRIUM"}:
+        continuation_bullish = trend == "BULLISH" and sweep_type == "sell_side" and zone in {"DISCOUNT", "EQUILIBRIUM"}
+        continuation_bearish = trend == "BEARISH" and sweep_type == "buy_side" and zone in {"PREMIUM", "EQUILIBRIUM"}
+        if continuation_bullish or continuation_bearish:
+            side_text = (
+                "bullish structure + sell-side sweep + discount/equilibrium mitigation"
+                if continuation_bullish
+                else "bearish structure + buy-side sweep + premium/equilibrium mitigation"
+            )
+            floor, evidence = self._continuation_floor(
+                recent_sweep=recent_sweep,
+                structure_quality=structure_quality,
+                zone=zone,
+            )
             return {
                 "name": "CONTINUATION_AFTER_SWEEP_DAY",
-                "confidence": min(90, round(max(58.0, top_conf))),
-                "reason": "bullish structure + sell-side sweep + discount/equilibrium mitigation",
-                "preferred_execution_family": "MITIGATION_LADDER",
-            }
-        if trend == "BEARISH" and sweep_type == "buy_side" and zone in {"PREMIUM", "EQUILIBRIUM"}:
-            return {
-                "name": "CONTINUATION_AFTER_SWEEP_DAY",
-                "confidence": min(90, round(max(58.0, top_conf))),
-                "reason": "bearish structure + buy-side sweep + premium/equilibrium mitigation",
+                "confidence": min(90, round(max(floor, top_conf))),
+                "reason": f"{side_text} ({', '.join(evidence)})",
                 "preferred_execution_family": "MITIGATION_LADDER",
             }
         # A reversal after a sweep is, by definition, a move that ends the
