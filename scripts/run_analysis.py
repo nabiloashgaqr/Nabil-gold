@@ -367,6 +367,7 @@ def _resolve_reward_target(
     target_price: float,
     candidate: Dict[str, Any] | None,
     min_rr: float,
+    min_tp1_rr: float = 0.0,
 ) -> tuple[float, float, str | None]:
     """Pick TP1 and TP2 from the liquidity map.
 
@@ -413,10 +414,26 @@ def _resolve_reward_target(
 
     if qualifying:
         tp2 = qualifying[0]
-        # TP1 is the nearest real level short of TP2; if none exists, take a
-        # partial at half the distance rather than inventing a new structure.
+        # TP1 is the nearest real level short of TP2, but it must still be far
+        # enough away to be worth taking. Picking the literal nearest level
+        # produced first targets 5 points from entry against a 150-point stop
+        # -- 0.03R. Because reaching TP1 moves the stop to breakeven, such a
+        # target guarantees the sequence: touch TP1 within one candle, lock the
+        # stop at entry, then get shaken out by ordinary noise. The setup was
+        # right and the trade still closed flat.
+        #
+        # A level closer than min_tp1_rr is skipped rather than rejected: it is
+        # simply not a target worth acting on. Only if nothing usable remains
+        # do we fall back to a proportional partial.
         nearer = [lv for lv in ordered if abs(lv - entry_price) < abs(tp2 - entry_price)]
-        tp1 = nearer[0] if nearer else round((entry_price + tp2) / 2.0, 2)
+        viable = [lv for lv in nearer if _rr(lv) >= min_tp1_rr]
+        if viable:
+            tp1 = viable[0]
+        else:
+            # Half-way to TP2 is structural enough to act on and always clears
+            # the floor, since TP2 itself already passed min_rr.
+            midpoint = round((entry_price + tp2) / 2.0, 2)
+            tp1 = midpoint if _rr(midpoint) >= min_tp1_rr else tp2
         return tp1, tp2, None
 
     mapped_rr = _rr(target_price) if target_price > 0 and _is_ahead(target_price) else 0.0
@@ -474,8 +491,12 @@ def _planner_trade_levels(
     # beyond a target that was only 40 pts away, and a 2.25R label on a trade
     # whose real reward-to-risk was 0.58.
     min_rr = _safe_float(risk_cfg.get("min_rr_ratio"), 1.5) or 1.5
+    # A first target must be far enough to survive normal noise, because
+    # reaching it arms the breakeven stop. See _resolve_reward_target.
+    min_tp1_rr = _safe_float(risk_cfg.get("min_tp1_rr"), 0.8)
     tp1, tp2, reject_reason = _resolve_reward_target(
-        direction, entry_price, adjusted_stop, target_price, candidate, min_rr
+        direction, entry_price, adjusted_stop, target_price, candidate, min_rr,
+        min_tp1_rr=min_tp1_rr,
     )
     if reject_reason:
         return {
@@ -630,6 +651,9 @@ def _build_plan_ladder_decision(
         return None
     entry_price = _safe_float(entry_price_override if entry_price_override is not None else candidate.get("entry_price"), 0.0)
     stop_loss = _safe_float(candidate.get("stop_loss"), 0.0)
+    # Keep the structural stop: a market conversion below reprices from the
+    # mapped invalidation, not from an already-floored stop.
+    raw_stop_loss = stop_loss
     target_price = _safe_float(candidate.get("target_price") or candidate.get("target_liquidity"), 0.0)
     current_price = _safe_float(base_decision.get("current_price"), 0.0)
     if entry_price <= 0 or stop_loss <= 0 or target_price <= 0 or current_price <= 0:
@@ -654,9 +678,51 @@ def _build_plan_ladder_decision(
         return None
     stop_loss = levels["stop_loss"]
     order_type = f"{direction}_MARKET" if force_market else _planned_order_type(config, direction, entry_price, current_price, symbol)
+    # Price sitting inside the mapped area is the setup arriving, not a reason
+    # to stand down. This branch used to return None whenever the leg priced as
+    # MARKET, so a confirmed map produced an order only while price was still
+    # far away, and refused one the moment price actually reached the level --
+    # the map was published, price traded through the zone, and nothing was
+    # ever placed.
+    #
+    # Convert instead of abandoning: the leg has already cleared the reward,
+    # risk-floor and reject_reason checks above, and everything downstream
+    # (planner gate, day-map sanity, duplicate and pending governors) still
+    # runs. Entry is repriced to the live price so the recorded fill is the
+    # real one, and the executed leg is never better than the mapped edge.
+    market_conversion = False
     if order_type.endswith("MARKET") and not force_market:
-        return None
-    entry_kind = "MARKET" if force_market else order_type.split("_")[-1]
+        if not bool(_split_execution_cfg(config).get("convert_touched_zone_to_market", True)):
+            logger.info(
+                "Session-plan leg skipped for %s %s: price inside the mapped area "
+                "and market conversion is disabled",
+                symbol, direction,
+            )
+            return None
+        market_conversion = True
+        entry_price = current_price
+        levels = _planner_trade_levels(
+            config,
+            direction=direction,
+            entry_price=entry_price,
+            stop_loss=raw_stop_loss,
+            target_price=target_price,
+            symbol=symbol,
+            candidate=candidate,
+        )
+        if levels.get("reject_reason"):
+            logger.info(
+                "Session-plan market conversion rejected for %s %s: %s",
+                symbol, direction, levels.get("reject_reason"),
+            )
+            return None
+        stop_loss = levels["stop_loss"]
+        logger.info(
+            "Session-plan leg converted to market for %s %s at %.2f "
+            "(price reached the mapped area)",
+            symbol, direction, entry_price,
+        )
+    entry_kind = "MARKET" if (force_market or market_conversion) else order_type.split("_")[-1]
     zone = candidate.get("poi_zone") or {}
     if isinstance(zone, dict) and zone.get("top") is not None and zone.get("bottom") is not None:
         low = min(_safe_float(zone.get("top"), entry_price), _safe_float(zone.get("bottom"), entry_price))
@@ -678,7 +744,7 @@ def _build_plan_ladder_decision(
             "decision": direction,
             "symbol": symbol,
             "confidence": _planner_display_confidence(base_decision, plan, candidate, config, direction=direction),
-            "entry_mode": "session_plan_ladder_market" if force_market else "session_plan_ladder",
+            "entry_mode": "session_plan_ladder_market" if (force_market or market_conversion) else "session_plan_ladder",
             "entry_path": 3,
             "reasons": [
                 f"Session plan {plan.get('scenario_type')} ({role})",
@@ -729,13 +795,13 @@ def _build_plan_ladder_decision(
         "type": direction,
         "entry": {
             "price": round(entry_price, 2),
-            "low": round(current_price if force_market else low, 2),
-            "high": round(current_price if force_market else high, 2),
+            "low": round(current_price if (force_market or market_conversion) else low, 2),
+            "high": round(current_price if (force_market or market_conversion) else high, 2),
             "kind": entry_kind,
             "order_type": order_type,
             "basis": basis_override or f"{hierarchy.get('execution_leg_label')} · session plan",
             "current_price": round(current_price, 2),
-            "distance_points": 0.0 if force_market else abs(price_to_points(entry_price - current_price, symbol=symbol)),
+            "distance_points": 0.0 if (force_market or market_conversion) else abs(price_to_points(entry_price - current_price, symbol=symbol)),
         },
         "stop_loss": round(stop_loss, 2),
         "tp1": round(tp1, 2),
@@ -746,7 +812,7 @@ def _build_plan_ladder_decision(
         "order_type": order_type,
         "entry_kind": entry_kind,
         "position_size": position_size,
-        "risk_summary": f"Session planner {hierarchy.get('execution_leg_label')} {'market' if force_market else 'pending'} · {levels.get('target_method')}",
+        "risk_summary": f"Session planner {hierarchy.get('execution_leg_label')} {'market' if (force_market or market_conversion) else 'pending'} · {levels.get('target_method')}",
         "execution_leg": hierarchy.get("execution_leg"),
         "execution_leg_label": hierarchy.get("execution_leg_label"),
         "target_method": levels.get("target_method"),
