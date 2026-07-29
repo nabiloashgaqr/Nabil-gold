@@ -2279,8 +2279,14 @@ def _notify_blocked_directional_signal(
 
     Delivery itself is owned by `_HourlyStatusDelivery`, so this only records
     the stage and reason; the message goes out even if this is never called.
+
+    Two independent switches can open this path: the hourly status window, and
+    `notify_on_blocked_signal` -- the setting that exists specifically to
+    surface rejection reasons. Only the first was ever consulted, which left
+    `should_send_status` defined and unused while the setting it reads did
+    nothing.
     """
-    if not send_hourly_now:
+    if not (send_hourly_now or should_send_status(config)):
         return
     side = str(decision.get("decision") or decision.get("signal") or "").upper()
     reason_text = str(reason or "").strip() or "no reason recorded"
@@ -3093,6 +3099,45 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                     logger.warning("Session plan Telegram returned False for %s", symbol)
             except Exception as delivery_exc:  # noqa: BLE001
                 logger.warning("Failed to deliver session plan Telegram for %s: %s", symbol, delivery_exc)
+
+        # Dynamic risk is the account-level circuit breaker: it halts trading
+        # after a losing streak, after the daily loss limit is spent, and
+        # raises the confidence/quality bar in between. Its verdict was being
+        # computed into all_results and then never read, so none of those
+        # protections actually stopped anything -- the system kept opening
+        # trades no matter how much it had just lost.
+        #
+        # The check sits here, ahead of BOTH execution routes (planner ladder
+        # and the direct BUY/SELL path), because a halt must apply to every
+        # way an order can be created, not just the one that happens to run.
+        #
+        # The ladder builds its legs from the plan's session_bias rather than
+        # from decision_type, so it can place orders on a cycle that reads
+        # WAIT. Gating on decision_type alone would leave that route open
+        # during a halt, which is precisely the path that fired yesterday.
+        _dyn_plan = all_results.get("session_plan") or {}
+        _dyn_side = decision_type if decision_type in {"BUY", "SELL"} else (
+            str(_dyn_plan.get("session_bias") or "").upper()
+            if isinstance(_dyn_plan, dict) and _dyn_plan.get("plan_ready") else ""
+        )
+        if _dyn_side in {"BUY", "SELL"}:
+            dynamic_block = should_block_signal(
+                {**decision, "decision": _dyn_side},
+                all_results.get("dynamic_risk", {}) or {},
+            )
+            if dynamic_block:
+                logger.info(
+                    "Dynamic risk blocked %s for %s: %s",
+                    decision_type, symbol, dynamic_block,
+                )
+                decision["dynamic_risk_block"] = dynamic_block
+                _notify_blocked_directional_signal(
+                    telegram=telegram, decision=decision, all_results=all_results,
+                    database=database, config=config, send_hourly_now=send_hourly_now,
+                    delivery=status_delivery,
+                    stage="dynamic risk", reason=dynamic_block,
+                )
+                return
 
         # Phase 2: if the morning/session planner already prepared a strong
         # PRIMARY / STANDBY thesis before the move, publish those pending ladder
