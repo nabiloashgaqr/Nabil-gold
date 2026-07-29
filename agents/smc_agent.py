@@ -605,6 +605,46 @@ class SMCAgent(BaseAgent):
                 "reason": "bearish structure + buy-side sweep + premium/equilibrium mitigation",
                 "preferred_execution_family": "MITIGATION_LADDER",
             }
+        # A reversal after a sweep is, by definition, a move that ends the
+        # prior direction -- so the two continuation branches above can never
+        # catch it: they require the trend to *already* point the way the
+        # trade wants to go. A confirmed sweep against a bullish leg, rejected
+        # back inside and sitting in premium, therefore fell through to the
+        # generic STRUCTURE_BIAS_DAY at a floor of 50% and was refused as
+        # low-conviction -- the exact setup the archetype layer exists to name.
+        #
+        # All four conditions are required, so this classifies a cleaner
+        # picture than the branches above rather than a cheaper one:
+        #   a sweep the detector already graded STRONG (it only grades that
+        #   way when price closed back inside the level), taken against the
+        #   prevailing leg, from the matching premium/discount half, with a
+        #   reversal-family candidate leading the book.
+        sweep_confirmation = str(recent_sweep.get("confirmation") or "").upper()
+        reversal_setups = {"LIQUIDITY_REVERSAL", "ORDER_BLOCK_PULLBACK"}
+        counter_trend_sweep = (
+            (sweep_type == "buy_side" and trend in {"BULLISH", "RANGING"} and zone == "PREMIUM")
+            or (sweep_type == "sell_side" and trend in {"BEARISH", "RANGING"} and zone == "DISCOUNT")
+        )
+        if (
+            counter_trend_sweep
+            and sweep_confirmation == "STRONG"
+            and top_setup in reversal_setups
+            and structure_quality in {"STRONG", "MODERATE"}
+        ):
+            side = "sell" if sweep_type == "buy_side" else "buy"
+            return {
+                "name": "REVERSAL_AFTER_SWEEP_DAY",
+                # Earned from the evidence rather than pinned to a constant:
+                # the floor reflects the four conditions already met, and a
+                # dominant thesis lifts it from there.
+                "confidence": min(90, round(max(66.0, top_conf))),
+                "reason": (
+                    f"confirmed {sweep_type.replace('_', '-')} sweep rejected back into "
+                    f"{zone.lower()} against a {trend.lower()} leg — {side}-side reversal"
+                ),
+                "preferred_execution_family": "REVERSAL_MAP",
+            }
+
         if top_setup == "LIQUIDITY_REVERSAL":
             return {
                 "name": "LIQUIDITY_REVERSAL_DAY",
