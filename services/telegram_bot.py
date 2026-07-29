@@ -897,7 +897,20 @@ class TelegramService:
         if dynamic and str(dynamic.get("level", "NORMAL")).upper() != "NORMAL":
             context_lines.append(f"• Dynamic risk: {html.escape(str(dynamic.get('level')))}")
         # Keep risk details compact and useful; skip empty optional risk block.
-        sl_dist = ((risk.get("stop_loss") or {}) if isinstance(risk, dict) else {}).get("distance_points")
+        # Derive the stop distance from the trade being sent, not from the
+        # risk-settings block. The configured floor was being printed verbatim
+        # -- a signal risking 150 points announced "SL distance: 400.0 pts".
+        sl_dist = None
+        try:
+            _entry = float((entry or {}).get("price") or decision.get("current_price") or 0)
+            _stop = float(signal.get("stop_loss") or 0)
+            if _entry > 0 and _stop > 0:
+                from utils.instruments import price_to_points
+                sl_dist = round(abs(price_to_points(_entry - _stop, symbol=symbol)), 1)
+        except (TypeError, ValueError):
+            sl_dist = None
+        if not sl_dist:
+            sl_dist = ((risk.get("stop_loss") or {}) if isinstance(risk, dict) else {}).get("distance_points")
         if sl_dist:
             context_lines.append(f"• SL distance: {html.escape(str(sl_dist))} pts")
         if context_lines:
