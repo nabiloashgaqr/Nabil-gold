@@ -89,7 +89,8 @@ jobs:
             tests/test_swept_level_poi.py \
             tests/test_order_block_detection_window.py \
             tests/test_no_stop_entry_orders.py \
-            tests/test_pending_survives_session_change.py
+            tests/test_pending_survives_session_change.py \
+            tests/test_plan_rejection_report_resilience.py
 
       - name: 🔎 Validate Production Setup
         run: |
