@@ -189,10 +189,21 @@
         "require_supabase": true
     },
     "pending_freshness": {
+        "enabled": true,
+        "aging_after_hours": 2,
+        "stale_after_hours": 6,
+        "stale_after_excursion_points": 250,
+        "stale_after_target_progress_pct": 60,
+        "mark_revalidation_required_on_session_change": true,
         "touch_revalidation": {
-            "min_age_minutes_for_candle_fill": 15,
-            "description": "أدنى عمر للأمر قبل السماح لقمة/قاع الشمعة بتفعيله. الشمعة الأخيرة قد تكون فُتحت قبل إنشاء الأمر، فقمتها حركة لم يشهدها. دون هذا العمر يُحكم بالسعر الحيّ وحده. 15 = شمعة واحدة على الفريم الأساسي. صفر يعطّل الحارس."
-        }
+            "enabled": true,
+            "min_confirmation_points": 15,
+            "limit_max_drift_points": 40,
+            "stop_max_drift_points": 25,
+            "cancel_on_failed_revalidation": true,
+            "description": "Phase 4 foundation: if a stale / revalidation-required pending order is touched late, do not activate blindly. Require fresh confirmation plus acceptable drift and RR, otherwise cancel it safely."
+        },
+        "description": "Phase 3/4 foundation: classify waiting pending orders as FRESH / AGING / STALE / REVALIDATION_REQUIRED based on time, excursion without fill, target-path progress, and session/plan decay."
     },
     "trade_management": {
         "near_tp1_progress": 0.8,
@@ -340,7 +351,11 @@
         "model": "gemini-2.5-flash-lite",
         "description_model": "النموذج المستخدم. flash-lite حصته اليومية ~1000 طلب مقابل ~250 لـ flash — وهو ما سبّب HTTP 429 الدائم. يمكن تجاوزه بمتغير البيئة GEMINI_MODEL.",
         "max_retry_delay_seconds": 20,
-        "fallback_models": ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-flash-latest"],
+        "fallback_models": [
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-flash",
+            "gemini-flash-latest"
+        ],
         "description_fallback_models": "توفّر النماذج يختلف بين الحسابات، فقد يُرفض معرّف صحيح في التوثيق بـ404. تُجرَّب هذه بالترتيب (الأرخص أولاً) ويُثبَّت أول ما ينجح لبقية التشغيل. 404 خطأ دائم فلا تُعاد المحاولة عليه.",
         "description_max_retry_delay_seconds": "سقف الانتظار بين المحاولات. يُستخدم مع 429 من نوع RPM فقط؛ أما RPD (الحصة اليومية) فيتوقف فوراً بلا انتظار.",
         "max_retries": 3,
@@ -431,23 +446,6 @@
         "min_displacement_improvement": 5,
         "min_dominance_improvement": 6,
         "description": "بعد إغلاق صفقة، يُمنع إعادة الدخول سريعاً من نفس المنطقة إلا إذا ظهر Thesis جديد فعلاً: POI/state_key جديد، أو sweep/displacement جديد بعد الخروج، أو تطور setup_state مع trigger أقوى."
-    },
-    "pending_freshness": {
-        "enabled": true,
-        "aging_after_hours": 2,
-        "stale_after_hours": 6,
-        "stale_after_excursion_points": 250,
-        "stale_after_target_progress_pct": 60,
-        "mark_revalidation_required_on_session_change": true,
-        "touch_revalidation": {
-            "enabled": true,
-            "min_confirmation_points": 15,
-            "limit_max_drift_points": 40,
-            "stop_max_drift_points": 25,
-            "cancel_on_failed_revalidation": true,
-            "description": "Phase 4 foundation: if a stale / revalidation-required pending order is touched late, do not activate blindly. Require fresh confirmation plus acceptable drift and RR, otherwise cancel it safely."
-        },
-        "description": "Phase 3/4 foundation: classify waiting pending orders as FRESH / AGING / STALE / REVALIDATION_REQUIRED based on time, excursion without fill, target-path progress, and session/plan decay."
     },
     "quality_score": {
         "enabled": true,
@@ -733,7 +731,9 @@
             "session_plan_ladder_market",
             "adaptive_market_promotion"
         ],
-        "description": "Phase E: all execution paths must respect the day map. Signals outside the planner zones are blocked, and EXTREME_POI scenarios must use planner-led execution instead of local legacy bypasses."
+        "description": "Phase E: all execution paths must respect the day map. Signals outside the planner zones are blocked, and EXTREME_POI scenarios must use planner-led execution instead of local legacy bypasses.",
+        "require_day_map_for_all_entries": false,
+        "description_require_day_map_for_all_entries": "false = خريطة اليوم الغائبة لا تمنع الإشارة. خلال 300 دورة كانت 294 دورة (98%) بلا خريطة جاهزة — غالباً لأن المخطِّط رفض خريطته هو على اقتناع النمط، لا لأن السوق غير مقروء. فكان إجماع 87.3% بلا معارض يُرفض لغياب رأي ثانٍ لا لخلاف معه. كل البوابات الأخرى تبقى عاملة: بوابة الوكلاء، سقف المعارضة، حارس التكرار، مسافة المسارات، والتحقق النهائي. اضبطه true للعودة لسلوك «لا تداول بلا خريطة»."
     },
     "split_execution": {
         "enabled": true,
