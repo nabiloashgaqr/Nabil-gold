@@ -122,6 +122,15 @@ class OpenTradesManager(BaseAgent):
         self.pending_freshness_revalidation_on_session_change = bool(pf.get("mark_revalidation_required_on_session_change", True))
         ptr = (pf.get("touch_revalidation") or {}) if isinstance(pf, dict) else {}
         self.pending_touch_revalidation_enabled = bool(ptr.get("enabled", True))
+        # Minutes an order must exist before a candle extreme (rather than the
+        # live price) may fill it. Defaults to one 15m bar, the primary frame.
+        # `or` would swallow an explicit 0, leaving no way to switch the guard
+        # off; read the value directly and only fall back when it is absent.
+        _min_age = ptr.get("min_age_minutes_for_candle_fill", 15)
+        try:
+            self.pending_touch_min_age_minutes = float(_min_age)
+        except (TypeError, ValueError):
+            self.pending_touch_min_age_minutes = 15.0
         self.pending_touch_revalidation_min_confirmation_points = float(ptr.get("min_confirmation_points", 15) or 15)
         self.pending_touch_revalidation_limit_max_drift_points = float(ptr.get("limit_max_drift_points", 40) or 40)
         self.pending_touch_revalidation_stop_max_drift_points = float(ptr.get("stop_max_drift_points", 25) or 25)
@@ -1448,6 +1457,31 @@ class OpenTradesManager(BaseAgent):
         touch_source_reliable = market_source not in {"swissquote_spot_quote_fallback", "synthetic_demo", "quote"}
         theoretical_touch = self._order_filled(order_type, trade_type, entry, current_price, high_price, low_price)
         filled_touch = theoretical_touch if touch_source_reliable else False
+
+        # A pending order can only be filled by price action that happened
+        # after it existed. The candle handed in here is simply "the latest
+        # bar", and on a 5m/15m frame that bar often opened before the order
+        # did -- so an order created at 12:21 was activated in the same cycle
+        # by a high printed earlier in the same bar.
+        #
+        # The live case: BUY STOP at 4028.77 reported "Waiting: 0.0h" and
+        # "Current Price: 4017.65" -- filled 111 points below its own trigger,
+        # because the bar's high (~4036) predated the order.
+        #
+        # Require the market to actually reach the trigger while the order is
+        # live: on the creation cycle, judge by the price now rather than by a
+        # high the order never saw.
+        if filled_touch and not self._touch_is_after_creation(trade, now):
+            live_touch = self._order_filled(
+                order_type, trade_type, entry, current_price, current_price, current_price
+            )
+            if not live_touch:
+                self.logger.info(
+                    "Pending %s for %s not activated: the bar's extreme predates the order "
+                    "(entry %.2f, price now %.2f)",
+                    order_type or trade_type, trade.get("id"), entry, current_price,
+                )
+                filled_touch = False
         base_updates = {
             "current_price": round(current_price, 2),
             "last_candle_high": round(high_price, 2),
@@ -2218,6 +2252,23 @@ class OpenTradesManager(BaseAgent):
             return 0.0
         favorable_move = (current_price - entry) if trade_type == "BUY" else (entry - current_price)
         return max(0.0, favorable_move / target_distance)
+
+    def _touch_is_after_creation(self, trade: Dict[str, Any], now: datetime) -> bool:
+        """Has a full bar closed since this order was created?
+
+        The manager receives only "the latest candle", with no timestamp of
+        its own, so it cannot tell whether that bar's high belongs to price
+        action the order witnessed. Age is the reliable proxy: once the order
+        has outlived the bar interval, any extreme in the current bar is
+        necessarily from after it was placed.
+        """
+        created = self._parse_dt(str(trade.get("created_at") or trade.get("entry_time") or ""))
+        if created is None:
+            # Unknown age: fall back to the permissive path rather than
+            # blocking a legitimate fill on missing metadata.
+            return True
+        minutes = max(0.0, (now - created).total_seconds() / 60.0)
+        return minutes >= self.pending_touch_min_age_minutes
 
     def _hours_open(self, trade: Dict[str, Any], now: datetime) -> float:
         opened = self._parse_dt(str(trade.get("entry_time") or trade.get("created_at") or ""))
