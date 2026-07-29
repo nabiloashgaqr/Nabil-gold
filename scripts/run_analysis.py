@@ -3295,6 +3295,24 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             elif action == "ALLOW_REGIME_FLIP":
                 logger.info("Directional authority allowed regime flip %s for %s: %s", decision_type, symbol, authority_review.get("reason"))
                 decision.setdefault("reasons", []).append(str(authority_review.get("reason") or "Directional authority allowed regime flip"))
+            elif action == "ALLOW_MAP_RETIRED":
+                # The live book has outvoted a map that no longer describes
+                # it. Write the verdict onto the plan before anything else
+                # reads it: DayMapSanityService refuses any side that
+                # disagrees with a CONFIRMED map, so leaving the old stamp in
+                # place would block this same signal one gate later, and the
+                # retirement would be an announcement with no effect.
+                logger.info(
+                    "Directional authority retired the %s day map for %s: %s",
+                    authority_review.get("authority_direction"), symbol,
+                    authority_review.get("reason"),
+                )
+                for _plan_ref in (
+                    all_results.get("session_plan"),
+                    decision.get("session_plan"),
+                ):
+                    DirectionalAuthorityService.apply_retirement(_plan_ref, authority_review)
+                decision.setdefault("reasons", []).append(str(authority_review.get("reason") or "Day map retired by the live agent book"))
 
         send_hourly_now = should_send_hourly_status(config)
         # Arm as soon as the cycle has a decision: every later exit is covered
