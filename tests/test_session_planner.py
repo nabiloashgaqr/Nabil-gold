@@ -382,6 +382,27 @@ def test_execution_readiness_constrains_fallback_when_support_is_missing() -> No
 
 
 def test_session_planner_breaks_authority_tie_with_structure_and_sweep_objective(tmp_path: Path) -> None:
+    """A tie may still pick a direction, but it no longer confers authority.
+
+    UPDATED 2026-07-29 -- this test previously asserted
+    ``authority_state == "CONFIRMED"`` and so pinned the defect that cost the
+    2026-07-29 session.
+
+    The scenario is macro BEARISH against a BULLISH structure: a 1-1 tie
+    between one independent source and one SMC-derived source. The tiebreak
+    (`_market_objective`) reads structure, sweep and zone -- all SMC -- so it
+    resolved the tie in SMC's favour and the old assertion certified that
+    outcome as CONFIRMED authority on a single aligned source, below the
+    configured ``min_authority_alignment_count`` of 2.
+
+    That stamp is what DirectionalAuthorityService reads before cancelling an
+    opposing signal. In the live 12:21 cycle it cancelled a SELL consensus of
+    87.3% that had no qualified opposition at all, and the BUY that replaced
+    it lost 198 points while the market fell 310.
+
+    The direction is still chosen -- the map is planned and published -- but
+    the state is now WEAK, which means it can no longer veto the other side.
+    """
     service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True}})
     service.storage_path = tmp_path / "session_plans.json"
     results = _results()
@@ -393,10 +414,13 @@ def test_session_planner_breaks_authority_tie_with_structure_and_sweep_objective
     results["smc"]["market_structure"] = {"trend": "BULLISH", "structure_quality": "STRONG"}
     results["smc"]["liquidity"]["recent_sweep"] = {"occurred": True, "type": "sell_side", "reference_type": "session_low", "confirmation": "STRONG"}
     plan = service.build_plan(results)
-    assert plan["authority_state"] == "CONFIRMED"
+    # The tiebreak still names a direction to plan around ...
     assert plan["authority_direction"] == "BUY"
     assert "market objective" in str(plan["authority_reason"]).lower()
     assert "conflicted" not in str(plan["plan_reason"]).lower()
+    # ... but a self-referential tiebreak does not earn veto power.
+    assert plan["authority_state"] == "WEAK"
+    assert "weak" in str(plan["authority_reason"]).lower()
 
 
 def test_session_planner_can_use_reversal_watch_as_authority_source(tmp_path: Path) -> None:

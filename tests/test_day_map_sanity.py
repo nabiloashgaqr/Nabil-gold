@@ -55,10 +55,33 @@ def _decision(price: float, *, order_type: str, entry_mode: str = "three_agent_c
     }
 
 
-def test_day_map_sanity_blocks_when_no_plan_ready() -> None:
+def test_day_map_sanity_allows_when_no_plan_ready_unless_strict() -> None:
+    """A missing map is an absence of opinion, not a veto.
+
+    UPDATED 2026-07-29 -- this test previously asserted BLOCK_NO_DAY_MAP
+    unconditionally, pinning behaviour that refused every directional signal
+    whenever the planner had produced no map.
+
+    Across the operator's own 300-cycle sample, 294 cycles (98%) had no ready
+    map, overwhelmingly because the planner refused its own map on archetype
+    conviction rather than because the market was unreadable. The practical
+    effect was that a SELL consensus of 87.3% with zero qualified opposition
+    was blocked for lacking a second opinion, on a day the market fell 310
+    points.
+
+    Blocking is still available, but it is now an explicit opt-in via
+    ``require_day_map_for_all_entries`` rather than a silent default.
+    """
     service = DayMapSanityService(_config())
     review = service.review(_decision(4021.0, order_type="SELL_MARKET"), {"plan_ready": False})
-    assert review["action"] == "BLOCK_NO_DAY_MAP"
+    assert review["action"] == "ALLOW"
+
+    strict_config = _config()
+    strict_config["day_map_sanity"]["require_day_map_for_all_entries"] = True
+    strict_review = DayMapSanityService(strict_config).review(
+        _decision(4021.0, order_type="SELL_MARKET"), {"plan_ready": False}
+    )
+    assert strict_review["action"] == "BLOCK_NO_DAY_MAP"
 
 
 def test_day_map_sanity_allows_market_inside_confirmed_day_map_zone() -> None:
