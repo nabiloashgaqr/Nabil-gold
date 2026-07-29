@@ -86,7 +86,8 @@ jobs:
             tests/test_archetype_floors_are_earned.py \
             tests/test_swing_sweep_detection.py \
             tests/test_reversal_floor_is_earned.py \
-            tests/test_swept_level_poi.py
+            tests/test_swept_level_poi.py \
+            tests/test_order_block_detection_window.py
 
       - name: 🔎 Validate Production Setup
         run: |
