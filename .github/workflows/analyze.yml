@@ -70,7 +70,8 @@ jobs:
             tests/test_cross_path_distance.py \
             tests/test_no_ignored_results.py \
             tests/test_message_truthfulness.py \
-            tests/test_decision_audit.py
+            tests/test_decision_audit.py \
+            tests/test_selective_memory_and_moment.py
 
       - name: 🔎 Validate Production Setup
         run: |
