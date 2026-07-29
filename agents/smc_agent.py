@@ -927,7 +927,10 @@ class SMCAgent(BaseAgent):
             return []
         sweep = liquidity.get("recent_sweep", {}) or {}
         recent_candles = candles or []
-        raw_candidates = self._poi_candidates(direction, current_price, atr, order_blocks, fvg, dealing_range)
+        raw_candidates = self._poi_candidates(
+            direction, current_price, atr, order_blocks, fvg, dealing_range,
+            liquidity=liquidity,
+        )
         if not raw_candidates:
             return []
 
@@ -1246,7 +1249,10 @@ class SMCAgent(BaseAgent):
         market_structure: Dict[str, Any],
         sweep: Dict[str, Any],
     ) -> Dict[str, Any] | None:
-        candidates = self._poi_candidates(direction, current_price, atr, order_blocks, fvg, dealing_range)
+        candidates = self._poi_candidates(
+            direction, current_price, atr, order_blocks, fvg, dealing_range,
+            liquidity={"recent_sweep": sweep} if sweep else None,
+        )
         if not candidates:
             return None
         ranked = sorted(
@@ -1266,6 +1272,70 @@ class SMCAgent(BaseAgent):
         ]
         return best
 
+    def _swept_level_poi(
+        self,
+        direction: str,
+        current_price: float,
+        atr: float,
+        liquidity: Dict[str, Any] | None,
+    ) -> Dict[str, Any] | None:
+        """Offer the level a confirmed raid just took as a point of interest.
+
+        A raid is the clearest POI a chart produces: price reached for
+        liquidity above (or below) a known level, failed, and closed back
+        inside. That level is where the rejection happened, and it is where a
+        discretionary analyst places the entry.
+
+        The order-block detector cannot supply it in time. It scans
+        ``range(2, len(candles) - 4)``, so the last four candles are never
+        examined -- and the raid candle is the newest one. On the 2026-07-29
+        chart the bearish block only became visible after the decline had
+        already run, by which point the entry sat 240 points away.
+
+        Nothing here is inferred or relaxed. ``recent_sweep`` already carries
+        the level, its grade and the reference it belongs to, computed every
+        cycle. A raid graded WEAK -- price never closed back inside -- is not
+        offered, and the zone is anchored on the level itself rather than on
+        the wick, so the entry is the edge the market defended.
+        """
+        sweep = (liquidity or {}).get("recent_sweep") or {}
+        if not sweep.get("occurred"):
+            return None
+        if str(sweep.get("confirmation") or "").upper() not in {"STRONG", "MODERATE"}:
+            return None
+
+        sweep_type = str(sweep.get("type") or "")
+        # A buy-side raid took liquidity above: that is a place to sell.
+        if direction == "SELL" and sweep_type != "buy_side":
+            return None
+        if direction == "BUY" and sweep_type != "sell_side":
+            return None
+
+        level = self._f(sweep.get("level"), 0.0)
+        if level <= 0:
+            return None
+
+        # Keep the zone tight around the defended edge; a wide box here would
+        # drag the entry away from the level that actually held.
+        depth = max(atr * 0.25, 0.40)
+        if direction == "SELL":
+            zone = {"top": round(level + depth, 2), "bottom": round(level - depth, 2)}
+        else:
+            zone = {"top": round(level + depth, 2), "bottom": round(level - depth, 2)}
+
+        confirmation = str(sweep.get("confirmation") or "").upper()
+        return {
+            "poi_type": "swept_level",
+            "zone": zone,
+            "strength": "strong" if confirmation == "STRONG" else "medium",
+            "created_at": sweep.get("time"),
+            "mitigation_status": "FRESH",
+            "displacement_score": self._f(sweep.get("sweep_distance"), 0.0) * 10.0,
+            "displacement_quality": confirmation,
+            "near_price": self._price_in_or_near_zone(current_price, zone, atr * 0.35),
+            "source_ref": dict(sweep),
+        }
+
     def _poi_candidates(
         self,
         direction: str,
@@ -1274,9 +1344,13 @@ class SMCAgent(BaseAgent):
         order_blocks: List[Dict[str, Any]],
         fvg: List[Dict[str, Any]],
         dealing_range: Dict[str, float],
+        liquidity: Dict[str, Any] | None = None,
     ) -> List[Dict[str, Any]]:
         relevant_type = "bullish" if direction == "BUY" else "bearish"
         candidates: List[Dict[str, Any]] = []
+        swept = self._swept_level_poi(direction, current_price, atr, liquidity)
+        if swept:
+            candidates.append(swept)
         for block in order_blocks:
             if block.get("type") != relevant_type:
                 continue
