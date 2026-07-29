@@ -90,7 +90,8 @@ jobs:
             tests/test_order_block_detection_window.py \
             tests/test_no_stop_entry_orders.py \
             tests/test_pending_survives_session_change.py \
-            tests/test_plan_rejection_report_resilience.py
+            tests/test_plan_rejection_report_resilience.py \
+            tests/test_reversal_archetype_coverage.py
 
       - name: 🔎 Validate Production Setup
         run: |
