@@ -1146,6 +1146,22 @@ class SessionPlannerService:
         diagnostics["primary_zone_width_points"] = round(self._zone_width_points(primary, symbol=symbol), 1)
         diagnostics["standby_zone_width_points"] = round(self._zone_width_points(standby, symbol=symbol), 1) if standby else 0.0
         diagnostics["main_rr"] = round(self._f(primary_execution.get("rr_ratio"), 0.0), 2)
+
+        # Execution has the final say on whether a leg is priceable at all, and
+        # it says so explicitly via reject_reason. That verdict was carried
+        # through _execution_levels and then never read: the plan was only
+        # stopped because a rejected leg happens to come back with rr = 0,
+        # which trips the RR check below by accident.
+        #
+        # That is fragile and it lies. Any future rejection that still returns
+        # a non-zero ratio would publish a READY map for a leg execution has
+        # already refused, and today the operator is told "main area RR 0.00
+        # below 1.50" when the real reason is that no qualifying liquidity
+        # exists. Honour the verdict directly.
+        reject_reason = str(primary_execution.get("reject_reason") or "").strip()
+        if reject_reason:
+            diagnostics["execution_reject_reason"] = reject_reason
+            return False, f"execution refused the main leg: {reject_reason}", diagnostics
         if diagnostics["primary_zone_width_points"] > self.max_primary_zone_width_points:
             return False, f"main area too wide ({diagnostics['primary_zone_width_points']:.0f} pts)", diagnostics
         if self.min_zone_width_points > 0 and 0 < diagnostics["primary_zone_width_points"] < self.min_zone_width_points:
