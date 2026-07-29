@@ -47,6 +47,11 @@ on:
         required: false
         default: "Manual operator close"
         type: string
+      split_at:
+        description: "For plan_rejections only: ISO time to split before/after (e.g. 2026-07-29T08:58:00Z)"
+        required: false
+        default: ""
+        type: string
       report_date:
         description: "For daily_report only: optional YYYY-MM-DD or yesterday"
         required: false
@@ -115,6 +120,7 @@ jobs:
           TRADE_ID: ${{ github.event.inputs.trade_id }}
           CLOSE_REASON: ${{ github.event.inputs.close_reason || 'Manual operator close' }}
           REPORT_DATE: ${{ github.event.inputs.report_date }}
+          SPLIT_AT: ${{ github.event.inputs.split_at }}
           TF: ${{ github.event.inputs.timeframe || '15m' }}
           OUTPUTSIZE: ${{ github.event.inputs.outputsize || '420' }}
           WINDOW: ${{ github.event.inputs.window || '160' }}
@@ -170,7 +176,11 @@ jobs:
               python scripts/run_operations_pipeline.py --timeframe "$TF" --outputsize "$OUTPUTSIZE" --window "$WINDOW" --step "$STEP" --horizon "$HORIZON" --max-trades "$MAX_TRADES" $TELEGRAM_FLAG
               ;;
             plan_rejections)
-              python scripts/analyze_plan_rejections.py --limit 300
+              SPLIT_FLAG=""
+              if [ -n "$SPLIT_AT" ]; then
+                SPLIT_FLAG="--split-at $SPLIT_AT"
+              fi
+              python scripts/analyze_plan_rejections.py --limit 300 $SPLIT_FLAG
               ;;
             backtest_benchmark)
               python scripts/run_backtest.py --benchmark --timeframe "$TF" --outputsize "$OUTPUTSIZE" --window "$WINDOW" --step "$STEP" --horizon "$HORIZON" --max-trades "$MAX_TRADES" $TELEGRAM_FLAG
