@@ -60,7 +60,15 @@ jobs:
             tests/test_session_planner.py \
             tests/test_open_trades_manager.py \
             tests/test_planner_execution_gate.py \
-            tests/test_day_map_sanity.py
+            tests/test_day_map_sanity.py \
+            tests/test_blocked_signal_safety_barrier.py \
+            tests/test_execution_quality_guards.py \
+            tests/test_dynamic_risk_wiring.py \
+            tests/test_live_opposition_enforced.py \
+            tests/test_execution_reject_is_honoured.py \
+            tests/test_signal_final_validation.py \
+            tests/test_cross_path_distance.py \
+            tests/test_no_ignored_results.py
 
       - name: 🔎 Validate Production Setup
         run: |
