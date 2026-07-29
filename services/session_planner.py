@@ -1629,7 +1629,13 @@ class SessionPlannerService:
         "MITIGATION_LADDER": {"LIQUIDITY_REVERSAL", "ORDER_BLOCK_PULLBACK", "STRUCTURE_CONTINUATION"},
         "FAILED_RECLAIM_CONTINUATION": {"FAILED_RECLAIM_CONTINUATION", "STRUCTURE_CONTINUATION"},
         "CONTINUATION_BREAKDOWN": {"CONTINUATION_BREAKDOWN", "STRUCTURE_CONTINUATION"},
-        "REVERSAL_MAP": {"LIQUIDITY_REVERSAL", "REVERSAL_ATTEMPT"},
+        # ORDER_BLOCK_PULLBACK belongs here as well as in MITIGATION_LADDER:
+        # the same structure reads as continuation when price returns to a
+        # block with the trend, and as reversal when it returns to one left
+        # behind by a confirmed counter-trend sweep. Omitting it marked
+        # REVERSAL_AFTER_SWEEP_DAY as family-contradicting and capped an
+        # otherwise clean map at MEDIUM conviction.
+        "REVERSAL_MAP": {"LIQUIDITY_REVERSAL", "REVERSAL_ATTEMPT", "ORDER_BLOCK_PULLBACK"},
     }
 
     def _archetype_conviction(
