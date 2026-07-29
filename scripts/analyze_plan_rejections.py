@@ -95,6 +95,18 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=300)
     parser.add_argument("--symbol", default=None)
+    parser.add_argument(
+        "--since",
+        default=None,
+        help="ISO timestamp; only cycles at or after it. Use to isolate the "
+             "effect of a change instead of averaging it into a day of history.",
+    )
+    parser.add_argument(
+        "--split-at",
+        default=None,
+        help="ISO timestamp; report before/after separately. A 300-cycle window "
+             "spans ~25 hours, so a fix deployed an hour ago is invisible in the total.",
+    )
     args = parser.parse_args()
 
     config = load_config()
@@ -107,11 +119,39 @@ def main() -> None:
         logger.info("No session plans on record yet.")
         return
 
+    def _stamp(row: Dict[str, Any]) -> str:
+        return str(row.get("analysis_run_at") or row.get("created_at") or "")
+
+    if args.since:
+        rows = [r for r in rows if _stamp(r) >= args.since]
+        if not rows:
+            logger.info("No session plans at or after %s.", args.since)
+            return
+
+    # A 300-cycle window covers roughly a day. Averaging a change deployed an
+    # hour ago into that history hides it completely: the first report after
+    # the archetype fix moved "conviction LOW" by 3 rows out of 102, which
+    # says nothing about the fix and everything about the window.
+    if args.split_at:
+        before = [r for r in rows if _stamp(r) < args.split_at]
+        after = [r for r in rows if _stamp(r) >= args.split_at]
+        for label, subset in (("BEFORE " + args.split_at, before),
+                              ("AFTER  " + args.split_at, after)):
+            if subset:
+                _report(label, subset, config)
+            else:
+                print(f"\n  ({label}: no cycles)")
+        return
+
+    _report(f"last {len(rows)} cycles", rows, config)
+
+
+def _report(window_label: str, rows: List[Dict[str, Any]], config: Dict[str, Any]) -> None:
     ready = [r for r in rows if r.get("plan_ready")]
     refused = [r for r in rows if not r.get("plan_ready")]
 
     print("\n" + "=" * 62)
-    print(f"PLAN REJECTION ANALYSIS — last {len(rows)} cycles")
+    print(f"PLAN REJECTION ANALYSIS — {window_label}")
     print("=" * 62)
     crashes = [r for r in refused if _is_crash(str(r.get("plan_reason") or ""))]
     genuine = [r for r in refused if r not in crashes]
