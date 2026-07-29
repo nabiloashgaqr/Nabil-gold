@@ -71,7 +71,8 @@ jobs:
             tests/test_no_ignored_results.py \
             tests/test_message_truthfulness.py \
             tests/test_decision_audit.py \
-            tests/test_selective_memory_and_moment.py
+            tests/test_selective_memory_and_moment.py \
+            tests/test_reversal_after_sweep_archetype.py
 
       - name: 🔎 Validate Production Setup
         run: |
