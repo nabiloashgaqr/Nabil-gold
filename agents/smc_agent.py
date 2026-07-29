@@ -839,22 +839,43 @@ class SMCAgent(BaseAgent):
             (sweep_type == "buy_side" and trend in {"BULLISH", "RANGING"} and zone == "PREMIUM")
             or (sweep_type == "sell_side" and trend in {"BEARISH", "RANGING"} and zone == "DISCOUNT")
         )
+        # MODERATE is admitted alongside STRONG.
+        #
+        # Both grades mean the same event happened: price pierced the level
+        # and closed back inside it. Only the close position within the bar
+        # separates them -- STRONG needs the close in the far third, MODERATE
+        # in the far half. Requiring STRONG alone sent every other confirmed
+        # counter-trend raid to STRUCTURE_BIAS_DAY at a floor of 50, below the
+        # conviction bar, so it could never be traded.
+        #
+        # Measured over 274 live cycles that is not a corner case: 64% of days
+        # landed on a fallback, and every directional plan refused in that
+        # window died at the conviction gate with "archetype conviction LOW" --
+        # 25 of 25 SELL maps and 3 of 3 BUY maps.
+        #
+        # The grade still counts. It sets the floor rather than the entry
+        # ticket, so a MODERATE reversal is classified but ranked below a
+        # STRONG one, and it must still clear the bar on its own evidence.
+        # WEAK stays out: there the close never returned inside the level, so
+        # no reversal has been printed at all.
         if (
             counter_trend_sweep
-            and sweep_confirmation == "STRONG"
+            and sweep_confirmation in {"STRONG", "MODERATE"}
             and top_setup in reversal_setups
             and structure_quality in {"STRONG", "MODERATE"}
         ):
             side = "sell" if sweep_type == "buy_side" else "buy"
+            floor = 66.0 if sweep_confirmation == "STRONG" else 62.0
             return {
                 "name": "REVERSAL_AFTER_SWEEP_DAY",
                 # Earned from the evidence rather than pinned to a constant:
                 # the floor reflects the four conditions already met, and a
                 # dominant thesis lifts it from there.
-                "confidence": min(90, round(max(66.0, top_conf))),
+                "confidence": min(90, round(max(floor, top_conf))),
                 "reason": (
-                    f"confirmed {sweep_type.replace('_', '-')} sweep rejected back into "
-                    f"{zone.lower()} against a {trend.lower()} leg — {side}-side reversal"
+                    f"{sweep_confirmation.lower()} {sweep_type.replace('_', '-')} sweep "
+                    f"rejected back into {zone.lower()} against a {trend.lower()} leg "
+                    f"— {side}-side reversal"
                 ),
                 "preferred_execution_family": "REVERSAL_MAP",
             }
