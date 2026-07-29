@@ -432,8 +432,11 @@ def test_session_planner_blocks_when_main_zone_is_too_wide(tmp_path: Path) -> No
     service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True, "max_primary_zone_width_points": 260}})
     service.storage_path = tmp_path / "session_plans.json"
     results = _results()
+    # A SELL needs its stop above entry and its target below it. The previous
+    # values were inverted, so execution refused the leg outright and the
+    # width check was never the thing being exercised.
     results["smc"]["setup_candidates"] = [
-        _candidate("PRIMARY", entry_price=4051.18, stop_loss=3998.72, target_price=4072.66, poi_type="extreme_day_map_zone")
+        _candidate("PRIMARY", entry_price=4051.18, stop_loss=4066.18, target_price=3960.0, poi_type="extreme_day_map_zone")
     ]
     results["smc"]["setup_candidates"][0]["poi_zone"] = {"top": 4051.18, "bottom": 3998.72}
     plan = service.build_plan(results)
@@ -491,11 +494,17 @@ def test_session_planner_keeps_same_box_ladder_standby_even_when_overlapping(tmp
 
 
 def test_session_planner_blocks_when_main_rr_is_too_low(tmp_path: Path) -> None:
-    service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True, "min_main_rr_for_ready": 1.5}})
+    """The planner may demand more reward than execution's own floor.
+
+    The leg below is priceable -- execution accepts it at 2.0R -- so this
+    exercises the planner's own RR gate rather than reaching it by accident
+    through a leg execution had already rejected with rr = 0.
+    """
+    service = SessionPlannerService({"symbol": "XAU/USD", "session_planner": {"enabled": True, "min_main_rr_for_ready": 2.5}})
     service.storage_path = tmp_path / "session_plans.json"
     results = _results()
     results["smc"]["setup_candidates"] = [
-        _candidate("PRIMARY", entry_price=4051.18, stop_loss=3998.72, target_price=4072.66, poi_type="extreme_day_map_zone")
+        _candidate("PRIMARY", entry_price=4051.18, stop_loss=4066.18, target_price=4021.18, poi_type="extreme_day_map_zone")
     ]
     results["smc"]["setup_candidates"][0]["poi_zone"] = {"top": 4051.18, "bottom": 4048.72}
     plan = service.build_plan(results)
