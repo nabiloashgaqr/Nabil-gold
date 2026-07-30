@@ -982,13 +982,12 @@ def test_pending_near_miss_sell_limit_can_convert_to_open_after_rejection() -> N
     )
     assert result["new_status"] == "OPEN"
     assert result["events"] == ["ORDER_FILLED"]
-    # Zone-touch now handles this case first, and handles it better: price
-    # traded inside the published area, so it fills at the zone edge (4063.24)
-    # carrying the planned 400 pt risk, instead of converting at market
-    # (4060.00) against an unmoved stop -- 451 pts of risk at RR 1.89 versus
-    # 400 pts at RR 2.20. Near-miss remains the fallback for the case it was
-    # built for: price approaching the order without entering the zone.
-    assert "Zone-touch activation" in result["updates"]["activation_reason"]
+    # Near-miss owns this case again. Zone-touch gives the mapped entry a
+    # grace period first (two analysis cycles), so on a single evaluation it
+    # defers -- which is the intended division of labour: zone-touch is for an
+    # order that sat inside its area and was not filled, near-miss for price
+    # that approached and turned away within one cycle.
+    assert "Near-miss market conversion" in result["updates"]["activation_reason"]
 
 
 def test_pending_near_miss_does_not_chase_after_large_target_progress() -> None:

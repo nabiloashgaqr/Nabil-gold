@@ -68,8 +68,30 @@ def _trade(**over) -> dict:
 
 
 def _evaluate(manager, trade, price, high, low):
+    """Replay the wait the mapped entry is entitled to, then the departure.
+
+    The reference entry gets first refusal for `grace_minutes` (two analysis
+    cycles). These tests therefore drive three cycles: inside the zone, still
+    inside, then leaving it -- which is the sequence the live order saw.
+    """
+    from datetime import timedelta
+
+    t0 = datetime(2026, 7, 30, 9, 10, tzinfo=timezone.utc)
+    state = trade
+    for minutes, p, h, lo in (
+        (0, 4061.00, 4061.50, low),
+        (5, 4061.20, 4061.80, low),
+    ):
+        res = manager.evaluate_trade(
+            state, p, now=t0 + timedelta(minutes=minutes),
+            candle_high=h, candle_low=lo,
+            recent_candles=[{"time": "x", "open": p, "high": h, "low": lo, "close": p}],
+        )
+        carried = {k: v for k, v in res["updates"].items()
+                   if k in ("signal_snapshot", "pending_cycles")}
+        state = {**state, **carried}
     return manager.evaluate_trade(
-        trade, price, now=datetime(2026, 7, 30, 10, 0, tzinfo=timezone.utc),
+        state, price, now=t0 + timedelta(minutes=10),
         candle_high=high, candle_low=low,
         recent_candles=[
             {"time": "2026-07-30T09:45:00+00:00", "open": 4062.0, "high": 4066.0,
@@ -189,6 +211,8 @@ def test_a_sell_zone_fills_at_the_lower_edge() -> None:
         current_price=4040.00,           # left the zone downward
         candle_high=4046.50, candle_low=4039.00,
         recent_window_high=4046.50, recent_window_low=4039.00, symbol=SYMBOL,
+        runtime={"zone_first_touch_at": "2026-07-30T09:10:00+00:00"},
+        now=datetime(2026, 7, 30, 9, 25, tzinfo=timezone.utc),
     )
     assert review["activate"] is True
     assert review["fill_price"] == 4045.64, "a SELL fills at the LOWER edge"
@@ -239,3 +263,127 @@ def test_disabling_it_restores_the_old_behaviour() -> None:
     cfg["order_execution"]["zone_touch_activation"]["enabled"] = False
     result = _evaluate(OpenTradesManager(cfg), _trade(), PRICE_AFTER, 4068.17, TOUCH_LOW)
     assert result["new_status"] == "PENDING"
+
+
+# ── the mapped entry gets first refusal ────────────────────────────────────
+
+def _cycle(manager, trade, price, high, low, minutes, t0=None):
+    from datetime import timedelta
+    t0 = t0 or datetime(2026, 7, 30, 9, 10, tzinfo=timezone.utc)
+    result = manager.evaluate_trade(
+        trade, price, now=t0 + timedelta(minutes=minutes),
+        candle_high=high, candle_low=low,
+        recent_candles=[{"time": "x", "open": price, "high": high, "low": low, "close": price}],
+    )
+    updates = result["updates"]
+    carried = {k: v for k, v in updates.items() if k in ("signal_snapshot", "pending_cycles")}
+    return result, {**trade, **carried}
+
+
+def test_the_mapped_entry_is_given_two_cycles_before_the_edge_is_used() -> None:
+    """Sitting inside the zone is not enough: the real entry gets its chance."""
+    manager = OpenTradesManager(_config())
+    trade = _trade()
+
+    # cycle 1 -- inside the zone, reference entry untouched
+    r1, trade = _cycle(manager, trade, 4061.00, 4061.50, 4060.40, 0)
+    assert r1["new_status"] == "PENDING"
+
+    # cycle 2 -- five minutes later, still inside
+    r2, trade = _cycle(manager, trade, 4061.20, 4061.80, 4060.60, 5)
+    assert r2["new_status"] == "PENDING"
+
+    # cycle 3 -- ten minutes in, price leaves the zone upward
+    r3, trade = _cycle(manager, trade, PRICE_AFTER, 4068.17, 4060.40, 10)
+    assert r3["new_status"] == "OPEN"
+    assert r3["updates"]["entry_price"] == ZONE_HIGH
+
+
+def test_leaving_the_zone_inside_the_grace_window_still_waits() -> None:
+    manager = OpenTradesManager(_config())
+    trade = _trade()
+    r1, trade = _cycle(manager, trade, 4061.00, 4061.50, 4060.40, 0)
+    assert r1["new_status"] == "PENDING"
+    # Leaves the zone after only 5 minutes -- inside the 10-minute grace.
+    r2, trade = _cycle(manager, trade, PRICE_AFTER, 4068.17, 4061.00, 5)
+    assert r2["new_status"] == "PENDING", "the mapped entry still had time"
+
+
+# ── the departure is a fact, not a live reading ────────────────────────────
+
+def _departed_trade() -> dict:
+    trade = _trade()
+    trade["signal_snapshot"]["pending_runtime"] = {
+        "zone_first_touch_at": "2026-07-30T09:10:00+00:00",
+        "zone_left_in_favour": True,
+        "zone_left_at": "2026-07-30T09:20:00+00:00",
+        "creation_price": 4066.00,
+    }
+    return trade
+
+
+def test_fill_is_at_the_edge_wherever_price_sits_when_noticed() -> None:
+    """Your rule: once it left the zone in favour, the edge is the fill.
+
+    The five-minute cycle may only notice the departure after price has
+    pulled back. The event already happened; where price sits on the cycle
+    that observes it is not part of the test.
+    """
+    from datetime import timedelta
+    for price, high, low in (
+        (4066.26, 4067.00, 4065.00),   # still above the edge
+        (4060.50, 4061.00, 4060.00),   # pulled back below the edge
+        (4058.90, 4059.50, 4058.50),   # all the way back inside the zone
+    ):
+        manager = OpenTradesManager(_config())
+        result = manager.evaluate_trade(
+            _departed_trade(), price,
+            now=datetime(2026, 7, 30, 9, 25, tzinfo=timezone.utc),
+            candle_high=high, candle_low=low,
+            recent_candles=[{"time": "x", "open": price, "high": high, "low": low, "close": price}],
+        )
+        assert result["new_status"] == "OPEN", f"price {price} should still activate"
+        assert result["updates"]["entry_price"] == ZONE_HIGH
+
+
+# ── the 60-point published zone floor ──────────────────────────────────────
+
+def test_published_zones_are_widened_to_the_configured_floor() -> None:
+    """A 42-point area is too tight to be reachable; widen, never refuse."""
+    from services.session_planner import SessionPlannerService
+
+    planner = SessionPlannerService(_config())
+    floor = planner.min_entry_zone_width_points
+    assert floor >= 60
+
+    # the live SELL map from 2026-07-30
+    low, high, widened = planner._enforce_min_zone_width(
+        4045.64, 4049.88, entry_price=4047.76, symbol=SYMBOL,
+    )
+    assert widened is True
+    assert round((high - low) / 0.1) >= floor
+    assert low <= 4047.76 <= high, "the reference entry must stay inside its own zone"
+
+
+def test_a_zone_already_wide_enough_is_left_alone() -> None:
+    from services.session_planner import SessionPlannerService
+
+    planner = SessionPlannerService(_config())
+    low, high, widened = planner._enforce_min_zone_width(
+        ZONE_LOW, ZONE_HIGH, entry_price=ENTRY, symbol=SYMBOL,
+    )
+    assert widened is False
+    assert (low, high) == (ZONE_LOW, ZONE_HIGH)
+
+
+def test_widening_is_recorded_on_the_payload() -> None:
+    from services.session_planner import SessionPlannerService
+
+    planner = SessionPlannerService(_config())
+    payload = planner._zone_payload({
+        "poi_zone": {"bottom": 4045.64, "top": 4049.88},
+        "entry_price": 4047.76, "poi_type": "ob", "symbol": SYMBOL,
+    })
+    assert payload["widened_to_min_width"] is True
+    assert payload["original_low"] == 4045.64
+    assert round((payload["high"] - payload["low"]) / 0.1) >= 60
