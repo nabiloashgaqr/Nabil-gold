@@ -97,7 +97,8 @@ jobs:
             tests/test_thesis_exit_status_naming.py \
             tests/test_zone_touch_activation.py \
             tests/test_protected_trade_does_not_lock_the_map.py \
-            tests/test_reversal_tightens_the_trail.py
+            tests/test_reversal_tightens_the_trail.py \
+            tests/test_trailing_rule_message_is_true.py
 
       - name: 🔎 Validate Production Setup
         run: |
