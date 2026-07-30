@@ -34,7 +34,9 @@ on:
           - exit_without_entry
           # What the thesis exit actually requires before it closes a trade
           - thesis_exit_behaviour
-          # Run all six in sequence
+          # Should the agents vote on the exit? (corrects the review above)
+          - exit_needs_agents
+          # Run all seven in sequence
           - all
       run_tests:
         description: "Also run the execution-path test suite"
@@ -85,10 +87,14 @@ jobs:
             thesis_exit_behaviour)
               python scripts/prove_thesis_exit_behaviour.py
               ;;
+            exit_needs_agents)
+              python scripts/prove_exit_needs_agents.py
+              ;;
             all)
               for s in prove_chart_to_order prove_direction_veto \
                        prove_1221_end_to_end prove_map_retirement \
-                       prove_exit_without_entry prove_thesis_exit_behaviour; do
+                       prove_exit_without_entry prove_thesis_exit_behaviour \
+                       prove_exit_needs_agents; do
                 if [ -f "scripts/$s.py" ]; then
                   echo "════════════════════════════════════════════════════"
                   echo "  scripts/$s.py"
