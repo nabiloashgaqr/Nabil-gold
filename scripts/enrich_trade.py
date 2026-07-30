@@ -32,7 +32,7 @@ _VALID = {"reopen", "update_prices", "close_now", "be_hit", "sl_hit", "trailing_
           "trailing_sl_update", "tp1_hit", "tp2_hit", "delete"}
 
 _CLEARABLE = {"TP2_HIT", "TP1_HIT", "SL_HIT", "TRAILING_SL_HIT", "BE_HIT",
-              "EXPIRED", "MANUAL_CLOSE", "MOVE_SL_TO_BE", "TRAILING_SL_UPDATED",
+              "EXPIRED", "THESIS_EXIT", "MANUAL_CLOSE", "MOVE_SL_TO_BE", "TRAILING_SL_UPDATED",
               "EXIT_WARNING", "NEAR_TP1", "LONG_RUNNING", "PRICE_SANITY_FAILED",
               "PARTIAL_CLOSE", "ORDER_FILLED"}
 

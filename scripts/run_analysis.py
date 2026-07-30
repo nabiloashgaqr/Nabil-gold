@@ -138,7 +138,7 @@ def _trade_entry_price(trade: Dict[str, Any]) -> float | None:
 _OPEN_STATUSES = {"OPEN", "PARTIAL", "TP1_HIT", "PENDING"}
 _LOSS_STATUSES = {"SL_HIT"}
 _WIN_STATUSES = {"TP2_HIT"}
-_BREAKEVEN_STATUSES = {"BE_HIT", "EXPIRED", "MANUAL_CLOSE"}
+_BREAKEVEN_STATUSES = {"BE_HIT", "EXPIRED", "THESIS_EXIT", "MANUAL_CLOSE"}
 
 
 def _trade_outcome(trade: Dict[str, Any]) -> str:
