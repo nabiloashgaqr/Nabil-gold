@@ -1043,6 +1043,15 @@ class OpenTradesManager(BaseAgent):
         }
         if new_stop_loss is not None:
             updates["stop_loss"] = round(new_stop_loss, 2)
+        # Publish the gap and step that were actually used this cycle.
+        #
+        # The Telegram card used to state "150-point gap / 40-point step" as a
+        # hardcoded string while the trade ran on its profile's own numbers --
+        # continuation_profile is 170/45 -- so the message contradicted both
+        # the plan card and the arithmetic behind the stop it was reporting.
+        # A tightened reversal trail would have made it wrong a third way.
+        updates["trailing_distance_points"] = effective_trail_points
+        updates["trailing_step_points"] = float(management["trailing_step_points"])
         if reversal_trail_active:
             updates["reversal_trail_active"] = True
             updates["reversal_trail_points"] = effective_trail_points
