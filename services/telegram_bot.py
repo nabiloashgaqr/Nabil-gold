@@ -1038,7 +1038,32 @@ class TelegramService:
         "POST_NEWS_REVALIDATION_FAILED": "Pending order was cancelled after post-news revalidation failed (invalidated, drift too large, or RR degraded).",
     }
 
-    def _event_notes(self, events: List[str], cancel_reason_code: str | None = None) -> List[str]:
+    def _trailing_rule_text(self, updates: Dict[str, Any] | None = None) -> str:
+        """Describe the trailing rule that was actually applied.
+
+        This line used to be the literal string "150-point gap / 40-point
+        step". A trade running continuation_profile trails at 170/45, so the
+        card contradicted both the plan message and the stop it was reporting
+        in the same breath. The manager now publishes the values it used.
+        """
+        updates = updates if isinstance(updates, dict) else {}
+        mgmt = (self.config.get("trade_management") or {}) if isinstance(self.config, dict) else {}
+        gap = updates.get("trailing_distance_points")
+        step = updates.get("trailing_step_points")
+        if gap is None:
+            gap = mgmt.get("trailing_distance_points", 150)
+        if step is None:
+            step = mgmt.get("trailing_step_points", 40)
+        try:
+            gap_txt, step_txt = f"{float(gap):.0f}", f"{float(step):.0f}"
+        except (TypeError, ValueError):
+            gap_txt, step_txt = "150", "40"
+        text = f"{gap_txt}-point gap / {step_txt}-point step"
+        if updates.get("reversal_trail_active"):
+            text += " (tightened: the agent book turned against this trade)"
+        return text
+
+    def _event_notes(self, events: List[str], cancel_reason_code: str | None = None, updates: Dict[str, Any] | None = None) -> List[str]:
         notes = []
         if "NEWS_HOLD" in events:
             notes.append("Pending order touched during a blocked news window; activation was paused until post-news recheck.")
@@ -1056,7 +1081,7 @@ class TelegramService:
         if "MOVE_SL_TO_BE" in events:
             notes.append("Stop loss moved to entry / breakeven protection.")
         if "TRAILING_SL_UPDATED" in events:
-            notes.append("Trailing stop updated using 150-point gap / 40-point step.")
+            notes.append(f"Trailing stop updated using {self._trailing_rule_text(updates)}.")
         if "THESIS_SCALE_OUT" in events:
             notes.append("Position size was reduced because thesis risk increased before the formal target was reached.")
         if "TP1_HIT" in events:
@@ -1187,7 +1212,7 @@ class TelegramService:
                     lines.append(f"• <b>New SL:</b> {self._money(new_sl, symbol)} — locking about +{locked:.0f} pts")
                 except (TypeError, ValueError):
                     lines.append(f"• <b>New SL:</b> {self._money(new_sl, symbol)}")
-            lines.append("• <b>Trailing rule:</b> 150-point gap / 40-point step")
+            lines.append(f"• <b>Trailing rule:</b> {self._trailing_rule_text(updates)}")
         if "PENDING_CANCELLED" in events:
             cancel_reason = self._first_reason(updates.get("reasons"), trade.get("reasons"))
             if cancel_reason:
@@ -1212,7 +1237,7 @@ class TelegramService:
                 if realized is not None:
                     lines.append(f"• <b>Realized so far:</b> {float(realized):+.1f} pts")
                 lines.append("• <b>Remainder:</b> still open, stop at entry")
-        notes = self._event_notes(events, str(evaluation.get("cancel_reason_code") or ""))
+        notes = self._event_notes(events, str(evaluation.get("cancel_reason_code") or ""), updates)
         if notes:
             lines.append("──────────────────")
             for note in notes:
