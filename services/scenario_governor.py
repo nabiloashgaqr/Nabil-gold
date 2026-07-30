@@ -98,7 +98,27 @@ class ScenarioGovernor:
         incumbent_states = {str(((self.setup_from_trade(t).get("pending_runtime") if isinstance(self.setup_from_trade(t), dict) else {}) or {})) for t in incumbent_trades}
         stale_family = all(self._freshness_state(t) in {"STALE", "REVALIDATION_REQUIRED"} for t in incumbent_trades)
 
-        replace = stale_family or score_gap >= self.min_plan_score_improvement or dom_gap >= self.min_primary_dominance_improvement
+        # A stale family is always replaceable. Otherwise the newcomer must be
+        # better on one axis WITHOUT being materially worse on the other.
+        #
+        # The old rule was a plain OR, so a plan whose dominance rose by 6
+        # could evict an incumbent even while its quality score fell: on
+        # 2026-07-30 that cancelled an A 88.9 order for a D 59.0 one, and
+        # again cancelled a 59.0 order for another 59.0 that happened to sit
+        # 6.2 points higher on dominance. Churn, not improvement.
+        #
+        # `max_regression` gives the same tolerance in reverse: an axis may
+        # dip slightly, but not collapse.
+        max_regression = max(self.min_plan_score_improvement,
+                             self.min_primary_dominance_improvement)
+        better_on_score = score_gap >= self.min_plan_score_improvement
+        better_on_dominance = dom_gap >= self.min_primary_dominance_improvement
+        not_worse_on_score = score_gap > -max_regression
+        not_worse_on_dominance = dom_gap > -max_regression
+        replace = stale_family or (
+            (better_on_score and not_worse_on_dominance)
+            or (better_on_dominance and not_worse_on_score)
+        )
         if not replace:
             return {
                 "action": "KEEP_EXISTING_FAMILY",
