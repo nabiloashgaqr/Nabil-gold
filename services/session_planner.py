@@ -48,6 +48,10 @@ class SessionPlannerService:
         # Floor as well as ceiling: a zone narrower than the spread cannot be
         # traded, so a 2-point "entry zone" is a formatting artefact, not a plan.
         self.min_zone_width_points = float(cfg.get("min_zone_width_points", 0) or 0)
+        # Floor for the PUBLISHED entry area, enforced by widening rather than
+        # by refusal. See _enforce_min_zone_width. `min_zone_width_points`
+        # above is the older reject-if-narrower gate and is left untouched.
+        self.min_entry_zone_width_points = float(cfg.get("min_entry_zone_width_points", 60) or 60)
         conviction_cfg = (cfg.get("archetype_conviction") or {}) if isinstance(cfg, dict) else {}
         self.archetype_conviction_enabled = bool(conviction_cfg.get("enabled", True))
         self.archetype_high_conviction = float(conviction_cfg.get("high_conviction_confidence", 75) or 75)
@@ -2217,20 +2221,76 @@ class SessionPlannerService:
                 compact["details"] = {"liquidity": liquidity}
         return compact
 
-    @staticmethod
-    def _zone_payload(candidate: Dict[str, Any] | None) -> Dict[str, Any] | None:
+    def _enforce_min_zone_width(
+        self,
+        low: float,
+        high: float,
+        *,
+        entry_price: float | None = None,
+        symbol: Any = None,
+    ) -> tuple[float, float, bool]:
+        """Widen a published entry area up to the configured floor.
+
+        A POI can be a couple of dollars tall. The order sits at one price
+        inside it, and on 2026-07-30 a BUY zone 4054.49-4062.05 was touched at
+        4060.40 -- 21 points above the reference entry -- without filling;
+        price then ran to 4079.88 through TP1.
+
+        The floor is enforced by WIDENING, never by refusing. Rejecting narrow
+        zones would have thrown away real plans: the live SELL maps that day
+        were 42 points wide, and refusing them removes the trade instead of
+        making it reachable.
+
+        Widening is symmetric around the reference entry so the mapped price
+        keeps its place inside the area. Risk does not drift as a result:
+        zone-touch activation carries the stop the same distance it moves the
+        entry, so the planned risk is preserved whichever edge fills.
+        """
+        floor_points = getattr(self, "min_entry_zone_width_points", 0.0)
+        if floor_points <= 0 or low <= 0 or high <= 0:
+            return low, high, False
+        if high < low:
+            low, high = high, low
+        floor_price = points_to_price(floor_points, symbol)
+        width = high - low
+        if width >= floor_price:
+            return low, high, False
+
+        missing = floor_price - width
+        anchor = entry_price if entry_price and low <= entry_price <= high else (low + high) / 2.0
+        # Share the widening in proportion to where the anchor sits, so the
+        # reference entry keeps its relative position rather than being
+        # shoved toward an edge.
+        upper_share = (high - anchor) / width if width > 0 else 0.5
+        upper_share = min(max(upper_share, 0.0), 1.0)
+        new_low = low - missing * (1.0 - upper_share)
+        new_high = high + missing * upper_share
+        return round(new_low, 2), round(new_high, 2), True
+
+    def _zone_payload(self, candidate: Dict[str, Any] | None) -> Dict[str, Any] | None:
         if not candidate:
             return None
+        symbol = candidate.get("symbol")
+        entry_price = self._f(candidate.get("entry_price"), 0.0) or None
         zone = candidate.get("poi_zone") or {}
         if isinstance(zone, dict) and zone.get("top") is not None and zone.get("bottom") is not None:
             try:
                 top = float(zone.get("top"))
                 bottom = float(zone.get("bottom"))
-                return {
-                    "low": min(top, bottom),
-                    "high": max(top, bottom),
+                low, high, widened = self._enforce_min_zone_width(
+                    min(top, bottom), max(top, bottom),
+                    entry_price=entry_price, symbol=symbol,
+                )
+                payload = {
+                    "low": low,
+                    "high": high,
                     "source": candidate.get("poi_type") or "poi",
                 }
+                if widened:
+                    payload["widened_to_min_width"] = True
+                    payload["original_low"] = round(min(top, bottom), 2)
+                    payload["original_high"] = round(max(top, bottom), 2)
+                return payload
             except (TypeError, ValueError):
                 pass
         low = candidate.get("poi_low")
@@ -2239,7 +2299,16 @@ class SessionPlannerService:
             try:
                 low_f = float(low)
                 high_f = float(high)
-                return {"low": min(low_f, high_f), "high": max(low_f, high_f), "source": candidate.get("poi_type") or "poi"}
+                new_low, new_high, widened = self._enforce_min_zone_width(
+                    min(low_f, high_f), max(low_f, high_f),
+                    entry_price=entry_price, symbol=symbol,
+                )
+                payload = {"low": new_low, "high": new_high, "source": candidate.get("poi_type") or "poi"}
+                if widened:
+                    payload["widened_to_min_width"] = True
+                    payload["original_low"] = round(min(low_f, high_f), 2)
+                    payload["original_high"] = round(max(low_f, high_f), 2)
+                return payload
             except (TypeError, ValueError):
                 return None
         return None
