@@ -2,7 +2,9 @@
 // Secure version: no Supabase keys in frontend. Data comes from /api/dashboard.
 
 const API_URL = (window.SMARTSIGNAL_API_URL || '/api/dashboard');
-const OUTCOME_STATUSES = new Set(['TP2_HIT', 'SL_HIT', 'BE_HIT', 'EXPIRED', 'MANUAL_CLOSE', 'CLOSED']);
+// THESIS_EXIT is the automatic close written by the thesis check; it was
+// previously stored as MANUAL_CLOSE. Both are listed so history stays visible.
+const OUTCOME_STATUSES = new Set(['TP2_HIT', 'SL_HIT', 'BE_HIT', 'EXPIRED', 'THESIS_EXIT', 'MANUAL_CLOSE', 'CLOSED']);
 const LIVE_STATUSES = new Set(['OPEN', 'TP1_HIT', 'PARTIAL']);
 const PENDING_STATUSES = new Set(['PENDING']);
 const CLOSED_TRADES_TABLE_LIMIT = 50;
