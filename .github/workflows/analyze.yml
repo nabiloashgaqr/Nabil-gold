@@ -95,7 +95,8 @@ jobs:
             tests/test_thesis_exit_agent_vote.py \
             tests/test_dynamic_risk_judges_the_plan.py \
             tests/test_thesis_exit_status_naming.py \
-            tests/test_zone_touch_activation.py
+            tests/test_zone_touch_activation.py \
+            tests/test_protected_trade_does_not_lock_the_map.py
 
       - name: 🔎 Validate Production Setup
         run: |
