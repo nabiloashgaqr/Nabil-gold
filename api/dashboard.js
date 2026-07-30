@@ -2,7 +2,9 @@
 // Reads Supabase using server-side environment variables only.
 // Required env in Vercel: SUPABASE_URL and SUPABASE_SERVICE_KEY (or SUPABASE_KEY).
 
-const OUTCOME_STATUSES = ['TP2_HIT', 'SL_HIT', 'BE_HIT', 'EXPIRED', 'MANUAL_CLOSE', 'CLOSED'];
+// THESIS_EXIT is the automatic close written by the thesis check; it was
+// previously stored as MANUAL_CLOSE. Both are listed so history stays visible.
+const OUTCOME_STATUSES = ['TP2_HIT', 'SL_HIT', 'BE_HIT', 'EXPIRED', 'THESIS_EXIT', 'MANUAL_CLOSE', 'CLOSED'];
 const LIVE_STATUSES = ['OPEN', 'TP1_HIT', 'PARTIAL'];
 const PENDING_STATUSES = ['PENDING'];
 
