@@ -2988,6 +2988,11 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             )
             return
         persisted_macro_context = database.get_macro_context()
+        # The verified snapshot is an input to three of the five voting agents,
+        # so it has to exist before any of them are asked anything. It is built
+        # purely from `data` and `config`, both already in hand.
+        verified_snapshot = build_market_snapshot(data, config)
+        data["verified_snapshot"] = verified_snapshot
         if has_symbol_active_trades:
             high, low = _latest_candle_extremes(data)
             recent_candles = (((data.get("timeframes", {}) or {}).get("5m") or {}).get("data") or data.get("data") or [])[-6:]
@@ -2997,6 +3002,35 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             except Exception:
                 news_pre = {}
             news_blocked_pre = bool(news_pre.get("can_trade") is False or str(news_pre.get("market_status", "")).upper() in {"DANGER", "HIGH_VOLATILITY"})
+            # Give the exit the same agent read the rest of the cycle gets.
+            #
+            # The thesis exit used to decide on two candles alone, 23 lines
+            # before these agents were polled -- so on 2026-07-30 it closed a
+            # SELL while Classical 71, SMC 90 and Multi-Timeframe 83 were all
+            # still arguing SELL, and the planner republished that exact zone
+            # as an A+ map hours later.
+            #
+            # These are the same six calls the cycle makes below, on the same
+            # `data`. Failure is non-fatal: an empty book makes the exit behave
+            # exactly as it did before.
+            exit_agent_details: Dict[str, Any] | None = None
+            try:
+                pre_exit_results = {
+                    "technical": run_agent("technical", TechnicalAgent(config), data),
+                    "classical": run_agent("classical", ClassicalAgent(config), data),
+                    "smc": run_agent("smc", SMCAgent(config), data),
+                    "price_action": run_agent("price_action", PriceActionAgent(config), data),
+                    "multitimeframe": run_agent("multitimeframe", MultiTimeframeAgent(config), data),
+                }
+                exit_agent_details = _compact_agent_details(pre_exit_results)
+                logger.info(
+                    "Exit agent book for %s: %s",
+                    symbol,
+                    {k: f"{v.get('direction')} {v.get('confidence')}" for k, v in exit_agent_details.items()},
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Could not build the exit agent book for %s: %s", symbol, exc)
+                exit_agent_details = None
             OpenTradesManager(config).update_trades(
                 open_trades=[t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol],
                 current_price=float(data.get("current_price", 0)),
@@ -3009,10 +3043,9 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 news_blocked=news_blocked_pre,
                 news_context=news_pre,
                 market_data_source=str(data.get("source") or ""),
+                agent_details=exit_agent_details,
             )
         if not session.get("trading_allowed"): return
-        verified_snapshot = build_market_snapshot(data, config)
-        data["verified_snapshot"] = verified_snapshot
         macro_input = {**data, "macro_context": persisted_macro_context} if persisted_macro_context else data
         macro = run_agent("macro_fundamental", MacroFundamentalAgent(config), macro_input)
         news_config = {**config, "macro_context": persisted_macro_context} if persisted_macro_context else config
