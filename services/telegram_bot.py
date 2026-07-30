@@ -1187,6 +1187,24 @@ class TelegramService:
                 lines.append(f"• <b>Cancellation reason:</b> {self._clean_text(cancel_reason)}")
         if any(e in events for e in {"MANUAL_CLOSE", "THESIS_SCALE_OUT"}) and primary_reason:
             lines.append(f"• <b>Exit reason:</b> {self._clean_text(primary_reason)}")
+        # A partial close has to state how much was actually closed and at what
+        # price. `partial_close` used to be a label with no size behind it, so
+        # a "scale-out" message described a reduction that never happened.
+        if "THESIS_SCALE_OUT" in events:
+            try:
+                fraction = float(updates.get("closed_fraction") or 0.0)
+            except (TypeError, ValueError):
+                fraction = 0.0
+            if fraction > 0:
+                closed_txt = f"• <b>Closed:</b> {fraction * 100:.0f}% of the position"
+                scale_price = updates.get("scale_out_price")
+                if scale_price:
+                    closed_txt += f" at {float(scale_price):.2f}"
+                lines.append(closed_txt)
+                realized = updates.get("realized_pnl_points")
+                if realized is not None:
+                    lines.append(f"• <b>Realized so far:</b> {float(realized):+.1f} pts")
+                lines.append("• <b>Remainder:</b> still open, stop at entry")
         notes = self._event_notes(events, str(evaluation.get("cancel_reason_code") or ""))
         if notes:
             lines.append("──────────────────")
