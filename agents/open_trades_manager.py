@@ -1186,7 +1186,30 @@ class OpenTradesManager(BaseAgent):
     def _window_extremes_since(self, trade: Dict[str, Any], recent_candles: List[Dict[str, Any]] | None) -> tuple[float | None, float | None]:
         if not recent_candles:
             return None, None
-        baseline = self._parse_dt(str(trade.get("last_updated") or trade.get("created_at") or trade.get("entry_time") or ""))
+        # A live position may only be judged by price action it was actually
+        # exposed to.
+        #
+        # The baseline used to prefer `last_updated`, falling back to
+        # `created_at` -- the moment the PLAN was written, which for a pending
+        # order can be hours before it filled. Any 5m bar from that window was
+        # then treated as this trade's own excursion.
+        #
+        # On 2026-07-30 that closed 8d6ad198 at "breakeven" while price stood
+        # at 4075.69, 110 points above entry and rising: an older bar printed
+        # before the fill had dipped to the entry level, and `be_touched` read
+        # it as a live touch. The card contradicted itself in two lines --
+        # "Current Price: 4075.69" next to "Exit Price: 4064.69".
+        #
+        # Fill time is the only honest floor. `entry_time` is written the
+        # moment the order activates; `last_updated` may still be consulted
+        # afterwards, but never to reach back before the fill.
+        fill_time = self._parse_dt(str(trade.get("entry_time") or ""))
+        last_seen = self._parse_dt(str(trade.get("last_updated") or ""))
+        baseline = last_seen
+        if fill_time and (baseline is None or baseline < fill_time):
+            baseline = fill_time
+        if baseline is None:
+            baseline = self._parse_dt(str(trade.get("created_at") or ""))
         highs: List[float] = []
         lows: List[float] = []
         for candle in recent_candles:
@@ -1194,6 +1217,11 @@ class OpenTradesManager(BaseAgent):
                 continue
             dt = self._parse_dt(str(candle.get("time") or ""))
             if baseline and dt and dt <= baseline:
+                continue
+            # A bar with no readable timestamp cannot be proved to belong to
+            # this trade's lifetime. When a baseline exists, skip it rather
+            # than let it widen the excursion on trust.
+            if baseline and dt is None:
                 continue
             high = self._f(candle.get("high"), 0.0)
             low = self._f(candle.get("low"), 0.0)
