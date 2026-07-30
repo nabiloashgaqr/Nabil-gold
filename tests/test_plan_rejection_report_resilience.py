@@ -177,3 +177,31 @@ def test_direction_breakdown_skips_directionless_refusals(capsys) -> None:
     assert "Direction of refused maps" in out
     # With no directional rows there is nothing to attribute.
     assert "Why each direction is refused" not in out or "NONE" in out
+
+
+def test_execution_refusals_are_split_by_cause() -> None:
+    """A flat count across three reports was a measurement blind spot.
+
+    "execution refused the leg" read exactly 20 in reports #17, #7 and #8 --
+    three code states, three market days, one number. The gate was live; the
+    label was collapsing every distinct cause into one bucket, so nothing
+    underneath could ever be seen to move.
+    """
+    from scripts.analyze_plan_rejections import _reason_family
+
+    liquidity = _reason_family(
+        "execution refused the main leg: no qualifying liquidity pool below the zone"
+    )
+    stop = _reason_family(
+        "execution refused the main leg: stop distance 120 below minimum 400"
+    )
+    assert liquidity != stop, "distinct execution causes must not share one label"
+    assert "liquidity" in liquidity
+    assert "stop distance" in stop
+
+    # A bare verdict with no cause still gets a stable label.
+    assert _reason_family("execution refused the leg") == "execution refused the leg"
+
+    # Unrelated families are untouched.
+    assert _reason_family("archetype conviction LOW") == "archetype conviction LOW"
+    assert _reason_family("news blocked: DANGER") == "news blocked: DANGER"
