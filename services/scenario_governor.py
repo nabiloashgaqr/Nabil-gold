@@ -88,7 +88,9 @@ class ScenarioGovernor:
         incumbent_plan = self.plan_from_trade(incumbent_trades[0])
         incumbent_setup = self.setup_from_trade(incumbent_trades[0])
         new_score = self._plan_score(plan)
-        old_score = self._plan_score(incumbent_plan)
+        # Score the incumbent on its own evidence, not only on a session_plan
+        # it may never have had. See _incumbent_score.
+        old_score = self._incumbent_score(incumbent_trades[0])
         new_dom = self._primary_dominance(plan)
         old_dom = self._setup_dominance(incumbent_setup)
         score_gap = new_score - old_score
@@ -245,6 +247,51 @@ class ScenarioGovernor:
             return float(plan.get("planner_confidence") or 0.0)
         except (TypeError, ValueError):
             return 0.0
+
+    @classmethod
+    def _incumbent_score(cls, trade: Dict[str, Any]) -> float:
+        """Score a sitting order on whatever evidence it actually carries.
+
+        Not every pending order is planner-led. A 3-AGENT CONSENSUS signal is
+        admitted through a different path and stores no `session_plan`, so
+        `_plan_score` read it as 0.0 -- and on 2026-07-30 that let a D 59.0
+        dual-agent plan evict an A 88.9 consensus order with 4/5 qualified
+        agents and 99.3 dominance, three minutes after it was placed. The
+        "improvement" was 59 - 0.
+
+        Fall back to the quality score the signal was actually graded with,
+        so a non-planner order defends itself with its own number instead of
+        with a zero it never earned.
+        """
+        plan_score = cls._plan_score(cls.plan_from_trade(trade))
+        if plan_score > 0:
+            return plan_score
+        snap = trade.get("signal_snapshot") or {}
+        if isinstance(snap, str):
+            try:
+                import json
+                snap = json.loads(snap)
+            except Exception:
+                snap = {}
+        if not isinstance(snap, dict):
+            snap = {}
+        for source in (snap.get("quality"), trade.get("quality")):
+            if isinstance(source, dict):
+                try:
+                    value = float(source.get("score") or 0.0)
+                except (TypeError, ValueError):
+                    value = 0.0
+                if value > 0:
+                    return value
+        for key in ("quality_score", "confidence"):
+            for holder in (snap, trade):
+                try:
+                    value = float((holder or {}).get(key) or 0.0)
+                except (TypeError, ValueError):
+                    value = 0.0
+                if value > 0:
+                    return value
+        return 0.0
 
     @staticmethod
     def _primary_dominance(plan: Dict[str, Any] | None) -> float:
