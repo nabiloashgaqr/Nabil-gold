@@ -145,6 +145,28 @@ class OpenTradesManager(BaseAgent):
         self.thesis_exit_opposing_poi_enabled = bool(thesis_exit.get("opposing_poi_enabled", True))
         self.thesis_exit_opposing_poi_buffer_points = float(thesis_exit.get("opposing_poi_buffer_points", 18) or 18)
         self.thesis_exit_opposing_poi_reclaim_points = float(thesis_exit.get("opposing_poi_reclaim_points", 12) or 12)
+        # Agent vote on the candle-triggered exit.
+        #
+        # The candle rule (_continuation_trigger_against_trade) is a single
+        # source of evidence, and two live trades proved it cannot carry the
+        # decision alone: both produced a byte-identical trigger, yet
+        # a4911dee was a genuine regime change (the exit saved 314 points)
+        # and 5f383b5c was noise (the exit cost 107, and the planner
+        # republished the very same zone as an A+ map hours later).
+        #
+        # No threshold separates them, because the defect is the input. The
+        # same cycle already computes a six-agent read; this asks for it.
+        agent_vote = (thesis_exit.get("agent_vote", {}) or {}) if isinstance(thesis_exit, dict) else {}
+        self.thesis_exit_agent_vote_enabled = bool(agent_vote.get("enabled", True))
+        self.thesis_exit_agent_min_confidence = float(
+            agent_vote.get("agent_min_confidence")
+            or (self.config.get("signal_requirements", {}) or {}).get("agent_min_confidence", 70)
+            or 70
+        )
+        self.thesis_exit_min_defenders = int(agent_vote.get("min_defenders_to_hold", 2) or 2)
+        self.thesis_exit_min_opponents = int(agent_vote.get("min_opponents_to_exit", 2) or 2)
+        self.thesis_exit_silent_action = str(agent_vote.get("silent_action", "SCALE_OUT")).upper()
+        self.thesis_exit_silent_scale_fraction = float(agent_vote.get("silent_scale_fraction", 0.5) or 0.5)
         self.pending_governor = PendingGovernor(self.config)
         self.scenario_governor = ScenarioGovernor(self.config)
 
@@ -349,6 +371,7 @@ class OpenTradesManager(BaseAgent):
         news_blocked: bool = False,
         news_context: Dict[str, Any] | None = None,
         market_data_source: str | None = None,
+        agent_details: Dict[str, Any] | None = None,
     ) -> List[Dict[str, Any]]:
         """Evaluate all open trades, persist updates and send Telegram events.
 
@@ -371,6 +394,7 @@ class OpenTradesManager(BaseAgent):
                 news_context=news_context,
                 database=database,
                 market_data_source=market_data_source,
+                agent_details=agent_details,
             )
             evaluations.append(evaluation)
             trade_id = str(trade.get("id", ""))
@@ -447,6 +471,7 @@ class OpenTradesManager(BaseAgent):
         news_context: Dict[str, Any] | None = None,
         database: Any | None = None,
         market_data_source: str | None = None,
+        agent_details: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         """Return updates/events for a single trade without external side effects.
 
@@ -541,6 +566,9 @@ class OpenTradesManager(BaseAgent):
         close_price = None
         final_pnl = None
         new_stop_loss: float | None = None
+        partial_realized_pnl: float | None = None
+        partial_closed_fraction: float | None = None
+        partial_scale_out_price: float | None = None
 
         if old_status not in self.OPEN_STATUSES:
             return {
@@ -590,6 +618,7 @@ class OpenTradesManager(BaseAgent):
             tp1=tp1,
             entry=entry,
             partial_close=partial_close,
+            agent_details=agent_details,
         )
 
         # Informational age/risk markers are still recorded even if the same
@@ -772,6 +801,23 @@ class OpenTradesManager(BaseAgent):
             new_status = "PARTIAL"
             partial_close = True
             events.append("THESIS_SCALE_OUT")
+            # Book the closed half at the price it was actually closed at.
+            #
+            # `partial_close` used to be a label and nothing more: no code
+            # anywhere read partial_close_percentage, so a "50% scale-out"
+            # left the full size running and the final PnL was computed
+            # entirely at the last price. The reduction has to be recorded
+            # when it happens, or the number reported at the end describes a
+            # trade that was never held.
+            scale_fraction = min(max(self._f(thesis_exit.get("scale_fraction"), 0.5), 0.0), 1.0)
+            already_closed = min(max(self._f(trade.get("closed_fraction"), 0.0), 0.0), 1.0)
+            newly_closed = min(scale_fraction, max(0.0, 1.0 - already_closed))
+            if newly_closed > 0:
+                realized_before = self._f(trade.get("realized_pnl_points"), 0.0)
+                scale_out_realized = round(pnl_points * newly_closed, 1)
+                partial_realized_pnl = round(realized_before + scale_out_realized, 1)
+                partial_closed_fraction = round(already_closed + newly_closed, 4)
+                partial_scale_out_price = round(current_price, 2)
             if not sl_moved_to_entry:
                 sl_moved_to_entry = True
                 new_stop_loss = entry
@@ -899,8 +945,41 @@ class OpenTradesManager(BaseAgent):
         }
         if new_stop_loss is not None:
             updates["stop_loss"] = round(new_stop_loss, 2)
+        if partial_realized_pnl is not None:
+            updates["realized_pnl_points"] = partial_realized_pnl
+            updates["closed_fraction"] = partial_closed_fraction
+            updates["scale_out_price"] = partial_scale_out_price
         if result is not None:
             updates["result"] = result
+
+        # Composite settlement for a position that was scaled before it closed.
+        #
+        # `final_pnl` above is computed as if the whole position ran to the
+        # closing price. Once part of it was booked earlier at a different
+        # price that is simply untrue, and it is the number the scoreboard,
+        # the weekly report and the learning service all consume.
+        #
+        # Settle what is left on the remaining fraction and add back what was
+        # already realized, so the reported result is the one the account
+        # actually experienced.
+        closed_fraction_so_far = min(
+            max(self._f(updates.get("closed_fraction", trade.get("closed_fraction")), 0.0), 0.0), 1.0
+        )
+        realized_so_far = self._f(
+            updates.get("realized_pnl_points", trade.get("realized_pnl_points")), 0.0
+        )
+        if final_pnl is not None and closed_fraction_so_far > 0 and new_status in self.CLOSED_STATUSES:
+            remaining = max(0.0, 1.0 - closed_fraction_so_far)
+            composite = round(realized_so_far + final_pnl * remaining, 1)
+            self.logger.info(
+                "Composite settlement for %s: %.1f realized on %.0f%% + %.1f on the "
+                "remaining %.0f%% = %.1f pts",
+                trade.get("id"), realized_so_far, closed_fraction_so_far * 100,
+                final_pnl, remaining * 100, composite,
+            )
+            final_pnl = composite
+            updates["closed_fraction"] = 1.0
+            updates["realized_pnl_points"] = composite
         if thesis_exit.get("exit_now") or thesis_exit.get("scale_out"):
             updates["reasons"] = [str(thesis_exit.get("reason") or "Automatic thesis exit")]
         if close_price is not None:
@@ -1362,6 +1441,51 @@ class OpenTradesManager(BaseAgent):
                     }
         return {"exit_now": False, "scale_out": False}
 
+    AGENT_VOTE_AGENTS = ("technical", "classical", "smc", "price_action", "multitimeframe")
+
+    def _agent_exit_vote(self, agent_details: Dict[str, Any] | None, trade_type: str) -> Dict[str, Any]:
+        """Ask the live agent book whether the trade's thesis still stands.
+
+        Returns one of three verdicts:
+
+          CONFIRM  the book agrees the trade is finished
+          DEFEND   qualified agents still argue the trade's own direction
+          SILENT   no usable majority either way (also when no book is given)
+
+        SILENT is deliberately the fallback for a missing or empty book, so a
+        caller that cannot supply agents behaves exactly as before.
+        """
+        if not self.thesis_exit_agent_vote_enabled or not isinstance(agent_details, dict) or not agent_details:
+            return {"verdict": "SILENT", "available": False, "defenders": [], "opponents": []}
+
+        opposite = "BUY" if trade_type == "SELL" else "SELL"
+        defenders: List[str] = []
+        opponents: List[str] = []
+        for name in self.AGENT_VOTE_AGENTS:
+            detail = agent_details.get(name)
+            if not isinstance(detail, dict):
+                continue
+            direction = str(detail.get("direction") or detail.get("signal") or "WAIT").upper()
+            if self._f(detail.get("confidence"), 0.0) < self.thesis_exit_agent_min_confidence:
+                continue
+            if direction == trade_type:
+                defenders.append(name)
+            elif direction == opposite:
+                opponents.append(name)
+
+        if len(defenders) >= self.thesis_exit_min_defenders and len(defenders) > len(opponents):
+            verdict = "DEFEND"
+        elif len(opponents) >= self.thesis_exit_min_opponents and not defenders:
+            verdict = "CONFIRM"
+        else:
+            verdict = "SILENT"
+        return {
+            "verdict": verdict,
+            "available": True,
+            "defenders": defenders,
+            "opponents": opponents,
+        }
+
     def _thesis_exit_review(
         self,
         trade: Dict[str, Any],
@@ -1376,15 +1500,88 @@ class OpenTradesManager(BaseAgent):
         tp1: float,
         entry: float,
         partial_close: bool,
+        agent_details: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         if not self.thesis_exit_enabled or trade_type not in {"BUY", "SELL"}:
             return {"exit_now": False, "scale_out": False}
         opposite_continuation = self._continuation_trigger_against_trade(trade_type, recent_candles, symbol)
         if opposite_continuation:
+            vote = self._agent_exit_vote(agent_details, trade_type)
+            verdict = str(vote.get("verdict"))
+            defenders = vote.get("defenders") or []
+            opponents = vote.get("opponents") or []
+
+            # The agents still argue the trade's own case. On 2026-07-30 this
+            # was Classical 71, SMC 90 and Multi-Timeframe 83 defending a SELL
+            # that the candle rule closed for -39.2 -- a trade the planner
+            # then republished as its A+ map of the day, and which the market
+            # went on to pay.
+            if verdict == "DEFEND":
+                return {
+                    "exit_now": False,
+                    "scale_out": False,
+                    "kind": "OPPOSITE_CONTINUATION_VETOED_BY_AGENTS",
+                    "reason": (
+                        f"Thesis exit held: {len(defenders)} qualified agents "
+                        f"({', '.join(defenders)}) still support the {trade_type}"
+                    ),
+                    "agent_vote": vote,
+                }
+
+            # An absent book is not a silent book.
+            #
+            # `available` is False when no agent read was supplied at all --
+            # the emergency run_trade_updates.py path, older callers, tests
+            # that predate this vote. Softening the exit there would change
+            # behaviour on the strength of evidence nobody gathered, so the
+            # legacy full exit stands. Scaling is reserved for the case the
+            # operator actually chose: agents consulted, and undecided.
+            if not vote.get("available"):
+                return {
+                    "exit_now": True,
+                    "reason": f"Automatic thesis exit: {opposite_continuation}",
+                    "kind": "OPPOSITE_CONTINUATION",
+                    "agent_vote": vote,
+                }
+
+            # Already scaled once on this trigger. A candle that keeps
+            # printing the same shape is not new evidence, and repeating the
+            # reduction would grind the position away cycle by cycle -- worse
+            # than the full exit it was meant to soften. Only a CHANGE in the
+            # agent book escalates from here.
+            if verdict == "SILENT" and partial_close:
+                return {
+                    "exit_now": False,
+                    "scale_out": False,
+                    "kind": "OPPOSITE_CONTINUATION_ALREADY_SCALED",
+                    "reason": (
+                        "Thesis exit already scaled this position; the stop sits at "
+                        "breakeven and the agent book has not changed"
+                    ),
+                    "agent_vote": vote,
+                }
+
+            if verdict == "SILENT" and self.thesis_exit_silent_action == "SCALE_OUT":
+                return {
+                    "exit_now": False,
+                    "scale_out": True,
+                    "scale_fraction": self.thesis_exit_silent_scale_fraction,
+                    "kind": "OPPOSITE_CONTINUATION_SCALE_OUT",
+                    "reason": (
+                        f"Automatic thesis scale-out: {opposite_continuation}, "
+                        f"unconfirmed by the agent book"
+                    ),
+                    "agent_vote": vote,
+                }
+
+            reason = f"Automatic thesis exit: {opposite_continuation}"
+            if verdict == "CONFIRM" and opponents:
+                reason += f", confirmed by {len(opponents)} qualified agents ({', '.join(opponents)})"
             return {
                 "exit_now": True,
-                "reason": f"Automatic thesis exit: {opposite_continuation}",
+                "reason": reason,
                 "kind": "OPPOSITE_CONTINUATION",
+                "agent_vote": vote,
             }
         opposing_poi = self._opposing_poi_exit_review(
             trade,
