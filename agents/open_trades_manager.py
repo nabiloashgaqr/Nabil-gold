@@ -141,6 +141,19 @@ class OpenTradesManager(BaseAgent):
             _zt_progress = (oe.get("near_miss_execution", {}) or {}).get("max_target_progress_pct", 60)
         self.zone_touch_max_target_progress_pct = float(_zt_progress or 60)
         self.zone_touch_require_planner_context = bool(zta.get("require_planner_context", True))
+        # Give the mapped price its chance first.
+        #
+        # The reference entry is the price the plan actually wants. Only once
+        # price has been inside the area for this long without filling is the
+        # order treated as sitting too deep. One analysis cycle is 5 minutes,
+        # so the default waits two of them.
+        self.zone_touch_grace_minutes = float(zta.get("grace_minutes", 10) or 10)
+        # Once price has left the zone in favour, the edge is a fact of the
+        # past: the fill is judged by where the zone was, not by where price
+        # happens to sit on the cycle that notices. Without this, a pullback
+        # back toward the edge would cancel an activation that had already
+        # earned itself.
+        self.zone_touch_allow_after_return = bool(zta.get("allow_after_return", True))
         nme = (oe.get("near_miss_execution", {}) or {}) if isinstance(oe, dict) else {}
         self.near_miss_enabled = bool(nme.get("enabled", True))
         self.near_miss_min_halo_points = float(nme.get("min_halo_points", 12) or 12)
@@ -1347,6 +1360,8 @@ class OpenTradesManager(BaseAgent):
         recent_window_high: float | None,
         recent_window_low: float | None,
         symbol: str,
+        runtime: Dict[str, Any] | None = None,
+        now: datetime | None = None,
     ) -> Dict[str, Any]:
         """Fill a mapped order that traded inside its own entry zone.
 
@@ -1391,7 +1406,14 @@ class OpenTradesManager(BaseAgent):
 
         # Did price trade inside the published area at all?
         touched = low <= zone_high and high >= zone_low
-        if not touched:
+        runtime = runtime if isinstance(runtime, dict) else {}
+        first_seen = self._parse_dt(str(runtime.get("zone_first_touch_at") or ""))
+        # A departure recorded on an earlier cycle stays true. Price leaving
+        # the area in favour is the event; the cycle that happens to observe
+        # it, and where price sits by then, are not part of the test.
+        left_before = bool(runtime.get("zone_left_in_favour"))
+
+        if not touched and not left_before:
             return blank
 
         planned_risk = abs(entry - stop_loss)
@@ -1404,18 +1426,51 @@ class OpenTradesManager(BaseAgent):
             # touch path rather than filling worse than the map asked for.
             if low <= entry:
                 return blank
-            if self.zone_touch_require_exit_in_favour and current_price <= zone_high:
-                return {"activate": False, "reason": "price has not yet left the zone upward"}
+            left_now = high > zone_high
+            left = left_now or (left_before and self.zone_touch_allow_after_return)
+            if self.zone_touch_require_exit_in_favour and not left:
+                return {
+                    "activate": False,
+                    "reason": "price has not yet left the zone upward",
+                    "touched": touched,
+                }
             new_stop = fill - planned_risk if self.zone_touch_preserve_planned_risk else stop_loss
             reward = tp2 - fill
         else:
             fill = zone_low
             if high >= entry:
                 return blank
-            if self.zone_touch_require_exit_in_favour and current_price >= zone_low:
-                return {"activate": False, "reason": "price has not yet left the zone downward"}
+            left_now = low < zone_low
+            left = left_now or (left_before and self.zone_touch_allow_after_return)
+            if self.zone_touch_require_exit_in_favour and not left:
+                return {
+                    "activate": False,
+                    "reason": "price has not yet left the zone downward",
+                    "touched": touched,
+                }
             new_stop = fill + planned_risk if self.zone_touch_preserve_planned_risk else stop_loss
             reward = fill - tp2
+
+        # The mapped price gets first refusal. Only after price has been in
+        # the area this long without filling is the order judged too deep.
+        if self.zone_touch_grace_minutes > 0:
+            reference = now or datetime.now(timezone.utc)
+            if first_seen is None:
+                return {
+                    "activate": False,
+                    "reason": "waiting for the mapped entry to fill first",
+                    "touched": touched,
+                }
+            waited = (reference - first_seen).total_seconds() / 60.0
+            if waited < self.zone_touch_grace_minutes:
+                return {
+                    "activate": False,
+                    "reason": (
+                        f"mapped entry still has time ({waited:.0f} of "
+                        f"{self.zone_touch_grace_minutes:.0f} min)"
+                    ),
+                    "touched": touched,
+                }
 
         # How much of the fill -> TP1 path has price already covered?
         tp1 = self._f(trade.get("tp1"), 0.0)
@@ -2249,7 +2304,26 @@ class OpenTradesManager(BaseAgent):
                 recent_window_high=recent_window_high,
                 recent_window_low=recent_window_low,
                 symbol=symbol,
+                runtime=runtime,
+                now=now,
             )
+            # Remember the visit and the departure. The grace period is
+            # measured from the first time price was seen inside the area, and
+            # a departure must survive the cycle that observed it -- otherwise
+            # a pullback would erase an activation that had already earned
+            # itself between two five-minute checks.
+            _zone_low, _zone_high = self._entry_zone_bounds(trade)
+            if _zone_low > 0 and _zone_high > 0:
+                _inside = low_price <= _zone_high and high_price >= _zone_low
+                if _inside and not runtime.get("zone_first_touch_at"):
+                    _persist_runtime(zone_first_touch_at=self._iso(now))
+                _left = (high_price > _zone_high) if trade_type == "BUY" else (low_price < _zone_low)
+                if _left and runtime.get("zone_first_touch_at") and not runtime.get("zone_left_in_favour"):
+                    _persist_runtime(
+                        zone_left_in_favour=True,
+                        zone_left_at=self._iso(now),
+                        zone_left_edge=round(_zone_high if trade_type == "BUY" else _zone_low, 2),
+                    )
             if zone_review.get("activate"):
                 allowed, gov_reason = _conversion_allowed(current_price)
                 if allowed:
