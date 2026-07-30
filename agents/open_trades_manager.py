@@ -23,7 +23,11 @@ class OpenTradesManager(BaseAgent):
 
     name = "open_trades_manager"
     OPEN_STATUSES = {"OPEN", "PARTIAL", "TP1_HIT"}
-    CLOSED_STATUSES = {"TP2_HIT", "SL_HIT", "BE_HIT", "EXPIRED", "MANUAL_CLOSE"}
+    # THESIS_EXIT is the automatic close: the system decided the thesis the
+    # trade was opened on no longer holds. MANUAL_CLOSE is retained because a
+    # human close (scripts/run_close_trade_now.py) is a genuinely different
+    # event, and because rows written before the rename still carry it.
+    CLOSED_STATUSES = {"TP2_HIT", "SL_HIT", "BE_HIT", "EXPIRED", "THESIS_EXIT", "MANUAL_CLOSE"}
     # Events that must NEVER trigger a Telegram notification because they are
     # internal/system signals not related to actual trade state changes.
     SILENT_EVENTS = {"PRICE_SANITY_FAILED"}
@@ -45,6 +49,7 @@ class OpenTradesManager(BaseAgent):
         "TRAILING_SL_HIT",
         "BE_HIT",
         "EXPIRED",
+        "THESIS_EXIT",
         "MANUAL_CLOSE",
     }
 
@@ -823,8 +828,8 @@ class OpenTradesManager(BaseAgent):
                 new_stop_loss = entry
                 events.append("MOVE_SL_TO_BE")
         elif thesis_exit.get("exit_now"):
-            new_status = "MANUAL_CLOSE"
-            events.append("MANUAL_CLOSE")
+            new_status = "THESIS_EXIT"
+            events.append("THESIS_EXIT")
             close_price = current_price
             final_pnl = round(pnl_points, 1)
             result = "WIN" if pnl_points > 0 else "LOSS" if pnl_points < 0 else "BREAKEVEN"
@@ -913,7 +918,7 @@ class OpenTradesManager(BaseAgent):
                         events.append("TRAILING_SL_UPDATED")
 
         # Avoid repeating informational events already sent. Status events are naturally one-time after status changes.
-        closing_events = {"TP2_HIT", "SL_HIT", "TRAILING_SL_HIT", "BE_HIT", "MANUAL_CLOSE"}
+        closing_events = {"TP2_HIT", "SL_HIT", "TRAILING_SL_HIT", "BE_HIT", "THESIS_EXIT", "MANUAL_CLOSE"}
         if any(event in closing_events for event in events):
             events = [event for event in events if event not in {"NEAR_TP1", "LONG_RUNNING", "EXIT_WARNING"}]
         filtered_events: List[str] = []
