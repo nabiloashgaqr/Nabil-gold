@@ -108,6 +108,39 @@ class OpenTradesManager(BaseAgent):
         self.pending_news_require_rr_recheck = bool(pnh.get("require_rr_recheck", True))
         self.pending_news_require_spread_recheck = bool(pnh.get("require_spread_recheck", True))
         self.pending_news_cancel_if_drift_exceeds = bool(pnh.get("cancel_if_drift_exceeds", True))
+        # Zone-touch activation.
+        #
+        # A planner map publishes an entry ZONE, then waits for one price
+        # inside it. On 2026-07-30 a BUY zone 4054.49-4062.05 was touched at
+        # 4060.40 -- inside the zone, 21 points above the reference entry --
+        # and the order never filled. Price then ran to 4079.88, through TP1.
+        #
+        # Chasing that at market was not the answer: the stop stays where the
+        # map put it, so entering 80 points higher inflates risk from 185 to
+        # 265 points and collapses RR from 1.90 to 1.02, below the configured
+        # floor. The near-miss path refuses it for exactly that reason.
+        #
+        # Filling at the zone EDGE and carrying the stop the same distance
+        # keeps the planned risk intact: 185 points either way, RR 1.69.
+        # The trade the map described is taken, at the worst price inside the
+        # area the map itself drew.
+        zta = (oe.get("zone_touch_activation", {}) or {}) if isinstance(oe, dict) else {}
+        self.zone_touch_enabled = bool(zta.get("enabled", True))
+        self.zone_touch_require_exit_in_favour = bool(zta.get("require_exit_in_favour", True))
+        self.zone_touch_preserve_planned_risk = bool(zta.get("preserve_planned_risk", True))
+        self.zone_touch_min_remaining_rr = float(zta.get("min_remaining_rr", 1.5) or 1.5)
+        # Do not board a move that has already happened. Measured against the
+        # distance from the ZONE EDGE to TP1: once price has covered most of
+        # that, the reward left no longer justifies the mapped stop, and the
+        # RR test alone will not catch it because TP2 may still be far away.
+        # Defaults to the near-miss ceiling when zone-touch does not set its
+        # own, so an operator who tightened one chase-guard is not silently
+        # bypassed by the other.
+        _zt_progress = zta.get("max_target_progress_pct")
+        if _zt_progress is None:
+            _zt_progress = (oe.get("near_miss_execution", {}) or {}).get("max_target_progress_pct", 60)
+        self.zone_touch_max_target_progress_pct = float(_zt_progress or 60)
+        self.zone_touch_require_planner_context = bool(zta.get("require_planner_context", True))
         nme = (oe.get("near_miss_execution", {}) or {}) if isinstance(oe, dict) else {}
         self.near_miss_enabled = bool(nme.get("enabled", True))
         self.near_miss_min_halo_points = float(nme.get("min_halo_points", 12) or 12)
@@ -1286,6 +1319,144 @@ class OpenTradesManager(BaseAgent):
         reason = f"Near-miss market conversion: missed entry by {missed_by_points:.0f} pts within halo {halo_points:.0f}, then confirmed away by {move_away_points:.0f} pts"
         return True, reason, round(halo_points, 1)
 
+    def _entry_zone_bounds(self, trade: Dict[str, Any]) -> tuple[float, float]:
+        """The published entry area, as low/high prices. (0, 0) when absent."""
+        snapshot = self._trade_snapshot(trade)
+        signal = snapshot.get("signal") or {}
+        zone = signal.get("entry") or {}
+        low = self._f(zone.get("low"), 0.0)
+        high = self._f(zone.get("high"), 0.0)
+        if low <= 0 or high <= 0:
+            return 0.0, 0.0
+        if low > high:
+            low, high = high, low
+        return low, high
+
+    def _zone_touch_review(
+        self,
+        trade: Dict[str, Any],
+        *,
+        trade_type: str,
+        order_type: str,
+        entry: float,
+        stop_loss: float,
+        tp2: float,
+        current_price: float,
+        candle_high: float,
+        candle_low: float,
+        recent_window_high: float | None,
+        recent_window_low: float | None,
+        symbol: str,
+    ) -> Dict[str, Any]:
+        """Fill a mapped order that traded inside its own entry zone.
+
+        The reference entry is one price inside an area; the area is the
+        thesis. When price enters the zone and then leaves it in the trade's
+        favour, the setup happened -- the order simply sat a few points too
+        deep to be touched.
+
+        Two conditions keep this honest:
+
+        - the exit must be IN FAVOUR. A wick into the zone followed by a
+          collapse is not an entry signal, and at the moment of the touch the
+          two are indistinguishable. Requiring a close beyond the far edge is
+          what separates "price worked through the area" from "price rejected
+          it".
+        - the risk must not grow. Filling at the edge without moving the stop
+          would silently widen risk and drop RR under the configured floor.
+          The stop travels the same distance as the entry, so the trade keeps
+          the exact risk the map planned for it.
+        """
+        blank = {"activate": False}
+        if not self.zone_touch_enabled:
+            return blank
+        if not str(order_type or "").upper().endswith("LIMIT"):
+            return blank
+        if entry <= 0 or stop_loss <= 0:
+            return blank
+        if self.zone_touch_require_planner_context and not self._has_planner_pending_context(trade):
+            return blank
+
+        zone_low, zone_high = self._entry_zone_bounds(trade)
+        if zone_low <= 0 or zone_high <= 0 or zone_high <= zone_low:
+            return blank
+
+        high = max(self._f(candle_high, current_price), self._f(recent_window_high, 0.0))
+        low = self._f(candle_low, current_price)
+        window_low = self._f(recent_window_low, 0.0)
+        if window_low > 0:
+            low = min(low, window_low)
+        if high <= 0 or low <= 0:
+            return blank
+
+        # Did price trade inside the published area at all?
+        touched = low <= zone_high and high >= zone_low
+        if not touched:
+            return blank
+
+        planned_risk = abs(entry - stop_loss)
+        if planned_risk <= 0:
+            return blank
+
+        if trade_type == "BUY":
+            fill = zone_high
+            # Already fillable at the reference entry: leave it to the normal
+            # touch path rather than filling worse than the map asked for.
+            if low <= entry:
+                return blank
+            if self.zone_touch_require_exit_in_favour and current_price <= zone_high:
+                return {"activate": False, "reason": "price has not yet left the zone upward"}
+            new_stop = fill - planned_risk if self.zone_touch_preserve_planned_risk else stop_loss
+            reward = tp2 - fill
+        else:
+            fill = zone_low
+            if high >= entry:
+                return blank
+            if self.zone_touch_require_exit_in_favour and current_price >= zone_low:
+                return {"activate": False, "reason": "price has not yet left the zone downward"}
+            new_stop = fill + planned_risk if self.zone_touch_preserve_planned_risk else stop_loss
+            reward = fill - tp2
+
+        # How much of the fill -> TP1 path has price already covered?
+        tp1 = self._f(trade.get("tp1"), 0.0)
+        if tp1 > 0:
+            span = abs(tp1 - fill)
+            travelled = (current_price - fill) if trade_type == "BUY" else (fill - current_price)
+            if span > 0 and travelled > 0:
+                progress_pct = travelled / span * 100.0
+                if progress_pct > self.zone_touch_max_target_progress_pct:
+                    return {
+                        "activate": False,
+                        "reason": (
+                            f"price already covered {progress_pct:.0f}% of the path to TP1 "
+                            f"(limit {self.zone_touch_max_target_progress_pct:.0f}%)"
+                        ),
+                    }
+
+        risk = abs(fill - new_stop)
+        if risk <= 0:
+            return blank
+        remaining_rr = reward / risk if reward > 0 else 0.0
+        if remaining_rr < self.zone_touch_min_remaining_rr:
+            return {
+                "activate": False,
+                "reason": f"zone-edge RR {remaining_rr:.2f} below {self.zone_touch_min_remaining_rr:.2f}",
+            }
+
+        missed_by = abs(calculate_pips(entry, low if trade_type == "BUY" else high, "BUY", symbol))
+        return {
+            "activate": True,
+            "fill_price": round(fill, 2),
+            "stop_loss": round(new_stop, 2),
+            "remaining_rr": round(remaining_rr, 2),
+            "reason": (
+                f"Zone-touch activation: price traded into the mapped area "
+                f"({zone_low:.2f}-{zone_high:.2f}) within {missed_by:.0f} pts of entry "
+                f"and left it in favour; filled at the zone edge {fill:.2f} with the "
+                f"planned {abs(calculate_pips(fill, new_stop, 'BUY', symbol)):.0f} pt risk preserved"
+            ),
+        }
+
     def _management_phase(self, status: str, sl_moved_to_entry: bool, partial_close: bool, pnl_points: float) -> str:
         if status == "TP1_HIT" or partial_close:
             return "POST_TP1_TRAILING" if sl_moved_to_entry else "POST_TP1"
@@ -2057,6 +2228,69 @@ class OpenTradesManager(BaseAgent):
                 "hours_open": hours_open,
                 "pending_distance_points": dist_pts,
             }
+
+        # Zone-touch activation runs before the near-miss path. Both answer
+        # "price came close but did not fill", but this one fills at the edge
+        # of the mapped area with the planned risk intact, while near-miss
+        # converts to market and therefore has to refuse anything that would
+        # widen risk. When price genuinely traded inside the published zone,
+        # the zone edge is the truer price.
+        if (not filled_touch) and (not news_blocked) and freshness_state in {"FRESH", "AGING"}:
+            zone_review = self._zone_touch_review(
+                trade,
+                trade_type=trade_type,
+                order_type=order_type,
+                entry=entry,
+                stop_loss=stop_loss,
+                tp2=tp2,
+                current_price=current_price,
+                candle_high=high_price,
+                candle_low=low_price,
+                recent_window_high=recent_window_high,
+                recent_window_low=recent_window_low,
+                symbol=symbol,
+            )
+            if zone_review.get("activate"):
+                allowed, gov_reason = _conversion_allowed(current_price)
+                if allowed:
+                    fill_price = self._f(zone_review.get("fill_price"), 0.0)
+                    new_stop = self._f(zone_review.get("stop_loss"), 0.0)
+                    activation_reason = str(zone_review.get("reason") or "Zone-touch activation")
+                    _persist_runtime(
+                        zone_touch_activation=True,
+                        zone_touch_reason=activation_reason,
+                        zone_touch_fill_price=fill_price,
+                        zone_touch_original_stop=round(stop_loss, 2),
+                        zone_touch_remaining_rr=zone_review.get("remaining_rr"),
+                        activation_reason=activation_reason,
+                    )
+                    base_updates.update({
+                        "status": "OPEN",
+                        "entry_time": self._iso(now),
+                        "entry_price": fill_price,
+                        "stop_loss": new_stop,
+                        "current_pnl": 0,
+                        "current_pnl_points": 0,
+                        "pending_cycles": 0,
+                        "activation_reason": activation_reason,
+                    })
+                    self.logger.info(
+                        "Zone-touch activation for %s: filled at %.2f, stop moved %.2f -> %.2f "
+                        "to preserve the planned risk",
+                        trade.get("id"), fill_price, stop_loss, new_stop,
+                    )
+                    return {
+                        "trade_id": trade.get("id"),
+                        "old_status": "PENDING",
+                        "new_status": "OPEN",
+                        "pnl_points": 0.0,
+                        "events": ["ORDER_FILLED"],
+                        "updates": base_updates,
+                        "progress_to_tp1": 0.0,
+                        "hours_open": 0.0,
+                        "pending_distance_points": 0.0,
+                    }
+                _persist_runtime(zone_touch_blocked_reason=gov_reason)
 
         if (not filled_touch) and (not news_blocked) and freshness_state in {"FRESH", "AGING"}:
             near_miss_ok, near_miss_reason, near_miss_halo = self._near_miss_review(
