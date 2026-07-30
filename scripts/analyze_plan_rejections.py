@@ -75,10 +75,22 @@ def _reason_family(reason: str) -> str:
     text = (reason or "").lower()
     if _is_crash(reason):
         return f"⚠ CRASH — {(reason or '')[:44]}"
+    # "execution refused the leg" held a flat 20 across reports #17, #7 and
+    # #8 -- three different code states, three different market days, the
+    # same number. That looked like a dead gate, but the gate is live: the
+    # label was collapsing every distinct execution verdict into one bucket,
+    # so whatever actually varied underneath could never be seen.
+    #
+    # The planner already reports WHY execution refused
+    # (session_planner.py:1245, "execution refused the main leg: <cause>").
+    # Keep that cause instead of throwing it away.
+    if "execution refused" in text:
+        _, _, cause = (reason or "").partition(":")
+        cause = cause.strip()
+        return f"execution refused: {cause[:34]}" if cause else "execution refused the leg"
     for needle, label in (
         ("too weak for planning", "primary thesis too weak"),
         ("archetype conviction", "archetype conviction LOW"),
-        ("execution refused", "execution refused the leg"),
         ("rr", "reward-to-risk"),
         ("too wide", "zone too wide"),
         ("too narrow", "zone too narrow"),
