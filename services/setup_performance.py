@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 _WIN_STATUSES = {"TP2_HIT"}
 _LOSS_STATUSES = {"SL_HIT"}
-_CLOSED_STATUSES = _WIN_STATUSES | _LOSS_STATUSES | {"BE_HIT", "MANUAL_CLOSE", "EXPIRED", "TP1_HIT"}
+_CLOSED_STATUSES = _WIN_STATUSES | _LOSS_STATUSES | {"BE_HIT", "THESIS_EXIT", "MANUAL_CLOSE", "EXPIRED", "TP1_HIT"}
 
 
 def _f(value: Any, default: float = 0.0) -> float:

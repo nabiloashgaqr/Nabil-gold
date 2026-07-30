@@ -25,7 +25,7 @@ TELEGRAM_MAX_CHARS = 4096
 
 # Statuses considered as a closed (resolved) trade
 CLOSED_STATUSES = {"CLOSED_TP1", "CLOSED_TP2", "CLOSED_SL", "EXPIRED", "BE_HIT",
-                   "TP2_HIT", "SL_HIT", "MANUAL_CLOSE"}
+                   "TP2_HIT", "SL_HIT", "THESIS_EXIT", "MANUAL_CLOSE"}
 
 
 @dataclass

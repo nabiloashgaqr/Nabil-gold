@@ -40,7 +40,7 @@ class ExitReplayHarness:
     """Drive a trade through a candle series using the real manager."""
 
     CLOSING_EVENTS = {"TP2_HIT", "SL_HIT", "TRAILING_SL_HIT", "BE_HIT",
-                      "MANUAL_CLOSE", "EXPIRED"}
+                      "THESIS_EXIT", "MANUAL_CLOSE", "EXPIRED"}
 
     def __init__(self, config: Dict[str, Any] | None = None) -> None:
         self.config = config or {}

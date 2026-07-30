@@ -84,7 +84,7 @@ def build_execution_metrics(
 
     closed = [
         t for t in trades
-        if str(t.get("status") or "").upper() in {"TP2_HIT", "SL_HIT", "BE_HIT", "MANUAL_CLOSE", "EXPIRED"}
+        if str(t.get("status") or "").upper() in {"TP2_HIT", "SL_HIT", "BE_HIT", "THESIS_EXIT", "MANUAL_CLOSE", "EXPIRED"}
     ]
     recent_closed = []
     for trade in closed:

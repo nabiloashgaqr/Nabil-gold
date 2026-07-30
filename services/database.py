@@ -1109,7 +1109,7 @@ class DatabaseService:
             # SL_HIT is not automatically a loss: a trailing/breakeven stop can
             # close profitably (SL+) or at breakeven. Use PnL sign when present.
             is_loss = pnl < 0
-            is_win_or_break = status in {"TP2_HIT", "BE_HIT", "MANUAL_CLOSE", "EXPIRED"} or pnl >= 0
+            is_win_or_break = status in {"TP2_HIT", "BE_HIT", "THESIS_EXIT", "MANUAL_CLOSE", "EXPIRED"} or pnl >= 0
             if is_loss:
                 losses += 1
                 continue

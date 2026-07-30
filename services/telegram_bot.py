@@ -32,12 +32,13 @@ class TelegramService:
         "LONG_RUNNING": "Long-running Trade",
         "EXIT_WARNING": "Exit / Risk Warning",
         "EXPIRED": "Trade Expired",
+        "THESIS_EXIT": "Thesis Exit",
         "MANUAL_CLOSE": "Manual Close",
     }
     EVENT_PRIORITY = [
         "TP2_HIT", "TRAILING_SL_HIT", "SL_HIT", "BE_HIT", "TP1_HIT",
         "THESIS_SCALE_OUT", "MOVE_SL_TO_BE", "TRAILING_SL_UPDATED", "ORDER_FILLED", "NEWS_HOLD", "PENDING_CANCELLED", "EXIT_WARNING",
-        "LONG_RUNNING", "NEAR_TP1", "EXPIRED", "MANUAL_CLOSE",
+        "LONG_RUNNING", "NEAR_TP1", "EXPIRED", "THESIS_EXIT", "MANUAL_CLOSE",
     ]
 
     def __init__(self, config: Dict[str, Any] | None = None) -> None:
@@ -1108,8 +1109,14 @@ class TelegramService:
         new_status = str(evaluation.get("new_status") or old_status)
         updates = evaluation.get("updates") or {}
         primary_reason = self._first_reason(updates.get("reasons"), trade.get("reasons"))
-        title = "Thesis Exit" if ("MANUAL_CLOSE" in events and primary_reason and "thesis exit" in str(primary_reason).lower()) else self._event_title(events)
-        closing = any(e in events for e in {"TP2_HIT", "SL_HIT", "TRAILING_SL_HIT", "BE_HIT", "EXPIRED", "MANUAL_CLOSE"})
+        # The event itself now carries the distinction, so the title no longer
+        # has to guess it from the wording of the reason. A close written by
+        # the automatic thesis check is THESIS_EXIT; MANUAL_CLOSE means a human
+        # closed it. Older rows kept the reason-sniffing path below.
+        title = self._event_title(events)
+        if "THESIS_EXIT" not in events and "MANUAL_CLOSE" in events and primary_reason and "thesis exit" in str(primary_reason).lower():
+            title = "Thesis Exit"
+        closing = any(e in events for e in {"TP2_HIT", "SL_HIT", "TRAILING_SL_HIT", "BE_HIT", "EXPIRED", "THESIS_EXIT", "MANUAL_CLOSE"})
 
         lines = [
             f"🔔 <b>{html.escape(title)}</b>",
@@ -1185,7 +1192,7 @@ class TelegramService:
             cancel_reason = self._first_reason(updates.get("reasons"), trade.get("reasons"))
             if cancel_reason:
                 lines.append(f"• <b>Cancellation reason:</b> {self._clean_text(cancel_reason)}")
-        if any(e in events for e in {"MANUAL_CLOSE", "THESIS_SCALE_OUT"}) and primary_reason:
+        if any(e in events for e in {"THESIS_EXIT", "MANUAL_CLOSE", "THESIS_SCALE_OUT"}) and primary_reason:
             lines.append(f"• <b>Exit reason:</b> {self._clean_text(primary_reason)}")
         # A partial close has to state how much was actually closed and at what
         # price. `partial_close` used to be a label with no size behind it, so
