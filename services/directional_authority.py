@@ -57,6 +57,30 @@ class DirectionalAuthorityService:
                 oppose.append(name)
         return {"available": True, "support": support, "oppose": oppose}
 
+    def _is_at_risk(self, trade: Dict[str, Any], direction: str) -> bool:
+        """Can this position still lose money if its stop is hit?
+
+        A stop at or beyond the entry means the trade is protected: the worst
+        case is breakeven or better, so it is not something a new opposite
+        idea can damage. Anything else -- including a stop that has not moved,
+        or a pending order not yet filled -- is genuinely exposed.
+
+        Unknown or unparseable prices are treated as AT RISK. A missing field
+        must never quietly unlock the map.
+        """
+        entry = self._f(trade.get("entry_price"), 0.0)
+        stop = self._f(trade.get("stop_loss"), 0.0)
+        if entry <= 0 or stop <= 0:
+            return True
+        if str(trade.get("status") or "").upper() == "PENDING":
+            # Not filled yet: it will open at full risk the moment it fills.
+            return True
+        if direction == "BUY":
+            return stop < entry
+        if direction == "SELL":
+            return stop > entry
+        return True
+
     def review(
         self,
         decision: Dict[str, Any],
@@ -106,12 +130,29 @@ class DirectionalAuthorityService:
             reasons.append("no aligned fresh sweep for regime flip")
 
         if not allow_flip:
-            live_opposite = [
+            symbol_key = str(decision.get("symbol") or self.config.get("symbol", "XAU/USD")).upper()
+            on_map = [
                 t for t in (open_trades or [])
                 if str(t.get("status") or "").upper() in {"OPEN", "PARTIAL", "TP1_HIT", "PENDING"}
                 and str(t.get("type") or t.get("side") or "").upper() == authority_direction
-                and str(t.get("symbol") or "").upper() == str(decision.get("symbol") or self.config.get("symbol", "XAU/USD")).upper()
+                and str(t.get("symbol") or "").upper() == symbol_key
             ]
+            # Only a trade that can still LOSE money defends the map.
+            #
+            # This list existed to stop a fresh opposite signal contradicting
+            # a position that is already exposed. A trade whose stop has been
+            # carried to breakeven is not exposed: its worst outcome is zero.
+            # Counting it anyway meant one protected, profitable runner kept
+            # the whole symbol locked to its map -- so five qualified agents
+            # reading the other way could neither retire the map nor plan
+            # against it, purely because a risk-free position was still open.
+            #
+            # Measuring risk by price rather than by the sl_moved_to_entry
+            # flag is deliberate: the manager itself distrusts that flag
+            # (open_trades_manager.py:733) because older rows carry it while
+            # stop_loss still shows the original wider stop.
+            live_opposite = [t for t in on_map if self._is_at_risk(t, authority_direction)]
+            protected = [t for t in on_map if t not in live_opposite]
 
             # Before refusing, ask whether the map still describes the book.
             #
@@ -135,14 +176,20 @@ class DirectionalAuthorityService:
                     and not book["oppose"]
                     and len(book["support"]) >= self.min_agents_to_retire_map
                 ):
+                    retire_reason = (
+                        f"{len(book['support'])} qualified agents "
+                        f"({', '.join(book['support'])}) now read {side} and none "
+                        f"still support the {authority_direction} day map; the map "
+                        f"is retired rather than allowed to veto the live book"
+                    )
+                    if protected:
+                        retire_reason += (
+                            f" ({len(protected)} {authority_direction} trade(s) still open "
+                            f"but protected at breakeven, so no live risk defends the map)"
+                        )
                     return {
                         "action": "ALLOW_MAP_RETIRED",
-                        "reason": (
-                            f"{len(book['support'])} qualified agents "
-                            f"({', '.join(book['support'])}) now read {side} and none "
-                            f"still support the {authority_direction} day map; the map "
-                            f"is retired rather than allowed to veto the live book"
-                        ),
+                        "reason": retire_reason,
                         "authority_direction": authority_direction,
                         "signal_direction": side,
                         "opposing_agents": book["support"],
@@ -151,7 +198,15 @@ class DirectionalAuthorityService:
 
             prefix = f"confirmed {authority_direction} day map still owns this symbol"
             if live_opposite:
-                prefix += f" with {len(live_opposite)} active same-map trade(s)"
+                prefix += f" with {len(live_opposite)} at-risk same-map trade(s)"
+            elif protected:
+                # Say so explicitly. A refusal that mentions open trades while
+                # every one of them is risk-free reads as if the position were
+                # the cause, when the flip conditions are.
+                prefix += (
+                    f" ({len(protected)} same-map trade(s) open but protected, "
+                    f"so they are not what refused this)"
+                )
             return {
                 "action": "BLOCK_OPPOSITE_LOCAL",
                 "reason": f"{prefix}; {'; '.join(reasons)}",
