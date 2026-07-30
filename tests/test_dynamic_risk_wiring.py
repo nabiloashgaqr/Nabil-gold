@@ -7,6 +7,13 @@ never read. Every protection it provides was inert: the system kept opening
 trades no matter how much it had just lost.
 
 These tests pin the wiring, not just the function.
+
+The gate now lives in `_dynamic_risk_block_for_cycle`, extracted from
+`_run_analysis_for_config` so that a test can call it directly instead of
+re-implementing it. These scans therefore look at BOTH: the call site inside
+the cycle, and the helper it delegates to. Following an extraction is the
+point -- the guard is about the halt reaching every execution route, not
+about which function the statement happens to sit in.
 """
 
 from __future__ import annotations
@@ -60,8 +67,12 @@ def _signal(confidence: float = 79.8, quality: float = 100.0):
 
 def test_should_block_signal_is_actually_called() -> None:
     """The import existed for months while the call never did."""
-    source = inspect.getsource(ra._run_analysis_for_config)
-    assert "should_block_signal(" in source, (
+    cycle = inspect.getsource(ra._run_analysis_for_config)
+    helper = inspect.getsource(ra._dynamic_risk_block_for_cycle)
+    assert "_dynamic_risk_block_for_cycle(" in cycle, (
+        "the analysis cycle no longer consults dynamic risk at all"
+    )
+    assert "should_block_signal(" in helper, (
         "dynamic risk is computed but never consulted; the halt does nothing"
     )
 
@@ -70,7 +81,7 @@ def test_dynamic_risk_check_precedes_both_execution_routes() -> None:
     """A halt must cover the planner ladder as well as the direct path."""
     source = inspect.getsource(ra._run_analysis_for_config)
 
-    gate = source.find("should_block_signal(")
+    gate = source.find("_dynamic_risk_block_for_cycle(")
     ladder = source.find("_execute_session_plan_ladder(")
     direct = source.find("database.new_trade_id()")
 
@@ -81,10 +92,8 @@ def test_dynamic_risk_check_precedes_both_execution_routes() -> None:
 
 def test_halt_gate_covers_a_wait_cycle_carrying_a_ready_plan() -> None:
     """The ladder trades the plan's bias, so gating on decision_type is not enough."""
-    source = inspect.getsource(ra._run_analysis_for_config)
-    start = source.find("should_block_signal(")
-    window = source[max(0, start - 900):start]
-    assert "session_bias" in window, (
+    source = inspect.getsource(ra._dynamic_risk_block_for_cycle)
+    assert "session_bias" in source, (
         "the halt only looks at decision_type; a WAIT cycle with a ready plan "
         "would still place ladder orders during a halt"
     )
@@ -93,7 +102,7 @@ def test_halt_gate_covers_a_wait_cycle_carrying_a_ready_plan() -> None:
 def test_dynamic_risk_block_returns_before_creating_a_trade() -> None:
     """Reporting the block must not become an alternative to stopping."""
     source = inspect.getsource(ra._run_analysis_for_config)
-    start = source.find("should_block_signal(")
+    start = source.find("_dynamic_risk_block_for_cycle(")
     ladder = source.find("_execute_session_plan_ladder(")
     between = source[start:ladder]
     assert "\n                return" in between or "\n            return" in between

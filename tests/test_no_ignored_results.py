@@ -94,7 +94,7 @@ def test_safety_checks_precede_order_creation() -> None:
     assert create != -1, "order creation not found; the scan is broken"
 
     for label, needle in (
-        ("dynamic risk halt", "should_block_signal("),
+        ("dynamic risk halt", "_dynamic_risk_block_for_cycle("),
         ("final signal validation", "validate_signal_before_send("),
     ):
         position = source.find(needle)
