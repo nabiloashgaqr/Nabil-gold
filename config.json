@@ -618,6 +618,19 @@
             "require_planner_context": true,
             "description": "If price misses a planner limit area by only a few points, then rejects and moves away in the intended direction, allow a controlled market conversion without widening the original POI itself."
         },
+        "zone_touch_activation": {
+            "enabled": true,
+            "description": "تفعيل بلمس المنطقة. الخطة تنشر منطقة دخول كاملة، والدخول المرجعي نقطة واحدة داخلها. في 2026-07-30 لمس السعر 4060.40 داخل منطقة شراء 4054.49-4062.05 ولم يُملأ الأمر لأن المرجع كان 4058.27، ثم صعد إلى 4079.88 مخترقاً TP1. المطاردة بسعر السوق ليست الحل: الوقف ثابت فترتفع المخاطرة من 185 إلى 265 نقطة وينهار RR من 1.90 إلى 1.02 تحت الأرضية. الملء عند حافة المنطقة مع تحريك الوقف بنفس المسافة يبقي المخاطرة 185 نقطة و RR 1.69.",
+            "require_exit_in_favour": true,
+            "description_require_exit_in_favour": "لا يكفي اللمس. يجب أن يغادر السعر المنطقة في اتجاه الصفقة (شراء: فوق الحد العلوي · بيع: تحت الحد السفلي). فتيل يدخل المنطقة ثم ينهار ليس إشارة دخول، ولحظة اللمس لا يمكن التمييز بينهما.",
+            "preserve_planned_risk": true,
+            "description_preserve_planned_risk": "الوقف ينتقل بنفس مسافة انتقال الدخول، فتبقى المخاطرة المخططة كما هي بالضبط. هذا هو الفرق الجوهري عن المطاردة: لا توسيع للمخاطرة.",
+            "min_remaining_rr": 1.5,
+            "description_min_remaining_rr": "نفس أرضية risk_settings.min_rr_ratio — لا رقم جديد.",
+            "max_target_progress_pct": 60,
+            "description_max_target_progress_pct": "لا تركب موجة انتهت. تُقاس من حافة المنطقة إلى TP1: إذا قطع السعر أكثر من هذه النسبة فالمكافأة المتبقية لا تبرر الوقف المخطط. اختبار RR وحده لا يمسك هذا لأن TP2 قد يكون بعيداً.",
+            "require_planner_context": true
+        },
         "smart_entry": {
             "enabled": true,
             "fill_at": "mid",
