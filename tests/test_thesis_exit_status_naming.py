@@ -165,3 +165,54 @@ def test_database_schema_accepts_the_new_status() -> None:
     assert os.path.exists(migration), "the DB constraint change needs a migration file"
     body = open(migration, encoding="utf-8").read()
     assert "THESIS_EXIT" in body and "trades_status_check" in body
+
+
+def test_no_status_list_anywhere_forgets_thesis_exit() -> None:
+    """A closing status missing from one list does not raise -- it hides rows.
+
+    The dashboard proved this in production: `OUTCOME_STATUSES` in three
+    JavaScript files still listed only MANUAL_CLOSE, so after the rename the
+    renamed trades were filtered out of the UI and looked deleted. The rows
+    were never touched; the filter simply stopped matching them.
+
+    Any file that enumerates closing statuses must include THESIS_EXIT. The
+    exceptions below are deliberate and each is justified.
+    """
+    import pathlib
+
+    allowed_without = {
+        # A genuine human close. Must NOT adopt the automatic name.
+        "scripts/run_close_trade_now.py",
+        # Proof scripts replaying recorded history, where the rows really
+        # were written as MANUAL_CLOSE at the time.
+        "scripts/prove_exit_without_entry.py",
+        "scripts/prove_exit_then_replan_same_zone.py",
+        "scripts/prove_agent_vote_before_after.py",
+        # Tests covering the manual-close path itself.
+        "tests/test_manual_close_trade.py",
+        "tests/test_enrich_trade_close_now.py",
+        "tests/test_duplicate_filter.py",
+        "tests/test_integration.py",
+        "tests/test_signal_formatting.py",
+    }
+    root = pathlib.Path(ROOT)
+    offenders = []
+    for pattern in ("**/*.py", "**/*.js", "**/*.sql"):
+        for path in root.glob(pattern):
+            parts = set(path.parts)
+            if parts & {"node_modules", ".git", "__pycache__", ".venv"}:
+                continue
+            rel = path.relative_to(root).as_posix()
+            if rel in allowed_without:
+                continue
+            try:
+                body = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            if "MANUAL_CLOSE" in body and "THESIS_EXIT" not in body:
+                offenders.append(rel)
+
+    assert not offenders, (
+        "these files still enumerate MANUAL_CLOSE without THESIS_EXIT, so "
+        f"automatic exits will silently vanish from them: {offenders}"
+    )
