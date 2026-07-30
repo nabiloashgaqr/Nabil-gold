@@ -846,8 +846,10 @@ def test_open_sell_trade_can_auto_exit_on_bullish_continuation_reclaim() -> None
         {"time": "2026-07-23T10:05:00Z", "open": 4121.2, "high": 4131.0, "low": 4120.8, "close": 4130.0},
     ]
     result = manager.evaluate_trade(trade, 4130.0, candle_high=4131.0, candle_low=4120.8, recent_candles=recent_candles)
-    assert result["new_status"] == "MANUAL_CLOSE"
-    assert result["events"] == ["MANUAL_CLOSE"]
+    # Renamed from MANUAL_CLOSE: nobody closed this by hand. The automatic
+    # thesis check did, and the status now says so.
+    assert result["new_status"] == "THESIS_EXIT"
+    assert result["events"] == ["THESIS_EXIT"]
     assert "thesis exit" in result["updates"]["reasons"][0].lower()
 
 
@@ -903,8 +905,10 @@ def test_open_sell_trade_closes_on_opposing_poi_rejection_if_not_aligned() -> No
         {"time": "2026-07-23T10:05:00Z", "open": 4088.3, "high": 4095.0, "low": 4087.0, "close": 4094.0},
     ]
     result = manager.evaluate_trade(trade, 4094.0, candle_high=4095.0, candle_low=4087.0, recent_candles=recent_candles)
-    assert result["new_status"] == "MANUAL_CLOSE"
-    assert result["events"] == ["MANUAL_CLOSE"]
+    # Renamed from MANUAL_CLOSE: nobody closed this by hand. The automatic
+    # thesis check did, and the status now says so.
+    assert result["new_status"] == "THESIS_EXIT"
+    assert result["events"] == ["THESIS_EXIT"]
     assert "opposing buy poi rejection" in result["updates"]["reasons"][0].lower()
 
 
@@ -926,8 +930,10 @@ def test_countertrend_trade_exits_early_when_it_fails_to_follow_through() -> Non
         {"time": "2026-07-23T10:05:00Z", "open": 4120.9, "high": 4122.2, "low": 4120.1, "close": 4121.1},
     ]
     result = manager.evaluate_trade(trade, 4121.1, candle_high=4122.2, candle_low=4120.1, recent_candles=recent_candles)
-    assert result["new_status"] == "MANUAL_CLOSE"
-    assert result["events"] == ["MANUAL_CLOSE"]
+    # Renamed from MANUAL_CLOSE: nobody closed this by hand. The automatic
+    # thesis check did, and the status now says so.
+    assert result["new_status"] == "THESIS_EXIT"
+    assert result["events"] == ["THESIS_EXIT"]
     assert "counter-objective" in result["updates"]["reasons"][0].lower()
 
 
