@@ -36,7 +36,9 @@ on:
           - thesis_exit_behaviour
           # Should the agents vote on the exit? (corrects the review above)
           - exit_needs_agents
-          # Run all seven in sequence
+          # The exit the planner itself reversed hours later, same zone
+          - exit_then_replan
+          # Run all eight in sequence
           - all
       run_tests:
         description: "Also run the execution-path test suite"
@@ -90,11 +92,14 @@ jobs:
             exit_needs_agents)
               python scripts/prove_exit_needs_agents.py
               ;;
+            exit_then_replan)
+              python scripts/prove_exit_then_replan_same_zone.py
+              ;;
             all)
               for s in prove_chart_to_order prove_direction_veto \
                        prove_1221_end_to_end prove_map_retirement \
                        prove_exit_without_entry prove_thesis_exit_behaviour \
-                       prove_exit_needs_agents; do
+                       prove_exit_needs_agents prove_exit_then_replan_same_zone; do
                 if [ -f "scripts/$s.py" ]; then
                   echo "════════════════════════════════════════════════════"
                   echo "  scripts/$s.py"
