@@ -93,7 +93,8 @@ jobs:
             tests/test_plan_rejection_report_resilience.py \
             tests/test_reversal_archetype_coverage.py \
             tests/test_thesis_exit_agent_vote.py \
-            tests/test_dynamic_risk_judges_the_plan.py
+            tests/test_dynamic_risk_judges_the_plan.py \
+            tests/test_thesis_exit_status_naming.py
 
       - name: 🔎 Validate Production Setup
         run: |
