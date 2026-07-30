@@ -218,6 +218,22 @@ class OpenTradesManager(BaseAgent):
         self.thesis_exit_min_opponents = int(agent_vote.get("min_opponents_to_exit", 2) or 2)
         self.thesis_exit_silent_action = str(agent_vote.get("silent_action", "SCALE_OUT")).upper()
         self.thesis_exit_silent_scale_fraction = float(agent_vote.get("silent_scale_fraction", 0.5) or 0.5)
+        # When the agent book turns against a winning trade but the candle has
+        # not broken, the exit correctly holds -- a thesis should not die on an
+        # opinion the price action has not confirmed. But holding used to mean
+        # holding at the full trailing gap: a +191 pt runner protected only
+        # 41 pts, leaving 150 on the table while five qualified agents read the
+        # other way.
+        #
+        # Tighten the trail instead of closing the trade. The stop still only
+        # moves in the profitable direction, so this can never add risk; it
+        # only decides how much of an existing gain is defended.
+        self.thesis_exit_tighten_trail_on_reversal = bool(
+            agent_vote.get("tighten_trail_on_reversal", True)
+        )
+        self.thesis_exit_reversal_trail_points = float(
+            agent_vote.get("reversal_trail_distance_points", 60) or 60
+        )
         self.pending_governor = PendingGovernor(self.config)
         self.scenario_governor = ScenarioGovernor(self.config)
 
@@ -672,6 +688,37 @@ class OpenTradesManager(BaseAgent):
             agent_details=agent_details,
         )
 
+        # A winning trade the agents have turned against defends more of its
+        # gain. The exit itself still holds -- see _thesis_exit_review -- but
+        # the trailing gap narrows so the profit is not handed back while the
+        # book argues the other way.
+        #
+        # Deliberately narrow: it needs an actual agent verdict against the
+        # trade, an open profit, and a stop already at or beyond breakeven, so
+        # it can only ever tighten a position that is already safe. The stop
+        # moves in the profitable direction only, so no risk is added.
+        effective_trail_points = float(management["trailing_distance_points"])
+        reversal_trail_active = False
+        if (
+            self.thesis_exit_tighten_trail_on_reversal
+            and pnl_points > 0
+            and sl_moved_to_entry
+            and self.thesis_exit_reversal_trail_points > 0
+            and self.thesis_exit_reversal_trail_points < effective_trail_points
+        ):
+            _vote = self._agent_exit_vote(agent_details, trade_type)
+            if _vote.get("available") and str(_vote.get("verdict")) == "CONFIRM":
+                effective_trail_points = self.thesis_exit_reversal_trail_points
+                reversal_trail_active = True
+                self.logger.info(
+                    "Agent book turned against %s while +%.0f pts open; trailing gap "
+                    "tightened %.0f -> %.0f pts to defend the gain (opponents: %s)",
+                    trade.get("id"), pnl_points,
+                    float(management["trailing_distance_points"]),
+                    effective_trail_points,
+                    ", ".join(_vote.get("opponents") or []),
+                )
+
         # Informational age/risk markers are still recorded even if the same
         # cycle also expires the trade.
         if old_status == "OPEN" and hours_open >= float(management["time_warning_hours"]) and "LONG_RUNNING" not in updates_sent:
@@ -742,7 +789,7 @@ class OpenTradesManager(BaseAgent):
                         active_protective_stop,
                         entry,
                         symbol,
-                        distance_points=float(management["trailing_distance_points"]),
+                        distance_points=effective_trail_points,
                         step_points=float(management["trailing_step_points"]),
                         min_profit_lock_points=float(management["trailing_min_profit_lock_points"]),
                     )
@@ -954,7 +1001,7 @@ class OpenTradesManager(BaseAgent):
                     base_stop,
                     entry,
                     symbol,
-                    distance_points=float(management["trailing_distance_points"]),
+                    distance_points=effective_trail_points,
                     step_points=float(management["trailing_step_points"]),
                     min_profit_lock_points=float(management["trailing_min_profit_lock_points"]),
                 )
@@ -996,6 +1043,9 @@ class OpenTradesManager(BaseAgent):
         }
         if new_stop_loss is not None:
             updates["stop_loss"] = round(new_stop_loss, 2)
+        if reversal_trail_active:
+            updates["reversal_trail_active"] = True
+            updates["reversal_trail_points"] = effective_trail_points
         if partial_realized_pnl is not None:
             updates["realized_pnl_points"] = partial_realized_pnl
             updates["closed_fraction"] = partial_closed_fraction
