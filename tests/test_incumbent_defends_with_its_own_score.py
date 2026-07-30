@@ -144,3 +144,34 @@ def test_a_malformed_snapshot_scores_zero_rather_than_crashing() -> None:
         trade = {"id": "X", "symbol": SYMBOL, "type": "BUY",
                  "status": "PENDING", "signal_snapshot": snapshot}
         assert governor._incumbent_score(trade) == 0.0
+
+
+# ── an improvement on one axis must not hide a collapse on the other ───────
+#
+# The rule was a plain OR: better score OR better dominance. So a plan whose
+# dominance rose by 6 could evict an incumbent whose quality it halved. On
+# 2026-07-30 the governor cancelled two pending orders in a row this way.
+
+def test_a_dominance_gain_cannot_mask_a_quality_collapse() -> None:
+    incumbent = _consensus_order(quality=88.0, dominance=99.0)
+    result = _review(incumbent, _new_plan(59.0, 105.0))
+    assert result["action"] == "KEEP_EXISTING_FAMILY", (
+        "dominance +6 let a plan 29 quality points worse take over"
+    )
+
+
+def test_a_quality_gain_cannot_mask_a_dominance_collapse() -> None:
+    incumbent = _consensus_order(quality=59.0, dominance=63.0)
+    result = _review(incumbent, _new_plan(88.0, 50.0))
+    assert result["action"] == "KEEP_EXISTING_FAMILY"
+
+
+def test_better_on_both_axes_still_replaces() -> None:
+    incumbent = _consensus_order(quality=59.0, dominance=63.0)
+    assert _review(incumbent, _new_plan(88.0, 70.0))["action"] == "REPLACE_PENDING_FAMILY"
+
+
+def test_better_on_one_axis_and_flat_on_the_other_still_replaces() -> None:
+    """Flat is not a regression: a genuine edge on either axis is enough."""
+    incumbent = _consensus_order(quality=59.0, dominance=63.8)
+    assert _review(incumbent, _new_plan(59.0, 70.0))["action"] == "REPLACE_PENDING_FAMILY"
