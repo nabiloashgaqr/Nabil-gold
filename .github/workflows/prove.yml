@@ -38,7 +38,9 @@ on:
           - exit_needs_agents
           # The exit the planner itself reversed hours later, same zone
           - exit_then_replan
-          # Run all eight in sequence
+          # Before/after of the agent vote on both live trades
+          - agent_vote_before_after
+          # Run all nine in sequence
           - all
       run_tests:
         description: "Also run the execution-path test suite"
@@ -95,11 +97,15 @@ jobs:
             exit_then_replan)
               python scripts/prove_exit_then_replan_same_zone.py
               ;;
+            agent_vote_before_after)
+              python scripts/prove_agent_vote_before_after.py
+              ;;
             all)
               for s in prove_chart_to_order prove_direction_veto \
                        prove_1221_end_to_end prove_map_retirement \
                        prove_exit_without_entry prove_thesis_exit_behaviour \
-                       prove_exit_needs_agents prove_exit_then_replan_same_zone; do
+                       prove_exit_needs_agents prove_exit_then_replan_same_zone \
+                       prove_agent_vote_before_after; do
                 if [ -f "scripts/$s.py" ]; then
                   echo "════════════════════════════════════════════════════"
                   echo "  scripts/$s.py"
