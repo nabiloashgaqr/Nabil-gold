@@ -265,6 +265,31 @@
                 "keep_protected_winners_open": false,
                 "description": "Range fades are shorter-lived: protect quickly and expire sooner."
             }
+        },
+        "thesis_exit": {
+            "enabled": true,
+            "description": "الخروج التلقائي عند انقلاب الأطروحة. كانت كل قيمه مدفونة في بايثون بلا أي كتلة هنا، فلم يكن قابلاً للضبط ولا للقياس.",
+            "reclaim_points": 12,
+            "countertrend_hold_minutes": 20,
+            "min_progress_pct": 18,
+            "min_mfe_points": 35,
+            "opposing_poi_enabled": true,
+            "opposing_poi_buffer_points": 18,
+            "opposing_poi_reclaim_points": 12,
+            "agent_vote": {
+                "enabled": true,
+                "description": "تصويت الوكلاء على خروج الشمعة. الشمعة وحدها دليل واحد: صفقتان حيّتان أنتجتا بصمة متطابقة بالحرف، إحداهما انعكاس حقيقي (وفّر الخروج 314 نقطة) والأخرى ضجيج (كلّف 107 نقاط ثم أعاد المخطِّط نشر نفس المنطقة A+). لا عتبة تفرّق بينهما لأن العيب في المُدخَل.",
+                "agent_min_confidence": 70,
+                "description_agent_min_confidence": "نفس عتبة signal_requirements.agent_min_confidence المستعملة في كل مكان — لا رقم جديد.",
+                "min_defenders_to_hold": 2,
+                "description_min_defenders_to_hold": "إذا دافع هذا العدد من الوكلاء المؤهلين عن اتجاه الصفقة وكانوا أكثر من المعارضين، يُلغى الخروج.",
+                "min_opponents_to_exit": 2,
+                "description_min_opponents_to_exit": "إذا عارض هذا العدد ولا مدافع واحد، يُنفَّذ الخروج كاملاً.",
+                "silent_action": "SCALE_OUT",
+                "description_silent_action": "عند غياب الأغلبية: SCALE_OUT تخفيف جزئي + وقف للتعادل. FULL_EXIT للسلوك القديم.",
+                "silent_scale_fraction": 0.5,
+                "description_silent_scale_fraction": "نسبة الإغلاق الفعلي عند الصمت. تُحتسب محاسبياً على الجزء المُغلق بسعره، والباقي بسعر إغلاقه."
+            }
         }
     },
     "performance": {
