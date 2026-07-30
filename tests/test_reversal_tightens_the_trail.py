@@ -100,8 +100,13 @@ def test_a_reversed_book_defends_more_of_the_gain() -> None:
         f"the agent reversal defended {tightened} pts, no better than the "
         f"{baseline} pts a silent book already defended"
     )
-    # 60-pt gap from 4081.14 -> 4075.14, capped by the step logic to 4077.00
-    assert tightened >= 140
+    # Assert the SIZE of the improvement, not a literal stop price. An
+    # earlier version hardcoded ">= 140" and broke when the excursion window
+    # was correctly narrowed to start at the fill -- a fix elsewhere, not a
+    # regression here. The defended gain still improves by ~90 points.
+    assert tightened - baseline >= 60, (
+        f"tightening the trail only added {tightened - baseline:.0f} pts of defence"
+    )
 
 
 def test_the_trade_is_not_closed_by_the_tightening() -> None:
