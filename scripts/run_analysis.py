@@ -1437,6 +1437,41 @@ def _revive_recent_ready_plan(
     return None
 
 
+def _dynamic_risk_block_for_cycle(
+    *,
+    decision_type: str,
+    decision: Dict[str, Any],
+    session_plan: Dict[str, Any],
+    dynamic_risk: Dict[str, Any],
+) -> str | None:
+    """Apply the dynamic-risk halt to whichever thesis this cycle can execute.
+
+    Two routes can create an order: the direct BUY/SELL path and the planner
+    ladder. The ladder builds from the plan's session_bias, so it can place
+    orders on a cycle whose live consensus reads WAIT -- which is why the
+    direction falls back to the plan here. A halt has to cover both.
+
+    But the numbers must belong to the thesis being judged. When the fallback
+    was used, `confidence` and `quality` were still read off the WAIT
+    decision, where both are 0.0, so a CONFIRMED A+ 98.6% day map was refused
+    as "Confidence 0.0% below Dynamic Risk requirement 65.0%" -- a sentence
+    about a number the map never had. `planner_confidence` is the same field
+    the planner-quality block already uses for a mapped plan.
+    """
+    plan_ready = isinstance(session_plan, dict) and bool(session_plan.get("plan_ready"))
+    side = decision_type if decision_type in {"BUY", "SELL"} else (
+        str(session_plan.get("session_bias") or "").upper() if plan_ready else ""
+    )
+    if side not in {"BUY", "SELL"}:
+        return None
+    probe = {**decision, "decision": side}
+    if decision_type not in {"BUY", "SELL"} and plan_ready:
+        planner_conf = _safe_float(session_plan.get("planner_confidence"), 0.0)
+        probe["confidence"] = planner_conf
+        probe["quality"] = {"score": planner_conf}
+    return should_block_signal(probe, dynamic_risk)
+
+
 def _execute_session_plan_ladder(
     base_decision: Dict[str, Any],
     all_results: Dict[str, Any],
@@ -3480,29 +3515,25 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         # from decision_type, so it can place orders on a cycle that reads
         # WAIT. Gating on decision_type alone would leave that route open
         # during a halt, which is precisely the path that fired yesterday.
-        _dyn_plan = all_results.get("session_plan") or {}
-        _dyn_side = decision_type if decision_type in {"BUY", "SELL"} else (
-            str(_dyn_plan.get("session_bias") or "").upper()
-            if isinstance(_dyn_plan, dict) and _dyn_plan.get("plan_ready") else ""
+        dynamic_block = _dynamic_risk_block_for_cycle(
+            decision_type=decision_type,
+            decision=decision,
+            session_plan=all_results.get("session_plan") or {},
+            dynamic_risk=all_results.get("dynamic_risk", {}) or {},
         )
-        if _dyn_side in {"BUY", "SELL"}:
-            dynamic_block = should_block_signal(
-                {**decision, "decision": _dyn_side},
-                all_results.get("dynamic_risk", {}) or {},
+        if dynamic_block:
+            logger.info(
+                "Dynamic risk blocked %s for %s: %s",
+                decision_type, symbol, dynamic_block,
             )
-            if dynamic_block:
-                logger.info(
-                    "Dynamic risk blocked %s for %s: %s",
-                    decision_type, symbol, dynamic_block,
-                )
-                decision["dynamic_risk_block"] = dynamic_block
-                _notify_blocked_directional_signal(
-                    telegram=telegram, decision=decision, all_results=all_results,
-                    database=database, config=config, send_hourly_now=send_hourly_now,
-                    delivery=status_delivery,
-                    stage="dynamic risk", reason=dynamic_block,
-                )
-                return
+            decision["dynamic_risk_block"] = dynamic_block
+            _notify_blocked_directional_signal(
+                telegram=telegram, decision=decision, all_results=all_results,
+                database=database, config=config, send_hourly_now=send_hourly_now,
+                delivery=status_delivery,
+                stage="dynamic risk", reason=dynamic_block,
+            )
+            return
 
         # Phase 2: if the morning/session planner already prepared a strong
         # PRIMARY / STANDBY thesis before the move, publish those pending ladder
