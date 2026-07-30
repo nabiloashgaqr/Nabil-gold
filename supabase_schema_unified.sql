@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS trades (
     paper_lot_size DECIMAL(18, 6),
     status VARCHAR(30) DEFAULT 'OPEN' CHECK (status IN (
         'OPEN', 'PARTIAL', 'PENDING', 'TP1_HIT', 'TP2_HIT', 'SL_HIT', 'BE_HIT',
-        'MANUAL_CLOSE', 'EXPIRED', 'CLOSED', 'CANCELLED'
+        'THESIS_EXIT', 'MANUAL_CLOSE', 'EXPIRED', 'CLOSED', 'CANCELLED'
     )),
     order_kind VARCHAR(20),
     order_type VARCHAR(20),

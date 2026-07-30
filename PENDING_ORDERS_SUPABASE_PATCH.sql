@@ -62,7 +62,7 @@ ALTER TABLE trades
     ADD CONSTRAINT trades_status_check CHECK (
         status IN (
             'OPEN', 'PARTIAL', 'PENDING', 'TP1_HIT', 'TP2_HIT', 'SL_HIT', 'BE_HIT',
-            'MANUAL_CLOSE', 'EXPIRED', 'CLOSED', 'CANCELLED'
+            'THESIS_EXIT', 'MANUAL_CLOSE', 'EXPIRED', 'CLOSED', 'CANCELLED'
         )
     );
 
