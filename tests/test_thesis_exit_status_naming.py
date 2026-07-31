@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -48,10 +49,15 @@ def _bullish_reclaim() -> list[dict]:
 
 def _closed_by_thesis() -> dict:
     manager = OpenTradesManager(_config())
+    # Relative age, never a frozen timestamp: a fixed created_at silently
+    # becomes older than expire_after_hours and the trade starts reporting
+    # EXPIRED instead of the behaviour under test.
+    opened = datetime.now(timezone.utc) - timedelta(minutes=30)
     trade = {
         "id": "T", "type": "SELL", "status": "OPEN", "symbol": SYMBOL,
         "entry_price": 4046.02, "stop_loss": 4086.02, "tp1": 3996.0,
-        "tp2": 3970.0, "created_at": "2026-07-30T06:31:00+00:00",
+        "tp2": 3970.0,
+        "created_at": opened.isoformat(), "entry_time": opened.isoformat(),
         "updates_sent": [],
     }
     # No agent book -> the legacy full exit path, which is the one that

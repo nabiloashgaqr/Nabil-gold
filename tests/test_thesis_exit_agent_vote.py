@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -182,10 +183,17 @@ def test_missing_agent_book_keeps_the_legacy_full_exit() -> None:
 
 def test_scale_out_books_the_closed_half_at_its_own_price() -> None:
     manager = OpenTradesManager(_config())
+    # The age must be RELATIVE. A frozen created_at turns any test into a
+    # time bomb: this one passed for a day, then crossed the 24h
+    # expire_after_hours window and started reporting EXPIRED instead of the
+    # scale-out it was written to check -- taking the whole CI barrier, and
+    # therefore live analysis, down with it.
+    opened = datetime.now(timezone.utc) - timedelta(minutes=30)
     trade = {
         "id": "T", "type": "SELL", "status": "OPEN", "symbol": SYMBOL,
         "entry_price": 4046.02, "stop_loss": 4086.02, "tp1": 3996.0,
-        "tp2": 3970.0, "created_at": "2026-07-30T06:31:00+00:00",
+        "tp2": 3970.0,
+        "created_at": opened.isoformat(), "entry_time": opened.isoformat(),
         "updates_sent": [],
     }
     silent = _book(
@@ -210,10 +218,12 @@ def test_scale_out_books_the_closed_half_at_its_own_price() -> None:
 def test_final_pnl_is_composite_after_a_scale_out() -> None:
     """Half booked at -39.2, the rest closed at +100 -> +30.4, not +100."""
     manager = OpenTradesManager(_config())
+    opened = datetime.now(timezone.utc) - timedelta(minutes=30)
     trade = {
         "id": "T", "type": "SELL", "status": "PARTIAL", "symbol": SYMBOL,
         "entry_price": 4046.02, "stop_loss": 4046.02, "tp1": 3996.0,
-        "tp2": 4036.02, "created_at": "2026-07-30T06:31:00+00:00",
+        "tp2": 4036.02,
+        "created_at": opened.isoformat(), "entry_time": opened.isoformat(),
         "updates_sent": ["THESIS_SCALE_OUT"], "partial_close": True,
         "sl_moved_to_entry": True,
         "closed_fraction": 0.5, "realized_pnl_points": -19.6,
