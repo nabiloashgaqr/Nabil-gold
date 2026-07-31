@@ -916,10 +916,25 @@ class OpenTradesManager(BaseAgent):
                 partial_realized_pnl = round(realized_before + scale_out_realized, 1)
                 partial_closed_fraction = round(already_closed + newly_closed, 4)
                 partial_scale_out_price = round(current_price, 2)
-            if not sl_moved_to_entry:
+            # Breakeven protection is only protection when breakeven is behind
+            # the market. If price is offside, entry sits between the market
+            # and the current stop, so "moving to breakeven" tightens the stop
+            # THROUGH the live price and closes the position instantly.
+            #
+            # This is a second line of defence: _thesis_exit_review already
+            # refuses to scale a losing position, but any future caller that
+            # sets scale_out must not be able to reintroduce the fault.
+            if not sl_moved_to_entry and self._beyond_breakeven_or_at(trade_type, current_price, entry):
                 sl_moved_to_entry = True
                 new_stop_loss = entry
                 events.append("MOVE_SL_TO_BE")
+            elif not sl_moved_to_entry:
+                self.logger.info(
+                    "Breakeven not applied on scale-out for %s: price %.2f is on "
+                    "the wrong side of entry %.2f, so the move would close the "
+                    "trade instead of protecting it",
+                    trade.get("id"), current_price, entry,
+                )
         elif thesis_exit.get("exit_now"):
             new_status = "THESIS_EXIT"
             events.append("THESIS_EXIT")
@@ -1880,6 +1895,33 @@ class OpenTradesManager(BaseAgent):
                 }
 
             if verdict == "SILENT" and self.thesis_exit_silent_action == "SCALE_OUT":
+                # Never scale a position that is under water.
+                #
+                # Scaling out carries the stop to breakeven. On a losing trade
+                # breakeven sits on the WRONG side of the market, so the move
+                # does not protect anything -- it executes the position at
+                # once. On 2026-07-31 a SELL entered at 4074.78 was scaled at
+                # 4081.45, 67 points offside; the stop jumped from 4089.78 to
+                # 4074.78 and was taken out by the very next tick at 4081.71.
+                # Price then fell to 4044: a +308 pt trade booked as -33.4.
+                #
+                # A SILENT book is the weakest verdict there is -- the agents
+                # neither confirm nor defend. It must not be allowed to close
+                # a trade the stop was still holding. Leave the original stop
+                # to do its job and let the market decide.
+                if pnl_points <= 0:
+                    return {
+                        "exit_now": False,
+                        "scale_out": False,
+                        "kind": "OPPOSITE_CONTINUATION_HELD_WHILE_OFFSIDE",
+                        "reason": (
+                            f"Thesis scale-out withheld: the position is "
+                            f"{abs(pnl_points):.0f} pts offside, so moving the stop to "
+                            f"breakeven would close it rather than protect it; "
+                            f"the original stop still governs"
+                        ),
+                        "agent_vote": vote,
+                    }
                 return {
                     "exit_now": False,
                     "scale_out": True,
