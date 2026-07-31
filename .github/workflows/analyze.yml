@@ -101,7 +101,8 @@ jobs:
             tests/test_trailing_rule_message_is_true.py \
             tests/test_excursion_starts_at_the_fill.py \
             tests/test_incumbent_defends_with_its_own_score.py \
-            tests/test_no_time_bomb_tests.py
+            tests/test_no_time_bomb_tests.py \
+            tests/test_no_breakeven_while_offside.py
 
       - name: 🔎 Validate Production Setup
         run: |
