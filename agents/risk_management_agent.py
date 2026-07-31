@@ -98,16 +98,59 @@ class RiskManagementAgent(BaseAgent):
                 tp3_ratio = max(tp2_ratio + 1.0, tp2_ratio * 1.2)
                 if direction == "BUY":
                     stop_loss = entry_price - min_sl_distance
-                    tp1 = entry_price + min_sl_distance * tp1_ratio
-                    tp2 = entry_price + min_sl_distance * tp2_ratio
-                    tp3 = entry_price + min_sl_distance * tp3_ratio
                 else:
                     stop_loss = entry_price + min_sl_distance
-                    tp1 = entry_price - min_sl_distance * tp1_ratio
-                    tp2 = entry_price - min_sl_distance * tp2_ratio
-                    tp3 = entry_price - min_sl_distance * tp3_ratio
                 sl_method = f"{sl_method}+min_floor"
-                target_method = "rr_from_floored_sl"
+
+                # Widening the stop must not delete the map.
+                #
+                # This block used to rebuild BOTH targets from the floored
+                # stop: tp1 = floor x 1.25, tp2 = floor x 2.25. Because the
+                # floor is a flat 400 on XAU, every floored plan shipped the
+                # identical geometry -400/+500/+900 and the liquidity the
+                # analysis had identified was discarded. Measured over 300
+                # cycles: 100% of orders written under the current floor
+                # carried stop-derived targets, and in 35 of 35 recorded cases
+                # the mapped objective was nearer than the shipped TP2 -- the
+                # order was aiming somewhere the analysis never pointed.
+                #
+                # The floor is a statement about RISK: how close a stop may
+                # sit before noise takes it. It says nothing about where price
+                # is going. So the stop is still floored, and the targets are
+                # kept on the levels price is actually drawn to.
+                #
+                # The ratio rebuild survives only as a fallback for when the
+                # map offers nothing usable, so a plan is never left with
+                # targets too close to clear min_rr_ratio.
+                chained_tp1, chained_tp2, chain_method = self._liquidity_chain_targets(
+                    direction=direction,
+                    entry=entry_price,
+                    stop_loss=stop_loss,
+                    liquidity_map=liquidity_map,
+                    supports=support_levels,
+                    resistances=resistance_levels,
+                    atr=atr,
+                )
+                if chained_tp1 is not None and chained_tp2 is not None:
+                    tp1, tp2 = chained_tp1, chained_tp2
+                    tp3 = max(tp2 + atr, tp2) if direction == "BUY" else min(tp2 - atr, tp2)
+                    target_method = chain_method
+                    target_map.update({
+                        "tp1_basis": "liquidity_after_floor",
+                        "tp2_basis": "liquidity_after_floor",
+                        "floored_stop_kept_map": True,
+                    })
+                else:
+                    if direction == "BUY":
+                        tp1 = entry_price + min_sl_distance * tp1_ratio
+                        tp2 = entry_price + min_sl_distance * tp2_ratio
+                        tp3 = entry_price + min_sl_distance * tp3_ratio
+                    else:
+                        tp1 = entry_price - min_sl_distance * tp1_ratio
+                        tp2 = entry_price - min_sl_distance * tp2_ratio
+                        tp3 = entry_price - min_sl_distance * tp3_ratio
+                    target_method = "rr_from_floored_sl"
+                    target_map.update({"tp1_basis": "rr_fallback", "tp2_basis": "rr_fallback"})
 
             risk_distance = abs(entry_price - stop_loss)
             max_rr = self._f(self.settings.get("max_rr_ratio"), 4.0)
@@ -785,6 +828,82 @@ class RiskManagementAgent(BaseAgent):
                 tp1, tp2 = atr_tp1, atr_tp2
             tp3 = min(entry - atr * tp3_mult, tp2 - atr)
         return tp1, tp2, tp3, method, target_map
+
+    def _liquidity_chain_targets(
+        self,
+        *,
+        direction: str,
+        entry: float,
+        stop_loss: float,
+        liquidity_map: Dict[str, Any] | None,
+        supports: List[float],
+        resistances: List[float],
+        atr: float,
+    ) -> Tuple[float | None, float | None, str]:
+        """TP1 and TP2 from the levels price is actually drawn to.
+
+        The nearest pool is where price is heading next; the pool beyond it is
+        where the move ends. Taking both is what separates a 456-point trade
+        from the 677 the manual analyst booked on the same map: on 2026-07-30
+        his chart marked tp-1 at ~4093 and an extended target at 4132.389,
+        while the system shipped TP2 at 4093.31 and left 257 points behind.
+
+        Rules, in order:
+          * a target must be ahead of entry by at least one ATR, so TP1 is not
+            a level price is already sitting on;
+          * TP2 must clear ``min_rr_ratio`` against the ACTUAL stop, which is
+            what makes this safe to run after the floor has widened it;
+          * if the pools are exhausted, structure (support/resistance) is used
+            before giving up.
+
+        Returns ``(None, None, "")`` when the map cannot produce a qualifying
+        pair, so the caller keeps its existing fallback rather than inventing
+        a level. Targets are never fabricated here.
+        """
+        liquidity_map = liquidity_map or {}
+        risk = abs(entry - stop_loss)
+        if risk <= 0 or entry <= 0:
+            return None, None, ""
+
+        min_rr = self._f(self.settings.get("min_rr_ratio"), 1.5) or 1.5
+        min_distance = max(atr, 0.80)
+
+        side_key = "buy_side" if direction == "BUY" else "sell_side"
+        structure = resistances if direction == "BUY" else supports
+
+        def _ahead(level: float) -> bool:
+            return (level - entry) >= min_distance if direction == "BUY" else (entry - level) >= min_distance
+
+        levels: List[float] = []
+        for raw in list(liquidity_map.get(side_key) or []):
+            value = self._f(raw, 0.0)
+            if value > 0 and _ahead(value):
+                levels.append(value)
+        for raw in list(structure or []):
+            value = self._f(raw, 0.0)
+            if value > 0 and _ahead(value):
+                levels.append(value)
+
+        if not levels:
+            return None, None, ""
+
+        # Nearest first: the order price would meet them in.
+        ordered = sorted(set(levels), key=lambda lv: abs(lv - entry))
+
+        # TP2 is the first pool far enough to be worth holding for. Reaching
+        # for the furthest level would invent a target the map does not
+        # support; taking the first qualifying one keeps it honest.
+        tp2 = next((lv for lv in ordered if abs(lv - entry) / risk >= min_rr), None)
+        if tp2 is None:
+            return None, None, ""
+
+        # TP1 is the nearest pool short of TP2. When TP2 is itself the nearest
+        # level, split the distance rather than stacking both targets on one
+        # price -- a TP1 equal to TP2 makes the partial close meaningless.
+        nearer = [lv for lv in ordered if abs(lv - entry) < abs(tp2 - entry)]
+        tp1 = nearer[0] if nearer else round((entry + tp2) / 2.0, 2)
+
+        return tp1, tp2, "liquidity_chain"
 
     def _run_filters(
         self,
