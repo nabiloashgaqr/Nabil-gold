@@ -576,7 +576,160 @@ def _planner_trade_levels(
 
 
 
-def validate_signal_before_send(decision: Dict[str, Any], config: Dict[str, Any]) -> List[str]:
+def _max_pending_distance_points(config: Dict[str, Any]) -> float:
+    """Furthest a resting order may sit from the market, in points.
+
+    Derived from the map's own geometry rather than a new invented number:
+    ``session_planner.max_primary_zone_width_points`` is the widest zone the
+    planner is allowed to publish, so an entry further away than that cannot
+    be a mapped level -- there is no zone that reaches it.
+
+    Set ``execution_guards.max_pending_distance_points`` to override, or 0 to
+    disable the check.
+    """
+    guards = (config.get("execution_guards") or {}) if isinstance(config, dict) else {}
+    if "max_pending_distance_points" in guards:
+        return max(0.0, _safe_float(guards.get("max_pending_distance_points"), 0.0))
+    planner = (config.get("session_planner") or {}) if isinstance(config, dict) else {}
+    return max(0.0, _safe_float(planner.get("max_primary_zone_width_points"), 450.0))
+
+
+def _unreachable_pending_violation(
+    decision: Dict[str, Any], config: Dict[str, Any]
+) -> str | None:
+    """Refuse a resting order the market would have to travel absurdly far to fill.
+
+    2026-07-31, 13:16 UTC. With SELL d917b1d5 already live and deep in
+    profit, the system published TRADE_..._6e31ddf6: a SELL LIMIT at 4076.93
+    while price was 4023.21 -- 537 points ABOVE a market that was collapsing
+    toward the very target its own live trade was about to hit. Thirty
+    minutes later it cancelled the order itself: "market covered 61% of
+    target path without fill".
+
+    The cancellation was right. The placement was the fault. That order could
+    only ever fill on a 537-point rally against the system's own winning
+    thesis, and while it sat there it occupied the map.
+
+    Distance is measured to the entry the order will actually rest at, and
+    only in the direction that would have to be travelled to reach it. An
+    entry the market has already passed through is a different case entirely
+    and is left to the normal fill logic.
+    """
+    limit = _max_pending_distance_points(config)
+    if limit <= 0:
+        return None
+
+    side = str(decision.get("decision") or "").upper()
+    if side not in {"BUY", "SELL"}:
+        return None
+    signal = decision.get("signal") or {}
+    if not isinstance(signal, dict):
+        return None
+
+    order_type = str(signal.get("order_type") or "").upper()
+    if order_type.endswith("MARKET"):
+        return None
+
+    symbol = str(decision.get("symbol") or config.get("symbol", "XAU/USD"))
+    entry_info = signal.get("entry") or {}
+    entry = _safe_float(entry_info.get("price") if isinstance(entry_info, dict) else None, 0.0)
+    current = _safe_float(decision.get("current_price"), 0.0)
+    if entry <= 0 or current <= 0:
+        return None
+
+    # Points the market must travel to reach the resting entry. A SELL LIMIT
+    # sits above the market and needs a rally; a BUY LIMIT sits below and
+    # needs a decline. Anything on the other side is already reachable.
+    if side == "SELL":
+        travel = price_to_points(entry - current, symbol=symbol)
+    else:
+        travel = price_to_points(current - entry, symbol=symbol)
+    if travel <= 0:
+        return None
+    if travel <= limit:
+        return None
+
+    return (
+        f"resting {side} entry {entry:.2f} is {travel:.0f} pts from the market "
+        f"at {current:.2f}, beyond the {limit:.0f}-pt reach of the widest "
+        "mapped zone; it could only fill on a move that would invalidate the "
+        "setup it is based on"
+    )
+
+
+def _counter_to_live_winner_violation(
+    decision: Dict[str, Any],
+    config: Dict[str, Any],
+    open_trades: List[Dict[str, Any]] | None,
+) -> str | None:
+    """Refuse a resting order that is a bet against the system's own winner.
+
+    The same 2026-07-31 incident from the other side. A SELL LIMIT placed
+    537 points above the market fills only if price rallies that far -- which
+    is precisely the move that would have destroyed the live SELL then
+    running to its target. The system was, in effect, hedging against its own
+    correct call while that call was winning.
+
+    Narrow by construction. It only refuses a *resting* order in the *same
+    direction* as a live trade that is *already in profit* and whose entry
+    the new order sits *worse than*. A genuine pyramid -- adding at a better
+    price, or scaling a loser's recovery -- is untouched, and a market order
+    is never blocked.
+    """
+    guards = (config.get("execution_guards") or {}) if isinstance(config, dict) else {}
+    if guards.get("block_pending_behind_live_winner") is False:
+        return None
+
+    side = str(decision.get("decision") or "").upper()
+    if side not in {"BUY", "SELL"}:
+        return None
+    signal = decision.get("signal") or {}
+    if not isinstance(signal, dict):
+        return None
+    if str(signal.get("order_type") or "").upper().endswith("MARKET"):
+        return None
+
+    symbol = str(decision.get("symbol") or config.get("symbol", "XAU/USD"))
+    normalized = normalize_symbol(symbol)
+    entry_info = signal.get("entry") or {}
+    entry = _safe_float(entry_info.get("price") if isinstance(entry_info, dict) else None, 0.0)
+    if entry <= 0:
+        return None
+
+    for trade in open_trades or []:
+        if normalize_symbol(trade.get("symbol") or symbol) != normalized:
+            continue
+        if str(trade.get("status") or "").upper() not in {"OPEN", "PARTIAL", "TP1_HIT"}:
+            continue
+        if str(trade.get("type") or trade.get("side") or "").upper() != side:
+            continue
+        live_pnl = _safe_float(
+            trade.get("current_pnl_points", trade.get("current_pnl")), 0.0
+        )
+        if live_pnl <= 0:
+            continue
+        live_entry = _safe_float(trade.get("entry_price"), 0.0)
+        if live_entry <= 0:
+            continue
+        # "Worse than" the live entry: for a SELL that means higher (needs a
+        # rally against the winner); for a BUY, lower.
+        worse = entry > live_entry if side == "SELL" else entry < live_entry
+        if not worse:
+            continue
+        gap = abs(price_to_points(entry - live_entry, symbol=symbol))
+        return (
+            f"resting {side} entry {entry:.2f} sits {gap:.0f} pts worse than live "
+            f"{side} {trade.get('id') or ''} (entry {live_entry:.2f}, +{live_pnl:.0f} pts "
+            "open); it can only fill on the move that would end the winning trade"
+        ).replace("  ", " ")
+    return None
+
+
+def validate_signal_before_send(
+    decision: Dict[str, Any],
+    config: Dict[str, Any],
+    open_trades: List[Dict[str, Any]] | None = None,
+) -> List[str]:
     """Final arithmetic check on a finished signal. Returns violations.
 
     Every execution fault found so far was individually invisible and jointly
@@ -662,6 +815,17 @@ def validate_signal_before_send(decision: Dict[str, Any], config: Dict[str, Any]
             f"breakeven trigger (+{breakeven_points:.0f} pts) is not reachable before "
             f"tp1 ({tp1_points:.0f} pts away); the promised protection cannot apply"
         )
+
+    # 4. Reachability. A resting order the market cannot plausibly reach is
+    #    not a plan, and one that can only fill by destroying a live winner is
+    #    a bet against the system's own thesis. Both were published on
+    #    2026-07-31 as a single SELL LIMIT 537 pts above a collapsing market.
+    unreachable = _unreachable_pending_violation(decision, config)
+    if unreachable:
+        violations.append(unreachable)
+    counter_bet = _counter_to_live_winner_violation(decision, config, open_trades)
+    if counter_bet:
+        violations.append(counter_bet)
 
     return violations
 
@@ -1611,7 +1775,7 @@ def _execute_session_plan_ladder(
             if role in {"PRIMARY", "STARTER"}:
                 return created
             continue
-        ladder_violations = validate_signal_before_send(ladder_decision, config)
+        ladder_violations = validate_signal_before_send(ladder_decision, config, staged_trades)
         if ladder_violations:
             logger.error(
                 "Session-plan ladder %s failed final validation for %s: %s",
@@ -3718,7 +3882,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             except Exception as exc:  # noqa: BLE001 - memory must never block a trade
                 logger.warning("Setup performance review failed: %s", exc)
 
-            signal_violations = validate_signal_before_send(decision, config)
+            signal_violations = validate_signal_before_send(decision, config, open_trades_snapshot)
             if signal_violations:
                 logger.error(
                     "Signal validation failed for %s %s: %s",
