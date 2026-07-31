@@ -1032,6 +1032,42 @@ def _build_plan_ladder_decision(
         high = _safe_float(candidate.get("poi_high"), entry_price)
         if low <= 0 or high <= 0:
             low = high = entry_price
+
+    # Publish the area the planner actually mandates, not the raw POI.
+    #
+    # `session_planner.min_entry_zone_width_points` (60) is enforced by
+    # SessionPlannerService._enforce_min_zone_width, which widens a narrow POI
+    # symmetrically around the reference entry. That method is called from
+    # _zone_payload -- the planner's own view of the map -- but this function
+    # builds the order that is actually sent, and it read the raw POI instead.
+    #
+    # 2026-07-31, TRADE_..._b4f85832: the card published "Entry zone
+    # 4029.85 → 4033.69", which is 38.4 points. The floor is 60. The planner,
+    # asked directly, returns 4028.77 → 4034.77 = exactly 60.0.
+    #
+    # A published area narrower than the floor is the precise failure the
+    # floor exists to prevent: the order rests at one price inside it, and a
+    # touch that misses that price by a few points leaves the plan unfilled
+    # while price runs to target. Risk does not drift from widening --
+    # zone_touch_activation carries the stop the same distance it moves the
+    # entry (preserve_planned_risk=true).
+    if not (force_market or market_conversion) and high > low:
+        try:
+            widened_low, widened_high, _widened = SessionPlannerService(config)._enforce_min_zone_width(
+                low, high, entry_price=entry_price, symbol=symbol,
+            )
+            if _widened and widened_low > 0 and widened_high > widened_low:
+                logger.info(
+                    "Entry area widened to the configured floor for %s %s: "
+                    "%.2f-%.2f (%.0f pts) -> %.2f-%.2f (%.0f pts)",
+                    symbol, direction, low, high,
+                    abs(price_to_points(high - low, symbol=symbol)),
+                    widened_low, widened_high,
+                    abs(price_to_points(widened_high - widened_low, symbol=symbol)),
+                )
+                low, high = widened_low, widened_high
+        except Exception as exc:  # noqa: BLE001 - never block a valid signal
+            logger.warning("Could not apply the minimum entry-zone width: %s", exc)
     tp1 = levels["tp1"]
     tp2 = levels["tp2"]
     rr = levels["rr"]
