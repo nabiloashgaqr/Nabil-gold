@@ -107,8 +107,46 @@ def _mapped_objective(trade: Dict[str, Any]) -> float:
     return 0.0
 
 
+def _was_filled(trade: Dict[str, Any]) -> bool:
+    """True only when the order actually became a position.
+
+    Report #11 counted 106 "trades" and concluded that 92.5% never reached
+    half of TP2, with an average reach of 11%. Both numbers were wrong, and
+    they were wrong because this distinction was missing.
+
+    A CANCELLED or EXPIRED pending order never entered the market, so its
+    excursion is zero by definition -- not because the target was too far.
+    Averaging those zeros against real positions produced a figure that
+    describes bookkeeping, not price. The arithmetic is plain: 98 zeros plus
+    8 positions averaging ~145% gives the 11% that was printed.
+
+    Fill is proved by evidence of a life: a fill timestamp, a realized
+    result, or a recorded excursion -- not by status alone, since older rows
+    predate some of these fields.
+    """
+    status = str(trade.get("status") or "").upper()
+    if status in {"CANCELLED", "EXPIRED", "REJECTED"}:
+        # An expired PENDING never filled; an expired position did. Only the
+        # latter carries a fill time or a realized number.
+        return bool(
+            trade.get("entry_time")
+            or trade.get("close_price")
+            or trade.get("final_pnl") is not None
+        )
+    if trade.get("entry_time") or trade.get("close_price"):
+        return True
+    return trade.get("final_pnl") is not None
+
+
 def _mfe_points(trade: Dict[str, Any]) -> float | None:
-    """Best excursion in the trade's favour, in points."""
+    """Best excursion in the trade's favour, in points.
+
+    Returns None for an order that never filled, so it is excluded from the
+    reach statistics rather than counted as a target that was never
+    approached.
+    """
+    if not _was_filled(trade):
+        return None
     raw = trade.get("max_favorable_excursion")
     if raw is None:
         return None
@@ -209,6 +247,29 @@ def analyse(trades: List[Dict[str, Any]], config: Dict[str, Any], symbol: str) -
     print(f"  Targets derived from the stop  : {floored_signature:4d}  {_pct(floored_signature, considered)}")
     print("     (TP1/TP2 match floor x 1.25 / floor x 2.25 to within 1 pt)")
 
+    # Rows written under a previous floor are a different population.
+    #
+    # Report #11 showed two dominant shapes: stop 400 -> TP2 900 (46 rows) and
+    # stop 300 -> TP2 700 (37 rows). config.json records that the floor was
+    # "رُفع من 300 إلى 400", so the second group predates the change. Averaging
+    # the two eras gave 43.4% -- against 69% among rows written under today's
+    # floor. The same mistake as the rejection report: mixing populations
+    # hides the very signal being measured.
+    current_era = [
+        d for d in (risk_distances or {})
+        if floor_points > 0 and abs(d - floor_points) <= 1.0
+    ]
+    current_count = sum(risk_distances[d] for d in current_era)
+    older = considered - current_count
+    if older > 0 and floor_points > 0:
+        print()
+        print(f"  Rows written under the current {floor_points:.0f}-pt floor : {current_count:4d}")
+        print(f"  Rows from an earlier floor                : {older:4d}")
+        if current_count:
+            print(f"     stop-derived share, current era only   : "
+                  f"{_pct(floored_signature, current_count)}")
+            print("     (the headline % above averages both eras together)")
+
     print()
     print("  Distinct stop distances actually shipped:")
     for distance, count in sorted(risk_distances.items(), key=lambda kv: -kv[1])[:6]:
@@ -235,7 +296,10 @@ def analyse(trades: List[Dict[str, Any]], config: Dict[str, Any], symbol: str) -
     if mfe_vs_tp2:
         avg_reach = sum(mfe_vs_tp2) / len(mfe_vs_tp2)
         print()
-        print(f"  How far trades actually ran vs TP2 (avg) : {avg_reach * 100:.0f}% of the way")
+        print(f"  Orders that actually filled   : {len(mfe_vs_tp2):4d} of {considered}")
+        print("     (cancelled and expired pending orders never entered the")
+        print("      market, so their zero excursion is excluded)")
+        print(f"  How far filled trades ran vs TP2 (avg)   : {avg_reach * 100:.0f}% of the way")
         print(f"  Ran past TP2 and kept going   : {ran_past_tp2:4d}  {_pct(ran_past_tp2, len(mfe_vs_tp2))}")
         if left_on_table:
             avg_left = sum(left_on_table) / len(left_on_table)
