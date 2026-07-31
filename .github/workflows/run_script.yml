@@ -34,6 +34,7 @@ on:
           - analyze_plan_rejections
           - analyze_agent_accuracy
           - analyze_sl_floor
+          - analyze_target_geometry
           - run_analyst_comparison
           - run_daily_report
           - run_weekly_report
