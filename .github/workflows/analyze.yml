@@ -102,7 +102,8 @@ jobs:
             tests/test_excursion_starts_at_the_fill.py \
             tests/test_incumbent_defends_with_its_own_score.py \
             tests/test_no_time_bomb_tests.py \
-            tests/test_no_breakeven_while_offside.py
+            tests/test_no_breakeven_while_offside.py \
+            tests/test_trailed_stop_needs_later_price.py
 
       - name: 🔎 Validate Production Setup
         run: |
