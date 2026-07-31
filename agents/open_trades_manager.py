@@ -851,6 +851,15 @@ class OpenTradesManager(BaseAgent):
                 result = "WIN"
                 close_price = tp2
                 final_pnl = calculate_pips(entry, tp2, trade_type, symbol)
+                # One bar can span both targets; TP1 must still be booked.
+                _skipped = self._book_skipped_tp1_on_tp2(
+                    trade, management, entry, tp1, tp2, trade_type, symbol,
+                    tp1_touched, partial_close,
+                )
+                if _skipped is not None:
+                    partial_close = True
+                    events.append("TP1_HIT")
+                    partial_realized_pnl, partial_closed_fraction, partial_scale_out_price = _skipped
             elif tp1_touched and old_status == "OPEN" and not partial_close:
                 # TP1 can still be hit while in early-BE phase (BE done via
                 # early_breakeven, not TP1). Must record partial close.
@@ -955,6 +964,17 @@ class OpenTradesManager(BaseAgent):
             result = "WIN"
             close_price = tp2
             final_pnl = calculate_pips(entry, tp2, trade_type, symbol)
+            # A single bar reaching TP1 and TP2 together skipped the TP1
+            # branch entirely and settled the full size at TP2. Book the half
+            # that left at TP1, exactly as the two-candle path does.
+            _skipped = self._book_skipped_tp1_on_tp2(
+                trade, management, entry, tp1, tp2, trade_type, symbol,
+                tp1_touched, partial_close,
+            )
+            if _skipped is not None:
+                partial_close = True
+                events.append("TP1_HIT")
+                partial_realized_pnl, partial_closed_fraction, partial_scale_out_price = _skipped
         elif old_status == "OPEN" and tp1_touched:
             new_status = "TP1_HIT"
             events.append("TP1_HIT")
@@ -1391,6 +1411,48 @@ class OpenTradesManager(BaseAgent):
             round(already_closed + newly_closed, 4),
             round(tp1, 2),
         )
+
+    def _book_skipped_tp1_on_tp2(
+        self,
+        trade: Dict[str, Any],
+        management: Dict[str, Any],
+        entry: float,
+        tp1: float,
+        tp2: float,
+        trade_type: str,
+        symbol: str,
+        tp1_touched: bool,
+        partial_close: bool,
+    ) -> tuple[float, float, float] | None:
+        """Book the TP1 half when one candle reached TP1 and TP2 together.
+
+        The outcome branches are an if/elif chain and ``tp2_touched`` is
+        tested before ``tp1_touched``, so a single 5-minute bar that spans
+        both targets jumps straight to TP2 and TP1 never runs. The position
+        is then settled at full size on the TP2 price.
+
+        2026-07-31, trade d917b1d5: one bar fell 4055 -> 4023, crossing TP1
+        4051.98 and TP2 4029.17. The card read "OPEN -> TP2_HIT ... +456.1
+        pts" -- no TP1 event, no half booked at 4051.98, and 114 points that
+        the account never received.
+
+        Price cannot reach TP2 without passing through TP1, so the TP1 fill
+        is not an assumption: it is the only order in which those two levels
+        can be touched. Booking it here keeps the arithmetic identical to the
+        two-candle path, where TP1 fires on its own bar.
+
+        Returns ``(realized_total, closed_fraction_total, tp1_price)`` or None
+        when this does not apply.
+        """
+        if not tp1_touched or partial_close or tp1 <= 0 or tp2 <= 0:
+            return None
+        # Only when TP1 genuinely sits between the entry and TP2. A TP1 on the
+        # far side, or beyond TP2, is a malformed plan and is left untouched.
+        tp1_travel = calculate_pips(entry, tp1, trade_type, symbol)
+        tp2_travel = calculate_pips(entry, tp2, trade_type, symbol)
+        if tp1_travel <= 0 or tp2_travel <= tp1_travel:
+            return None
+        return self._book_tp1_partial(trade, management, entry, tp1, trade_type, symbol)
 
     def _adverse_extreme_after(
         self,
