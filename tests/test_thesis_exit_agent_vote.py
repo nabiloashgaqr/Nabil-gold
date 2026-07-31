@@ -61,12 +61,13 @@ def _bullish_reclaim_candles() -> list[dict]:
     ]
 
 
-def _review(manager, *, book, partial_close=False, entry=4046.02):
+def _review(manager, *, book, partial_close=False, entry=4046.02,
+            price=4049.94, pnl=-39.2):
     return manager._thesis_exit_review(
         {"id": "T", "type": "SELL", "entry_price": entry, "symbol": SYMBOL},
-        trade_type="SELL", symbol=SYMBOL, current_price=4049.94,
+        trade_type="SELL", symbol=SYMBOL, current_price=price,
         recent_candles=_bullish_reclaim_candles(), hours_open=0.5,
-        pnl_points=-39.2, max_favorable_excursion=0.0, tp1=3996.0,
+        pnl_points=pnl, max_favorable_excursion=0.0, tp1=3996.0,
         entry=entry, partial_close=partial_close, agent_details=book,
     )
 
@@ -122,8 +123,16 @@ def test_agents_confirming_the_flip_still_exit_in_full() -> None:
 # ── silent book -> scale out, per the operator's choice (أ) ────────────────
 
 def test_silent_agent_book_scales_out_instead_of_closing() -> None:
+    """Scaling is for a WINNING position.
+
+    This test used to run at 4049.94 against a 4046.02 SELL -- 39 points
+    offside -- and assert a scale-out. That is the exact shape that cost 341
+    points on 2026-07-31: scaling moves the stop to breakeven, and on a losing
+    trade breakeven sits on the wrong side of the market, so the "protection"
+    closes the position instantly. The test was pinning the bug.
+    """
     manager = OpenTradesManager(_config())
-    verdict = _review(manager, book=_book(
+    verdict = _review(manager, price=4040.0, pnl=60.0, book=_book(
         technical=("BUY", 92.0),
         classical=("WAIT", 40.0),
         smc=("WAIT", 30.0),
@@ -144,12 +153,16 @@ def test_repeated_candle_does_not_scale_the_position_again() -> None:
         technical=("BUY", 92.0), classical=("WAIT", 40.0), smc=("WAIT", 30.0),
         price_action=("WAIT", 29.0), multitimeframe=("WAIT", 48.0),
     )
-    first = _review(manager, book=silent, partial_close=False)
+    # A winning position: scaling an offside one would move the stop through
+    # the market. See test_no_breakeven_while_offside.py.
+    first = _review(manager, book=silent, partial_close=False,
+                    price=4040.0, pnl=60.0)
     assert first["scale_out"] is True
 
     # The candle keeps printing the same shape on the next cycles.
     for _ in range(3):
-        again = _review(manager, book=silent, partial_close=True)
+        again = _review(manager, book=silent, partial_close=True,
+                        price=4040.0, pnl=60.0)
         assert again["scale_out"] is False, "a repeated candle is not new evidence"
         assert again["exit_now"] is False
         assert again["kind"] == "OPPOSITE_CONTINUATION_ALREADY_SCALED"
@@ -200,16 +213,21 @@ def test_scale_out_books_the_closed_half_at_its_own_price() -> None:
         technical=("BUY", 92.0), classical=("WAIT", 40.0), smc=("WAIT", 30.0),
         price_action=("WAIT", 29.0), multitimeframe=("WAIT", 48.0),
     )
+    # A WINNING position. The original version of this test scaled a SELL
+    # that was 39 points offside and asserted the stop moved to breakeven --
+    # which is what destroyed d917b1d5 on 2026-07-31: for a losing trade,
+    # breakeven is on the far side of the market, so the move closes the
+    # position instead of protecting it. See test_no_breakeven_while_offside.
     res = manager.evaluate_trade(
-        trade, 4049.94, candle_high=4050.2, candle_low=4046.4,
+        trade, 4026.02, candle_high=4027.0, candle_low=4025.0,
         recent_candles=_bullish_reclaim_candles(), agent_details=silent,
     )
     assert "THESIS_SCALE_OUT" in res["events"]
     updates = res["updates"]
     assert updates["closed_fraction"] == 0.5
-    # -39.2 pts on the half that was closed
-    assert updates["realized_pnl_points"] == -19.6
-    assert updates["scale_out_price"] == 4049.94
+    # +200 pts on the half that was closed
+    assert updates["realized_pnl_points"] == 100.0
+    assert updates["scale_out_price"] == 4026.02
     # the remaining half is protected at entry
     assert updates["sl_moved_to_entry"] is True
     assert updates["stop_loss"] == 4046.02
