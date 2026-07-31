@@ -68,6 +68,23 @@ class OpenTradesManager(BaseAgent):
         # breakeven stop. Measured in R rather than points so it holds across
         # instruments and stop widths.
         self.min_breakeven_rr = float(self.management.get("min_breakeven_rr", 0.5) or 0.0)
+        # Fraction of the position actually closed when TP1 is reached.
+        #
+        # `partial_close_at_tp1: true` / `partial_close_percentage: 50` have
+        # been in config.json from the start, and until now nothing read the
+        # percentage. TP1 set a `partial_close` label and the position kept
+        # running at full size, so TP2 settled 100% at the TP2 price.
+        #
+        # On 2026-07-31 trade d917b1d5 reported "+456.1 pts" at TP2. The
+        # account had booked half at 4051.98 and half at 4029.17: +342.1. The
+        # card overstated the result by 114 points, and the scoreboard, the
+        # weekly report and the learning service all consumed the inflated
+        # number -- so every two-target trade taught the system a payoff it
+        # never received.
+        self.partial_close_at_tp1 = bool(self.management.get("partial_close_at_tp1", False))
+        self.partial_close_fraction = min(
+            max(float(self.management.get("partial_close_percentage", 0) or 0.0) / 100.0, 0.0), 1.0
+        )
 
         # Trailing stop + breakeven: read from trade_management first,
         # then instruments (per-symbol override), then trailing_stop (legacy).
@@ -266,6 +283,8 @@ class OpenTradesManager(BaseAgent):
             "expire_after_hours": self.expire_after_hours,
             "keep_protected_winners_open": self.keep_protected_winners_open,
             "auto_be": self.auto_be,
+            "partial_close_at_tp1": self.partial_close_at_tp1,
+            "partial_close_fraction": self.partial_close_fraction,
             "trailing_enabled": self.trailing_enabled,
             "trailing_distance_points": self.trailing_distance,
             "trailing_step_points": self.trailing_step,
@@ -399,7 +418,33 @@ class OpenTradesManager(BaseAgent):
                 if "Scenario governor" in reasons:
                     story = "Add area cancelled because the map reprioritized another family leg."
             elif role in {"PRIMARY", "STARTER"}:
-                story = "Main mapped execution was cancelled before activation because the day map lost validity."
+                # The story has to follow the reason that actually fired.
+                #
+                # 2026-07-31: order 6e31ddf6 was cancelled with the reason
+                # "market covered 61% of target path without fill", and the
+                # card announced "the day map lost validity". The map had not
+                # lost validity -- it was right, price reached the level it
+                # predicted and the live trade took TP2 there. The order was
+                # simply never reachable. Telling the user the map failed on
+                # the day it worked teaches him to distrust a correct map.
+                lowered = reasons.lower()
+                if "target path" in lowered or "without fill" in lowered:
+                    story = (
+                        "Main mapped execution was cancelled because the market reached "
+                        "the plan's objective without ever returning to the entry."
+                    )
+                elif "waiting too long" in lowered or "expired" in lowered:
+                    story = (
+                        "Main mapped execution was cancelled because it waited past its "
+                        "allowed window without activating."
+                    )
+                elif "moved" in lowered and "without fill" in lowered:
+                    story = (
+                        "Main mapped execution was cancelled because price travelled away "
+                        "from the entry without filling it."
+                    )
+                else:
+                    story = "Main mapped execution was cancelled before activation because the day map lost validity."
         elif events.intersection({"TP1_HIT", "TRAILING_SL_UPDATED", "TP2_HIT"}):
             if role == "STARTER" and has_secondary_defined and not pending_sibling_roles and not live_sibling_roles:
                 story = "Starter survived — add-on is not needed right now."
@@ -812,6 +857,9 @@ class OpenTradesManager(BaseAgent):
                 new_status = "TP1_HIT"
                 events.append("TP1_HIT")
                 partial_close = True
+                booked = self._book_tp1_partial(trade, management, entry, tp1, trade_type, symbol)
+                if booked is not None:
+                    partial_realized_pnl, partial_closed_fraction, partial_scale_out_price = booked
                 # SL is already at entry from early BE — no need to move again.
             else:
                 # Legacy compatibility: older rows may have sl_moved_to_entry=True
@@ -911,6 +959,13 @@ class OpenTradesManager(BaseAgent):
             new_status = "TP1_HIT"
             events.append("TP1_HIT")
             partial_close = True
+            # Actually book the TP1 fraction. Without this the "50% partial
+            # close" is a label with no size behind it and TP2 settles the
+            # full position at the TP2 price -- 114 points of pure fiction on
+            # trade d917b1d5 alone.
+            booked = self._book_tp1_partial(trade, management, entry, tp1, trade_type, symbol)
+            if booked is not None:
+                partial_realized_pnl, partial_closed_fraction, partial_scale_out_price = booked
             # Moving the stop to entry is only protection if the trade has
             # actually travelled relative to what it is risking. A TP1 sitting
             # 22 points away against a 133-point stop is 0.16R: price tags it
@@ -1303,6 +1358,39 @@ class OpenTradesManager(BaseAgent):
         if not highs or not lows:
             return None, None
         return max(highs), min(lows)
+
+    def _book_tp1_partial(
+        self,
+        trade: Dict[str, Any],
+        management: Dict[str, Any],
+        entry: float,
+        tp1: float,
+        trade_type: str,
+        symbol: str,
+    ) -> tuple[float, float, float] | None:
+        """Realize the TP1 fraction at the TP1 price.
+
+        Returns ``(realized_total, closed_fraction_total, tp1_price)`` or None
+        when partial closing is disabled or the position is already fully
+        booked. Booking at ``tp1`` rather than the current price matters: TP1
+        is a limit order, so the half leaves at exactly that level.
+        """
+        if not bool(management.get("partial_close_at_tp1")):
+            return None
+        fraction = float(management.get("partial_close_fraction") or 0.0)
+        if fraction <= 0 or tp1 <= 0:
+            return None
+        already_closed = min(max(self._f(trade.get("closed_fraction"), 0.0), 0.0), 1.0)
+        newly_closed = min(fraction, max(0.0, 1.0 - already_closed))
+        if newly_closed <= 0:
+            return None
+        realized_before = self._f(trade.get("realized_pnl_points"), 0.0)
+        booked = calculate_pips(entry, tp1, trade_type, symbol) * newly_closed
+        return (
+            round(realized_before + booked, 1),
+            round(already_closed + newly_closed, 4),
+            round(tp1, 2),
+        )
 
     def _adverse_extreme_after(
         self,
