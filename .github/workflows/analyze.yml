@@ -100,7 +100,8 @@ jobs:
             tests/test_reversal_tightens_the_trail.py \
             tests/test_trailing_rule_message_is_true.py \
             tests/test_excursion_starts_at_the_fill.py \
-            tests/test_incumbent_defends_with_its_own_score.py
+            tests/test_incumbent_defends_with_its_own_score.py \
+            tests/test_no_time_bomb_tests.py
 
       - name: 🔎 Validate Production Setup
         run: |
