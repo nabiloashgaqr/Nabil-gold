@@ -665,6 +665,48 @@ class OpenTradesManager(BaseAgent):
                 return False
             return low_price <= level if trade_type == "BUY" else high_price >= level
 
+        # A stop that was trailed into profit may only be executed by price
+        # action that printed AFTER that stop existed.
+        #
+        # 2026-07-31, trade d917b1d5. One 5-minute bar carried the collapse:
+        # high 4055.00, low 4035.45. The low drove the trailing stop from
+        # 4063.00 down to 4050.45 -- and the SAME bar's high, 4055.00, was
+        # then read as a touch of it. The card reported "Trailing Stop Hit ...
+        # Exit 4050.45 ... +243.3 pts" while it also printed "Current Price:
+        # 4042.05". Price never traded at 4050.45 after the stop moved there;
+        # it was already 33 points below and still falling. The trade was
+        # worth +327 at that moment and went on to 4029 (TP2).
+        #
+        # The same-cycle guard below (`active_protective_stop`) already refuses
+        # to execute a stop the current cycle just created. It was not enough:
+        # the cycle that MOVES the stop persists it, and the very next cycle
+        # sees a stop that is now "old" and a window that still contains the
+        # pre-move high. The guard has to follow the candle, not the cycle.
+        #
+        # `trailing_stop_source_time` records the newest bar that fed the
+        # trailing calculation. Bars at or before it are the bars the stop was
+        # derived from; OHLC cannot prove the high came after the low inside
+        # any one of them, which is the same reasoning the same-cycle rule is
+        # already built on. Current price always counts -- "now" is by
+        # definition after the stop was set -- so a genuine move through the
+        # stop still closes the trade at the stop, in the same cycle.
+        #
+        # Rows written before this field existed have no baseline and keep the
+        # previous behaviour exactly.
+        stop_source_time = self._parse_dt(str(trade.get("trailing_stop_source_time") or ""))
+        adverse_after_stop = self._adverse_extreme_after(recent_candles, trade_type, stop_source_time)
+
+        def _trailed_stop_touched(level: float) -> bool:
+            if level <= 0:
+                return False
+            if stop_source_time is None:
+                return _stop_touched(level)
+            if (current_price <= level) if trade_type == "BUY" else (current_price >= level):
+                return True
+            if adverse_after_stop is None:
+                return False
+            return adverse_after_stop <= level if trade_type == "BUY" else adverse_after_stop >= level
+
         def _breakeven_touched() -> bool:
             return low_price <= entry if trade_type == "BUY" else high_price >= entry
 
@@ -779,7 +821,14 @@ class OpenTradesManager(BaseAgent):
                 active_protective_stop = stop_loss
                 if sl_moved_to_entry and not self._beyond_breakeven_or_at(trade_type, stop_loss, entry):
                     active_protective_stop = entry
-                active_stop_touched = _stop_touched(active_protective_stop)
+                # A stop trailed into profit may only be executed by bars that
+                # printed after it was set (see _trailed_stop_touched). A stop
+                # at or worse than entry is the original risk and is judged on
+                # the full window as before.
+                if self._beyond_breakeven(trade_type, active_protective_stop, entry):
+                    active_stop_touched = _trailed_stop_touched(active_protective_stop)
+                else:
+                    active_stop_touched = _stop_touched(active_protective_stop)
 
                 trailing_candidate = None
                 if bool(management["trailing_enabled"]) and new_status in self.OPEN_STATUSES and "EXPIRED" not in events:
@@ -826,7 +875,7 @@ class OpenTradesManager(BaseAgent):
         elif (
             sl_moved_to_entry
             and self._beyond_breakeven(trade_type, stop_loss, entry)
-            and sl_touched
+            and _trailed_stop_touched(stop_loss)
         ):
             # The persisted stop_loss has been trailed past breakeven (see the
             # progressive-trailing branch below) and price has now pulled back
@@ -1058,6 +1107,13 @@ class OpenTradesManager(BaseAgent):
         }
         if new_stop_loss is not None:
             updates["stop_loss"] = round(new_stop_loss, 2)
+            # Stamp the newest bar this stop was derived from, so a later
+            # cycle cannot execute it using the very bar that created it.
+            # Only a stop trailed into profit needs the stamp; a breakeven or
+            # original stop is not derived from the window at all.
+            if self._beyond_breakeven(trade_type, new_stop_loss, entry):
+                source_time = self._newest_candle_time(recent_candles) or now
+                updates["trailing_stop_source_time"] = self._iso(source_time)
         # Publish the gap and step that were actually used this cycle.
         #
         # The Telegram card used to state "150-point gap / 40-point step" as a
@@ -1247,6 +1303,51 @@ class OpenTradesManager(BaseAgent):
         if not highs or not lows:
             return None, None
         return max(highs), min(lows)
+
+    def _adverse_extreme_after(
+        self,
+        recent_candles: List[Dict[str, Any]] | None,
+        trade_type: str,
+        after: datetime | None,
+    ) -> float | None:
+        """Worst price printed strictly after ``after``.
+
+        Used to decide whether a trailed stop was genuinely traded through.
+        For a SELL the adverse extreme is the highest high; for a BUY it is
+        the lowest low. Bars at or before ``after`` are the bars the stop was
+        derived from, so they cannot also execute it. A bar with no readable
+        timestamp is skipped rather than trusted, matching
+        ``_window_extremes_since``.
+        """
+        if not recent_candles or after is None:
+            return None
+        values: List[float] = []
+        for candle in recent_candles:
+            if not isinstance(candle, dict):
+                continue
+            dt = self._parse_dt(str(candle.get("time") or ""))
+            if dt is None or dt <= after:
+                continue
+            key = "low" if trade_type == "BUY" else "high"
+            value = self._f(candle.get(key), 0.0)
+            if value > 0:
+                values.append(value)
+        if not values:
+            return None
+        return min(values) if trade_type == "BUY" else max(values)
+
+    def _newest_candle_time(self, recent_candles: List[Dict[str, Any]] | None) -> datetime | None:
+        """Timestamp of the newest bar that fed a trailing calculation."""
+        if not recent_candles:
+            return None
+        stamps: List[datetime] = []
+        for candle in recent_candles:
+            if not isinstance(candle, dict):
+                continue
+            dt = self._parse_dt(str(candle.get("time") or ""))
+            if dt is not None:
+                stamps.append(dt)
+        return max(stamps) if stamps else None
 
     def _recent_window_extremes(self, recent_candles: List[Dict[str, Any]] | None) -> tuple[float | None, float | None]:
         if not recent_candles:
