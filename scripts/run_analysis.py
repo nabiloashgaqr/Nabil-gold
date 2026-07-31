@@ -725,6 +725,53 @@ def _counter_to_live_winner_violation(
     return None
 
 
+def _rejected_setup_execution_block(
+    decision: Dict[str, Any], config: Dict[str, Any]
+) -> str | None:
+    """Refuse to trade a setup the SMC agent ranked and declined.
+
+    ``selection_role`` carries SMCAgent's verdict on its own candidates.
+    REJECTED means it was ranked and not chosen -- neither the primary thesis
+    nor a qualifying standby. Publishing one is trading a setup the agent that
+    discovered it did not believe in.
+
+    2026-07-31, TRADE_20260731_152110_326407_a5520ee6: a SELL LIMIT went out
+    with "role REJECTED · quality C · dominance 47.6 · reach 40.8". The
+    planner would have refused it at two separate floors
+    (min_primary_dominance 50, min_return_probability 42); the dual-agent path
+    does not run those floors, so nothing stopped it.
+
+    This is a quality gate, not a risk gate: no stop, target, size or ratio is
+    affected. Set ``execution_guards.allow_rejected_setups: true`` to restore
+    the previous behaviour.
+    """
+    guards = (config.get("execution_guards") or {}) if isinstance(config, dict) else {}
+    if guards.get("allow_rejected_setups") is True:
+        return None
+
+    side = str(decision.get("decision") or "").upper()
+    if side not in {"BUY", "SELL"}:
+        return None
+
+    setup = decision.get("setup_context") or {}
+    if not isinstance(setup, dict):
+        return None
+    role = str(setup.get("selection_role") or "").upper()
+    # No role at all means the snapshot predates the labelling; do not block
+    # on an absence of information.
+    if not role or role in _SELECTED_SETUP_ROLES:
+        return None
+
+    dominance = _safe_float(setup.get("thesis_dominance_score"), 0.0)
+    reach = _safe_float(setup.get("return_probability_score"), 0.0)
+    return (
+        f"setup was ranked {role} by the SMC agent — it was not chosen as the "
+        f"primary thesis or a qualifying standby (dominance {dominance:.1f}, "
+        f"return probability {reach:.1f}); trading it overrides the agent that "
+        "found it"
+    )
+
+
 def validate_signal_before_send(
     decision: Dict[str, Any],
     config: Dict[str, Any],
@@ -826,6 +873,12 @@ def validate_signal_before_send(
     counter_bet = _counter_to_live_winner_violation(decision, config, open_trades)
     if counter_bet:
         violations.append(counter_bet)
+
+    # 5. Provenance. A setup the SMC agent ranked and declined must not be
+    #    traded, whatever its arithmetic looks like.
+    rejected_setup = _rejected_setup_execution_block(decision, config)
+    if rejected_setup:
+        violations.append(rejected_setup)
 
     return violations
 
@@ -2979,19 +3032,67 @@ def _compact_agent_details(all_results: Dict[str, Any]) -> Dict[str, Any]:
     return details
 
 
+#: Roles SMCAgent assigns to the candidates it actually selected. Anything
+#: else -- in practice "REJECTED" -- is a candidate it ranked and declined.
+_SELECTED_SETUP_ROLES = {"PRIMARY", "STANDBY", "STARTER", "ADD_ON"}
+
+
 def _select_setup_candidate(decision_type: str, all_results: Dict[str, Any]) -> Dict[str, Any]:
+    """The setup a signal is allowed to describe itself with.
+
+    SMCAgent ranks every candidate and records the verdict in
+    ``selection_role``: rank 1 becomes PRIMARY, a qualifying rank 2 becomes
+    STANDBY, and everything else is labelled REJECTED (agents/smc_agent.py
+    :1148). REJECTED is not a neutral label -- it means the agent that found
+    the setup looked at it and did not choose it.
+
+    This function used to re-sort ALL candidates by quality score and return
+    the top one, never reading the role. A declined candidate could therefore
+    be handed straight to a live order by having the best score among the
+    leftovers.
+
+    2026-07-31, TRADE_20260731_152110_326407_a5520ee6 shipped as a SELL LIMIT
+    carrying "role REJECTED · quality C · dominance 47.6 · reach 40.8". Both
+    of those numbers sit below the planner's own floors (min_primary_dominance
+    50, min_return_probability 42), which is why the planner path would have
+    refused it -- but the dual-agent path reads this function instead, so the
+    floors were never consulted.
+
+    Selected roles are now preferred absolutely: a PRIMARY or STANDBY always
+    outranks a REJECTED, whatever their scores. Within the selected group the
+    existing quality ordering is unchanged.
+
+    A rejected candidate is still RETURNED when nothing else exists, because
+    the payload it builds is also used for reporting and diagnostics. Refusing
+    to publish is a separate decision, taken by
+    ``_rejected_setup_execution_block`` at the point an order is created.
+    """
     smc = all_results.get("smc", {}) or {}
     candidates = list(smc.get("setup_candidates") or [])
     if not candidates:
         return {}
+
+    def _score(candidate: Dict[str, Any]) -> float:
+        quality = candidate.get("setup_quality") or {}
+        return float(quality.get("score", candidate.get("quality_score", 0)) or 0)
+
+    def _was_selected(candidate: Dict[str, Any]) -> bool:
+        role = str(candidate.get("selection_role") or "").upper()
+        # An absent role predates the labelling and is treated as selected,
+        # so older snapshots behave exactly as they did before.
+        return role in _SELECTED_SETUP_ROLES or not role
+
+    # Sort by (selected first, then quality). Python's sort is stable, so
+    # equal-score candidates keep their original ranking.
+    def _ordered(pool: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return sorted(pool, key=lambda c: (0 if _was_selected(c) else 1, -_score(c)))
+
     side = str(decision_type or "").upper()
     if side in {"BUY", "SELL"}:
         directional = [c for c in candidates if str(c.get("direction", "")).upper() == side]
         if directional:
-            directional.sort(key=lambda c: float((c.get("setup_quality") or {}).get("score", c.get("quality_score", 0)) or 0), reverse=True)
-            return directional[0]
-    candidates.sort(key=lambda c: float((c.get("setup_quality") or {}).get("score", c.get("quality_score", 0)) or 0), reverse=True)
-    return candidates[0]
+            return _ordered(directional)[0]
+    return _ordered(candidates)[0]
 
 
 def _setup_context_payload(decision: Dict[str, Any], all_results: Dict[str, Any]) -> Dict[str, Any]:
