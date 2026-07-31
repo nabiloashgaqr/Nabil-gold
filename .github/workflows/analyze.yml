@@ -107,7 +107,8 @@ jobs:
             tests/test_tp1_partial_is_booked.py \
             tests/test_pending_must_be_reachable.py \
             tests/test_cancellation_story_matches_reason.py \
-            tests/test_tp1_booked_when_one_candle_spans_both.py
+            tests/test_tp1_booked_when_one_candle_spans_both.py \
+            tests/test_published_zone_meets_the_floor.py
 
       - name: 🔎 Validate Production Setup
         run: |
