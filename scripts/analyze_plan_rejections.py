@@ -88,6 +88,20 @@ def _reason_family(reason: str) -> str:
         _, _, cause = (reason or "").partition(":")
         cause = cause.strip()
         return f"execution refused: {cause[:34]}" if cause else "execution refused the leg"
+    # The opposite mistake to the one above: a reason that embeds a MEASURED
+    # value splinters into one row per value, so the gate disappears from the
+    # ranking even when it is the single largest cause.
+    #
+    # Report #10 printed seven separate rows -- "primary quality 68.0 below
+    # planner floor 70.0" (24), then 62.0 (12), 55.0 (10), 50.0 (8), 63.0 (6),
+    # 58.0 (5), 54.0 (5) -- so the quality floor read as seven small problems
+    # of 24 or fewer, while "archetype conviction LOW" (51) took the top slot.
+    # Summed, the floor was 70+: the actual number one, and invisible as such.
+    #
+    # The distribution of those scores is still worth seeing, so it is printed
+    # separately below rather than discarded.
+    if "below planner floor" in text:
+        return "primary quality below planner floor"
     for needle, label in (
         ("too weak for planning", "primary thesis too weak"),
         ("archetype conviction", "archetype conviction LOW"),
@@ -204,6 +218,53 @@ def _report(window_label: str, rows: List[Dict[str, Any]], config: Dict[str, Any
         remainder = len(refused) - sum(c for _, c in shown)
         if remainder > 0:
             print(f"    {remainder:4d}  {'·' * 32}  (all other reasons)")
+
+    # How far below the floor did the quality scores actually land?
+    #
+    # Grouping them into one family (see _reason_family) restores the gate to
+    # the ranking, but the spread is the part that says whether the floor is
+    # calibrated. A cluster sitting two points short means the bar is cutting
+    # through the middle of the population; a long tail means the refusals are
+    # genuinely poor setups.
+    #
+    # Report #10: 24 plans scored exactly 68.0 against a floor of 70.0. The
+    # smallest award in _setup_quality is +4, so nothing a 68 can earn lands
+    # it on 70 -- it must gain a whole extra qualifying condition. That is a
+    # cliff, and it is only visible once the scores are read together.
+    quality_scores: List[float] = []
+    for row in refused:
+        text = str(row.get("plan_reason") or "")
+        if "below planner floor" not in text.lower():
+            continue
+        match = re.search(r"primary quality\s+([0-9]+(?:\.[0-9]+)?)", text)
+        if match:
+            try:
+                quality_scores.append(float(match.group(1)))
+            except ValueError:
+                continue
+    if quality_scores:
+        floor_match = re.search(r"planner floor\s+([0-9]+(?:\.[0-9]+)?)", 
+                                " ".join(str(r.get("plan_reason") or "") for r in refused))
+        floor = float(floor_match.group(1)) if floor_match else 70.0
+        ordered = sorted(quality_scores)
+        median = ordered[len(ordered) // 2]
+        gaps = [floor - s for s in quality_scores]
+        within_4 = sum(1 for g in gaps if g <= 4.0)
+        print(f"\n  Quality scores that missed the floor ({floor:.0f})")
+        print(f"    samples {len(quality_scores)} · median {median:.1f} · "
+              f"min {min(ordered):.1f} · max {max(ordered):.1f}")
+        buckets = Counter(round(s, 0) for s in quality_scores)
+        for score, count in sorted(buckets.items(), reverse=True)[:8]:
+            print(f"     {score:5.0f}  {count:4d}  {_bar(count, len(quality_scores))}")
+        print(f"\n    within 4 points of the floor: {within_4}/{len(quality_scores)} "
+              f"({within_4 / len(quality_scores) * 100:.0f}%)")
+        if within_4 / len(quality_scores) >= 0.3:
+            print("    → the bar is cutting through the middle of the population,")
+            print("      not trimming a weak tail. The smallest award in")
+            print("      _setup_quality is +4, so these cannot inch over the line.")
+        else:
+            print("    → the misses are spread well below the floor;")
+            print("      the bar is separating weak setups, as intended.")
 
     # Which direction is the system refusing to map?
     #
