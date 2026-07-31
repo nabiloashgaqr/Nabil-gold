@@ -52,11 +52,19 @@ CONFIG = load_config()
 SYMBOL = "XAU/USD"
 
 # The card, verbatim.
+# A TP2_HIT row must carry evidence that it filled -- entry_time and a
+# realized result. The original fixture had neither, which is a state the
+# database cannot produce: a position cannot reach TP2 without first being
+# opened. Once excursion statistics began requiring proof of a fill (see
+# test_target_geometry_excludes_unfilled.py) that contradiction surfaced as a
+# failure, and the fixture was corrected rather than the rule relaxed.
 THE_CARD = {
     "id": "TRADE_20260731_141102_627592_b4f85832",
     "symbol": SYMBOL, "status": "TP2_HIT",
     "entry_price": 4031.77, "initial_stop_loss": 4071.77, "stop_loss": 4071.77,
     "tp1": 3981.77, "tp2": 3941.77,
+    "entry_time": "2026-07-31T14:14:00+00:00",
+    "close_price": 3941.77, "final_pnl": 900.0,
     "max_favorable_excursion": 1050.0,
     "signal_snapshot": {"session_plan": {"primary_poi": {"target_price": 4021.07}}},
 }
@@ -67,6 +75,8 @@ MAP_DERIVED = {
     "symbol": SYMBOL, "status": "TP2_HIT",
     "entry_price": 4074.78, "initial_stop_loss": 4089.78, "stop_loss": 4089.78,
     "tp1": 4051.98, "tp2": 4029.17,
+    "entry_time": "2026-07-31T06:02:53+00:00",
+    "close_price": 4029.17, "final_pnl": 342.1,
     "max_favorable_excursion": 520.0,
     "signal_snapshot": {"session_plan": {"primary_poi": {"target_price": 4029.17}}},
 }
