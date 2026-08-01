@@ -2009,6 +2009,116 @@ def _post_exit_revalidation_review(
     return {"allow": False, "reason": "; ".join(blockers[:3])}
 
 
+def _trade_tp2_price(trade: Dict[str, Any]) -> float | None:
+    """The TP2 level a closed trade was actually settled at."""
+    for key in ("tp2", "take_profit_2"):
+        try:
+            value = float(trade.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    snapshot = _trade_setup_context(trade)
+    if isinstance(snapshot, dict):
+        try:
+            value = float((snapshot.get("signal") or {}).get("tp2") or 0)
+        except (TypeError, ValueError):
+            value = 0.0
+        if value > 0:
+            return value
+    return None
+
+
+def _post_tp2_reentry_block(
+    decision: Dict[str, Any],
+    candidates: List[Dict[str, Any]],
+    config: Dict[str, Any],
+    *,
+    now: datetime,
+    symbol: str,
+    entry_price: float,
+    direction: str,
+) -> str | None:
+    """After a SELL takes TP2, refuse another SELL too close above that level.
+
+    TP2 is where a move ENDS, because it is where the liquidity that fuelled
+    it was consumed. Selling again at that same level is selling into the
+    bounce, and the existing cooldown could not see it: it measures distance
+    from the previous trade's ENTRY, not from the level it closed at.
+
+    2026-07-31 is the case that motivated this rule. d917b1d5 took TP2 at
+    4029.17 around 13:50. Twenty-one minutes later b4f85832 was published as
+    a SELL LIMIT at 4031.77 -- 26 points above that TP2 -- and by 15:21 it
+    was 116 points offside. The old guard skipped it because it sat 430
+    points from the prior ENTRY (4074.78), outside the 200-pt duplicate zone.
+
+    Measuring from TP2 is the whole point of this check.
+
+    Deliberately narrow:
+      * SELL only. A BUY after a SELL's TP2 is a reversal, not a repeat, and
+        the user asked for the sell side alone.
+      * Time-boxed: the block expires after ``window_hours``.
+      * Overridden by a genuinely new thesis -- the same
+        ``_post_exit_revalidation_review`` evidence already used elsewhere
+        (a different POI, a fresh sweep after the exit, or a state
+        progression with a stronger trigger). A trend that keeps giving new
+        structure is not blocked; a lazy re-entry at an exhausted level is.
+
+    No risk setting is touched: this refuses a signal, it never resizes,
+    re-prices or re-stops one.
+    """
+    cfg = (config.get("post_tp2_reentry") or {}) if isinstance(config, dict) else {}
+    if cfg.get("enabled", True) is False:
+        return None
+    if direction != "SELL":
+        return None
+
+    min_distance_points = float(cfg.get("min_distance_points", 250) or 250)
+    window_hours = float(cfg.get("window_hours", 2) or 2)
+    if min_distance_points <= 0 or window_hours <= 0:
+        return None
+
+    for trade in candidates:
+        if _trade_outcome(trade) == "OPEN":
+            continue
+        if str(trade.get("status") or "").upper() != "TP2_HIT":
+            continue
+        tp2 = _trade_tp2_price(trade)
+        if tp2 is None or tp2 <= 0:
+            continue
+
+        closed_at = _trade_reference_time(trade, now)
+        hours_since = (now - closed_at).total_seconds() / 3600.0
+        if hours_since < 0 or hours_since > window_hours:
+            continue
+
+        # For a SELL, a safe re-entry sits well ABOVE the exhausted level.
+        distance = price_to_points(entry_price - tp2, symbol=symbol)
+        if distance >= min_distance_points:
+            continue
+
+        review = _post_exit_revalidation_review(
+            decision, trade, config, now=now, symbol=symbol
+        )
+        if review.get("allow"):
+            logger.info(
+                "Post-TP2 re-entry allowed for %s despite being %.0f pts above "
+                "TP2 %.2f: %s",
+                symbol, distance, tp2, review.get("reason"),
+            )
+            continue
+
+        detail = str(review.get("reason") or "").strip()
+        suffix = f" No new thesis: {detail}." if detail else ""
+        return (
+            f"Post-TP2 re-entry blocked: {direction} entry {entry_price:.2f} is only "
+            f"{distance:.0f} pts above the TP2 {tp2:.2f} taken {hours_since:.1f}h ago "
+            f"(needs ≥{min_distance_points:.0f} pts within {window_hours:.0f}h)."
+            f"{suffix}"
+        )
+    return None
+
+
 def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService, config: Dict[str, Any]) -> str | None:
     filt = config.get('duplicate_signal_filter', {}) or {}
     if not filt.get('enabled', True): return None
@@ -2058,6 +2168,14 @@ def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService,
         open_same_direction = [t for t in candidates if _trade_outcome(t) == "OPEN"]
         if len(open_same_direction) >= max_open_same_direction:
             return f"Same-direction exposure cap: {len(open_same_direction)} open {direction} trade(s) already exist, blocking another {direction}."
+
+    # A target that was reached is an exhausted level, not a fresh one.
+    post_tp2 = _post_tp2_reentry_block(
+        decision, candidates, config,
+        now=now, symbol=symbol, entry_price=entry_price, direction=direction,
+    )
+    if post_tp2:
+        return post_tp2
 
     for trade in candidates:
         if _trade_outcome(trade) == "OPEN":
