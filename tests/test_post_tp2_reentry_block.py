@@ -21,9 +21,16 @@ this guard.
 
 THE RULE (as specified by the user)
 -----------------------------------
-    * SELL only. A BUY after a SELL's TP2 is a reversal, not a repeat.
-    * A new SELL must sit at least ``min_distance_points`` (250) ABOVE the
-      TP2 that was taken.
+    * Both directions, mirrored. The safe re-entry is always AWAY from the
+      exhausted level, back toward where the move began:
+
+          SELL -> new entry at least ``min_distance_points`` (250) ABOVE TP2
+          BUY  -> new entry at least ``min_distance_points`` (250) BELOW TP2
+
+      An entry on the far side of TP2 -- already beyond it -- is not a repeat
+      of the exhausted move and is left alone.
+    * Direction must match the closed trade. A BUY after a SELL's TP2 is a
+      reversal, not a repeat, and is never blocked.
     * The block lapses after ``window_hours`` (2).
     * It is overridden early by a genuinely new thesis, using the same
       evidence ``_post_exit_revalidation_review`` already accepts: a
@@ -172,9 +179,96 @@ def test_a_repackaged_same_thesis_does_not_lift_it() -> None:
 
 # ── scope ───────────────────────────────────────────────────────────────────
 
-def test_a_buy_is_never_blocked() -> None:
-    """A BUY after a SELL's TP2 is a reversal, not a repeat."""
+def test_a_buy_after_a_sell_tp2_is_never_blocked() -> None:
+    """Direction must match: a BUY after a SELL's TP2 is a reversal."""
     assert _block(4031.77, _at(14, 11), direction="BUY") is None
+
+
+# ── the mirrored BUY side ───────────────────────────────────────────────────
+#
+# A BUY's TP2 sits ABOVE its entry, so the exhausted level is above and the
+# safe re-entry is BELOW it -- the exact mirror of the SELL case. The prices
+# below are the manual analyst's 2026-07-30 chart, whose extended target was
+# 4132.389.
+
+BUY_TP2 = 4132.389
+
+BUY_CLOSED_ON_TP2 = {
+    "id": "buy-prev", "symbol": SYMBOL, "type": "BUY", "status": "TP2_HIT",
+    "result": "WIN", "entry_price": 4074.055, "tp1": 4093.0, "tp2": BUY_TP2,
+    "closed_at": "2026-07-31T13:50:00+00:00", "final_pnl": 583.3,
+    "signal_snapshot": {"setup_context": OLD_SETUP},
+}
+
+
+def _buy_block(entry: float, when: datetime, *, setup: dict | None = None,
+               config=None) -> str | None:
+    decision = {
+        "decision": "BUY", "symbol": SYMBOL, "current_price": entry,
+        "signal": {"entry": {"price": entry}},
+        "setup_context": SAME_THESIS if setup is None else setup,
+    }
+    return ra._post_tp2_reentry_block(
+        decision, [BUY_CLOSED_ON_TP2], config or CONFIG,
+        now=when, symbol=SYMBOL, entry_price=entry, direction="BUY",
+    )
+
+
+def test_a_buy_too_close_below_its_own_tp2_is_blocked() -> None:
+    reason = _buy_block(4130.00, _at(14, 11))
+    assert reason is not None
+    assert "24 pts below the TP2 4132.39" in reason, (
+        "the message must say BELOW for a BUY; saying 'above' would describe "
+        "the wrong side of the market"
+    )
+
+
+def test_the_buy_bar_is_the_same_distance_mirrored() -> None:
+    """Exactly 250 points below TP2 is the boundary, and it passes."""
+    exact = round(BUY_TP2 - 25.0, 3)          # 250 pts in price terms
+    assert _buy_block(exact, _at(14, 11)) is None
+    # One cent nearer is genuinely inside the bar.
+    assert _buy_block(round(exact + 0.01, 3), _at(14, 11)) is not None
+
+
+def test_a_buy_well_below_its_tp2_is_allowed() -> None:
+    assert _buy_block(4100.00, _at(14, 11)) is None
+
+
+def test_a_buy_beyond_its_own_tp2_is_not_a_repeat() -> None:
+    """Price already past the exhausted level is a different situation."""
+    assert _buy_block(4140.00, _at(14, 11)) is None
+
+
+def test_the_buy_block_also_lapses_after_the_window() -> None:
+    assert _buy_block(4130.00, _at(15, 45)) is not None   # 1.9h
+    assert _buy_block(4130.00, _at(16, 0)) is None        # 2.2h
+
+
+def test_a_new_thesis_lifts_the_buy_block_too() -> None:
+    fresh = {
+        "state_key": "K2", "setup_type": "ORDER_BLOCK_PULLBACK",
+        "poi_type": "order_block", "setup_state": "ENTRY_ARMED",
+        "thesis_dominance_score": 70.0, "trigger_score": 62.0,
+        "displacement_score": 55.0,
+    }
+    assert _buy_block(4130.00, _at(14, 11), setup=fresh) is None
+
+
+def test_a_sell_after_a_buy_tp2_is_never_blocked() -> None:
+    decision = {
+        "decision": "SELL", "symbol": SYMBOL, "current_price": 4130.00,
+        "signal": {"entry": {"price": 4130.00}}, "setup_context": SAME_THESIS,
+    }
+    assert ra._post_tp2_reentry_block(
+        decision, [BUY_CLOSED_ON_TP2], CONFIG,
+        now=_at(14, 11), symbol=SYMBOL, entry_price=4130.00, direction="SELL",
+    ) is None
+
+
+def test_a_sell_entry_beyond_its_own_tp2_is_not_a_repeat() -> None:
+    """The SELL mirror of the far-side case."""
+    assert _block(4020.00, _at(14, 11)) is None
 
 
 def test_only_a_tp2_close_arms_the_rule() -> None:
