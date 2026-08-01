@@ -2039,12 +2039,13 @@ def _post_tp2_reentry_block(
     entry_price: float,
     direction: str,
 ) -> str | None:
-    """After a SELL takes TP2, refuse another SELL too close above that level.
+    """After a trade takes TP2, refuse a same-direction re-entry too near it.
 
     TP2 is where a move ENDS, because it is where the liquidity that fuelled
-    it was consumed. Selling again at that same level is selling into the
-    bounce, and the existing cooldown could not see it: it measures distance
-    from the previous trade's ENTRY, not from the level it closed at.
+    it was consumed. Re-entering the same direction at that same level is
+    entering into the bounce, and the existing cooldown could not see it: it
+    measures distance from the previous trade's ENTRY, not from the level it
+    closed at.
 
     2026-07-31 is the case that motivated this rule. d917b1d5 took TP2 at
     4029.17 around 13:50. Twenty-one minutes later b4f85832 was published as
@@ -2054,9 +2055,23 @@ def _post_tp2_reentry_block(
 
     Measuring from TP2 is the whole point of this check.
 
-    Deliberately narrow:
-      * SELL only. A BUY after a SELL's TP2 is a reversal, not a repeat, and
-        the user asked for the sell side alone.
+    BOTH DIRECTIONS, MIRRORED
+    -------------------------
+    The safe side is always AWAY from the exhausted level, back toward where
+    the move began:
+
+        SELL: TP2 sits below entry, so a new SELL must be ABOVE it
+              -> entry - tp2 >= min_distance_points
+        BUY:  TP2 sits above entry, so a new BUY must be BELOW it
+              -> tp2 - entry >= min_distance_points
+
+    A re-entry on the far side of TP2 -- already beyond the level -- is not a
+    repeat of the exhausted move and is left alone.
+
+    Only a same-direction trade arms the rule: a BUY after a SELL's TP2 is a
+    reversal, not a repeat.
+
+    Also:
       * Time-boxed: the block expires after ``window_hours``.
       * Overridden by a genuinely new thesis -- the same
         ``_post_exit_revalidation_review`` evidence already used elsewhere
@@ -2070,7 +2085,7 @@ def _post_tp2_reentry_block(
     cfg = (config.get("post_tp2_reentry") or {}) if isinstance(config, dict) else {}
     if cfg.get("enabled", True) is False:
         return None
-    if direction != "SELL":
+    if direction not in {"BUY", "SELL"}:
         return None
 
     min_distance_points = float(cfg.get("min_distance_points", 250) or 250)
@@ -2083,6 +2098,9 @@ def _post_tp2_reentry_block(
             continue
         if str(trade.get("status") or "").upper() != "TP2_HIT":
             continue
+        # Only the same direction repeats an exhausted move.
+        if _trade_direction(trade) != direction:
+            continue
         tp2 = _trade_tp2_price(trade)
         if tp2 is None or tp2 <= 0:
             continue
@@ -2092,9 +2110,17 @@ def _post_tp2_reentry_block(
         if hours_since < 0 or hours_since > window_hours:
             continue
 
-        # For a SELL, a safe re-entry sits well ABOVE the exhausted level.
-        distance = price_to_points(entry_price - tp2, symbol=symbol)
-        if distance >= min_distance_points:
+        # Distance back toward where the move began. A SELL retreats upward
+        # from its TP2; a BUY retreats downward from its own. A negative
+        # value means the entry is on the far side of TP2 -- already beyond
+        # the exhausted level -- which is not a repeat of the same move.
+        if direction == "SELL":
+            distance = price_to_points(entry_price - tp2, symbol=symbol)
+            side_word = "above"
+        else:
+            distance = price_to_points(tp2 - entry_price, symbol=symbol)
+            side_word = "below"
+        if distance >= min_distance_points or distance < 0:
             continue
 
         review = _post_exit_revalidation_review(
@@ -2102,9 +2128,9 @@ def _post_tp2_reentry_block(
         )
         if review.get("allow"):
             logger.info(
-                "Post-TP2 re-entry allowed for %s despite being %.0f pts above "
+                "Post-TP2 re-entry allowed for %s despite being %.0f pts %s "
                 "TP2 %.2f: %s",
-                symbol, distance, tp2, review.get("reason"),
+                symbol, distance, side_word, tp2, review.get("reason"),
             )
             continue
 
@@ -2112,7 +2138,7 @@ def _post_tp2_reentry_block(
         suffix = f" No new thesis: {detail}." if detail else ""
         return (
             f"Post-TP2 re-entry blocked: {direction} entry {entry_price:.2f} is only "
-            f"{distance:.0f} pts above the TP2 {tp2:.2f} taken {hours_since:.1f}h ago "
+            f"{distance:.0f} pts {side_word} the TP2 {tp2:.2f} taken {hours_since:.1f}h ago "
             f"(needs ≥{min_distance_points:.0f} pts within {window_hours:.0f}h)."
             f"{suffix}"
         )
