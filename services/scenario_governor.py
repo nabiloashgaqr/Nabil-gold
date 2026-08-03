@@ -24,6 +24,21 @@ class ScenarioGovernor:
         self.allow_replace_older_pending_scenarios = bool(cfg.get("allow_replace_older_pending_scenarios", True))
         self.min_plan_score_improvement = float(cfg.get("min_plan_score_improvement", 4) or 4)
         self.min_primary_dominance_improvement = float(cfg.get("min_primary_dominance_improvement", 5) or 5)
+        # Minutes a freshly placed order is protected from replacement.
+        #
+        # A LIMIT order needs TIME to be reached -- that is its whole purpose.
+        # Cancelling one minutes after birth means it never had the chance the
+        # plan was built around, and the map churns instead of trading.
+        #
+        # 2026-08-03: order 03ed828a was published at 14:03 with quality B
+        # 74.0, dominance 77.3 and freshness FRESH, and was cancelled five
+        # minutes later by a plan scoring four points higher. Nothing in this
+        # class looked at how long it had been resting.
+        #
+        # A stale or invalidated order is still replaceable immediately: the
+        # grace protects orders that are merely young, not orders that are
+        # wrong.
+        self.replace_grace_minutes = float(cfg.get("replace_grace_minutes", 30) or 0)
 
     def review_new_plan(
         self,
@@ -119,6 +134,30 @@ class ScenarioGovernor:
             (better_on_score and not_worse_on_dominance)
             or (better_on_dominance and not_worse_on_score)
         )
+
+        # A young order keeps its place unless it is genuinely stale.
+        #
+        # Checked after the score comparison so the reason can quote the real
+        # numbers, and deliberately AFTER `stale_family`: an order that has
+        # already expired, been invalidated, or watched the market walk away
+        # is replaceable at any age. This only protects an order that simply
+        # has not been given time to fill.
+        if replace and not stale_family and self.replace_grace_minutes > 0:
+            youngest = self._youngest_age_minutes(incumbent_trades)
+            if youngest is not None and youngest < self.replace_grace_minutes:
+                return {
+                    "action": "KEEP_EXISTING_FAMILY",
+                    "reason": (
+                        f"existing pending family is only {youngest:.0f} min old and still "
+                        f"fresh; it keeps its place for {self.replace_grace_minutes:.0f} min "
+                        f"(old_score={old_score:.1f}, new_score={new_score:.1f}, "
+                        f"old_dom={old_dom:.1f}, new_dom={new_dom:.1f})"
+                    ),
+                    "cancelled_ids": [],
+                    "old_scenario_id": incumbent_id,
+                    "new_scenario_id": new_sid,
+                }
+
         if not replace:
             return {
                 "action": "KEEP_EXISTING_FAMILY",
@@ -258,6 +297,36 @@ class ScenarioGovernor:
         plan = ScenarioGovernor.plan_from_trade(best)
         setup = ScenarioGovernor.setup_from_trade(best)
         return ScenarioGovernor._plan_score(plan) + ScenarioGovernor._setup_dominance(setup)
+
+    @classmethod
+    def _youngest_age_minutes(cls, trades: List[Dict[str, Any]]) -> float | None:
+        """Age of the newest order in a family, in minutes.
+
+        The YOUNGEST is the right measure: a family is protected while any of
+        its legs still has a fair chance to fill. Returns None when no
+        timestamp can be read, so an unreadable row falls through to the
+        normal comparison rather than being protected on trust.
+        """
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        ages: List[float] = []
+        for trade in trades or []:
+            if not isinstance(trade, dict):
+                continue
+            for key in ("created_at", "entry_time", "opened_at"):
+                raw = str(trade.get(key) or "")
+                if not raw:
+                    continue
+                try:
+                    stamp = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if stamp.tzinfo is None:
+                    stamp = stamp.replace(tzinfo=timezone.utc)
+                ages.append(max(0.0, (now - stamp).total_seconds() / 60.0))
+                break
+        return min(ages) if ages else None
 
     @staticmethod
     def _plan_score(plan: Dict[str, Any] | None) -> float:
