@@ -122,7 +122,8 @@ jobs:
             tests/test_post_tp2_sees_the_closed_trade.py \
             tests/test_consensus_path_uses_dynamic_floor.py \
             tests/test_block_message_states_the_real_window.py \
-            tests/test_refused_plans_are_never_published.py
+            tests/test_refused_plans_are_never_published.py \
+            tests/test_stop_derived_rr_earns_nothing.py
 
       - name: 🔎 Validate Production Setup
         run: |
