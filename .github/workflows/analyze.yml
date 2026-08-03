@@ -113,7 +113,8 @@ jobs:
             tests/test_rejected_setups_are_not_traded.py \
             tests/test_post_tp2_reentry_block.py \
             tests/test_zone_floor_and_quality_labels.py \
-            tests/test_silent_book_holds_the_trade.py
+            tests/test_silent_book_holds_the_trade.py \
+            tests/test_analyst_labels_are_scoreable.py
 
       - name: 🔎 Validate Production Setup
         run: |
