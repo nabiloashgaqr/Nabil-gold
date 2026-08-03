@@ -210,14 +210,28 @@ class RiskManagementAgent(BaseAgent):
                     # Entry ZONE: the order fills when price touches entry_price
                     # (the zone MIDPOINT). low/high are the zone edges; the SL is
                     # placed behind the distal edge (see above).
-                    "zone": {
-                        "low": round(entry_zone.get("low", entry_price - max(0.20, atr * 0.07)), 2),
-                        "high": round(entry_zone.get("high", entry_price + max(0.20, atr * 0.07)), 2),
-                        "proximal": round(entry_zone.get("proximal", entry_price), 2),
-                        "distal": round(entry_zone.get("distal", entry_price), 2),
-                        "fill_at": entry_zone.get("fill_at", "mid"),
-                        "source": entry_zone.get("source", "atr"),
-                    },
+                    #
+                    # The published edges respect
+                    # session_planner.min_entry_zone_width_points. That floor
+                    # exists because the order rests at ONE price inside the
+                    # area: on 2026-07-30 a BUY zone was touched 21 points from
+                    # the reference entry without filling, and price then ran
+                    # through TP1.
+                    #
+                    # run_analysis applies it on the planner-ladder path, but
+                    # this agent builds the signal for the consensus and
+                    # dual-agent paths and read the raw POI instead. On
+                    # 2026-08-03 trade bdde9a5f published "Entry zone
+                    # 4063.55 - 4067.02" -- 34.7 points against a 60-point
+                    # floor. Same setting, same intent, one path honouring it.
+                    #
+                    # Widening is symmetric around the reference entry, so the
+                    # mapped price keeps its place and no risk moves:
+                    # zone_touch_activation carries the stop the same distance
+                    # it moves the entry.
+                    "zone": self._entry_zone_with_floor(
+                        entry_zone, entry_price=entry_price, atr=atr
+                    ),
                     # Smart execution metadata (see _smart_entry / _classify_order):
                     #   kind        -> MARKET / LIMIT / STOP (human concept)
                     #   order_type  -> BUY_MARKET / SELL_LIMIT / ... (broker style)
@@ -828,6 +842,67 @@ class RiskManagementAgent(BaseAgent):
                 tp1, tp2 = atr_tp1, atr_tp2
             tp3 = min(entry - atr * tp3_mult, tp2 - atr)
         return tp1, tp2, tp3, method, target_map
+
+    def _entry_zone_with_floor(
+        self,
+        entry_zone: Dict[str, Any],
+        *,
+        entry_price: float,
+        atr: float,
+    ) -> Dict[str, Any]:
+        """Publish the entry area at no less than the configured floor.
+
+        Reads ``session_planner.min_entry_zone_width_points`` -- the same
+        setting SessionPlannerService enforces -- so both paths describe the
+        same map. Set it to 0 to disable widening entirely.
+
+        The area is widened symmetrically around the reference entry, which
+        keeps the mapped price where the analysis put it. ``proximal`` and
+        ``distal`` are carried with the edges they belong to, so the stop
+        (placed behind the distal edge) moves with the zone rather than
+        landing inside it.
+        """
+        default_half = max(0.20, atr * 0.07)
+        low = self._f(entry_zone.get("low", entry_price - default_half), entry_price - default_half)
+        high = self._f(entry_zone.get("high", entry_price + default_half), entry_price + default_half)
+        if high < low:
+            low, high = high, low
+        proximal = self._f(entry_zone.get("proximal", entry_price), entry_price)
+        distal = self._f(entry_zone.get("distal", entry_price), entry_price)
+
+        planner_cfg = (self.config.get("session_planner") or {}) if isinstance(self.config, dict) else {}
+        floor_points = self._f(planner_cfg.get("min_entry_zone_width_points"), 0.0)
+        widened = False
+        if floor_points > 0 and low > 0 and high > 0:
+            floor_price = points_to_price(floor_points, self.symbol)
+            width = high - low
+            if width < floor_price:
+                missing = floor_price - width
+                anchor = entry_price if low <= entry_price <= high else (low + high) / 2.0
+                upper_share = ((high - anchor) / width) if width > 0 else 0.5
+                upper_share = min(max(upper_share, 0.0), 1.0)
+                new_low = low - missing * (1.0 - upper_share)
+                new_high = high + missing * upper_share
+                # Keep proximal/distal on the edges they described.
+                if abs(proximal - low) < abs(proximal - high):
+                    proximal = new_low
+                    distal = new_high
+                else:
+                    proximal = new_high
+                    distal = new_low
+                low, high, widened = new_low, new_high, True
+
+        payload = {
+            "low": round(low, 2),
+            "high": round(high, 2),
+            "proximal": round(proximal, 2),
+            "distal": round(distal, 2),
+            "fill_at": entry_zone.get("fill_at", "mid"),
+            "source": entry_zone.get("source", "atr"),
+        }
+        if widened:
+            payload["widened_to_min_width"] = True
+        return payload
 
     def _liquidity_chain_targets(
         self,
