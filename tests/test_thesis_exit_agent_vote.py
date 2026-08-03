@@ -128,6 +128,28 @@ def test_agents_defending_the_trade_veto_the_exit() -> None:
 # ── a4911dee: agents confirm -> full exit ──────────────────────────────────
 
 def test_agents_confirming_the_flip_still_exit_in_full() -> None:
+    """CONFIRM needs min_opponents_to_exit qualified opponents and no defender.
+
+    The bar was raised from 2 to 3, so this book carries three qualified BUY
+    votes against the SELL. Two opponents is now SILENT -- covered by
+    test_two_opponents_are_no_longer_enough below.
+    """
+    manager = OpenTradesManager(_config())
+    verdict = _review(manager, book=_book(
+        technical=("WAIT", 39.6),
+        classical=("BUY", 76.0),
+        smc=("BUY", 82.0),
+        price_action=("BUY", 79.0),
+        multitimeframe=("WAIT", 48.0),
+    ))
+    assert verdict["exit_now"] is True
+    assert verdict["kind"] == "OPPOSITE_CONTINUATION"
+    assert verdict["agent_vote"]["verdict"] == "CONFIRM"
+    assert "confirmed by 3 qualified agents" in verdict["reason"]
+
+
+def test_two_opponents_are_no_longer_enough() -> None:
+    """The change of intent, pinned: two is a minority of five voters."""
     manager = OpenTradesManager(_config())
     verdict = _review(manager, book=_book(
         technical=("WAIT", 39.6),
@@ -136,10 +158,8 @@ def test_agents_confirming_the_flip_still_exit_in_full() -> None:
         price_action=("BUY", 79.0),
         multitimeframe=("WAIT", 48.0),
     ))
-    assert verdict["exit_now"] is True
-    assert verdict["kind"] == "OPPOSITE_CONTINUATION"
-    assert verdict["agent_vote"]["verdict"] == "CONFIRM"
-    assert "confirmed by 2 qualified agents" in verdict["reason"]
+    assert verdict["agent_vote"]["verdict"] == "SILENT"
+    assert len(verdict["agent_vote"]["opponents"]) == 2
 
 
 # ── silent book -> scale out, per the operator's choice (أ) ────────────────
@@ -196,7 +216,7 @@ def test_agents_turning_against_a_scaled_trade_do_escalate() -> None:
     verdict = _review(manager, partial_close=True, book=_book(
         technical=("BUY", 92.0),
         classical=("BUY", 74.0),
-        smc=("WAIT", 30.0),
+        smc=("BUY", 71.0),
         price_action=("WAIT", 29.0),
         multitimeframe=("WAIT", 48.0),
     ))

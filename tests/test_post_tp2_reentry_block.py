@@ -31,7 +31,7 @@ THE RULE (as specified by the user)
       of the exhausted move and is left alone.
     * Direction must match the closed trade. A BUY after a SELL's TP2 is a
       reversal, not a repeat, and is never blocked.
-    * The block lapses after ``window_hours`` (2).
+    * The block lapses after ``window_hours`` (3).
     * It is overridden early by a genuinely new thesis, using the same
       evidence ``_post_exit_revalidation_review`` already accepts: a
       different POI, a fresh sweep after the exit, or a state progression
@@ -137,7 +137,7 @@ def test_the_configured_distance_and_window() -> None:
     cfg = CONFIG["post_tp2_reentry"]
     assert cfg["enabled"] is True
     assert float(cfg["min_distance_points"]) == 250.0
-    assert float(cfg["window_hours"]) == 2.0
+    assert float(cfg["window_hours"]) == 3.0
 
 
 def test_exactly_at_the_distance_is_allowed() -> None:
@@ -156,7 +156,8 @@ def test_a_comfortable_rally_back_is_allowed() -> None:
 def test_the_block_lapses_after_the_window() -> None:
     assert _block(4031.77, _at(14, 11)) is not None      # 0.3h
     assert _block(4031.77, _at(15, 45)) is not None      # 1.9h
-    assert _block(4031.77, _at(16, 0)) is None           # 2.2h
+    assert _block(4031.77, _at(16, 45)) is not None      # 2.9h
+    assert _block(4031.77, _at(16, 55)) is None          # 3.1h
 
 
 # ── the early override ──────────────────────────────────────────────────────
@@ -241,8 +242,8 @@ def test_a_buy_beyond_its_own_tp2_is_not_a_repeat() -> None:
 
 
 def test_the_buy_block_also_lapses_after_the_window() -> None:
-    assert _buy_block(4130.00, _at(15, 45)) is not None   # 1.9h
-    assert _buy_block(4130.00, _at(16, 0)) is None        # 2.2h
+    assert _buy_block(4130.00, _at(16, 45)) is not None   # 2.9h
+    assert _buy_block(4130.00, _at(16, 55)) is None       # 3.1h
 
 
 def test_a_new_thesis_lifts_the_buy_block_too() -> None:
@@ -307,7 +308,7 @@ def test_the_numbers_are_configurable() -> None:
     entry = round(TP2 + 20.0, 2)
     assert _block(entry, _at(14, 11), config=tighter) is None
     assert _block(entry, _at(14, 11)) is not None
-    # ...and the 1h window lapses sooner than the default 2h.
+    # ...and the 1h window lapses sooner than the default 3h.
     assert _block(4031.77, _at(15, 30), config=tighter) is None
 
 

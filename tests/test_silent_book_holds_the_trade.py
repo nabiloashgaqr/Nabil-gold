@@ -81,8 +81,12 @@ _BEARISH_RECLAIM = [
 
 # Undecided: one qualified opponent, no qualified defender.
 SILENT_BOOK = _book(technical=("SELL", 92.0), classical=("WAIT", 30.0))
-# Two qualified opponents, no defender.
-CONFIRM_BOOK = _book(technical=("SELL", 92.0), smc=("SELL", 84.0))
+# Three qualified opponents, no defender -- min_opponents_to_exit is 3.
+CONFIRM_BOOK = _book(
+    technical=("SELL", 92.0), smc=("SELL", 84.0), classical=("SELL", 76.0)
+)
+# Two qualified opponents: a minority of the five voters, so SILENT.
+TWO_OPPONENTS_BOOK = _book(technical=("SELL", 92.0), smc=("SELL", 84.0))
 # Two qualified defenders.
 DEFEND_BOOK = _book(technical=("BUY", 92.0), smc=("BUY", 84.0))
 
@@ -135,13 +139,27 @@ def test_hold_applies_after_a_previous_partial() -> None:
 
 # ── what must still close ───────────────────────────────────────────────────
 
-def test_two_qualified_opponents_still_close_the_trade() -> None:
-    """The operator's rule: two agents the other way, and it goes."""
+def test_enough_qualified_opponents_still_close_the_trade() -> None:
+    """The operator's rule: a majority the other way, and it goes.
+
+    The bar is min_opponents_to_exit, raised from 2 to 3 of the five voting
+    agents, with no qualified defender.
+    """
     verdict = _review(_config(), CONFIRM_BOOK)
 
     assert verdict["exit_now"] is True
     assert verdict["agent_vote"]["verdict"] == "CONFIRM"
-    assert "confirmed by 2 qualified agents" in verdict["reason"]
+    assert "confirmed by 3 qualified agents" in verdict["reason"]
+
+
+def test_two_opponents_no_longer_close_the_trade() -> None:
+    """Two of five is not a majority; the position holds."""
+    verdict = _review(_config(), TWO_OPPONENTS_BOOK)
+
+    assert verdict["exit_now"] is False
+    assert verdict["scale_out"] is False
+    assert verdict["agent_vote"]["verdict"] == "SILENT"
+    assert len(verdict["agent_vote"]["opponents"]) == 2
 
 
 def test_two_defenders_still_hold_the_trade() -> None:
@@ -234,10 +252,26 @@ def test_no_risk_or_vote_threshold_was_changed() -> None:
     vote = _config()["trade_management"]["thesis_exit"]["agent_vote"]
     assert float(vote["agent_min_confidence"]) == 70.0
     assert int(vote["min_defenders_to_hold"]) == 2
-    assert int(vote["min_opponents_to_exit"]) == 2
+    assert int(vote["min_opponents_to_exit"]) == 3
     risk = _config()["risk_settings"]
     assert float(risk["min_sl_distance_points"]) == 400.0
     assert float(risk["min_rr_ratio"]) == 1.5
+
+
+def test_the_opponent_threshold_is_live_not_decorative() -> None:
+    """Changing the number must change the outcome.
+
+    A threshold nothing reads is the dead-gate pattern this project has hit
+    repeatedly: `partial_close_percentage` sat in config for months while no
+    code consulted it. The same book must produce different verdicts at
+    different bars, or the setting is a comment.
+    """
+    two_opponents = TWO_OPPONENTS_BOOK
+    assert _review(_config(), two_opponents)["agent_vote"]["verdict"] == "SILENT"
+
+    relaxed = _config()
+    relaxed["trade_management"]["thesis_exit"]["agent_vote"]["min_opponents_to_exit"] = 2
+    assert _review(relaxed, two_opponents)["agent_vote"]["verdict"] == "CONFIRM"
 
 
 def test_fault_injection_the_config_alone_would_have_forced_a_full_exit() -> None:
