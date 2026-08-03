@@ -2029,6 +2029,18 @@ def _trade_tp2_price(trade: Dict[str, Any]) -> float | None:
     return None
 
 
+def _trim_zero(value: float) -> str:
+    """Format a possibly-fractional hour count without lying about it.
+
+    ``f"{2.5:.0f}"`` renders "2", so a 2.5-hour window announced itself as
+    "within 2h" -- the message contradicted the rule enforcing it. Keeping
+    one decimal only when it carries information means 3.0 stays "3" and
+    2.5 stays "2.5".
+    """
+    text = f"{float(value):.1f}"
+    return text[:-2] if text.endswith(".0") else text
+
+
 def _post_tp2_reentry_block(
     decision: Dict[str, Any],
     candidates: List[Dict[str, Any]],
@@ -2139,7 +2151,12 @@ def _post_tp2_reentry_block(
         return (
             f"Post-TP2 re-entry blocked: {direction} entry {entry_price:.2f} is only "
             f"{distance:.0f} pts {side_word} the TP2 {tp2:.2f} taken {hours_since:.1f}h ago "
-            f"(needs ≥{min_distance_points:.0f} pts within {window_hours:.0f}h)."
+            # The window accepts fractions (2.5 since 2026-08-03). ".0f"
+            # rounded it for display, so a 2.5-hour rule announced itself as
+            # "within 2h" -- a message that contradicts the rule it is
+            # reporting. Trim only a trailing ".0" so whole numbers still
+            # read "3h" rather than "3.0h".
+            f"(needs ≥{min_distance_points:.0f} pts within {_trim_zero(window_hours)}h)."
             f"{suffix}"
         )
     return None
