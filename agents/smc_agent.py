@@ -328,9 +328,50 @@ class SMCAgent(BaseAgent):
         )
         recent_sweep = self._recent_sweep(candles, tolerance, previous_day_levels, session_liquidity)
 
+        # PROJECTED POOLS: where liquidity SHOULD be resting, not only where
+        # it has already been taken.
+        #
+        # Everything above -- equal highs/lows, recent swings, previous-day
+        # and session extremes -- is a level price has ALREADY traded to.
+        # That is memory, not an objective. In a trend it fails exactly when
+        # it is needed: price prints a new low, that low becomes the nearest
+        # "target", the consumer drops it for being less than one ATR ahead,
+        # and the pool empties. The plan then falls back to targets derived
+        # from the stop.
+        #
+        # Measured on 2026-08-03 16:41 (signal 36e5cc8a, SELL 4037.09): the
+        # sell-side pool held eight levels and NOT ONE was more than 5.29 USD
+        # below entry -- seven were above it. Filtered for "at least one ATR
+        # ahead" the list came back empty, and the shipped TP2 became
+        # 3955.15, which is 397 points beyond anything on the chart.
+        #
+        # The manual analyst does the opposite: on the same session he marked
+        # 4014.11 and 3996.65 ("SELLSIDE STOP HUNT") -- prices the market had
+        # NOT yet reached. Those are the levels that make a trend trade
+        # payable.
+        #
+        # These projections are derived, never invented:
+        #   * round-number magnets ($10 and $25 on gold) are where resting
+        #     stops actually cluster;
+        #   * a measured move equal to the dealing range, projected from the
+        #     break, is the classic continuation objective.
+        # Each is tagged in ``projected_detail`` so a consumer can tell a
+        # projected pool from a historical one, and they are appended AFTER
+        # the real levels so genuine structure is always preferred.
+        projected = self._projected_pools(
+            candles=candles,
+            highs=highs,
+            lows=lows,
+            previous_day_levels=previous_day_levels,
+            session_liquidity=session_liquidity,
+        )
+        buy_side = self._unique_levels(buy_side + projected["buy_side"])
+        sell_side = self._unique_levels(sell_side + projected["sell_side"])
+
         return {
             "buy_side": buy_side[-8:],
             "sell_side": sell_side[:8],
+            "projected_detail": projected["detail"],
             "equal_highs": equal_highs,
             "equal_lows": equal_lows,
             "equal_highs_detail": equal_highs_detail,
@@ -2007,6 +2048,100 @@ class SMCAgent(BaseAgent):
             quality = "STRONG" if touches >= 4 else "MODERATE" if touches == 3 else "WEAK"
             details.append({"level": round(mean(cluster), 2), "touches": touches, "quality": quality})
         return details
+
+    def _projected_pools(
+        self,
+        *,
+        candles: List[Candle],
+        highs: List[Dict[str, Any]],
+        lows: List[Dict[str, Any]],
+        previous_day_levels: Dict[str, Any],
+        session_liquidity: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Levels liquidity is likely resting at but price has not reached.
+
+        Two families, both derived from structure that is already on the
+        chart. Nothing here is a free parameter chosen to make a trade fit.
+
+        ROUND-NUMBER MAGNETS
+            Stops cluster at whole numbers. On gold the meaningful grid is
+            $10, with $25 as the heavier shelf. The nearest untouched
+            multiples ahead of price are genuine pools -- 4000.00 on the
+            2026-08-03 chart is exactly such a level, and the analyst
+            labelled it "SELLSIDE STOP HUNT".
+
+        MEASURED MOVE
+            A range that breaks tends to travel its own height again. The
+            dealing range is already computed for premium/discount, so
+            projecting it from the break costs no new assumption.
+
+        Only levels AHEAD of price in each direction are returned; a
+        projection behind price is just history under another name.
+        """
+        detail: List[Dict[str, Any]] = []
+        buy: List[float] = []
+        sell: List[float] = []
+        if not candles:
+            return {"buy_side": [], "sell_side": [], "detail": []}
+
+        price = self._f(candles[-1].get("close"))
+        if price <= 0:
+            return {"buy_side": [], "sell_side": [], "detail": []}
+
+        # Range height from the same swings the dealing range uses, so the
+        # projection and the premium/discount model agree on the structure.
+        if highs and lows:
+            range_high = max(self._f(p.get("price")) for p in highs[-5:])
+            range_low = min(self._f(p.get("price")) for p in lows[-5:])
+        else:
+            recent = candles[-50:]
+            range_high = max(self._f(c.get("high")) for c in recent)
+            range_low = min(self._f(c.get("low")) for c in recent)
+        span = max(range_high - range_low, 0.0)
+
+        # A projection closer than this is indistinguishable from noise and
+        # would be filtered out by every consumer anyway.
+        min_ahead = max(self._avg_range(candles[-20:]) if len(candles) >= 20 else 0.0, 1.0)
+
+        def _add(level: float, side: str, kind: str) -> None:
+            level = round(self._f(level), 2)
+            if level <= 0:
+                return
+            if side == "buy" and level - price < min_ahead:
+                return
+            if side == "sell" and price - level < min_ahead:
+                return
+            bucket = buy if side == "buy" else sell
+            if any(abs(level - existing) < 0.01 for existing in bucket):
+                return
+            bucket.append(level)
+            detail.append({"level": level, "side": side, "basis": kind})
+
+        # ── round-number magnets ────────────────────────────────────────
+        for step in (10.0, 25.0):
+            above = (int(price / step) + 1) * step
+            below = int(price / step) * step
+            if abs(below - price) < 0.01:
+                below -= step
+            _add(above, "buy", f"round_{int(step)}")
+            _add(below, "sell", f"round_{int(step)}")
+            _add(above + step, "buy", f"round_{int(step)}_extended")
+            _add(below - step, "sell", f"round_{int(step)}_extended")
+
+        # ── measured move from the dealing range ────────────────────────
+        if span > 0:
+            _add(range_high + span, "buy", "measured_move")
+            _add(range_low - span, "sell", "measured_move")
+
+        # ── the far side of the range is itself an untouched pool ───────
+        _add(range_high, "buy", "range_high")
+        _add(range_low, "sell", "range_low")
+
+        return {
+            "buy_side": sorted(buy),
+            "sell_side": sorted(sell),
+            "detail": detail,
+        }
 
     def _unique_levels(self, levels: List[float]) -> List[float]:
         """Deduplicate rounded price levels."""
