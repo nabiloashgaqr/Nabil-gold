@@ -15,6 +15,15 @@ from utils.instruments import points_to_price, price_to_points
 from services.moment_quality import MomentQualityService
 
 
+#: Target methods whose reward ratio is a restatement of the stop distance
+#: rather than a measurement of the market. ``rr_from_floored_sl`` rebuilds
+#: both targets from the floored stop; ``atr_targets`` is the same idea one
+#: step earlier -- entry +/- ATR multiples, with no level consulted. A ratio
+#: produced this way carries no information about reward and must not be
+#: scored as if it did. See ``_trade_risk_profile``.
+_STOP_DERIVED_TARGET_METHODS = ("rr_from_floored_sl", "atr_targets")
+
+
 def _safe_moment(moment: Dict[str, Any]) -> float:
     """Read the multiplier defensively; sizing must survive a bad payload."""
     try:
@@ -223,6 +232,7 @@ class RiskManagementAgent(BaseAgent):
                 direction_details=direction_details,
                 results=results,
                 checks=checks,
+                target_method=target_method,
             )
             checks["trade_grade_filter"] = risk_profile["grade"] not in {"D", "F"}
             approved = all(checks.values())
@@ -1148,11 +1158,49 @@ class RiskManagementAgent(BaseAgent):
         direction_details: Dict[str, Any],
         results: Dict[str, Any],
         checks: Dict[str, bool],
+        target_method: str = "",
     ) -> Dict[str, Any]:
         """Grade trade risk quality and assign a risk multiplier."""
         score = 0.0
         notes: List[str] = []
-        if rr_tp2 >= 3.0:
+
+        # A REWARD RATIO IS ONLY EVIDENCE IF SOMETHING MEASURED IT.
+        #
+        # When the map offers no usable level the targets are rebuilt from the
+        # stop itself: tp1 = risk x (atr_tp1/atr_sl), tp2 = risk x
+        # (atr_tp2/atr_sl). On XAU that is 1.25 and 2.25 by construction, so
+        # `rr_tp2` is 2.25 no matter what the market looks like. Awarding +20
+        # for "Good R:R" then grades the arithmetic, not the trade -- and the
+        # ratio can never fail, because the question "is reward >= 1.5 x risk"
+        # is being asked of a number defined as 2.25 x risk.
+        #
+        # The effect was backwards and measurable. Signal 36e5cc8a
+        # (2026-08-03 16:41, SELL 4037.09, stop 364.2 pts):
+        #
+        #   liquidity map EMPTY -> tp2 3955.15, rr 2.25 -> +20 -> grade B 65
+        #                          -> approved -> published
+        #   same setup WITH the real levels -> tp2 4014.11, rr 0.63
+        #                          -> -15 -> grade F 0 -> refused
+        #
+        # 3955.15 is 397 points beyond the furthest level anyone had drawn.
+        # Knowing less scored better, so the only plans reaching the operator
+        # were the ones the system understood least.
+        #
+        # So a stop-derived ratio earns nothing. It is not penalised either --
+        # the setup may still be sound, and `rr_filter` still applies to it
+        # unchanged. It simply stops counting as proof of reward. Targets that
+        # came from structure keep their full weight.
+        #
+        # No risk setting is touched: min_rr_ratio stays 1.5, the floor stays
+        # 400/150, and nothing here can open a trade that was refused before.
+        method = str(target_method or "")
+        mapped_reward = not any(
+            marker in method for marker in _STOP_DERIVED_TARGET_METHODS
+        )
+
+        if not mapped_reward:
+            notes.append("R:R not scored (targets derived from the stop)")
+        elif rr_tp2 >= 3.0:
             score += 25; notes.append("Excellent R:R")
         elif rr_tp2 >= 2.0:
             score += 20; notes.append("Good R:R")
