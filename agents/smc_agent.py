@@ -368,9 +368,23 @@ class SMCAgent(BaseAgent):
         buy_side = self._unique_levels(buy_side + projected["buy_side"])
         sell_side = self._unique_levels(sell_side + projected["sell_side"])
 
+        last_price = self._f(candles[-1].get("close")) if candles else 0.0
+
         return {
-            "buy_side": buy_side[-8:],
-            "sell_side": sell_side[:8],
+            # KEEP BOTH ENDS OF THE LADDER.
+            #
+            # The old truncation took the eight levels nearest the far side --
+            # `sell_side[:8]` is the eight LOWEST prices. That was harmless
+            # while every level was historical and therefore close to price.
+            # Once the grid reaches out past 1000 points it stops being
+            # harmless: the eight lowest became 3900-4010 and every near rung
+            # was discarded, leaving nothing for TP1.
+            #
+            # A ladder needs both ends. `_trim_ladder` keeps the nearest rungs
+            # (which become TP1) and the furthest ones (which justify a wide
+            # stop), dropping only the redundant middle.
+            "buy_side": self._trim_ladder(buy_side, price=last_price, side="buy"),
+            "sell_side": self._trim_ladder(sell_side, price=last_price, side="sell"),
             "projected_detail": projected["detail"],
             "equal_highs": equal_highs,
             "equal_lows": equal_lows,
@@ -2049,6 +2063,71 @@ class SMCAgent(BaseAgent):
             details.append({"level": round(mean(cluster), 2), "touches": touches, "quality": quality})
         return details
 
+    def _trim_ladder(
+        self, levels: List[float], *, price: float, side: str, limit: int = 10
+    ) -> List[float]:
+        """Keep the nearest and furthest rungs, drop the redundant middle.
+
+        A target ladder is used at both ends. The nearest levels become TP1 --
+        the first objective price is drawn to. The furthest ones are what let
+        a wide, noise-proof stop still clear ``min_rr_ratio``.
+
+        The previous truncation kept one end only: ``sell_side[:8]`` is the
+        eight lowest prices. While every level was historical they were all
+        near price, so nothing was lost. Once the projected grid reaches past
+        1000 points that slice returned 3900-4010 and discarded every rung
+        near price, leaving no candidate for TP1.
+
+        Splitting the budget keeps both jobs answerable. Ordering is preserved
+        so existing consumers, which assume an ascending list, are unaffected.
+        """
+        unique = sorted({round(self._f(x), 2) for x in levels if self._f(x) > 0})
+        if len(unique) <= limit or price <= 0:
+            return unique
+
+        if side == "buy":
+            ahead = sorted((x for x in unique if x > price))
+            behind = [x for x in unique if x <= price][-2:]
+        else:
+            # Nearest first: for a SELL that is the highest level below price.
+            ahead = sorted((x for x in unique if x < price), reverse=True)
+            behind = [x for x in unique if x >= price][:2]
+
+        # KEEPING THE MIDDLE MATTERS.
+        #
+        # A first attempt kept the nearest half and the furthest half and
+        # dropped whatever sat between. On the 2026-08-03 downtrend that
+        # discarded 4000.00 -- the $25 shelf the analyst had labelled
+        # "SELLSIDE STOP HUNT", and the one level that makes the day
+        # tradeable at a sane stop. The test caught it.
+        #
+        # The rungs are not interchangeable, so thin them EVENLY instead:
+        # always keep the nearest (TP1) and the furthest (what pays for a wide
+        # stop), then sample the rest at a constant stride. Round numbers are
+        # kept in preference to odd historical prints, because a $25/$50/$100
+        # shelf is where stops actually rest.
+        budget = max(4, limit - len(behind))
+        if len(ahead) <= budget:
+            kept = set(ahead)
+        else:
+            kept = {ahead[0], ahead[-1]}
+            # Prefer round shelves among the interior rungs.
+            interior = ahead[1:-1]
+            rounds = [x for x in interior if abs(x - round(x / 25.0) * 25.0) < 0.01]
+            for level in rounds:
+                if len(kept) >= budget:
+                    break
+                kept.add(level)
+            if len(kept) < budget:
+                remaining = [x for x in interior if x not in kept]
+                stride = max(1, len(remaining) // max(1, budget - len(kept)))
+                for level in remaining[::stride]:
+                    if len(kept) >= budget:
+                        break
+                    kept.add(level)
+
+        return sorted(kept | set(behind))
+
     def _projected_pools(
         self,
         *,
@@ -2117,21 +2196,67 @@ class SMCAgent(BaseAgent):
             bucket.append(level)
             detail.append({"level": level, "side": side, "basis": kind})
 
+        # ── how far the map has to reach ────────────────────────────────
+        #
+        # A target ladder that stops short of what the stop needs is the same
+        # failure as having no ladder at all: the consumer finds nothing that
+        # pays, and rebuilds targets from the stop instead.
+        #
+        # The required reach is not a taste. It is arithmetic on settings that
+        # already exist:
+        #
+        #     widest permitted stop  x  min_rr_ratio
+        #     dynamic_sl_floor.max_points (400) x 1.5 = 600 points = 60 USD
+        #
+        # Measured on 2026-08-03: the ladder reached 337 points below price
+        # while a 398-point stop needed 597. Every real level sat inside the
+        # gap, so the plan fell back to invented targets. Extending the grid
+        # to the $50 and $100 shelves carries it past 1000 points, which
+        # covers the widest stop the configuration can produce.
+        #
+        # Noise is why the stop is wide; distance is what pays for it. Both
+        # sides of that trade have to be modelled, not just the stop.
+        risk_cfg = (self.config.get("risk_settings") or {}) if isinstance(self.config, dict) else {}
+        floor_cfg = (risk_cfg.get("dynamic_sl_floor") or {}) if isinstance(risk_cfg, dict) else {}
+        widest_stop_points = self._f(floor_cfg.get("max_points")) or self._f(
+            risk_cfg.get("min_sl_distance_points")
+        ) or 400.0
+        min_rr = self._f(risk_cfg.get("min_rr_ratio")) or 1.5
+        # Points -> USD on gold (point_size 0.10). One extra multiple of the
+        # requirement so the furthest rung is reachable rather than exactly on
+        # the bar.
+        required_reach = widest_stop_points * min_rr * 0.10 * 1.2
+
         # ── round-number magnets ────────────────────────────────────────
-        for step in (10.0, 25.0):
+        #
+        # $10 is the working grid, $25 the heavier shelf, $50 and $100 the
+        # levels that anchor a whole session. Walking each grid outward until
+        # the required reach is covered keeps the near rungs (which become
+        # TP1) while guaranteeing something far enough to justify a wide stop.
+        for step in (10.0, 25.0, 50.0, 100.0):
             above = (int(price / step) + 1) * step
             below = int(price / step) * step
             if abs(below - price) < 0.01:
                 below -= step
-            _add(above, "buy", f"round_{int(step)}")
-            _add(below, "sell", f"round_{int(step)}")
-            _add(above + step, "buy", f"round_{int(step)}_extended")
-            _add(below - step, "sell", f"round_{int(step)}_extended")
+            # Enough rungs to span the requirement, capped so a small grid
+            # cannot flood the pool.
+            rungs = max(2, min(6, int(required_reach / step) + 2))
+            for k in range(rungs):
+                tag = f"round_{int(step)}" if k == 0 else f"round_{int(step)}_x{k + 1}"
+                _add(above + step * k, "buy", tag)
+                _add(below - step * k, "sell", tag)
 
         # ── measured move from the dealing range ────────────────────────
+        #
+        # One range height is the classic continuation objective; two is the
+        # extension a trending session reaches when the first is consumed.
+        # The analyst's own 2026-07-30 chart marked exactly this pair -- a
+        # first target and an "extended" one beyond it.
         if span > 0:
             _add(range_high + span, "buy", "measured_move")
             _add(range_low - span, "sell", "measured_move")
+            _add(range_high + span * 2, "buy", "measured_move_x2")
+            _add(range_low - span * 2, "sell", "measured_move_x2")
 
         # ── the far side of the range is itself an untouched pool ───────
         _add(range_high, "buy", "range_high")
