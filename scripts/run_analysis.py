@@ -3959,6 +3959,30 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                             "position_size": risk.get("position_size", {}),
                             "risk_summary": risk.get("summary", ""),
                         }
+                        # RECORD THE PRE-FLOOR STOP SO IT CAN BE AUDITED.
+                        #
+                        # `analyze_sl_floor` answers the only question that
+                        # decides whether the noise floor earns its keep:
+                        # would the structural stop have survived? It reads
+                        # that stop from `signal_snapshot.session_plan`, which
+                        # only the planner path writes.
+                        #
+                        # Every consensus and dual-agent trade therefore fell
+                        # into `no_structural_stop` and was silently excluded
+                        # -- including 36e5cc8a, the exact trade that raised
+                        # the question. The measurement would have covered the
+                        # minority path and reported it as the whole picture.
+                        #
+                        # The risk agent already computes this; it just was
+                        # never persisted on this route.
+                        _rm = (risk.get("risk_metrics") or {})
+                        decision["risk_geometry"] = {
+                            "structural_sl_points": _rm.get("structural_sl_points"),
+                            "shipped_sl_points": sl.get("distance_points"),
+                            "floor_points": _rm.get("min_sl_distance_points"),
+                            "target_method": _rm.get("target_method"),
+                            "sl_method": sl.get("method"),
+                        }
                         decision["entry_mode"] = f"two_agent_{confirm_source}"
                         decision["entry_path"] = 2
                         decision["confirm_source"] = confirm_source

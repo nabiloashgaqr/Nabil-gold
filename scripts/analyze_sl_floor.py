@@ -37,7 +37,7 @@ sys.path.insert(0, str(ROOT))
 
 from services.database import DatabaseService  # noqa: E402
 from utils.helpers import load_config  # noqa: E402
-from utils.instruments import price_to_points  # noqa: E402
+from utils.instruments import price_to_points, points_to_price  # noqa: E402
 
 
 def _f(value: Any, default: float = 0.0) -> float:
@@ -59,7 +59,16 @@ def _snapshot(trade: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _structural_stop(trade: Dict[str, Any]) -> float:
-    """The stop the planner derived from structure, before the floor."""
+    """The stop the planner derived from structure, before the floor.
+
+    Read from the planner's own plan when present. Trades that came from the
+    consensus / dual-agent route never carry a ``session_plan``, so they used
+    to fall into ``no_structural_stop`` and vanish from the sample -- which is
+    the majority of live trades, and precisely the ones that raised the
+    question. ``risk_geometry`` is written on that route for this reason; it
+    stores the pre-floor distance in POINTS, so it is converted back to a
+    price here.
+    """
     snap = _snapshot(trade)
     plan = snap.get("session_plan") or {}
     for source in (
@@ -69,6 +78,16 @@ def _structural_stop(trade: Dict[str, Any]) -> float:
         value = _f(source)
         if value > 0:
             return value
+
+    geometry = snap.get("risk_geometry") or {}
+    points = _f(geometry.get("structural_sl_points"))
+    entry = _f(trade.get("entry_price"))
+    shipped = _f(trade.get("initial_stop_loss") or trade.get("stop_loss"))
+    if points > 0 and entry > 0 and shipped > 0:
+        symbol = str(trade.get("symbol") or "XAU/USD")
+        distance = points_to_price(points, symbol)
+        # Same side of entry as the stop that shipped.
+        return entry + distance if shipped > entry else entry - distance
     return 0.0
 
 
