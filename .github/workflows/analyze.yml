@@ -118,7 +118,8 @@ jobs:
             tests/test_post_tp2_survives_adaptive_bypass.py \
             tests/test_young_pending_keeps_its_place.py \
             tests/test_near_miss_preserves_planned_risk.py \
-            tests/test_activation_card_reports_the_fill.py
+            tests/test_activation_card_reports_the_fill.py \
+            tests/test_post_tp2_sees_the_closed_trade.py
 
       - name: 🔎 Validate Production Setup
         run: |
