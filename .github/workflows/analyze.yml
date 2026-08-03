@@ -121,7 +121,8 @@ jobs:
             tests/test_activation_card_reports_the_fill.py \
             tests/test_post_tp2_sees_the_closed_trade.py \
             tests/test_consensus_path_uses_dynamic_floor.py \
-            tests/test_block_message_states_the_real_window.py
+            tests/test_block_message_states_the_real_window.py \
+            tests/test_refused_plans_are_never_published.py
 
       - name: 🔎 Validate Production Setup
         run: |
