@@ -45,7 +45,20 @@ htmlcov/
 logs/
 
 # Storage
-storage/
+# Runtime state (session plans, decision audit, trade json) is machine-written
+# and must never be committed.
+# NOTE: this must be `storage/*` and NOT `storage/`. Git never descends into
+# a directory it has excluded, so with `storage/` the exceptions below are
+# never even examined -- verified with `git check-ignore`, which reported the
+# analyst files as IGNORED until this line was changed.
+storage/*
+# ...but the analyst comparison records are deliberate, hand-written evidence:
+# they are the only account of what the manual analyst called, and the
+# head-to-head scoreboard reads them. Ignoring them meant every label had to be
+# force-added or was silently lost on upload.
+!storage/*_analyst_label.csv
+!storage/*_head_to_head.md
+!storage/analyst_labels_*.json
 *.json.bak
 
 # Environment
