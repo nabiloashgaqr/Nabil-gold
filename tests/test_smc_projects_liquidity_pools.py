@@ -212,18 +212,35 @@ def test_every_projection_declares_its_basis(candles):
 
 
 @pytest.mark.parametrize("candles", [DOWNTREND, UPTREND])
-def test_projected_levels_appear_in_the_published_pools(candles):
+def test_the_published_pool_spans_both_ends(candles):
+    """UPDATED: the ladder is now thinned, so membership is not guaranteed.
+
+    The first version asserted that every projected level survives into the
+    published pool. Once the grid was extended to cover a 400-point stop that
+    became false by design -- there are more rungs than the pool carries, and
+    `_trim_ladder` samples them.
+
+    What must hold is the property the pool exists for: it has to serve BOTH
+    jobs. Something near enough to be a first target, and something far enough
+    to justify the widest stop the configuration allows.
+    """
     liq = _liquidity(candles)
-    buy = set(liq.get("buy_side") or [])
-    sell = set(liq.get("sell_side") or [])
-    for item in liq.get("projected_detail") or []:
-        pool = buy if item["side"] == "buy" else sell
-        # The pool is truncated to eight a side, so only assert membership
-        # for levels inside the retained window.
-        if item["side"] == "buy" and item["level"] <= max(buy or {0}):
-            assert item["level"] in pool or item["level"] < min(buy or {0}), item
-        if item["side"] == "sell" and item["level"] >= min(sell or {0}):
-            assert item["level"] in pool or item["level"] > max(sell or {0}), item
+    price = float(candles[-1]["close"])
+    for side, key in (("sell", "sell_side"), ("buy", "buy_side")):
+        pool = liq.get(key) or []
+        ahead = [x for x in pool if (x < price if side == "sell" else x > price)]
+        assert ahead, f"no {side}-side level ahead of price in {pool}"
+        nearest = min(abs(price - x) for x in ahead)
+        furthest = max(abs(price - x) for x in ahead)
+        assert nearest <= 25.0, (
+            f"{side}: nearest rung is {nearest:.2f} USD away; nothing close "
+            f"enough to serve as TP1"
+        )
+        # 400-point stop x 1.5 = 60 USD of required travel.
+        assert furthest >= 60.0, (
+            f"{side}: furthest rung is only {furthest:.2f} USD away; a wide "
+            f"stop can never clear min_rr against this ladder"
+        )
 
 
 @pytest.mark.parametrize("candles", [DOWNTREND, UPTREND])
@@ -234,7 +251,11 @@ def test_pools_stay_sorted_and_bounded(candles):
     sell = liq.get("sell_side") or []
     assert buy == sorted(buy)
     assert sell == sorted(sell)
-    assert len(buy) <= 8 and len(sell) <= 8
+    # UPDATED from 8. The cap rose to 10 a side when the grid was extended to
+    # cover a 400-point stop: the ladder must carry near rungs (TP1) and far
+    # rungs (reward for a wide stop) at the same time. Still bounded, so a
+    # misconfiguration cannot flood the pool.
+    assert len(buy) <= 12 and len(sell) <= 12
     assert all(x > 0 for x in buy + sell)
 
 
@@ -270,3 +291,87 @@ def test_no_risk_setting_was_changed():
     floor = risk["dynamic_sl_floor"]
     assert float(floor["min_points"]) == 150.0
     assert float(floor["max_points"]) == 400.0
+
+
+# ── the ladder must reach as far as the stop needs ──────────────────────────
+#
+# Added after the operator asked the question that reframed the problem:
+# "if this liquidity does not cover gold's noise, shouldn't it look for
+#  liquidity zones FURTHER away? further targets, a noise-proof stop?"
+#
+# That is the correct trade-off. The stop is wide because gold moves 50-100
+# points in seconds; the answer is not to tighten it into the noise but to
+# make sure the map reaches far enough to pay for it.
+#
+# Measured before this change: the ladder reached 337 points below price
+# while a 398-point stop needed 597. Every real level sat inside the gap.
+
+def _required_reach_usd() -> float:
+    """Widest permitted stop x min_rr, in USD. Derived, not chosen."""
+    risk = CONFIG["risk_settings"]
+    widest = float((risk.get("dynamic_sl_floor") or {}).get("max_points")
+                   or risk.get("min_sl_distance_points") or 400.0)
+    return widest * float(risk.get("min_rr_ratio") or 1.5) * 0.10
+
+
+@pytest.mark.parametrize("candles", [DOWNTREND, UPTREND])
+def test_the_ladder_reaches_far_enough_for_the_widest_stop(candles):
+    """A 400-point stop needs 600 points of travel. The map must offer it."""
+    liq = _liquidity(candles)
+    price = float(candles[-1]["close"])
+    need = _required_reach_usd()
+    for side, key in (("sell", "sell_side"), ("buy", "buy_side")):
+        pool = liq.get(key) or []
+        ahead = [x for x in pool if (x < price if side == "sell" else x > price)]
+        assert ahead, f"no {side}-side level ahead of price"
+        reach = max(abs(price - x) for x in ahead)
+        assert reach >= need, (
+            f"{side}-side ladder reaches {reach:.1f} USD but the widest "
+            f"permitted stop needs {need:.1f} USD to clear min_rr_ratio"
+        )
+
+
+@pytest.mark.parametrize("candles", [DOWNTREND, UPTREND])
+def test_far_rungs_did_not_evict_the_near_ones(candles):
+    """Extending the reach must not cost the first target.
+
+    The first implementation of the extension did exactly that: the pool was
+    truncated to the eight FURTHEST levels and every near rung vanished,
+    leaving nothing for TP1. `_trim_ladder` exists because of that failure.
+    """
+    liq = _liquidity(candles)
+    price = float(candles[-1]["close"])
+    for side, key in (("sell", "sell_side"), ("buy", "buy_side")):
+        ahead = [x for x in (liq.get(key) or [])
+                 if (x < price if side == "sell" else x > price)]
+        assert ahead, f"no {side}-side level ahead of price"
+        assert min(abs(price - x) for x in ahead) <= 25.0, (
+            f"{side}: nearest rung too far to serve as TP1"
+        )
+
+
+def test_the_analysts_own_shelf_survives_thinning():
+    """4000.00 must not be sampled away; it is the level that matters.
+
+    `_trim_ladder` first kept the nearest half and the furthest half and
+    dropped the middle -- which discarded exactly this level, the $25 shelf
+    the analyst labelled "SELLSIDE STOP HUNT" on 2026-08-03. The thinning was
+    rewritten to sample evenly and to prefer round shelves.
+    """
+    assert 4000.0 in (_liquidity(DOWNTREND).get("sell_side") or [])
+
+
+def test_the_reach_follows_configuration_not_a_hard_coded_number():
+    """Tighten max_points and the required reach must fall with it."""
+    import copy as _copy
+    from agents.smc_agent import SMCAgent as _Agent
+    cfg = _copy.deepcopy(CONFIG)
+    cfg["risk_settings"]["dynamic_sl_floor"]["max_points"] = 200
+    liq = _Agent(cfg).analyze(
+        {"data": DOWNTREND, "symbol": "XAU/USD"}
+    ).get("liquidity") or {}
+    price = float(DOWNTREND[-1]["close"])
+    ahead = [x for x in (liq.get("sell_side") or []) if x < price]
+    assert ahead
+    # Still has to cover 200 x 1.5 = 300 points = 30 USD.
+    assert max(price - x for x in ahead) >= 30.0
