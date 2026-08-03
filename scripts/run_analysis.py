@@ -2178,10 +2178,48 @@ def _post_tp2_reentry_reason(
 
     candidates: List[Dict[str, Any]] = []
     seen: set = set()
+    # A guard that cannot see the trade cannot guard against it.
+    #
+    # `get_recent_trades` orders by created_at and truncates. A trade that
+    # OPENED at 11:26 and took TP2 at 13:38 is old by creation order, so once
+    # enough newer rows exist -- cancelled pendings, ladder legs, the other
+    # symbol -- it falls out of the window entirely.
+    #
+    # 2026-08-03: TP2 was taken at 4022.31 at 13:38 and a SELL LIMIT went out
+    # at 4037.48 at 14:10, 152 points above it. The rule was configured, the
+    # code was deployed, and it allowed the signal because the closed trade
+    # was no longer in the list it was handed. Reproduced with 60 newer rows:
+    # the guard returns ALLOWED and the TP2 row is absent from limit=50.
+    #
+    # The window this rule cares about is TIME SINCE CLOSING, so ask for
+    # enough history to cover it rather than trusting a fixed row count. The
+    # filter below still discards anything outside the configured hours.
+    window_hours = float(
+        ((config.get("post_tp2_reentry") or {}) if isinstance(config, dict) else {})
+        .get("window_hours", 3) or 3
+    )
+    # ~12 five-minute cycles an hour, and a cycle can write several rows.
+    # Scaled to the window with a floor that keeps the old behaviour for
+    # short windows, and a ceiling so a misconfiguration cannot pull the
+    # whole table.
+    lookback_rows = int(min(500, max(50, window_hours * 120)))
+    since_iso = (
+        datetime.now(timezone.utc) - timedelta(hours=window_hours)
+    ).replace(microsecond=0).isoformat()
     try:
         pool = list(database.get_open_trades() or []) + list(
-            database.get_recent_trades(limit=50) or []
+            database.get_recent_trades(limit=lookback_rows) or []
         )
+        # Ask the database directly for trades that CLOSED inside the window.
+        # This is the authoritative source for this rule; the wider row scan
+        # above stays as a fallback for schemas without a closed_at column.
+        if hasattr(database, "get_trades_closed_since"):
+            try:
+                pool += list(
+                    database.get_trades_closed_since(since_iso, symbol=symbol) or []
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Post-TP2 guard could not read closed trades: %s", exc)
     except Exception as exc:  # noqa: BLE001 - a guard must not break the cycle
         logger.warning("Post-TP2 guard could not read trade history: %s", exc)
         return None
