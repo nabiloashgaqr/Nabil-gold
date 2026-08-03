@@ -25,6 +25,7 @@ except Exception:  # pragma: no cover - dependency may be absent in local Python
 from utils.helpers import load_config, load_trades, save_trades
 from utils.instruments import price_decimals, price_to_points
 from utils.sessions import session_label_from_utc, SESSION_ORDER
+from services import performance_stats
 
 
 class DatabaseService:
@@ -1097,6 +1098,57 @@ class DatabaseService:
                     self.logger.error("Failed to fetch recent trades from Supabase: %s", exc)
         trades = load_trades(self.local_path)
         return sorted(trades, key=self._trade_time_text, reverse=True)[:limit]
+
+    def get_recent_closed_trades(self, limit: int = 150) -> List[Dict[str, Any]]:
+        """Recent FINISHED trades, newest close first.
+
+        ``get_recent_trades`` answers "what was written recently" and returns
+        whatever is newest by ``created_at`` -- pending orders, cancelled
+        orders and open positions included. Anything that wants a performance
+        record has to filter that list afterwards, and by then the window has
+        already been spent on rows that have no outcome.
+
+        That is why the two dashboards disagreed. The Telegram card pulled 80
+        rows and filtered down to 52 closed trades; the web API asked the
+        database for closed rows directly and got 85. Same maths, different
+        sample, so the totals could never line up.
+
+        Filtering in the query keeps the whole window on rows that can
+        actually have a result, and mirrors what
+        ``dashboard/api/dashboard.js`` already does -- same status list, same
+        ordering -- so both surfaces read the same trades.
+        """
+        statuses = sorted(performance_stats.CLOSED_STATUSES)
+        if self.use_supabase and self.client:
+            for order_column in ("closed_at", "close_time", "created_at"):
+                try:
+                    response = (
+                        self.client.table("trades").select("*")
+                        .in_("status", statuses)
+                        .order(order_column, desc=True)
+                        .limit(limit)
+                        .execute()
+                    )
+                    return list(response.data or [])
+                except Exception as exc:  # noqa: BLE001
+                    if self._missing_column(exc, order_column):
+                        continue
+                    self.logger.warning(
+                        "Could not fetch recent closed trades ordered by %s: %s",
+                        order_column, exc,
+                    )
+                    break
+
+        rows = [
+            row for row in load_trades(self.local_path)
+            if str(row.get("status") or "").upper() in performance_stats.CLOSED_STATUSES
+        ]
+        return sorted(
+            rows,
+            key=lambda r: str(r.get("closed_at") or r.get("close_time")
+                              or self._trade_time_text(r) or ""),
+            reverse=True,
+        )[:limit]
 
     def get_trades_closed_since(
         self, since_iso: str, *, symbol: str | None = None, limit: int = 200
