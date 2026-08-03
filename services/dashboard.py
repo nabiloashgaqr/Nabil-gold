@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
+from services import performance_stats
+
 
 OPEN_STATUSES = {"OPEN", "PARTIAL", "TP1_HIT"}
 WIN_STATUSES = {"TP2_HIT"}
@@ -59,30 +61,40 @@ def _trade_type(trade: Dict[str, Any]) -> str:
 
 
 def summarize_trades(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
-    total = len(trades)
-    open_trades = [t for t in trades if str(t.get("status", "")).upper() in OPEN_STATUSES]
-    closed = [t for t in trades if str(t.get("status", "")).upper() not in OPEN_STATUSES]
-    wins = [t for t in closed if str(t.get("status", "")).upper() in WIN_STATUSES or _pnl(t) > 0]
-    losses = [t for t in closed if _pnl(t) < 0]
-    net = sum(_pnl(t) for t in trades)
-    gross_profit = sum(_pnl(t) for t in trades if _pnl(t) > 0)
-    gross_loss = abs(sum(_pnl(t) for t in trades if _pnl(t) < 0))
-    buy_trades = [t for t in trades if _trade_type(t) == "BUY"]
-    sell_trades = [t for t in trades if _trade_type(t) == "SELL"]
+    """Performance summary. Delegates to the one shared definition.
+
+    This used to be a second implementation of the maths the web dashboard
+    already had, and the two disagreed in front of the operator: the card
+    reported 80 trades with 34 wins and 9 losses -- 37 rows in neither
+    column, because PENDING and CANCELLED orders were being counted as
+    "trades" while having no outcome to be counted in. Net and profit factor
+    mixed realised profit with floating PnL for the same reason.
+
+    ``services.performance_stats`` now owns the definition. The legacy key
+    names are preserved so existing callers and the HTML renderer keep
+    working, and ``total`` deliberately means CLOSED trades now, matching the
+    number the wins and losses are drawn from.
+    """
+    summary = performance_stats.summarize(trades)
     return {
-        "total": total,
-        "open": len(open_trades),
-        "closed": len(closed),
-        "wins": len(wins),
-        "losses": len(losses),
-        "win_rate": round((len(wins) / (len(wins) + len(losses)) * 100) if (len(wins) + len(losses)) else 0, 2),
-        "net_points": round(net, 2),
-        "profit_factor": round(gross_profit / gross_loss, 2) if gross_loss > 0 else (99.9 if gross_profit > 0 else 0),
-        "buy_count": len(buy_trades),
-        "sell_count": len(sell_trades),
-        "buy_net": round(sum(_pnl(t) for t in buy_trades), 2),
-        "sell_net": round(sum(_pnl(t) for t in sell_trades), 2),
-        "avg_confidence": round(sum(_f(t.get("confidence")) for t in trades) / total, 2) if total else 0,
+        # `total` is the set the outcomes are computed over, so W + L + BE
+        # always reconciles against it.
+        "total": summary["closed"],
+        "open": summary["open"],
+        "pending": summary["pending"],
+        "closed": summary["closed"],
+        "wins": summary["wins"],
+        "losses": summary["losses"],
+        "breakeven": summary["breakeven"],
+        "win_rate": summary["win_rate"],
+        "net_points": summary["net_points"],
+        "profit_factor": summary["profit_factor"] if summary["profit_factor"] is not None else 99.9,
+        "open_floating_points": summary["open_floating_points"],
+        "buy_count": summary["buy_count"],
+        "sell_count": summary["sell_count"],
+        "buy_net": summary["buy_net"],
+        "sell_net": summary["sell_net"],
+        "avg_confidence": summary["avg_confidence"],
     }
 
 
@@ -215,10 +227,20 @@ def format_dashboard_telegram(summary: Dict[str, Any]) -> str:
     lines = [
         "📊 <b>Dashboard Updated</b>",
         "━━━━━━━━━━━━━━━━━━━━",
-        f"Trades: {summary.get('total', 0)} | Open: {summary.get('open', 0)}",
-        f"📈 Win Rate: {summary.get('win_rate', 0)}% · W: {wins} / L: {losses}",
+        # The label says CLOSED because that is what every figure below is
+        # computed over. The old card said "Trades: 80" while W + L was 43,
+        # because it counted pending and cancelled orders that have no
+        # outcome. Naming the scope is what stops that being misread.
+        f"Closed: {summary.get('total', 0)} | Open: {summary.get('open', 0)}"
+        + (f" | Pending: {summary.get('pending', 0)}" if summary.get("pending") else ""),
+        f"📈 Win Rate: {summary.get('win_rate', 0)}% · W: {wins} / L: {losses}"
+        + (f" / BE: {summary.get('breakeven')}" if summary.get("breakeven") else ""),
         f"💰 Net: {net:+} pts · PF: {pf_display}",
     ]
+    # Floating PnL is reported on its own line, never folded into Net.
+    floating = summary.get("open_floating_points") or 0
+    if summary.get("open") and floating:
+        lines.append(f"⏳ Open floating: {floating:+} pts (not in Net)")
     if buy_count or sell_count:
         lines.append(f"🟢 BUY: {buy_count} trades · {buy_net:+} pts")
         lines.append(f"🔴 SELL: {sell_count} trades · {sell_net:+} pts")
