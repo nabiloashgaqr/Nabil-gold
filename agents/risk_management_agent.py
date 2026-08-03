@@ -90,7 +90,42 @@ class RiskManagementAgent(BaseAgent):
             # configured ATR multipliers (tp_mult/sl_mult) applied to the new,
             # wider stop distance - otherwise R:R would shrink and min_rr_ratio
             # would start rejecting trades purely because SL got floored.
-            min_sl_distance = points_to_price(self._f(self.settings.get("min_sl_distance_points"), 0.0), self.symbol)
+            #
+            # ONE FLOOR, BOTH DOORS.
+            #
+            # `dynamic_sl_floor` was added to stop the flat 400 from setting
+            # the risk on every gold plan, and `_planner_trade_levels` in
+            # scripts/run_analysis.py honours it. This agent did not: it read
+            # `min_sl_distance_points` raw, so the CONSENSUS/two-agent route
+            # -- the route that actually builds the shipped order at
+            # run_analysis.py:3894 -- kept flooring every stop to the full
+            # 400 while the map and the planner priced the same leg at 150.
+            #
+            # Measured on the real 2026-08-03 signal 2f72579f (SELL 4037.48,
+            # zone 4034.48-4040.48): structural stop 33-50 pts, this door
+            # shipped 400 pts, the other door returns 150 pts.
+            #
+            # The consequence is the whole liquidity map being unreachable.
+            # Against a 400-pt stop the analyst's own levels score
+            # 4028.20=0.23R, 4022.31=0.38R, 4020.00=0.44R, 4000.00=0.94R --
+            # every one below min_rr_ratio 1.5, so the mapped target is
+            # refused and the ratio fallback ships the -400/+500/+900
+            # signature. Against the scaled floor 4000.00 is 2.50R and the
+            # chain has something real to aim at.
+            #
+            # No risk setting is changed here: min_sl_distance_points stays
+            # 400 and remains the ceiling (dynamic_sl_floor.max_points), and
+            # min_rr_ratio is untouched. This only makes the second door read
+            # the floor the first door already uses.
+            min_sl_points = self._f(self.settings.get("min_sl_distance_points"), 0.0)
+            structural_points = abs(price_to_points(entry_price - stop_loss, self.symbol))
+            floor_cfg = self.settings.get("dynamic_sl_floor") or {}
+            if bool(floor_cfg.get("enabled", False)) and structural_points > 0:
+                multiplier = self._f(floor_cfg.get("structural_multiplier"), 3.0) or 3.0
+                hard_min = self._f(floor_cfg.get("min_points"), 150.0)
+                hard_max = self._f(floor_cfg.get("max_points"), min_sl_points or 400.0)
+                min_sl_points = max(hard_min, min(structural_points * multiplier, hard_max))
+            min_sl_distance = points_to_price(min_sl_points, self.symbol)
             if min_sl_distance > 0 and abs(entry_price - stop_loss) < min_sl_distance:
                 sl_mult = self._f(self.settings.get("atr_multiplier_sl"), 2.0) or 2.0
                 tp1_ratio = self._f(self.settings.get("atr_multiplier_tp1"), 2.5) / sl_mult
@@ -260,6 +295,11 @@ class RiskManagementAgent(BaseAgent):
                     "tp1_distance_price": round(tp1_distance, 2),
                     "tp2_distance_price": round(tp2_distance, 2),
                     "target_method": target_method,
+                    # The floor that was actually applied on this path, so a
+                    # later audit can tell a scaled floor from the flat one
+                    # without re-deriving it.
+                    "min_sl_distance_points": round(min_sl_points, 1),
+                    "structural_sl_points": round(structural_points, 1),
                     "max_rr_ratio": self._f(self.settings.get("max_rr_ratio"), 4.0),
                     "checks": checks,
                     "portfolio": portfolio,
