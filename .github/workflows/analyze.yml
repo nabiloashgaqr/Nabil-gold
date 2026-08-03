@@ -115,7 +115,8 @@ jobs:
             tests/test_zone_floor_and_quality_labels.py \
             tests/test_silent_book_holds_the_trade.py \
             tests/test_analyst_labels_are_scoreable.py \
-            tests/test_post_tp2_survives_adaptive_bypass.py
+            tests/test_post_tp2_survives_adaptive_bypass.py \
+            tests/test_young_pending_keeps_its_place.py
 
       - name: 🔎 Validate Production Setup
         run: |
