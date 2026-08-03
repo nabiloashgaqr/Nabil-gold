@@ -62,12 +62,21 @@ def _bullish_reclaim_candles() -> list[dict]:
 
 
 def _review(manager, *, book, partial_close=False, entry=4046.02,
-            price=4049.94, pnl=-39.2):
+            price=4049.94, pnl=-39.2, mfe=None):
+    # max_favorable_excursion is the BEST the trade has ever seen, so it can
+    # never be below the current PnL. The helper used to hardcode 0.0 while
+    # callers passed a positive pnl -- a state the manager cannot produce.
+    # That was harmless until the scale-out began requiring real travel
+    # (test_scale_out_needs_real_travel.py), at which point the contradiction
+    # surfaced as a failure. The default now derives from pnl unless a test
+    # deliberately sets a different peak.
+    if mfe is None:
+        mfe = max(0.0, pnl)
     return manager._thesis_exit_review(
         {"id": "T", "type": "SELL", "entry_price": entry, "symbol": SYMBOL},
         trade_type="SELL", symbol=SYMBOL, current_price=price,
         recent_candles=_bullish_reclaim_candles(), hours_open=0.5,
-        pnl_points=pnl, max_favorable_excursion=0.0, tp1=3996.0,
+        pnl_points=pnl, max_favorable_excursion=mfe, tp1=3996.0,
         entry=entry, partial_close=partial_close, agent_details=book,
     )
 
