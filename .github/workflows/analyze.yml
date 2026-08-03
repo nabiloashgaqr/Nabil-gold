@@ -112,7 +112,7 @@ jobs:
             tests/test_targets_come_from_liquidity.py \
             tests/test_rejected_setups_are_not_traded.py \
             tests/test_post_tp2_reentry_block.py \
-            tests/test_scale_out_needs_real_travel.py
+            tests/test_zone_floor_and_quality_labels.py
 
       - name: 🔎 Validate Production Setup
         run: |
