@@ -165,6 +165,10 @@ class RiskManagementAgent(BaseAgent):
                     supports=support_levels,
                     resistances=resistance_levels,
                     atr=atr,
+                    # The distance structure actually argues for, before the
+                    # noise floor padded it. Used only as a fallback when the
+                    # padded risk vetoes every mapped level.
+                    structural_risk=points_to_price(structural_points, self.symbol),
                 )
                 if chained_tp1 is not None and chained_tp2 is not None:
                     tp1, tp2 = chained_tp1, chained_tp2
@@ -954,6 +958,7 @@ class RiskManagementAgent(BaseAgent):
         supports: List[float],
         resistances: List[float],
         atr: float,
+        structural_risk: float | None = None,
     ) -> Tuple[float | None, float | None, str]:
         """TP1 and TP2 from the levels price is actually drawn to.
 
@@ -1009,6 +1014,60 @@ class RiskManagementAgent(BaseAgent):
         # for the furthest level would invent a target the map does not
         # support; taking the first qualifying one keeps it honest.
         tp2 = next((lv for lv in ordered if abs(lv - entry) / risk >= min_rr), None)
+        method = "liquidity_chain"
+
+        if tp2 is None and structural_risk and structural_risk > 0:
+            # THE FLOOR MUST NOT VETO THE MAP.
+            #
+            # `risk` here is the SHIPPED stop, which the noise floor has
+            # widened -- on XAU by up to 3x the structural distance. Asking
+            # "does this level pay for that padded risk?" is a different
+            # question from "is this level a real objective", and when the
+            # padding is large enough the answer is always no. The chain then
+            # returns nothing and the caller rebuilds targets from the floor
+            # itself: the -400/+500/+900 signature.
+            #
+            # Measured on the live 2026-08-03 16:11 card (d0c708d9, SELL
+            # 4045.99, structural stop 132.7 pts floored to 398):
+            #
+            #   vs 398 pts    4022.31=0.59R 4014.11=0.80R 3996.65=1.24R  none
+            #   vs 132.7 pts  4022.31=1.78R 4014.11=2.40R 3996.65=3.72R  all
+            #
+            # Same map, opposite verdict, decided only by which stop asked.
+            #
+            # So: try the shipped stop FIRST -- that keeps reaching for the
+            # furthest level the real risk can justify, which is what makes
+            # TP2 4000.00 rather than the nearest pool. Only when nothing
+            # qualifies do we re-ask against structure, so the map is still
+            # used instead of inventing a ratio target.
+            #
+            # This never loosens min_rr_ratio on the published plan: the
+            # caller recomputes rr_tp2 against the real, floored stop and
+            # `rr_filter` still refuses the trade if it does not pay. It only
+            # decides WHERE to aim, never whether to trade.
+            # A REAL LEVEL IS NOT REQUIRED TO BEAT AN INVENTED ONE.
+            #
+            # An earlier version of this branch only accepted the structural
+            # pick when it was further than the caller's ratio target
+            # (floored_risk x tp2_mult/sl_mult). That is backwards: the ratio
+            # target is the very fiction this is meant to replace -- on the
+            # 16:11 card it sat at 3956.44, which is 398 x 2.25 and not a
+            # level anyone drew. Requiring the map to out-reach it guarantees
+            # the fiction wins whenever the floor is large, which is exactly
+            # when it matters.
+            #
+            # The map wins on being real. Whether the trade is worth taking
+            # is a separate question, answered downstream by `rr_filter`
+            # against the shipped stop -- which is why the 16:11 setup is now
+            # refused outright instead of being published with invented
+            # targets.
+            tp2 = next(
+                (lv for lv in ordered if abs(lv - entry) / structural_risk >= min_rr),
+                None,
+            )
+            if tp2 is not None:
+                method = "liquidity_chain_structural"
+
         if tp2 is None:
             return None, None, ""
 
@@ -1018,7 +1077,7 @@ class RiskManagementAgent(BaseAgent):
         nearer = [lv for lv in ordered if abs(lv - entry) < abs(tp2 - entry)]
         tp1 = nearer[0] if nearer else round((entry + tp2) / 2.0, 2)
 
-        return tp1, tp2, "liquidity_chain"
+        return tp1, tp2, method
 
     def _run_filters(
         self,
