@@ -1098,6 +1098,60 @@ class DatabaseService:
         trades = load_trades(self.local_path)
         return sorted(trades, key=self._trade_time_text, reverse=True)[:limit]
 
+    def get_trades_closed_since(
+        self, since_iso: str, *, symbol: str | None = None, limit: int = 200
+    ) -> List[Dict[str, Any]]:
+        """Trades that CLOSED at or after ``since_iso``, newest close first.
+
+        ``get_recent_trades`` orders by created_at, which answers a different
+        question: "what was written recently". A trade opened hours ago and
+        closed a minute ago is old by that measure and drops out of the list
+        as soon as enough newer rows exist.
+
+        The post-TP2 re-entry rule cares about when a target was TAKEN, so it
+        needs this ordering instead. On 2026-08-03 the rule allowed a SELL
+        152 points above a TP2 hit thirty minutes earlier, purely because the
+        closed trade was no longer inside the created_at window.
+
+        Falls back to a filtered read of recent history when the column is
+        missing, so an older schema degrades rather than raising.
+        """
+        if self.use_supabase and self.client:
+            for column in ("closed_at", "close_time"):
+                try:
+                    query = (
+                        self.client.table("trades").select("*")
+                        .gte(column, since_iso)
+                        .order(column, desc=True)
+                        .limit(limit)
+                    )
+                    if symbol:
+                        query = query.eq("symbol", symbol)
+                    response = query.execute()
+                    return list(response.data or [])
+                except Exception as exc:  # noqa: BLE001
+                    if self._missing_column(exc, column):
+                        continue
+                    self.logger.warning(
+                        "Could not read trades closed since %s by %s: %s",
+                        since_iso, column, exc,
+                    )
+                    break
+
+        rows = load_trades(self.local_path)
+        result: List[Dict[str, Any]] = []
+        for row in rows:
+            if symbol and str(row.get("symbol") or "") != symbol:
+                continue
+            closed = str(row.get("closed_at") or row.get("close_time") or "")
+            if closed and closed >= since_iso:
+                result.append(row)
+        return sorted(
+            result,
+            key=lambda r: str(r.get("closed_at") or r.get("close_time") or ""),
+            reverse=True,
+        )[:limit]
+
     def get_consecutive_losses(self, limit: int = 20) -> int:
         """Return consecutive losing closed trades, ignoring open trades."""
         losses = 0
