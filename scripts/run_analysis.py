@@ -2145,6 +2145,67 @@ def _post_tp2_reentry_block(
     return None
 
 
+def _post_tp2_reentry_reason(
+    decision: Dict[str, Any], database: DatabaseService, config: Dict[str, Any]
+) -> str | None:
+    """The post-TP2 block, callable independently of the duplicate filter.
+
+    ``duplicate_signal_reason`` runs this check as part of its sweep, but the
+    adaptive-execution path skips that whole function on purpose (a
+    replacement order is meant to resemble the order it replaces). An
+    exhausted target level is exhausted regardless of which route the signal
+    took, so this wrapper lets the block be evaluated on its own.
+
+    Same candidate set as the duplicate filter -- open trades plus recent
+    history in the same direction and symbol -- so the two paths cannot drift
+    apart in what they look at.
+    """
+    direction = str(decision.get("decision") or "").upper()
+    if direction not in {"BUY", "SELL"}:
+        return None
+    signal = decision.get("signal") or {}
+    entry_info = signal.get("entry") or {}
+    entry_price = _safe_float(
+        entry_info.get("price") if isinstance(entry_info, dict) else None, 0.0
+    ) or _safe_float(decision.get("current_price"), 0.0)
+    if entry_price <= 0:
+        return None
+
+    symbol = str(
+        decision.get("symbol") or signal.get("symbol") or config.get("symbol", "XAU/USD")
+    )
+    normalized = normalize_symbol(symbol)
+
+    candidates: List[Dict[str, Any]] = []
+    seen: set = set()
+    try:
+        pool = list(database.get_open_trades() or []) + list(
+            database.get_recent_trades(limit=50) or []
+        )
+    except Exception as exc:  # noqa: BLE001 - a guard must not break the cycle
+        logger.warning("Post-TP2 guard could not read trade history: %s", exc)
+        return None
+    for trade in pool:
+        if not isinstance(trade, dict):
+            continue
+        if normalize_symbol(trade.get("symbol") or symbol) != normalized:
+            continue
+        if _trade_direction(trade) != direction:
+            continue
+        tid = str(trade.get("id") or "")
+        if tid and tid in seen:
+            continue
+        if tid:
+            seen.add(tid)
+        candidates.append(trade)
+
+    return _post_tp2_reentry_block(
+        decision, candidates, config,
+        now=datetime.now(timezone.utc), symbol=symbol,
+        entry_price=entry_price, direction=direction,
+    )
+
+
 def duplicate_signal_reason(decision: Dict[str, Any], database: DatabaseService, config: Dict[str, Any]) -> str | None:
     filt = config.get('duplicate_signal_filter', {}) or {}
     if not filt.get('enabled', True): return None
@@ -4110,7 +4171,27 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                     logger.warning("Failed to send pending replacement-blocked message: %s", exc)
                 return
 
+            # Adaptive execution may waive the DUPLICATE filter, never the
+            # post-TP2 block.
+            #
+            # PROMOTE_TO_MARKET and REPLACE_WITH_CONTINUATION exist to let a
+            # stronger thesis replace a stale pending order, so skipping the
+            # duplicate check is deliberate: the new order is meant to look
+            # like the old one. But that skip took the whole of
+            # duplicate_signal_reason with it, and the post-TP2 re-entry guard
+            # lives inside that function.
+            #
+            # 2026-08-03: SELL 79fb5a6e took TP2 at 4022.31 at 13:38. Three
+            # minutes later a new SELL LIMIT went out at 4037.48 -- 152 points
+            # above that TP2, inside both the 250-point distance bar and the
+            # 3-hour window. The guard was correct and never ran.
+            #
+            # An exhausted level is exhausted whatever route the signal took
+            # to reach execution, so the block is evaluated separately and
+            # unconditionally.
             duplicate_reason = None if adaptive_action in {"PROMOTE_TO_MARKET", "REPLACE_WITH_CONTINUATION"} else duplicate_signal_reason(decision, database, config)
+            if not duplicate_reason:
+                duplicate_reason = _post_tp2_reentry_reason(decision, database, config)
             if duplicate_reason:
                 logger.info("Signal blocked for %s %s: %s", decision_type, symbol, duplicate_reason)
                 if str(duplicate_reason).startswith("Post-exit revalidation blocked:"):
