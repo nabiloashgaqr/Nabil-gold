@@ -2008,6 +2008,49 @@ class OpenTradesManager(BaseAgent):
             levels.append((label, marker))
         return levels
 
+    def _poi_exit_held_by_agents(
+        self,
+        vote: Dict[str, Any],
+        hold_on_silence: bool,
+        defended: bool,
+        label: str,
+        level: float,
+    ) -> Dict[str, Any] | None:
+        """Refuse a POI-rejection exit the agent book does not support.
+
+        Returns a hold verdict, or None to let the exit proceed. Silence is
+        only honoured when a book was actually supplied: an absent book
+        (`available` False) keeps the legacy behaviour rather than changing
+        outcomes on evidence nobody gathered.
+        """
+        if defended:
+            names = ", ".join(vote.get("defenders") or [])
+            return {
+                "exit_now": False,
+                "scale_out": False,
+                "kind": "OPPOSING_POI_VETOED_BY_AGENTS",
+                "reason": (
+                    f"Thesis exit held: price rejected {label} near {level:.2f}, but "
+                    f"{len(vote.get('defenders') or [])} qualified agents ({names}) "
+                    f"still support the trade"
+                ),
+                "agent_vote": vote,
+            }
+        if hold_on_silence:
+            return {
+                "exit_now": False,
+                "scale_out": False,
+                "kind": "OPPOSING_POI_HELD_SILENT_BOOK",
+                "reason": (
+                    f"Thesis exit held: price rejected {label} near {level:.2f}, but the "
+                    f"agent book is undecided ({len(vote.get('defenders') or [])} defending, "
+                    f"{len(vote.get('opponents') or [])} opposing) and silent_action is "
+                    f"HOLD; the existing stop still governs"
+                ),
+                "agent_vote": vote,
+            }
+        return None
+
     def _opposing_poi_exit_review(
         self,
         trade: Dict[str, Any],
@@ -2019,7 +2062,19 @@ class OpenTradesManager(BaseAgent):
         entry: float,
         tp1: float,
         partial_close: bool,
+        agent_details: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
+        """Close or reduce when price rejects an opposing point of interest.
+
+        This path is subject to the same agent rule as the candle trigger:
+        a POI rejection is one piece of evidence, and one piece of evidence
+        may not close a position on its own.
+
+        Under ``silent_action = HOLD`` an undecided book holds the trade here
+        too. Without that, switching the setting would have silenced the
+        candle path while this one kept closing positions unopposed -- the
+        rule would look applied and not be.
+        """
         if not self.thesis_exit_opposing_poi_enabled or not recent_candles or len(recent_candles) < 2:
             return {"exit_now": False, "scale_out": False}
         if tp1 > 0:
@@ -2036,11 +2091,24 @@ class OpenTradesManager(BaseAgent):
         touch_buffer = points_to_price(self.thesis_exit_opposing_poi_buffer_points, symbol)
         reclaim = points_to_price(self.thesis_exit_opposing_poi_reclaim_points, symbol)
         alignment = self._objective_alignment(trade)
+        # Ask the book once, before walking the levels.
+        poi_vote = self._agent_exit_vote(agent_details, trade_type)
+        hold_on_silence = (
+            self.thesis_exit_silent_action == "HOLD"
+            and poi_vote.get("available")
+            and str(poi_vote.get("verdict")) == "SILENT"
+        )
+        defended = poi_vote.get("available") and str(poi_vote.get("verdict")) == "DEFEND"
         for label, level in self._opposing_poi_levels(trade, trade_type):
             if trade_type == "SELL":
                 touched = self._f(last.get("low"), 0.0) <= level + touch_buffer
                 rejected = touched and last_close > level + reclaim and last_close > prev_close and last_close > last_open
                 if rejected:
+                    held = self._poi_exit_held_by_agents(
+                        poi_vote, hold_on_silence, defended, label, level
+                    )
+                    if held:
+                        return held
                     if alignment == "ALIGNED_WITH_MARKET_OBJECTIVE" and not partial_close:
                         return {
                             "exit_now": False,
@@ -2058,6 +2126,11 @@ class OpenTradesManager(BaseAgent):
                 touched = self._f(last.get("high"), 0.0) >= level - touch_buffer
                 rejected = touched and last_close < level - reclaim and last_close < prev_close and last_close < last_open
                 if rejected:
+                    held = self._poi_exit_held_by_agents(
+                        poi_vote, hold_on_silence, defended, label, level
+                    )
+                    if held:
+                        return held
                     if alignment == "ALIGNED_WITH_MARKET_OBJECTIVE" and not partial_close:
                         return {
                             "exit_now": False,
@@ -2193,6 +2266,41 @@ class OpenTradesManager(BaseAgent):
                     "agent_vote": vote,
                 }
 
+            if verdict == "SILENT" and self.thesis_exit_silent_action == "HOLD":
+                # The weakest verdict must not close anything.
+                #
+                # SILENT means the qualified agents neither confirmed the exit
+                # nor defended the trade -- the book has no majority either
+                # way. Under HOLD that absence of evidence changes nothing:
+                # the position keeps running on the stop it already has.
+                #
+                # This branch is checked BEFORE the SCALE_OUT branch and
+                # before the CONFIRM fall-through beneath it. Without it,
+                # setting silent_action to anything other than "SCALE_OUT"
+                # dropped SILENT straight into the full-exit path at the
+                # bottom of this block -- so the configuration meant to make
+                # the system gentler would have made it close every position
+                # the candle rule fired on, whatever the agents said.
+                #
+                # The candle trigger alone is one piece of evidence. On
+                # 2026-07-30 it closed a SELL for -39.2 while Classical 71,
+                # SMC 90 and Multi-Timeframe 83 still argued the trade, and
+                # the planner republished that same zone as its A+ map hours
+                # later. CONFIRM (two qualified opponents, no defender) is
+                # still honoured below; only the undecided case holds.
+                return {
+                    "exit_now": False,
+                    "scale_out": False,
+                    "kind": "OPPOSITE_CONTINUATION_HELD_SILENT_BOOK",
+                    "reason": (
+                        f"Thesis exit held: {opposite_continuation}, but the agent "
+                        f"book is undecided ({len(defenders)} defending, "
+                        f"{len(opponents)} opposing) and silent_action is HOLD; "
+                        f"the existing stop still governs"
+                    ),
+                    "agent_vote": vote,
+                }
+
             if verdict == "SILENT" and self.thesis_exit_silent_action == "SCALE_OUT":
                 # Never scale a position that is under water.
                 #
@@ -2290,8 +2398,15 @@ class OpenTradesManager(BaseAgent):
             entry=entry,
             tp1=tp1,
             partial_close=partial_close,
+            agent_details=agent_details,
         )
         if opposing_poi.get("exit_now") or opposing_poi.get("scale_out"):
+            return opposing_poi
+        # A held POI rejection is a decision too: surface it so the reason is
+        # visible, rather than silently falling through to the next check.
+        if opposing_poi.get("kind") in {
+            "OPPOSING_POI_VETOED_BY_AGENTS", "OPPOSING_POI_HELD_SILENT_BOOK",
+        }:
             return opposing_poi
         alignment = self._objective_alignment(trade)
         progress_pct = self._progress_to_tp1(trade_type, entry, tp1, current_price) * 100.0 if tp1 > 0 and entry > 0 else 0.0
