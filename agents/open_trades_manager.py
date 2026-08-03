@@ -181,6 +181,21 @@ class OpenTradesManager(BaseAgent):
         self.near_miss_max_target_progress_pct = float(nme.get("max_target_progress_pct", 30) or 30)
         self.near_miss_min_remaining_rr = float(nme.get("min_remaining_rr", 1.8) or 1.8)
         self.near_miss_require_planner_context = bool(nme.get("require_planner_context", True))
+        # Carry the planned risk to the converted fill.
+        #
+        # A near-miss conversion re-prices the ENTRY to the market but left
+        # the stop where the plan put it, so the distance between them grew
+        # by however far price had run. 2026-08-03, trade 2f72579f: a SELL
+        # planned at 4037.48 with a 400-point stop at 4077.48 was converted
+        # at 4031.76 -- the entry moved 57 points against the plan and the
+        # risk silently became 457 points. Nothing asked permission, and the
+        # RR test passed because 1.84 still cleared its 1.8 bar.
+        #
+        # zone_touch_activation already solves this with
+        # `preserve_planned_risk`: move the stop by the same distance the
+        # entry moved, so the trade risks what it was authorised to risk.
+        # Same principle, same default.
+        self.near_miss_preserve_planned_risk = bool(nme.get("preserve_planned_risk", True))
         pf = (self.config.get("pending_freshness", {}) or {}) if isinstance(self.config, dict) else {}
         self.pending_freshness_enabled = bool(pf.get("enabled", True))
         self.pending_freshness_aging_after_hours = float(pf.get("aging_after_hours", 2) or 2)
@@ -2967,16 +2982,51 @@ class OpenTradesManager(BaseAgent):
             if near_miss_ok:
                 allowed, reason = _conversion_allowed(current_price)
                 if allowed:
+                    # Re-pricing the entry must not re-price the risk.
+                    #
+                    # The stop travels with the fill so the planned distance
+                    # is exactly preserved. It only ever moves in the safer
+                    # direction here: the conversion happens after price has
+                    # moved AWAY from the entry in the trade's favour, so the
+                    # new stop is nearer the market than the mapped one, never
+                    # further.
+                    converted_stop = stop_loss
+                    planned_risk = abs(entry - stop_loss)
+                    if self.near_miss_preserve_planned_risk and planned_risk > 0:
+                        candidate = (
+                            current_price + planned_risk if trade_type == "SELL"
+                            else current_price - planned_risk
+                        )
+                        # Never widen: if the mapped stop is already tighter
+                        # than the planned distance would allow, keep it.
+                        if trade_type == "SELL":
+                            converted_stop = min(stop_loss, candidate)
+                        else:
+                            converted_stop = max(stop_loss, candidate)
+                        if abs(converted_stop - stop_loss) >= 0.01:
+                            self.logger.info(
+                                "Near-miss conversion for %s: entry re-priced %.2f -> "
+                                "%.2f, stop carried %.2f -> %.2f so the planned %.0f pt "
+                                "risk is preserved",
+                                trade.get("id"), entry, current_price,
+                                stop_loss, converted_stop,
+                                abs(calculate_pips(entry, stop_loss, trade_type, symbol)),
+                            )
                     _persist_runtime(
                         near_miss_activation=True,
                         near_miss_reason=near_miss_reason,
                         near_miss_halo_points=near_miss_halo,
                         activation_reason=near_miss_reason,
+                        near_miss_planned_risk_preserved=bool(
+                            self.near_miss_preserve_planned_risk
+                        ),
                     )
                     base_updates.update({
                         "status": "OPEN",
                         "entry_time": self._iso(now),
                         "entry_price": round(current_price, 2),
+                        "stop_loss": round(converted_stop, 2),
+                        "initial_stop_loss": round(converted_stop, 2),
                         "current_pnl": 0,
                         "current_pnl_points": 0,
                         "pending_cycles": 0,
