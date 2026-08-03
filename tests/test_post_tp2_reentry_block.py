@@ -31,7 +31,8 @@ THE RULE (as specified by the user)
       of the exhausted move and is left alone.
     * Direction must match the closed trade. A BUY after a SELL's TP2 is a
       reversal, not a repeat, and is never blocked.
-    * The block lapses after ``window_hours`` (3).
+    * The block lapses after ``window_hours`` (2.5 since 2026-08-03,
+      reduced from 3 at the operator's request).
     * It is overridden early by a genuinely new thesis, using the same
       evidence ``_post_exit_revalidation_review`` already accepts: a
       different POI, a fresh sweep after the exit, or a state progression
@@ -137,7 +138,9 @@ def test_the_configured_distance_and_window() -> None:
     cfg = CONFIG["post_tp2_reentry"]
     assert cfg["enabled"] is True
     assert float(cfg["min_distance_points"]) == 250.0
-    assert float(cfg["window_hours"]) == 3.0
+    # 3.0 -> 2.5 on 2026-08-03 at the operator's request. The assertion is
+    # kept (not deleted) so the shipped window stays pinned to one number.
+    assert float(cfg["window_hours"]) == 2.5
 
 
 def test_exactly_at_the_distance_is_allowed() -> None:
@@ -154,10 +157,24 @@ def test_a_comfortable_rally_back_is_allowed() -> None:
 
 
 def test_the_block_lapses_after_the_window() -> None:
-    assert _block(4031.77, _at(14, 11)) is not None      # 0.3h
-    assert _block(4031.77, _at(15, 45)) is not None      # 1.9h
-    assert _block(4031.77, _at(16, 45)) is not None      # 2.9h
-    assert _block(4031.77, _at(16, 55)) is None          # 3.1h
+    """UPDATED 2026-08-03: the window moved from 3h to 2.5h.
+
+    The TP2 here closed at 13:50, so the lapse point moved from 16:50 to
+    16:20. The 16:45 case previously asserted "still blocked at 2.9h"; under
+    the shorter window that hour is deliberately free, so it now asserts the
+    opposite. The old expectation is kept as a comment rather than deleted,
+    because it records what the boundary used to be.
+
+    The test was not weakened: it still pins a hard edge on both sides, one
+    sample inside and one outside, plus the exact boundary minute.
+    """
+    assert _block(4031.77, _at(14, 11)) is not None      # 0.35h  inside
+    assert _block(4031.77, _at(15, 45)) is not None      # 1.92h  inside
+    assert _block(4031.77, _at(16, 15)) is not None      # 2.42h  inside
+    assert _block(4031.77, _at(16, 20)) is not None      # 2.50h  exactly on the edge
+    assert _block(4031.77, _at(16, 25)) is None          # 2.58h  lapsed (was blocked at 3h)
+    assert _block(4031.77, _at(16, 45)) is None          # 2.92h  lapsed (was blocked at 3h)
+    assert _block(4031.77, _at(16, 55)) is None          # 3.08h  lapsed under both
 
 
 # ── the early override ──────────────────────────────────────────────────────
@@ -242,8 +259,16 @@ def test_a_buy_beyond_its_own_tp2_is_not_a_repeat() -> None:
 
 
 def test_the_buy_block_also_lapses_after_the_window() -> None:
-    assert _buy_block(4130.00, _at(16, 45)) is not None   # 2.9h
-    assert _buy_block(4130.00, _at(16, 55)) is None       # 3.1h
+    """UPDATED 2026-08-03 alongside the SELL case: window 3h -> 2.5h.
+
+    The mirrored BUY rule must lapse on exactly the same clock as the SELL
+    rule; a window that applied asymmetrically would be a bug of its own.
+    """
+    assert _buy_block(4130.00, _at(16, 15)) is not None   # 2.42h  inside
+    assert _buy_block(4130.00, _at(16, 20)) is not None   # 2.50h  on the edge
+    assert _buy_block(4130.00, _at(16, 25)) is None       # 2.58h  lapsed (was blocked at 3h)
+    assert _buy_block(4130.00, _at(16, 45)) is None       # 2.92h  lapsed (was blocked at 3h)
+    assert _buy_block(4130.00, _at(16, 55)) is None       # 3.08h  lapsed under both
 
 
 def test_a_new_thesis_lifts_the_buy_block_too() -> None:

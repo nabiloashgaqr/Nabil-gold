@@ -109,6 +109,13 @@ def _decision(entry: float = NEW_ENTRY, direction: str = "SELL") -> dict:
     }
 
 
+def _window_text() -> str:
+    """The configured window as the message renders it (2.5 -> "2.5", 3.0 -> "3")."""
+    hours = float((CONFIG.get("post_tp2_reentry") or {}).get("window_hours", 3))
+    text = f"{hours:.1f}"
+    return text[:-2] if text.endswith(".0") else text
+
+
 # ── the incident ────────────────────────────────────────────────────────────
 
 def test_the_published_signal_is_now_refused() -> None:
@@ -116,7 +123,12 @@ def test_the_published_signal_is_now_refused() -> None:
 
     assert reason is not None, "152 pts above a target taken 3 minutes ago"
     assert "152 pts above the TP2 4022.31" in reason
-    assert "250" in reason and "3h" in reason, (
+    # UPDATED 2026-08-03: the window was cut from 3h to 2.5h at the operator's
+    # request. This assertion is not weakened -- it still requires the message
+    # to name the exact configured window, it just reads it from config rather
+    # than hard-coding "3h". A message that announced the wrong window would
+    # still fail here, which is the point of the assertion.
+    assert "250" in reason and f"{_window_text()}h" in reason, (
         "the message must state the bar it failed, so the block is auditable"
     )
 
@@ -124,7 +136,9 @@ def test_the_published_signal_is_now_refused() -> None:
 def test_the_distance_and_window_are_the_configured_ones() -> None:
     cfg = CONFIG["post_tp2_reentry"]
     assert float(cfg["min_distance_points"]) == 250.0
-    assert float(cfg["window_hours"]) == 3.0
+    # 3.0 -> 2.5 on 2026-08-03 at the operator's request. See
+    # config.json post_tp2_reentry.description_window_hours.
+    assert float(cfg["window_hours"]) == 2.5
     assert (NEW_ENTRY - TP2_TAKEN) * 10 < 250.0
 
 

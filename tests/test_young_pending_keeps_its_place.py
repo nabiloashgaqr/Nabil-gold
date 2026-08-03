@@ -234,4 +234,5 @@ def test_no_risk_setting_was_changed() -> None:
     assert int(risk["max_open_trades"]) == 3
     post_tp2 = CONFIG["post_tp2_reentry"]
     assert float(post_tp2["min_distance_points"]) == 250.0
-    assert float(post_tp2["window_hours"]) == 3.0
+    # 3.0 -> 2.5 on 2026-08-03 at the operator's request; still pinned.
+    assert float(post_tp2["window_hours"]) == 2.5
