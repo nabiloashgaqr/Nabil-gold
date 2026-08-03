@@ -458,7 +458,18 @@ class TelegramService:
             if lead_agent:
                 compact.append(f"lead {lead_agent}")
             if quality:
-                compact.append(f"quality {quality}")
+                # Say WHICH quality this is.
+                #
+                # The header already prints "Quality: A 89.7" -- the decision
+                # agent's grade for the whole signal (confidence, reward,
+                # session, news). This one is SMCAgent's grade for the POI
+                # alone. They measure different things and can legitimately
+                # disagree, but printed as two bare letters on one card they
+                # read as a contradiction: 2026-08-03 trade bdde9a5f showed
+                # "Quality: A 89.7" beside "quality D" and neither was wrong.
+                #
+                # Naming the source costs one word and removes the confusion.
+                compact.append(f"POI quality {quality}")
             lines.append(f"• <b>Setup:</b> {html.escape(' · '.join(compact))}")
         if leg_label:
             lines.append(f"• <b>Execution leg:</b> {html.escape(leg_label)}")
@@ -833,7 +844,10 @@ class TelegramService:
             if objective_alignment == "COUNTER_OBJECTIVE_REVERSAL_CONFIRMED":
                 lines.append("⚠️ Counter-objective reversal — main leg only")
         if quality:
-            quality_label = "Setup quality" if planner_led else "Quality"
+            # "Quality" alone invited the reader to compare this with the POI
+            # grade printed further down, which measures something else
+            # entirely. Name the subject: this is the whole signal's grade.
+            quality_label = "Setup quality" if planner_led else "Signal quality"
             lines.append(f"🏅 {html.escape(quality_label)}: {html.escape(str(quality.get('grade', '')))} {html.escape(str(quality.get('score', '')))}".rstrip())
         if planner_led:
             planner_quality = decision.get("planner_quality") or {}
