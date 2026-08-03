@@ -1,935 +1,935 @@
 {
-    "symbol": "XAU/USD",
-    "timeframes": [
-        "5m",
-        "15m",
-        "1H",
-        "4H"
-    ],
-    "primary_timeframe": "15m",
-    "trend_timeframe": "4H",
-    "entry_timeframe": "15m",
-    "data_source": {
-        "primary": "twelvedata",
-        "fallback": null,
-        "description_fallback": "لا يوجد fallback مجاني موثوق لشموع XAU/USD 5m للتحليل. عند انتهاء كوتة Twelve Data يتم إيقاف التحليل بأمان. لإدارة الصفقات المفتوحة فقط يستخدم النظام Swissquote spot quote كسعر حي لحماية SL/TP دون توليد إشارات جديدة.",
-        "api_keys": {
-            "twelvedata": "ENV:TWELVEDATA_API_KEY"
-        },
-        "allow_synthetic_in_production": false,
-        "resample_timeframes_from_base": true,
-        "base_timeframe": "5m",
-        "base_outputsize": 2500,
-        "description_resample_timeframes_from_base": "Fetch one 5m series per symbol then locally resample 15m/1H/4H to reduce API calls."
+  "symbol": "XAU/USD",
+  "timeframes": [
+    "5m",
+    "15m",
+    "1H",
+    "4H"
+  ],
+  "primary_timeframe": "15m",
+  "trend_timeframe": "4H",
+  "entry_timeframe": "15m",
+  "data_source": {
+    "primary": "twelvedata",
+    "fallback": null,
+    "description_fallback": "لا يوجد fallback مجاني موثوق لشموع XAU/USD 5m للتحليل. عند انتهاء كوتة Twelve Data يتم إيقاف التحليل بأمان. لإدارة الصفقات المفتوحة فقط يستخدم النظام Swissquote spot quote كسعر حي لحماية SL/TP دون توليد إشارات جديدة.",
+    "api_keys": {
+      "twelvedata": "ENV:TWELVEDATA_API_KEY"
     },
-    "telegram": {
-        "bot_token": "ENV:TELEGRAM_BOT_TOKEN",
-        "chat_id": "ENV:TELEGRAM_CHAT_ID",
-        "signals_channel": "ENV:TELEGRAM_CHAT_ID"
-    },
-    "database": {
-        "provider": "supabase",
-        "url": "ENV:SUPABASE_URL",
-        "key": "ENV:SUPABASE_KEY",
-        "local_fallback_file": "storage/trades.json"
-    },
-    "agent_weights": {
-        "multitimeframe": 0.15,
-        "classical": 0.25,
-        "smc": 0.2,
-        "price_action": 0.2,
-        "technical": 0.2
-    },
-    "risk_settings": {
-        "min_confidence": 65,
-        "min_rr_ratio": 1.5,
-        "min_tp1_rr": 0.8,
-        "description_min_tp1_rr": "أدنى مكافأة/مخاطرة للهدف الأول. بلوغ TP1 ينقل الستوب للدخول، فهدف أول قريب جداً (0.03R) كان يضمن: لمس فوري ثم ستوب على الدخول ثم خروج بأول ارتداد. المستوى الأقرب من هذا الحد يُتخطى لا يُرفض.",
-        "default_risk_percent": 1.0,
-        "atr_multiplier_sl": 2.0,
-        "atr_multiplier_tp1": 2.5,
-        "atr_multiplier_tp2": 4.5,
-        "min_sl_distance_points": 400,
-        "description_min_sl_distance_points": "حد أدنى لمسافة SL (400 نقطة = 40$) لأن الذهب يتحرك 50-100 نقطة بثواني؛ SL أضيق من هذا يُفتح بالضوضاء وليس بانعكاس حقيقي. تم رفعه من 300 إلى 400 لتقليل ضرب الستوب بالضوضا المؤقتة. عند تفعيله يُعاد حساب TP1/TP2/TP3 بنفس نسبة R:R المُعتمدة من ATR للحفاظ على min_rr_ratio.",
-        "account_capital": 10000,
-        "max_rr_ratio": 4.0,
-        "max_open_trades": 3,
-        "max_daily_signals": 50,
-        "description_max_open_trades_daily_signals": "حد أقصى 3 صفقات مفتوحة (الأصلية + تعزيزين). max_daily_signals=50 بدون حد يومي صارم.",
-        "description_max_rr_ratio": "سقف R:R لتجنب أهداف TP2 غير واقعية في الإشارات التجريبية/الحية",
-        "dynamic_sl_floor": {
-            "enabled": true,
-            "structural_multiplier": 3.0,
-            "min_points": 150,
-            "max_points": 400,
-            "description": "أرضية وقف تتنفس مع السوق بدل 400 نقطة ثابتة. تُحسب = الوقف الهيكلي × 3 (الوقف الهيكلي يتضمن بافر ATR أصلًا)، محصورة بين 150 و400 نقطة. الثابتة 400 كانت تُفعَّل في كل خطة ذهب فتضخّم المخاطرة حتى 18 ضعفًا وتُسقط RR تحت الحد الأدنى حتى للإعدادات السليمة. اضبط enabled=false للعودة للسلوك الثابت."
-        }
-    },
-    "signal_requirements": {
-        "min_agents_agree": 3,
-        "min_agreement_percentage": 1,
-        "allow_all_signals": false,
-        "description": "Strict consensus mode: enter only when at least 3 qualified agents agree and their net weighted confidence after opposition penalty is ≥72%. Agent must have ≥70% confidence to participate in voting. This reduces reckless entries from over-active agents like MTF.",
-        "min_consensus_confidence": 72,
-        "strong_single_agent_confidence": 0,
-        "strong_single_agent_enabled": false,
-        "agent_min_confidence": 70,
-        "two_agent_entry": {
-            "enabled": true,
-            "min_agents_agree": 2,
-            "min_consensus_confidence": 72,
-            "agent_min_confidence": 70,
-            "macro_confirmation": {
-                "enabled": true,
-                "min_confidence": 55,
-                "description": "MacroFundamentalAgent must confirm same direction with ≥55% confidence"
-            },
-            "gemini_confirmation": {
-                "enabled": true,
-                "min_confidence": 70,
-                "description": "Gemini review must confirm same verdict with ≥70% confidence. Used only when macro does not confirm."
-            },
-            "priority": "macro_first_then_gemini",
-            "cross_entry_distance_points": 200,
-            "description_cross_entry": "When a trade from either path is open, any new signal from the OTHER path needs ≥200 pts distance. BUY entries must be LOWER than existing BUY, SELL entries must be HIGHER than existing SELL.",
-            "description": "When only 2 agents agree (same 70% individual + 72% net thresholds), require external confirmation. Try macro first (no API cost), fall back to Gemini if needed. Macro ≥55% or Gemini ≥70% to confirm."
-        }
-    },
-    "smc_engine": {
-        "poi_preference": {
-            "fresh_bonus": 18,
-            "tested_bonus": 8,
-            "mitigated_penalty": -14,
-            "invalidated_penalty": -60,
-            "order_block_bonus": 10,
-            "fvg_bonus": 6,
-            "equilibrium_bonus": 2,
-            "strong_bonus": 10,
-            "medium_bonus": 5,
-            "proximity_bonus_cap": 14,
-            "proximity_scale_atr": 1.5
-        },
-        "selection": {
-            "max_candidates": 5,
-            "standby_min_dominance_score": 42,
-            "standby_min_relative_to_primary": 0.72,
-            "return_probability_distance_scale_atr": 2.5,
-            "intermediate_poi_penalty": 10,
-            "session_bonus": 6,
-            "previous_day_liquidity_bonus": 8,
-            "session_liquidity_bonus": 6,
-            "description": "Select primary and standby pending thesis by combining POI quality, return probability, and thesis dominance."
-        },
-        "map_persistence": {
-            "enabled": true,
-            "max_age_minutes": 60,
-            "require_structure_bias": true,
-            "description": "المناطق (order blocks / FVG) حقائق في الرسم البياني، أما اتجاه SMC فتسمية تتقلب كلما عبرت الدرجة حد ±4 بسبب بنود قرب صغيرة. اشتقاق الخريطة من التسمية وحدها يجعلها تُحذف عند كل تقلب — 76% من الدورات بلا خريطة إطلاقاً. مع التفعيل تبقى الخريطة ما دام الهيكل ذا انحياز واضح (BULLISH/BEARISH).",
-            "description_max_age_minutes": "حد عمر الخريطة المشتقة من الهيكل. القياس على شهر: المناطق خلال أول 60 دقيقة تحقق 31% نجاح بمتوسط 211 نقطة، وتنخفض إلى 14% بعد 4 ساعات. الاحتفاظ المفتوح يضر."
-        },
-        "trigger_logic": {
-            "rejection_wick_body_ratio": 0.75,
-            "confirm_close_position": 0.55,
-            "market_entry_min_trigger_score": 70,
-            "description": "Used to confirm rejection at POI before MARKET execution in hybrid mode."
-        }
-    },
-    "schedule": {
-        "analysis_interval_minutes": 5,
-        "trade_update_interval_minutes": 5,
-        "daily_report_time": "23:00",
-        "timezone": "Asia/Hebron"
-    },
-    "filters": {
-        "no_signal_before_news_minutes": 30,
-        "no_signal_after_news_minutes": 15,
-        "max_spread_points": 5,
-        "min_atr_for_entry": 1.0,
-        "max_consecutive_losses": 999
-    },
-    "trading_hours": {
+    "allow_synthetic_in_production": false,
+    "resample_timeframes_from_base": true,
+    "base_timeframe": "5m",
+    "base_outputsize": 2500,
+    "description_resample_timeframes_from_base": "Fetch one 5m series per symbol then locally resample 15m/1H/4H to reduce API calls."
+  },
+  "telegram": {
+    "bot_token": "ENV:TELEGRAM_BOT_TOKEN",
+    "chat_id": "ENV:TELEGRAM_CHAT_ID",
+    "signals_channel": "ENV:TELEGRAM_CHAT_ID"
+  },
+  "database": {
+    "provider": "supabase",
+    "url": "ENV:SUPABASE_URL",
+    "key": "ENV:SUPABASE_KEY",
+    "local_fallback_file": "storage/trades.json"
+  },
+  "agent_weights": {
+    "multitimeframe": 0.15,
+    "classical": 0.25,
+    "smc": 0.2,
+    "price_action": 0.2,
+    "technical": 0.2
+  },
+  "risk_settings": {
+    "min_confidence": 65,
+    "min_rr_ratio": 1.5,
+    "min_tp1_rr": 0.8,
+    "description_min_tp1_rr": "أدنى مكافأة/مخاطرة للهدف الأول. بلوغ TP1 ينقل الستوب للدخول، فهدف أول قريب جداً (0.03R) كان يضمن: لمس فوري ثم ستوب على الدخول ثم خروج بأول ارتداد. المستوى الأقرب من هذا الحد يُتخطى لا يُرفض.",
+    "default_risk_percent": 1.0,
+    "atr_multiplier_sl": 2.0,
+    "atr_multiplier_tp1": 2.5,
+    "atr_multiplier_tp2": 4.5,
+    "min_sl_distance_points": 400,
+    "description_min_sl_distance_points": "حد أدنى لمسافة SL (400 نقطة = 40$) لأن الذهب يتحرك 50-100 نقطة بثواني؛ SL أضيق من هذا يُفتح بالضوضاء وليس بانعكاس حقيقي. تم رفعه من 300 إلى 400 لتقليل ضرب الستوب بالضوضا المؤقتة. عند تفعيله يُعاد حساب TP1/TP2/TP3 بنفس نسبة R:R المُعتمدة من ATR للحفاظ على min_rr_ratio.",
+    "account_capital": 10000,
+    "max_rr_ratio": 4.0,
+    "max_open_trades": 3,
+    "max_daily_signals": 50,
+    "description_max_open_trades_daily_signals": "حد أقصى 3 صفقات مفتوحة (الأصلية + تعزيزين). max_daily_signals=50 بدون حد يومي صارم.",
+    "description_max_rr_ratio": "سقف R:R لتجنب أهداف TP2 غير واقعية في الإشارات التجريبية/الحية",
+    "dynamic_sl_floor": {
+      "enabled": true,
+      "structural_multiplier": 3.0,
+      "min_points": 150,
+      "max_points": 400,
+      "description": "أرضية وقف تتنفس مع السوق بدل 400 نقطة ثابتة. تُحسب = الوقف الهيكلي × 3 (الوقف الهيكلي يتضمن بافر ATR أصلًا)، محصورة بين 150 و400 نقطة. الثابتة 400 كانت تُفعَّل في كل خطة ذهب فتضخّم المخاطرة حتى 18 ضعفًا وتُسقط RR تحت الحد الأدنى حتى للإعدادات السليمة. اضبط enabled=false للعودة للسلوك الثابت."
+    }
+  },
+  "signal_requirements": {
+    "min_agents_agree": 3,
+    "min_agreement_percentage": 1,
+    "allow_all_signals": false,
+    "description": "Strict consensus mode: enter only when at least 3 qualified agents agree and their net weighted confidence after opposition penalty is ≥72%. Agent must have ≥70% confidence to participate in voting. This reduces reckless entries from over-active agents like MTF.",
+    "min_consensus_confidence": 72,
+    "strong_single_agent_confidence": 0,
+    "strong_single_agent_enabled": false,
+    "agent_min_confidence": 70,
+    "two_agent_entry": {
+      "enabled": true,
+      "min_agents_agree": 2,
+      "min_consensus_confidence": 72,
+      "agent_min_confidence": 70,
+      "macro_confirmation": {
         "enabled": true,
-        "timezone": "Asia/Hebron",
-        "sessions": [
-            {
-                "name": "Main Trading Session",
-                "start_hour": 3,
-                "start_minute": 0,
-                "end_hour": 22,
-                "end_minute": 0,
-                "days": [
-                    0,
-                    1,
-                    2,
-                    3,
-                    4
-                ],
-                "quality": "HIGH",
-                "allow_signals": true,
-                "allow_reports": true,
-                "description": "Signals allowed 3:00 AM - 10:00 PM on weekdays (Monday-Friday) in Asia/Hebron timezone. Weekends are blocked."
-            }
+        "min_confidence": 55,
+        "description": "MacroFundamentalAgent must confirm same direction with ≥55% confidence"
+      },
+      "gemini_confirmation": {
+        "enabled": true,
+        "min_confidence": 70,
+        "description": "Gemini review must confirm same verdict with ≥70% confidence. Used only when macro does not confirm."
+      },
+      "priority": "macro_first_then_gemini",
+      "cross_entry_distance_points": 200,
+      "description_cross_entry": "When a trade from either path is open, any new signal from the OTHER path needs ≥200 pts distance. BUY entries must be LOWER than existing BUY, SELL entries must be HIGHER than existing SELL.",
+      "description": "When only 2 agents agree (same 70% individual + 72% net thresholds), require external confirmation. Try macro first (no API cost), fall back to Gemini if needed. Macro ≥55% or Gemini ≥70% to confirm."
+    }
+  },
+  "smc_engine": {
+    "poi_preference": {
+      "fresh_bonus": 18,
+      "tested_bonus": 8,
+      "mitigated_penalty": -14,
+      "invalidated_penalty": -60,
+      "order_block_bonus": 10,
+      "fvg_bonus": 6,
+      "equilibrium_bonus": 2,
+      "strong_bonus": 10,
+      "medium_bonus": 5,
+      "proximity_bonus_cap": 14,
+      "proximity_scale_atr": 1.5
+    },
+    "selection": {
+      "max_candidates": 5,
+      "standby_min_dominance_score": 42,
+      "standby_min_relative_to_primary": 0.72,
+      "return_probability_distance_scale_atr": 2.5,
+      "intermediate_poi_penalty": 10,
+      "session_bonus": 6,
+      "previous_day_liquidity_bonus": 8,
+      "session_liquidity_bonus": 6,
+      "description": "Select primary and standby pending thesis by combining POI quality, return probability, and thesis dominance."
+    },
+    "map_persistence": {
+      "enabled": true,
+      "max_age_minutes": 60,
+      "require_structure_bias": true,
+      "description": "المناطق (order blocks / FVG) حقائق في الرسم البياني، أما اتجاه SMC فتسمية تتقلب كلما عبرت الدرجة حد ±4 بسبب بنود قرب صغيرة. اشتقاق الخريطة من التسمية وحدها يجعلها تُحذف عند كل تقلب — 76% من الدورات بلا خريطة إطلاقاً. مع التفعيل تبقى الخريطة ما دام الهيكل ذا انحياز واضح (BULLISH/BEARISH).",
+      "description_max_age_minutes": "حد عمر الخريطة المشتقة من الهيكل. القياس على شهر: المناطق خلال أول 60 دقيقة تحقق 31% نجاح بمتوسط 211 نقطة، وتنخفض إلى 14% بعد 4 ساعات. الاحتفاظ المفتوح يضر."
+    },
+    "trigger_logic": {
+      "rejection_wick_body_ratio": 0.75,
+      "confirm_close_position": 0.55,
+      "market_entry_min_trigger_score": 70,
+      "description": "Used to confirm rejection at POI before MARKET execution in hybrid mode."
+    }
+  },
+  "schedule": {
+    "analysis_interval_minutes": 5,
+    "trade_update_interval_minutes": 5,
+    "daily_report_time": "23:00",
+    "timezone": "Asia/Hebron"
+  },
+  "filters": {
+    "no_signal_before_news_minutes": 30,
+    "no_signal_after_news_minutes": 15,
+    "max_spread_points": 5,
+    "min_atr_for_entry": 1.0,
+    "max_consecutive_losses": 999
+  },
+  "trading_hours": {
+    "enabled": true,
+    "timezone": "Asia/Hebron",
+    "sessions": [
+      {
+        "name": "Main Trading Session",
+        "start_hour": 3,
+        "start_minute": 0,
+        "end_hour": 22,
+        "end_minute": 0,
+        "days": [
+          0,
+          1,
+          2,
+          3,
+          4
         ],
-        "min_quality_required": "HIGH",
-        "allow_friday_after_hours": true,
-        "friday_cutoff_hour": 22,
-        "exclude_weekends": false,
-        "enforce_friday_cutoff": false,
-        "friday_cutoff_minute": 0,
-        "description": "توليد الإشارات مسموح 3:00-22:00 خلال أيام العمل فقط (الإثنين-الجمعة) بتوقيت Asia/Hebron. لا إشارات يومي السبت والأحد. متابعة الصفقات المفتوحة تبقى منفصلة وتعمل عند وجود صفقة لحماية SL/TP/Trailing."
+        "quality": "HIGH",
+        "allow_signals": true,
+        "allow_reports": true,
+        "description": "Signals allowed 3:00 AM - 10:00 PM on weekdays (Monday-Friday) in Asia/Hebron timezone. Weekends are blocked."
+      }
+    ],
+    "min_quality_required": "HIGH",
+    "allow_friday_after_hours": true,
+    "friday_cutoff_hour": 22,
+    "exclude_weekends": false,
+    "enforce_friday_cutoff": false,
+    "friday_cutoff_minute": 0,
+    "description": "توليد الإشارات مسموح 3:00-22:00 خلال أيام العمل فقط (الإثنين-الجمعة) بتوقيت Asia/Hebron. لا إشارات يومي السبت والأحد. متابعة الصفقات المفتوحة تبقى منفصلة وتعمل عند وجود صفقة لحماية SL/TP/Trailing."
+  },
+  "signal_filters": {
+    "require_trading_hours": true,
+    "allow_contrarian_in_low_quality": false
+  },
+  "github_actions": {
+    "enabled": true,
+    "state_storage": "supabase",
+    "note": "GitHub Actions is stateless; persistent trades must be stored in Supabase.",
+    "require_supabase": true
+  },
+  "pending_freshness": {
+    "enabled": true,
+    "aging_after_hours": 2,
+    "stale_after_hours": 6,
+    "stale_after_excursion_points": 250,
+    "stale_after_target_progress_pct": 60,
+    "mark_revalidation_required_on_session_change": true,
+    "touch_revalidation": {
+      "enabled": true,
+      "min_confirmation_points": 15,
+      "limit_max_drift_points": 40,
+      "stop_max_drift_points": 25,
+      "cancel_on_failed_revalidation": true,
+      "description": "Phase 4 foundation: if a stale / revalidation-required pending order is touched late, do not activate blindly. Require fresh confirmation plus acceptable drift and RR, otherwise cancel it safely."
     },
-    "signal_filters": {
-        "require_trading_hours": true,
-        "allow_contrarian_in_low_quality": false
-    },
-    "github_actions": {
-        "enabled": true,
-        "state_storage": "supabase",
-        "note": "GitHub Actions is stateless; persistent trades must be stored in Supabase.",
-        "require_supabase": true
-    },
-    "pending_freshness": {
-        "enabled": true,
-        "aging_after_hours": 2,
-        "stale_after_hours": 6,
-        "stale_after_excursion_points": 250,
-        "stale_after_target_progress_pct": 60,
-        "mark_revalidation_required_on_session_change": true,
-        "touch_revalidation": {
-            "enabled": true,
-            "min_confirmation_points": 15,
-            "limit_max_drift_points": 40,
-            "stop_max_drift_points": 25,
-            "cancel_on_failed_revalidation": true,
-            "description": "Phase 4 foundation: if a stale / revalidation-required pending order is touched late, do not activate blindly. Require fresh confirmation plus acceptable drift and RR, otherwise cancel it safely."
-        },
-        "description": "Phase 3/4 foundation: classify waiting pending orders as FRESH / AGING / STALE / REVALIDATION_REQUIRED based on time, excursion without fill, target-path progress, and session/plan decay."
-    },
-    "trade_management": {
-        "near_tp1_progress": 0.8,
+    "description": "Phase 3/4 foundation: classify waiting pending orders as FRESH / AGING / STALE / REVALIDATION_REQUIRED based on time, excursion without fill, target-path progress, and session/plan decay."
+  },
+  "trade_management": {
+    "near_tp1_progress": 0.8,
+    "time_warning_hours": 4,
+    "expire_after_hours": 24,
+    "auto_move_sl_to_entry_after_tp1": true,
+    "trailing_stop_enabled": true,
+    "trailing_activation_at": "TP1",
+    "trailing_distance_points": 150,
+    "partial_close_at_tp1": true,
+    "partial_close_percentage": 50,
+    "update_outside_trading_hours": true,
+    "description_update_outside_trading_hours": "متابعة الصفقات المفتوحة (SL/TP/breakeven/trailing) تعمل على مدار الساعة حتى خارج نافذة توليد الإشارات (02:00-22:00). الذهب يتحرك 24/5 وقد تضرب الصفقة هدفاً/وقفاً في أي وقت. توليد الإشارات الجديدة يبقى مقيّداً بالنافذة، لكن إدارة الصفقات القائمة لا تتوقف.",
+    "keep_protected_winners_open": true,
+    "description_expire": "expire_after_hours=24: تُغلق الصفقة تلقائياً بعد 24 ساعة. keep_protected_winners_open=true: لا تُغلق صفقة رابحة وقفها مُؤمّن عند الدخول أو أفضل حتى لو انتهت المدة — يُترك الستوب/التريلينغ يديرها بدل قطعها بالساعة.",
+    "trailing_step_points": 40,
+    "description_trailing_stop": "Trailing gap 150pts ($15) متناسب مع SL=400pts. خطوة 40pts تقلل التحديثات غير الضرورية بالضوضا.",
+    "early_breakeven_points": 150,
+    "min_breakeven_rr": 0.5,
+    "description_min_breakeven_rr": "أدنى مسافة (بالـ R) تقطعها الصفقة قبل أن يسمح بلوغ TP1 بنقل الستوب للدخول. صفقة لمست TP1 عند 0.16R نُقل ستوبها فوراً فخرجت بأول ارتداد. المقياس بالـ R لا بالنقاط ليصحّ عبر الأدوات وعروض الستوب.",
+    "description_early_breakeven": "early_breakeven_points=150: عند وصول الصفقة إلى +150 نقطة (15$) يُنقل الستوب إلى الدخول فوراً. بعدها يبدأ Trailing بفجوة 150pts.",
+    "profiles": {
+      "default_profile": {
         "time_warning_hours": 4,
         "expire_after_hours": 24,
-        "auto_move_sl_to_entry_after_tp1": true,
-        "trailing_stop_enabled": true,
-        "trailing_activation_at": "TP1",
-        "trailing_distance_points": 150,
-        "partial_close_at_tp1": true,
-        "partial_close_percentage": 50,
-        "update_outside_trading_hours": true,
-        "description_update_outside_trading_hours": "متابعة الصفقات المفتوحة (SL/TP/breakeven/trailing) تعمل على مدار الساعة حتى خارج نافذة توليد الإشارات (02:00-22:00). الذهب يتحرك 24/5 وقد تضرب الصفقة هدفاً/وقفاً في أي وقت. توليد الإشارات الجديدة يبقى مقيّداً بالنافذة، لكن إدارة الصفقات القائمة لا تتوقف.",
-        "keep_protected_winners_open": true,
-        "description_expire": "expire_after_hours=24: تُغلق الصفقة تلقائياً بعد 24 ساعة. keep_protected_winners_open=true: لا تُغلق صفقة رابحة وقفها مُؤمّن عند الدخول أو أفضل حتى لو انتهت المدة — يُترك الستوب/التريلينغ يديرها بدل قطعها بالساعة.",
-        "trailing_step_points": 40,
-        "description_trailing_stop": "Trailing gap 150pts ($15) متناسب مع SL=400pts. خطوة 40pts تقلل التحديثات غير الضرورية بالضوضا.",
         "early_breakeven_points": 150,
-        "min_breakeven_rr": 0.5,
-        "description_min_breakeven_rr": "أدنى مسافة (بالـ R) تقطعها الصفقة قبل أن يسمح بلوغ TP1 بنقل الستوب للدخول. صفقة لمست TP1 عند 0.16R نُقل ستوبها فوراً فخرجت بأول ارتداد. المقياس بالـ R لا بالنقاط ليصحّ عبر الأدوات وعروض الستوب.",
-        "description_early_breakeven": "early_breakeven_points=150: عند وصول الصفقة إلى +150 نقطة (15$) يُنقل الستوب إلى الدخول فوراً. بعدها يبدأ Trailing بفجوة 150pts.",
-        "profiles": {
-            "default_profile": {
-                "time_warning_hours": 4,
-                "expire_after_hours": 24,
-                "early_breakeven_points": 150,
-                "trailing_distance_points": 150,
-                "trailing_step_points": 40,
-                "partial_close_at_tp1": true,
-                "keep_protected_winners_open": true
-            },
-            "reversal_profile": {
-                "time_warning_hours": 3,
-                "expire_after_hours": 18,
-                "early_breakeven_points": 100,
-                "trailing_distance_points": 120,
-                "trailing_step_points": 30,
-                "partial_close_at_tp1": true,
-                "keep_protected_winners_open": true,
-                "description": "Faster protection for liquidity reversals: BE sooner and tighter trailing after rejection setups."
-            },
-            "continuation_profile": {
-                "time_warning_hours": 5,
-                "expire_after_hours": 30,
-                "early_breakeven_points": 170,
-                "trailing_distance_points": 170,
-                "trailing_step_points": 45,
-                "partial_close_at_tp1": true,
-                "keep_protected_winners_open": true,
-                "description": "Trend continuation profile: allow winners more room before breakeven/trailing."
-            },
-            "range_profile": {
-                "time_warning_hours": 3,
-                "expire_after_hours": 12,
-                "early_breakeven_points": 90,
-                "trailing_distance_points": 110,
-                "trailing_step_points": 25,
-                "partial_close_at_tp1": true,
-                "keep_protected_winners_open": false,
-                "description": "Range fades are shorter-lived: protect quickly and expire sooner."
-            }
-        },
-        "thesis_exit": {
-            "enabled": true,
-            "description": "الخروج التلقائي عند انقلاب الأطروحة. كانت كل قيمه مدفونة في بايثون بلا أي كتلة هنا، فلم يكن قابلاً للضبط ولا للقياس.",
-            "reclaim_points": 12,
-            "countertrend_hold_minutes": 20,
-            "min_progress_pct": 18,
-            "min_mfe_points": 35,
-            "opposing_poi_enabled": true,
-            "opposing_poi_buffer_points": 18,
-            "opposing_poi_reclaim_points": 12,
-            "agent_vote": {
-                "enabled": true,
-                "description": "تصويت الوكلاء على خروج الشمعة. الشمعة وحدها دليل واحد: صفقتان حيّتان أنتجتا بصمة متطابقة بالحرف، إحداهما انعكاس حقيقي (وفّر الخروج 314 نقطة) والأخرى ضجيج (كلّف 107 نقاط ثم أعاد المخطِّط نشر نفس المنطقة A+). لا عتبة تفرّق بينهما لأن العيب في المُدخَل.",
-                "agent_min_confidence": 70,
-                "description_agent_min_confidence": "نفس عتبة signal_requirements.agent_min_confidence المستعملة في كل مكان — لا رقم جديد.",
-                "min_defenders_to_hold": 2,
-                "description_min_defenders_to_hold": "إذا دافع هذا العدد من الوكلاء المؤهلين عن اتجاه الصفقة وكانوا أكثر من المعارضين، يُلغى الخروج.",
-                "min_opponents_to_exit": 3,
-                "description_min_opponents_to_exit": "إذا عارض هذا العدد من الوكلاء المؤهَّلين ولا مدافع واحد، يُنفَّذ الخروج كاملاً. رُفع من 2 إلى 3: الوكلاء المصوّتون خمسة (technical · classical · smc · price_action · multitimeframe)، فاشتراط ثلاثة يعني أغلبية حقيقية لا مجرد رأيين. مع silent_action=HOLD صار الإغلاق التلقائي مقصوراً على الحالة التي يجمع فيها أكثر الكتاب على أن الأطروحة انتهت؛ ما دون ذلك تُدار الصفقة بوقفها وأهدافها. الخروج السعري (وقف الخسارة، التعادل، الوقف المتحرك، TP1، TP2) لا يتأثر بهذا الرقم إطلاقاً.",
-                "silent_action": "HOLD",
-                "description_silent_action": "ماذا يحدث حين يصمت الوكلاء (لا أغلبية مؤهَّلة مع الصفقة ولا ضدها). HOLD: لا إغلاق ولا تخفيف — الصفقة تبقى على وقفها الحالي، وهو الوضع الحالي. SCALE_OUT: تخفيف جزئي مع نقل الوقف للتعادل. FULL_EXIT: السلوك القديم بإغلاق كامل. الصمت أضعف دليل في النظام: إشارة الشمعة وحدها دليل واحد، وفي 2026-07-30 أغلقت صفقة بيع بـ-39.2 بينما Classical 71 وSMC 90 وMulti-TF 83 ما زالوا يدافعون عنها، ثم أعاد المخطِّط نشر نفس المنطقة كخريطة A+. الإغلاق الكامل ما زال يعمل عند CONFIRM (معارضان مؤهَّلان بلا مدافع). تنبيه: هذا الإعداد يُقرأ في مسارين — إشارة الشمعة ورفض الـPOI المعاكس — فتغييره يسري على كليهما.",
-                "silent_scale_fraction": 0.5,
-                "description_silent_scale_fraction": "نسبة الإغلاق الفعلي عند الصمت. تُحتسب محاسبياً على الجزء المُغلق بسعره، والباقي بسعر إغلاقه.",
-                "tighten_trail_on_reversal": true,
-                "reversal_trail_distance_points": 60,
-                "description_reversal_trail_distance_points": "حين ينقلب الوكلاء على صفقة رابحة والشمعة لم تكسر، لا تُغلق الصفقة بل تضيق فجوة التتبّع من 150 إلى 60 نقطة. كانت صفقة +191 نقطة تحمي 41 فقط وتترك 150 معرّضة. الوقف يتحرك في اتجاه الربح فقط، فلا مخاطرة تُضاف — يتغيّر فقط مقدار الربح المدافَع عنه. يُشترط: حكم CONFIRM من الوكلاء + ربح مفتوح + وقف عند التعادل أو أفضل."
-            }
-        }
-    },
-    "performance": {
-        "track_win_rate_per_agent": true,
-        "track_session_performance": true,
-        "alert_on_drawdown_percent": 5,
-        "report_interval_days": 7
-    },
-    "trailing_stop": {
-        "enabled": true,
-        "tp1_trigger_pct": 50.0,
-        "partial_close_pct": 50.0,
-        "trailing_distance": 150.0,
-        "trailing_step": 40.0,
-        "tp2_trigger_pct": 100.0,
-        "tp2_distance": 15.0,
-        "min_profit_lock": 0.0,
-        "early_breakeven_points": 150.0,
-        "description_early_breakeven": "early_breakeven_points=150: عند وصول الصفقة إلى +150 نقطة (15$) يُنقل الستوب إلى الدخول فوراً. متناسب مع SL=400pts و trailing gap=150pts.",
-        "description_trailing_stop": "Trailing gap 150pts متناسب مع SL=400pts. خطوة 40pts تقلل التحديثات غير الضرورية بالضوضا."
-    },
-    "news_feed": {
-        "enabled": true,
-        "source": "forexfactory",
-        "hours_before": 2,
-        "hours_after": 1,
-        "min_impact": "medium",
-        "auto_block_on_high": true,
-        "gold_currencies": [
-            "USD",
-            "EUR",
-            "GBP",
-            "AUD",
-            "JPY",
-            "CAD",
-            "CHF"
-        ],
-        "allow_mock": false,
-        "note": "ACTIVE — ForexFactory free auto-feed. No API key needed."
-    },
-    "learning": {
-        "enabled": true,
-        "auto_update_weights": false,
-        "description_auto_update_weights": "False = التعلم يحلل ويقدّم توصيات الأوزان بدون تحديث تلقائي. الإدارة تحدّث الأوزان يدوياً في config.json و Supabase.",
-        "update_frequency_days": 1,
-        "min_predictions_for_adjustment": 3,
-        "max_weight_change": 0.25,
-        "momentum_weight": 0.4,
-        "decay_factor": 0.9,
-        "performance_threshold": 0.6,
-        "auto_adjust_confidence": true,
-        "aggressive_mode": true,
-        "streak_bonus": 0.1,
-        "contextual_weights_enabled": true,
-        "contextual_min_sample": 3,
-        "contextual_blend": 0.35,
-        "description_contextual_weights": "Phase 5 foundation: when enough history exists, DecisionAgent can blend setup/session/regime-specific learned weights on top of the static strategy profile.",
-        "description": "نظام التعلم الذكي لتحديث أوزان الوكلاء"
-    },
-    "moment_quality": {
-        "enabled": true,
-        "description": "معامل ظروف اللحظة يضرب حجم المركز فقط — لا يفتح صفقة ولا يمنعها. مدخل تحجيم بصلاحية رفض يصير بوابة قبول ثانية غير مختبَرة.",
-        "min_multiplier": 0.5,
-        "low_session_factor": 0.75,
-        "medium_session_factor": 0.9,
-        "news_caution_factor": 0.8,
-        "news_danger_factor": 0.6,
-        "extreme_volatility_factor": 0.75,
-        "low_volatility_factor": 0.85
-    },
-    "setup_performance": {
-        "enabled": true,
-        "description": "ذاكرة انتقائية: تفحص أداء نفس النمط في نفس الجلسة قبل الإرسال. تخفض الثقة على نمط ضعيف ولا ترفعها أبداً على نمط جيد — الذاكرة التي تضخّم القناعة هي طريق الإفراط في الملاءمة.",
-        "lookback_trades": 60,
-        "min_samples": 4,
-        "poor_win_rate_pct": 40,
-        "max_confidence_penalty": 12,
-        "veto_win_rate_pct": 0,
-        "description_veto": "0 = لا رفض قاطع، خصم ثقة فقط. ارفعه (مثلاً 15) لتفعيل الرفض عند سجل كارثي.",
-        "veto_min_samples": 6
-    },
-    "llm_review": {
-        "enabled": true,
-        "model": "gemini-2.5-flash-lite",
-        "description_model": "النموذج المستخدم. flash-lite حصته اليومية ~1000 طلب مقابل ~250 لـ flash — وهو ما سبّب HTTP 429 الدائم. يمكن تجاوزه بمتغير البيئة GEMINI_MODEL.",
-        "max_retry_delay_seconds": 20,
-        "fallback_models": [
-            "gemini-2.5-flash-lite",
-            "gemini-2.5-flash",
-            "gemini-flash-latest"
-        ],
-        "description_fallback_models": "توفّر النماذج يختلف بين الحسابات، فقد يُرفض معرّف صحيح في التوثيق بـ404. تُجرَّب هذه بالترتيب (الأرخص أولاً) ويُثبَّت أول ما ينجح لبقية التشغيل. 404 خطأ دائم فلا تُعاد المحاولة عليه.",
-        "description_max_retry_delay_seconds": "سقف الانتظار بين المحاولات. يُستخدم مع 429 من نوع RPM فقط؛ أما RPD (الحصة اليومية) فيتوقف فوراً بلا انتظار.",
-        "max_retries": 3,
-        "retry_delay_seconds": 3,
-        "description": "Gemini independent review. max_retries applies to all calls (signal, news, reports, learning). retry_delay_seconds is base delay with exponential backoff."
-    },
-    "analyst_distillation": {
-        "enabled": true,
-        "entry_tolerance_points": 80,
-        "time_window_hours": 12,
-        "match_threshold": 65,
-        "partial_match_threshold": 45,
-        "daily_compare_limit": 20,
-        "dashboard_compare_limit": 30,
-        "description": "Phase 6 foundation: compare manual analyst labels to bot setup candidates using direction, setup type, POI, sweep side, timing, and entry proximity."
-    },
-    "final_evaluation": {
-        "analyst_compare_limit": 30,
-        "min_match_rate_good": 55,
-        "max_entry_distance_good": 60,
-        "max_not_filled_ratio": 0.4,
-        "description": "Final pass combines benchmark deltas and analyst overlap into a single readiness verdict with next-step recommendations."
-    },
-    "tuning_advisor": {
-        "enabled": true,
-        "description": "Reads final_evaluation output and proposes a conservative config_patch for the next tuning round."
-    },
-    "release_readiness": {
-        "max_actions_for_trial": 2,
-        "min_benchmark_score_for_trial": 65,
-        "min_overlap_score_for_trial": 45,
-        "min_execution_score_for_trial": 55,
-        "min_governance_score_for_trial": 55,
-        "min_day_map_execution_score_for_trial": 55,
-        "allow_structured_trial_when_no_overlap_labels": true,
-        "description": "Final orchestration layer: decide whether to proceed to a structured forward trial, tune first, or hold for more refinement. Day-map execution must also stay healthy before production trial expansion."
-    },
-    "operations_pipeline": {
-        "output_root": "storage/ops_pipeline",
-        "description": "Final operator convenience layer: runs final evaluation, tuning advisor, and release readiness in one command."
-    },
-    "macro_data_provider": {
-        "description": "Hourly macro context from Yahoo Finance (yfinance). Zero cost, no API key, no quota. Provides 6/7 macro inputs: DXY (FX basket + direct), risk sentiment (SPY + VIX), US 10Y/5Y yields, fed tone, oil. Only inflation_surprise is unknown (no free source). Cron-job.org triggers macro_context.yml every hour."
-    },
-    "notifications": {
-        "send_no_signal_updates": false,
-        "manual_run_status_updates": true,
-        "hourly_status": false,
-        "hourly_status_interval_minutes": 60,
-        "market_status_title": "Market Status",
-        "status_every_analysis": false,
-        "hourly_market_status": false,
-        "notify_on_blocked_signal": false,
-        "description_notify_on_blocked_signal": "false في التشغيل العادي/الخارجي الصامت. رسائل الحالة/أسباب الرفض تُرسل فقط من Cron Job المخصص لحالة السوق عند send_status=true.",
-        "notify_on_trade_update": false,
-        "description_notify_on_trade_update": "إذا true يرسل Heartbeat مختصر حتى بدون أحداث. أحداث نقل الستوب/Trailing/TP/SL تُرسل دائماً فور تشغيل update_trades ولا تعتمد على هذا الخيار.",
-        "heartbeat_on_trade_update": false,
-        "description_heartbeat_on_trade_update": "false حتى لا يرسل النظام رسائل متابعة دورية بدون تغيير. سيتم إرسال Telegram فقط عند حدوث حدث فعلي: نقل SL للدخول، تحريك Trailing، TP، SL، BE، أو Fill.",
-        "heartbeat_interval_minutes": 60,
-        "description_send_no_signal_updates": "false لأن Market Status أصبح يُرسل فقط من cron-job.org عبر workflow_dispatch مع input send_status=true.",
-        "description_hourly_status": "false لإيقاف حالة السوق الداخلية من المستودع. استخدم Cron Job خارجي كل ساعة مع send_status=true."
-    },
-    "duplicate_signal_filter": {
-        "enabled": true,
-        "price_zone_points": 200,
-        "description_price_zone_points": "نطاق السعر الذي يُعتبر فيه دخولان 'نفس المنطقة' (نقاط الذهب: 1$=10 نقاط، أي 200 نقطة=20$). خارج هذا النطاق يُعد إعداداً جديداً مشروعاً ولا يُحجب.",
-        "open_trade": {
-            "block_same_direction_in_zone": true,
-            "block_same_direction_any_price": false,
-            "max_open_same_direction": 3,
-            "description_max_open_same_direction": "حد أقصى للصفقات المفتوحة بنفس الاتجاه على نفس الرمز. مثال: إذا توجد 3 صفقات SELL مفتوحة، تُمنع صفقة SELL رابعة فقط، بينما BUY يبقى مسموحاً.",
-            "description": "حماية تكديس الصفقات المفتوحة: امنع فتح صفقة بنفس الاتجاه داخل نفس منطقة السعر (in_zone)، ولا تسمح بأكثر من max_open_same_direction صفقات مفتوحة بنفس الاتجاه. فعّل any_price=true إذا أردت صفقة واحدة فقط لكل اتجاه بغضّ النظر عن السعر."
-        },
-        "cooldown": {
-            "lookback_hours": 6,
-            "after_loss_minutes": 90,
-            "after_breakeven_minutes": 45,
-            "after_win_minutes": 30,
-            "description": "تبريد واعٍ بالنتيجة للصفقات المغلقة حديثاً في نفس منطقة السعر فقط: بعد خسارة تبريد أطول (تجنّب التكرار الانتقامي)، بعد تعادل متوسط، بعد ربح أقصر (اتجاه ناجح). lookback_hours يحدد أقصى عمر للصفقة المغلقة التي تُؤخذ بالحسبان."
-        },
-        "description": "فلتر تكرار احترافي بمفهومين منفصلين: (1) حماية تكديس الصفقات المفتوحة في نفس المنطقة، (2) تبريد واعٍ بالنتيجة للصفقات المغلقة حديثاً في نفس المنطقة. دخول في منطقة سعر مختلفة لا يُحجب. مفاتيح legacy (lookback_minutes/same_direction_price_zone_points) ما زالت مدعومة كـ fallback."
-    },
-    "post_tp2_reentry": {
-        "enabled": true,
-        "min_distance_points": 250,
-        "window_hours": 3,
-        "description": "بعد إغلاق صفقة على الهدف الثاني، يُمنع دخول جديد بنفس الاتجاه على بعد أقل من 250 نقطة من مستوى TP2، ولمدة ثلاث ساعات. القاعدة تعمل بالاتجاهين بصيغة متناظرة: في البيع يجب أن يكون الدخول الجديد 250 نقطة على الأقل فوق TP2، وفي الشراء 250 نقطة على الأقل تحت TP2 — أي دائماً بعيداً عن المستوى المستنفَد وباتجاه بداية الحركة. السبب: TP2 هو المكان الذي انتهت عنده الحركة لأن السيولة التي غذّتها استُهلكت هناك، فالدخول عنده مجدداً دخولٌ في الارتداد. في 2026-07-31 أُغلقت d917b1d5 على TP2=4029.17 ثم نُشرت b4f85832 بيعاً عند 4031.77 بعد 21 دقيقة — 26 نقطة فقط فوق الهدف — وصارت -116 نقطة. الحارس القديم لم يرها لأنه يقيس المسافة من دخول الصفقة السابقة (4074.78) لا من هدفها. القاعدة تُلغى مبكراً عند ظهور أطروحة جديدة مثبتة (POI مختلف أو كنس جديد بعد الخروج أو تطوّر حالة الإعداد) وفق post_exit_revalidation نفسها، فلا تُحجب استمرارية الاتجاه. يُشترط تطابق الاتجاه: شراءٌ بعد هدف بيع انعكاسٌ لا تكرار، فلا يُحجب.",
-        "description_min_distance_points": "أدنى مسافة بالنقاط عن TP2 يُسمح عندها بدخول جديد بنفس الاتجاه (250 نقطة = 25$): فوق TP2 للبيع، وتحته للشراء.",
-        "description_window_hours": "مدة سريان الحظر بالساعات، تُحسب من لحظة إغلاق الصفقة على TP2 (closed_at) لا من لحظة فتحها. رُفعت من ساعتين إلى ثلاث.",
-        "description_disable": "اضبط enabled=false للعودة للسلوك السابق."
-    },
-    "post_exit_revalidation": {
-        "enabled": true,
-        "new_poi_min_distance_points": 80,
-        "min_state_progress_steps": 1,
-        "min_trigger_score_improvement": 8,
-        "min_displacement_improvement": 5,
-        "min_dominance_improvement": 6,
-        "description": "بعد إغلاق صفقة، يُمنع إعادة الدخول سريعاً من نفس المنطقة إلا إذا ظهر Thesis جديد فعلاً: POI/state_key جديد، أو sweep/displacement جديد بعد الخروج، أو تطور setup_state مع trigger أقوى."
-    },
-    "quality_score": {
-        "enabled": true,
-        "description": "يعرض درجة جودة الإشارة في Telegram ولا يمنع الإشارة حالياً"
-    },
-    "setup_memory": {
-        "enabled": true,
-        "arm_zone_buffer_points": 40,
-        "invalidate_buffer_points": 20,
-        "missing_cycles_before_expire": 6,
+        "trailing_distance_points": 150,
+        "trailing_step_points": 40,
+        "partial_close_at_tp1": true,
+        "keep_protected_winners_open": true
+      },
+      "reversal_profile": {
+        "time_warning_hours": 3,
+        "expire_after_hours": 18,
+        "early_breakeven_points": 100,
+        "trailing_distance_points": 120,
+        "trailing_step_points": 30,
+        "partial_close_at_tp1": true,
+        "keep_protected_winners_open": true,
+        "description": "Faster protection for liquidity reversals: BE sooner and tighter trailing after rejection setups."
+      },
+      "continuation_profile": {
+        "time_warning_hours": 5,
+        "expire_after_hours": 30,
+        "early_breakeven_points": 170,
+        "trailing_distance_points": 170,
+        "trailing_step_points": 45,
+        "partial_close_at_tp1": true,
+        "keep_protected_winners_open": true,
+        "description": "Trend continuation profile: allow winners more room before breakeven/trailing."
+      },
+      "range_profile": {
+        "time_warning_hours": 3,
         "expire_after_hours": 12,
-        "description": "Sprint 2 foundation: persists setup-state transitions across analysis cycles. Price near POI -> ENTRY_ARMED, breach beyond invalidation -> INVALIDATED, missing/stale setups -> EXPIRED."
+        "early_breakeven_points": 90,
+        "trailing_distance_points": 110,
+        "trailing_step_points": 25,
+        "partial_close_at_tp1": true,
+        "keep_protected_winners_open": false,
+        "description": "Range fades are shorter-lived: protect quickly and expire sooner."
+      }
     },
-    "session_planner": {
+    "thesis_exit": {
+      "enabled": true,
+      "description": "الخروج التلقائي عند انقلاب الأطروحة. كانت كل قيمه مدفونة في بايثون بلا أي كتلة هنا، فلم يكن قابلاً للضبط ولا للقياس.",
+      "reclaim_points": 12,
+      "countertrend_hold_minutes": 20,
+      "min_progress_pct": 18,
+      "min_mfe_points": 35,
+      "opposing_poi_enabled": true,
+      "opposing_poi_buffer_points": 18,
+      "opposing_poi_reclaim_points": 12,
+      "agent_vote": {
         "enabled": true,
-        "min_plan_score": 62,
-        "min_primary_dominance": 50,
-        "min_return_probability": 42,
-        "min_primary_quality_score": 70,
-        "min_trigger_score": 40,
-        "require_session_quality": "HIGH",
-        "require_structure_quality": "MODERATE",
-        "min_authority_alignment_count": 2,
-        "fallback_zone_half_width_points": 120,
-        "fallback_max_reference_levels": 3,
-        "allow_caution_news": true,
-        "expire_after_hours": 8,
-        "default_pending_slots": 2,
-        "standby_min_distance_points": 60,
-        "max_primary_zone_width_points": 450,
-        "max_standby_zone_width_points": 450,
-        "min_main_rr_for_ready": 1.5,
-        "min_supporting_agents_for_ready": 2,
-        "max_opposing_agents_for_ready": 1,
-        "agent_alignment_min_confidence": 68,
-        "create_pending_orders_from_plan": true,
-        "description": "Day-Map Authority + Planner Fallback: if structured setup candidates are missing or weak, build a morning/session plan from daily bias, macro, structure, PDH/PDL, session liquidity, and premium/discount map instead of leaving the system blind. Additional guards block micro / contradictory / overly wide execution maps from being published as READY.",
-        "min_add_leg_return_probability": 25,
-        "description_min_add_leg_return_probability": "الحد الأدنى لاحتمال عودة السعر (reach) لرجل الإضافة عندما تكون نافذة العودة LOW. رجل بعيدة باحتمال عودة ضعيف تحجز خانة أمر معلق بلا فائدة.",
-        "description_zone_width_vs_sl_floor": "عرض المنطقة يجب أن يسمح بوقف خسارة هيكلي يتجاوز min_sl_distance_points (400) وإلا تُفعَّل أرضية الوقف في كل خطة فتتطابق كل الإشارات على نفس الهندسة (-400/+500/+900). رُفع من 260/220 إلى 450 لكسر هذا التطابق.",
-        "min_zone_width_points": 6,
-        "min_entry_zone_width_points": 60,
-        "description_min_entry_zone_width_points": "أقل عرض لمنطقة الدخول المنشورة (60 نقطة). يُفرض بالتوسيع لا بالرفض: مناطق البيع الحيّة كانت 42 نقطة، ورفضها يلغي الصفقة بدل أن يجعلها قابلة للوصول. التوسيع متماثل حول الدخول المرجعي فيحتفظ بموضعه، والمخاطرة محفوظة لأن zone_touch_activation يحرّك الوقف بنفس مسافة الدخول.",
-        "description_min_zone_width_points": "أضيق منطقة POI مقبولة بالنقاط. الأمر يُوضع عند سعر دخول واحد لا عبر المنطقة كلها، فالعرض لا يمنع التنفيذ — الغرض فقط استبعاد مناطق منهارة أضيق من السبريد (max_spread_points=5). خُفض من 12 إلى 6 لأن 12 كان تقديرًا بلا بيانات وحجب مناطق سليمة عرضها 10 نقاط.",
-        "archetype_conviction": {
-            "enabled": true,
-            "high_conviction_confidence": 75,
-            "medium_conviction_confidence": 60,
-            "description": "طبقة الاقتناع بنمط اليوم: HIGH (ثقة ≥75 + توافق الـ setup مع العائلة المفضلة) تسمح بالتنفيذ الكامل main+add · MEDIUM (60-74 أو تعارض) تسمح بالرجل الرئيسية فقط · LOW (<60) خريطة للمراقبة بلا أوامر. قبلها كانت day_archetype_confidence تُخزَّن وتُعرض بلا أي أثر على القرار."
-        },
-        "revive_unexpired_plans": true,
-        "min_thesis_objective_points": 30,
-        "description_min_thesis_objective_points": "أدنى مسافة للهدف المذكور في نص الأطروحة. هدف على بُعد 6 نقاط أمام الدخول يمرّ فحص الاتجاه لكنه يناقض TP1 المعروض فوقه في نفس الرسالة. دون هذا الحد يُقال \"الهدف: السيولة التالية أمامنا\" بدل رقم بلا معنى.",
-        "description_revive_unexpired_plans": "الخطة تُبنى من الصفر كل دورة ولا تُحفظ للاستخدام، فإن لم تُنشئ أوامرها في نفس الدورة تُنسى. هذا يفعّل إحياء آخر خطة جاهزة لم تنتهِ صلاحيتها (plan_expires_at) حين يعجز التحليل عن بناء خطة جديدة — مثل تفرّق الوكلاء مؤقتًا. كل الفحوص اللاحقة (القبول، العائد، التكرار، مسافة السعر) تُطبَّق على الأسعار الحية. اضبطه false للعودة لسلوك 'دورة واحدة فقط'."
+        "description": "تصويت الوكلاء على خروج الشمعة. الشمعة وحدها دليل واحد: صفقتان حيّتان أنتجتا بصمة متطابقة بالحرف، إحداهما انعكاس حقيقي (وفّر الخروج 314 نقطة) والأخرى ضجيج (كلّف 107 نقاط ثم أعاد المخطِّط نشر نفس المنطقة A+). لا عتبة تفرّق بينهما لأن العيب في المُدخَل.",
+        "agent_min_confidence": 70,
+        "description_agent_min_confidence": "نفس عتبة signal_requirements.agent_min_confidence المستعملة في كل مكان — لا رقم جديد.",
+        "min_defenders_to_hold": 2,
+        "description_min_defenders_to_hold": "إذا دافع هذا العدد من الوكلاء المؤهلين عن اتجاه الصفقة وكانوا أكثر من المعارضين، يُلغى الخروج.",
+        "min_opponents_to_exit": 3,
+        "description_min_opponents_to_exit": "إذا عارض هذا العدد من الوكلاء المؤهَّلين ولا مدافع واحد، يُنفَّذ الخروج كاملاً. رُفع من 2 إلى 3: الوكلاء المصوّتون خمسة (technical · classical · smc · price_action · multitimeframe)، فاشتراط ثلاثة يعني أغلبية حقيقية لا مجرد رأيين. مع silent_action=HOLD صار الإغلاق التلقائي مقصوراً على الحالة التي يجمع فيها أكثر الكتاب على أن الأطروحة انتهت؛ ما دون ذلك تُدار الصفقة بوقفها وأهدافها. الخروج السعري (وقف الخسارة، التعادل، الوقف المتحرك، TP1، TP2) لا يتأثر بهذا الرقم إطلاقاً.",
+        "silent_action": "HOLD",
+        "description_silent_action": "ماذا يحدث حين يصمت الوكلاء (لا أغلبية مؤهَّلة مع الصفقة ولا ضدها). HOLD: لا إغلاق ولا تخفيف — الصفقة تبقى على وقفها الحالي، وهو الوضع الحالي. SCALE_OUT: تخفيف جزئي مع نقل الوقف للتعادل. FULL_EXIT: السلوك القديم بإغلاق كامل. الصمت أضعف دليل في النظام: إشارة الشمعة وحدها دليل واحد، وفي 2026-07-30 أغلقت صفقة بيع بـ-39.2 بينما Classical 71 وSMC 90 وMulti-TF 83 ما زالوا يدافعون عنها، ثم أعاد المخطِّط نشر نفس المنطقة كخريطة A+. الإغلاق الكامل ما زال يعمل عند CONFIRM (معارضان مؤهَّلان بلا مدافع). تنبيه: هذا الإعداد يُقرأ في مسارين — إشارة الشمعة ورفض الـPOI المعاكس — فتغييره يسري على كليهما.",
+        "silent_scale_fraction": 0.5,
+        "description_silent_scale_fraction": "نسبة الإغلاق الفعلي عند الصمت. تُحتسب محاسبياً على الجزء المُغلق بسعره، والباقي بسعر إغلاقه.",
+        "tighten_trail_on_reversal": true,
+        "reversal_trail_distance_points": 60,
+        "description_reversal_trail_distance_points": "حين ينقلب الوكلاء على صفقة رابحة والشمعة لم تكسر، لا تُغلق الصفقة بل تضيق فجوة التتبّع من 150 إلى 60 نقطة. كانت صفقة +191 نقطة تحمي 41 فقط وتترك 150 معرّضة. الوقف يتحرك في اتجاه الربح فقط، فلا مخاطرة تُضاف — يتغيّر فقط مقدار الربح المدافَع عنه. يُشترط: حكم CONFIRM من الوكلاء + ربح مفتوح + وقف عند التعادل أو أفضل."
+      }
+    }
+  },
+  "performance": {
+    "track_win_rate_per_agent": true,
+    "track_session_performance": true,
+    "alert_on_drawdown_percent": 5,
+    "report_interval_days": 7
+  },
+  "trailing_stop": {
+    "enabled": true,
+    "tp1_trigger_pct": 50.0,
+    "partial_close_pct": 50.0,
+    "trailing_distance": 150.0,
+    "trailing_step": 40.0,
+    "tp2_trigger_pct": 100.0,
+    "tp2_distance": 15.0,
+    "min_profit_lock": 0.0,
+    "early_breakeven_points": 150.0,
+    "description_early_breakeven": "early_breakeven_points=150: عند وصول الصفقة إلى +150 نقطة (15$) يُنقل الستوب إلى الدخول فوراً. متناسب مع SL=400pts و trailing gap=150pts.",
+    "description_trailing_stop": "Trailing gap 150pts متناسب مع SL=400pts. خطوة 40pts تقلل التحديثات غير الضرورية بالضوضا."
+  },
+  "news_feed": {
+    "enabled": true,
+    "source": "forexfactory",
+    "hours_before": 2,
+    "hours_after": 1,
+    "min_impact": "medium",
+    "auto_block_on_high": true,
+    "gold_currencies": [
+      "USD",
+      "EUR",
+      "GBP",
+      "AUD",
+      "JPY",
+      "CAD",
+      "CHF"
+    ],
+    "allow_mock": false,
+    "note": "ACTIVE — ForexFactory free auto-feed. No API key needed."
+  },
+  "learning": {
+    "enabled": true,
+    "auto_update_weights": false,
+    "description_auto_update_weights": "False = التعلم يحلل ويقدّم توصيات الأوزان بدون تحديث تلقائي. الإدارة تحدّث الأوزان يدوياً في config.json و Supabase.",
+    "update_frequency_days": 1,
+    "min_predictions_for_adjustment": 3,
+    "max_weight_change": 0.25,
+    "momentum_weight": 0.4,
+    "decay_factor": 0.9,
+    "performance_threshold": 0.6,
+    "auto_adjust_confidence": true,
+    "aggressive_mode": true,
+    "streak_bonus": 0.1,
+    "contextual_weights_enabled": true,
+    "contextual_min_sample": 3,
+    "contextual_blend": 0.35,
+    "description_contextual_weights": "Phase 5 foundation: when enough history exists, DecisionAgent can blend setup/session/regime-specific learned weights on top of the static strategy profile.",
+    "description": "نظام التعلم الذكي لتحديث أوزان الوكلاء"
+  },
+  "moment_quality": {
+    "enabled": true,
+    "description": "معامل ظروف اللحظة يضرب حجم المركز فقط — لا يفتح صفقة ولا يمنعها. مدخل تحجيم بصلاحية رفض يصير بوابة قبول ثانية غير مختبَرة.",
+    "min_multiplier": 0.5,
+    "low_session_factor": 0.75,
+    "medium_session_factor": 0.9,
+    "news_caution_factor": 0.8,
+    "news_danger_factor": 0.6,
+    "extreme_volatility_factor": 0.75,
+    "low_volatility_factor": 0.85
+  },
+  "setup_performance": {
+    "enabled": true,
+    "description": "ذاكرة انتقائية: تفحص أداء نفس النمط في نفس الجلسة قبل الإرسال. تخفض الثقة على نمط ضعيف ولا ترفعها أبداً على نمط جيد — الذاكرة التي تضخّم القناعة هي طريق الإفراط في الملاءمة.",
+    "lookback_trades": 60,
+    "min_samples": 4,
+    "poor_win_rate_pct": 40,
+    "max_confidence_penalty": 12,
+    "veto_win_rate_pct": 0,
+    "description_veto": "0 = لا رفض قاطع، خصم ثقة فقط. ارفعه (مثلاً 15) لتفعيل الرفض عند سجل كارثي.",
+    "veto_min_samples": 6
+  },
+  "llm_review": {
+    "enabled": true,
+    "model": "gemini-2.5-flash-lite",
+    "description_model": "النموذج المستخدم. flash-lite حصته اليومية ~1000 طلب مقابل ~250 لـ flash — وهو ما سبّب HTTP 429 الدائم. يمكن تجاوزه بمتغير البيئة GEMINI_MODEL.",
+    "max_retry_delay_seconds": 20,
+    "fallback_models": [
+      "gemini-2.5-flash-lite",
+      "gemini-2.5-flash",
+      "gemini-flash-latest"
+    ],
+    "description_fallback_models": "توفّر النماذج يختلف بين الحسابات، فقد يُرفض معرّف صحيح في التوثيق بـ404. تُجرَّب هذه بالترتيب (الأرخص أولاً) ويُثبَّت أول ما ينجح لبقية التشغيل. 404 خطأ دائم فلا تُعاد المحاولة عليه.",
+    "description_max_retry_delay_seconds": "سقف الانتظار بين المحاولات. يُستخدم مع 429 من نوع RPM فقط؛ أما RPD (الحصة اليومية) فيتوقف فوراً بلا انتظار.",
+    "max_retries": 3,
+    "retry_delay_seconds": 3,
+    "description": "Gemini independent review. max_retries applies to all calls (signal, news, reports, learning). retry_delay_seconds is base delay with exponential backoff."
+  },
+  "analyst_distillation": {
+    "enabled": true,
+    "entry_tolerance_points": 80,
+    "time_window_hours": 12,
+    "match_threshold": 65,
+    "partial_match_threshold": 45,
+    "daily_compare_limit": 20,
+    "dashboard_compare_limit": 30,
+    "description": "Phase 6 foundation: compare manual analyst labels to bot setup candidates using direction, setup type, POI, sweep side, timing, and entry proximity."
+  },
+  "final_evaluation": {
+    "analyst_compare_limit": 30,
+    "min_match_rate_good": 55,
+    "max_entry_distance_good": 60,
+    "max_not_filled_ratio": 0.4,
+    "description": "Final pass combines benchmark deltas and analyst overlap into a single readiness verdict with next-step recommendations."
+  },
+  "tuning_advisor": {
+    "enabled": true,
+    "description": "Reads final_evaluation output and proposes a conservative config_patch for the next tuning round."
+  },
+  "release_readiness": {
+    "max_actions_for_trial": 2,
+    "min_benchmark_score_for_trial": 65,
+    "min_overlap_score_for_trial": 45,
+    "min_execution_score_for_trial": 55,
+    "min_governance_score_for_trial": 55,
+    "min_day_map_execution_score_for_trial": 55,
+    "allow_structured_trial_when_no_overlap_labels": true,
+    "description": "Final orchestration layer: decide whether to proceed to a structured forward trial, tune first, or hold for more refinement. Day-map execution must also stay healthy before production trial expansion."
+  },
+  "operations_pipeline": {
+    "output_root": "storage/ops_pipeline",
+    "description": "Final operator convenience layer: runs final evaluation, tuning advisor, and release readiness in one command."
+  },
+  "macro_data_provider": {
+    "description": "Hourly macro context from Yahoo Finance (yfinance). Zero cost, no API key, no quota. Provides 6/7 macro inputs: DXY (FX basket + direct), risk sentiment (SPY + VIX), US 10Y/5Y yields, fed tone, oil. Only inflation_surprise is unknown (no free source). Cron-job.org triggers macro_context.yml every hour."
+  },
+  "notifications": {
+    "send_no_signal_updates": false,
+    "manual_run_status_updates": true,
+    "hourly_status": false,
+    "hourly_status_interval_minutes": 60,
+    "market_status_title": "Market Status",
+    "status_every_analysis": false,
+    "hourly_market_status": false,
+    "notify_on_blocked_signal": false,
+    "description_notify_on_blocked_signal": "false في التشغيل العادي/الخارجي الصامت. رسائل الحالة/أسباب الرفض تُرسل فقط من Cron Job المخصص لحالة السوق عند send_status=true.",
+    "notify_on_trade_update": false,
+    "description_notify_on_trade_update": "إذا true يرسل Heartbeat مختصر حتى بدون أحداث. أحداث نقل الستوب/Trailing/TP/SL تُرسل دائماً فور تشغيل update_trades ولا تعتمد على هذا الخيار.",
+    "heartbeat_on_trade_update": false,
+    "description_heartbeat_on_trade_update": "false حتى لا يرسل النظام رسائل متابعة دورية بدون تغيير. سيتم إرسال Telegram فقط عند حدوث حدث فعلي: نقل SL للدخول، تحريك Trailing، TP، SL، BE، أو Fill.",
+    "heartbeat_interval_minutes": 60,
+    "description_send_no_signal_updates": "false لأن Market Status أصبح يُرسل فقط من cron-job.org عبر workflow_dispatch مع input send_status=true.",
+    "description_hourly_status": "false لإيقاف حالة السوق الداخلية من المستودع. استخدم Cron Job خارجي كل ساعة مع send_status=true."
+  },
+  "duplicate_signal_filter": {
+    "enabled": true,
+    "price_zone_points": 200,
+    "description_price_zone_points": "نطاق السعر الذي يُعتبر فيه دخولان 'نفس المنطقة' (نقاط الذهب: 1$=10 نقاط، أي 200 نقطة=20$). خارج هذا النطاق يُعد إعداداً جديداً مشروعاً ولا يُحجب.",
+    "open_trade": {
+      "block_same_direction_in_zone": true,
+      "block_same_direction_any_price": false,
+      "max_open_same_direction": 3,
+      "description_max_open_same_direction": "حد أقصى للصفقات المفتوحة بنفس الاتجاه على نفس الرمز. مثال: إذا توجد 3 صفقات SELL مفتوحة، تُمنع صفقة SELL رابعة فقط، بينما BUY يبقى مسموحاً.",
+      "description": "حماية تكديس الصفقات المفتوحة: امنع فتح صفقة بنفس الاتجاه داخل نفس منطقة السعر (in_zone)، ولا تسمح بأكثر من max_open_same_direction صفقات مفتوحة بنفس الاتجاه. فعّل any_price=true إذا أردت صفقة واحدة فقط لكل اتجاه بغضّ النظر عن السعر."
     },
-    "session_plan_delivery": {
-        "enabled": true,
-        "only_when_ready": true,
-        "min_change_points": 60,
-        "min_update_interval_minutes": 25,
-        "description": "Deliver day-map / morning-plan only by Telegram. Send one opening plan per session when the map first becomes ready, then send updates only on material changes and not more frequently than the configured interval. Do not expose it in the public dashboard/API."
+    "cooldown": {
+      "lookback_hours": 6,
+      "after_loss_minutes": 90,
+      "after_breakeven_minutes": 45,
+      "after_win_minutes": 30,
+      "description": "تبريد واعٍ بالنتيجة للصفقات المغلقة حديثاً في نفس منطقة السعر فقط: بعد خسارة تبريد أطول (تجنّب التكرار الانتقامي)، بعد تعادل متوسط، بعد ربح أقصر (اتجاه ناجح). lookback_hours يحدد أقصى عمر للصفقة المغلقة التي تُؤخذ بالحسبان."
     },
-    "trading_mode": "paper",
-    "paper_trading": {
-        "enabled": true,
-        "starting_balance": 10000,
-        "currency": "USD",
-        "default_lot_size": 0.01,
-        "track_virtual_pnl": true,
-        "description": "وضع تجريبي: يتم حفظ ومتابعة الصفقات افتراضياً بدون تنفيذ حقيقي"
+    "description": "فلتر تكرار احترافي بمفهومين منفصلين: (1) حماية تكديس الصفقات المفتوحة في نفس المنطقة، (2) تبريد واعٍ بالنتيجة للصفقات المغلقة حديثاً في نفس المنطقة. دخول في منطقة سعر مختلفة لا يُحجب. مفاتيح legacy (lookback_minutes/same_direction_price_zone_points) ما زالت مدعومة كـ fallback."
+  },
+  "post_tp2_reentry": {
+    "enabled": true,
+    "min_distance_points": 250,
+    "window_hours": 2.5,
+    "description": "بعد إغلاق صفقة على الهدف الثاني، يُمنع دخول جديد بنفس الاتجاه على بعد أقل من 250 نقطة من مستوى TP2، ولمدة ساعتين ونصف. القاعدة تعمل بالاتجاهين بصيغة متناظرة: في البيع يجب أن يكون الدخول الجديد 250 نقطة على الأقل فوق TP2، وفي الشراء 250 نقطة على الأقل تحت TP2 — أي دائماً بعيداً عن المستوى المستنفَد وباتجاه بداية الحركة. السبب: TP2 هو المكان الذي انتهت عنده الحركة لأن السيولة التي غذّتها استُهلكت هناك، فالدخول عنده مجدداً دخولٌ في الارتداد. في 2026-07-31 أُغلقت d917b1d5 على TP2=4029.17 ثم نُشرت b4f85832 بيعاً عند 4031.77 بعد 21 دقيقة — 26 نقطة فقط فوق الهدف — وصارت -116 نقطة. الحارس القديم لم يرها لأنه يقيس المسافة من دخول الصفقة السابقة (4074.78) لا من هدفها. القاعدة تُلغى مبكراً عند ظهور أطروحة جديدة مثبتة (POI مختلف أو كنس جديد بعد الخروج أو تطوّر حالة الإعداد) وفق post_exit_revalidation نفسها، فلا تُحجب استمرارية الاتجاه. يُشترط تطابق الاتجاه: شراءٌ بعد هدف بيع انعكاسٌ لا تكرار، فلا يُحجب.",
+    "description_min_distance_points": "أدنى مسافة بالنقاط عن TP2 يُسمح عندها بدخول جديد بنفس الاتجاه (250 نقطة = 25$): فوق TP2 للبيع، وتحته للشراء.",
+    "description_window_hours": "مدة سريان الحظر بالساعات، تُحسب من لحظة إغلاق الصفقة على TP2 (closed_at) لا من لحظة فتحها. رُفعت من ساعتين إلى ثلاث، ثم خُفّضت إلى 2.5 بطلب المشغّل في 2026-08-03: ثلاث ساعات كانت تُبقي الحظر سارياً في جلسة نيويورك بعد أن يكون السوق قد بنى بنية جديدة فعلاً. تقبل القيمة كسوراً عشرية، والرسالة المعروضة تطبع الكسر كما هو (2.5h) لا مقرَّباً.",
+    "description_disable": "اضبط enabled=false للعودة للسلوك السابق."
+  },
+  "post_exit_revalidation": {
+    "enabled": true,
+    "new_poi_min_distance_points": 80,
+    "min_state_progress_steps": 1,
+    "min_trigger_score_improvement": 8,
+    "min_displacement_improvement": 5,
+    "min_dominance_improvement": 6,
+    "description": "بعد إغلاق صفقة، يُمنع إعادة الدخول سريعاً من نفس المنطقة إلا إذا ظهر Thesis جديد فعلاً: POI/state_key جديد، أو sweep/displacement جديد بعد الخروج، أو تطور setup_state مع trigger أقوى."
+  },
+  "quality_score": {
+    "enabled": true,
+    "description": "يعرض درجة جودة الإشارة في Telegram ولا يمنع الإشارة حالياً"
+  },
+  "setup_memory": {
+    "enabled": true,
+    "arm_zone_buffer_points": 40,
+    "invalidate_buffer_points": 20,
+    "missing_cycles_before_expire": 6,
+    "expire_after_hours": 12,
+    "description": "Sprint 2 foundation: persists setup-state transitions across analysis cycles. Price near POI -> ENTRY_ARMED, breach beyond invalidation -> INVALIDATED, missing/stale setups -> EXPIRED."
+  },
+  "session_planner": {
+    "enabled": true,
+    "min_plan_score": 62,
+    "min_primary_dominance": 50,
+    "min_return_probability": 42,
+    "min_primary_quality_score": 70,
+    "min_trigger_score": 40,
+    "require_session_quality": "HIGH",
+    "require_structure_quality": "MODERATE",
+    "min_authority_alignment_count": 2,
+    "fallback_zone_half_width_points": 120,
+    "fallback_max_reference_levels": 3,
+    "allow_caution_news": true,
+    "expire_after_hours": 8,
+    "default_pending_slots": 2,
+    "standby_min_distance_points": 60,
+    "max_primary_zone_width_points": 450,
+    "max_standby_zone_width_points": 450,
+    "min_main_rr_for_ready": 1.5,
+    "min_supporting_agents_for_ready": 2,
+    "max_opposing_agents_for_ready": 1,
+    "agent_alignment_min_confidence": 68,
+    "create_pending_orders_from_plan": true,
+    "description": "Day-Map Authority + Planner Fallback: if structured setup candidates are missing or weak, build a morning/session plan from daily bias, macro, structure, PDH/PDL, session liquidity, and premium/discount map instead of leaving the system blind. Additional guards block micro / contradictory / overly wide execution maps from being published as READY.",
+    "min_add_leg_return_probability": 25,
+    "description_min_add_leg_return_probability": "الحد الأدنى لاحتمال عودة السعر (reach) لرجل الإضافة عندما تكون نافذة العودة LOW. رجل بعيدة باحتمال عودة ضعيف تحجز خانة أمر معلق بلا فائدة.",
+    "description_zone_width_vs_sl_floor": "عرض المنطقة يجب أن يسمح بوقف خسارة هيكلي يتجاوز min_sl_distance_points (400) وإلا تُفعَّل أرضية الوقف في كل خطة فتتطابق كل الإشارات على نفس الهندسة (-400/+500/+900). رُفع من 260/220 إلى 450 لكسر هذا التطابق.",
+    "min_zone_width_points": 6,
+    "min_entry_zone_width_points": 60,
+    "description_min_entry_zone_width_points": "أقل عرض لمنطقة الدخول المنشورة (60 نقطة). يُفرض بالتوسيع لا بالرفض: مناطق البيع الحيّة كانت 42 نقطة، ورفضها يلغي الصفقة بدل أن يجعلها قابلة للوصول. التوسيع متماثل حول الدخول المرجعي فيحتفظ بموضعه، والمخاطرة محفوظة لأن zone_touch_activation يحرّك الوقف بنفس مسافة الدخول.",
+    "description_min_zone_width_points": "أضيق منطقة POI مقبولة بالنقاط. الأمر يُوضع عند سعر دخول واحد لا عبر المنطقة كلها، فالعرض لا يمنع التنفيذ — الغرض فقط استبعاد مناطق منهارة أضيق من السبريد (max_spread_points=5). خُفض من 12 إلى 6 لأن 12 كان تقديرًا بلا بيانات وحجب مناطق سليمة عرضها 10 نقاط.",
+    "archetype_conviction": {
+      "enabled": true,
+      "high_conviction_confidence": 75,
+      "medium_conviction_confidence": 60,
+      "description": "طبقة الاقتناع بنمط اليوم: HIGH (ثقة ≥75 + توافق الـ setup مع العائلة المفضلة) تسمح بالتنفيذ الكامل main+add · MEDIUM (60-74 أو تعارض) تسمح بالرجل الرئيسية فقط · LOW (<60) خريطة للمراقبة بلا أوامر. قبلها كانت day_archetype_confidence تُخزَّن وتُعرض بلا أي أثر على القرار."
     },
-    "daily_bias_filter": {
-        "enabled": true,
-        "timeframe": "4H",
-        "ema_fast": 20,
-        "ema_slow": 50,
-        "rsi_period": 14,
-        "slope_lookback": 12,
-        "score_threshold": 1.25,
-        "contrarian_min_confidence": 80,
-        "block_strong_contrarian_below": 80,
-        "description": "فلتر اتجاه أعلى (Daily Bias): الصفقات المعاكسة للاتجاه 4H تحتاج موافقة 3 وكلاء مؤهلين على نفس الاتجاه وثقة إشارة ≥80%. الوكلاء المعارضون يخصمون من قوة الإشارة.",
-        "contrarian_min_confidence_two_agents": 80,
-        "contrarian_min_agents_for_lower_confidence": 3
+    "revive_unexpired_plans": true,
+    "min_thesis_objective_points": 30,
+    "description_min_thesis_objective_points": "أدنى مسافة للهدف المذكور في نص الأطروحة. هدف على بُعد 6 نقاط أمام الدخول يمرّ فحص الاتجاه لكنه يناقض TP1 المعروض فوقه في نفس الرسالة. دون هذا الحد يُقال \"الهدف: السيولة التالية أمامنا\" بدل رقم بلا معنى.",
+    "description_revive_unexpired_plans": "الخطة تُبنى من الصفر كل دورة ولا تُحفظ للاستخدام، فإن لم تُنشئ أوامرها في نفس الدورة تُنسى. هذا يفعّل إحياء آخر خطة جاهزة لم تنتهِ صلاحيتها (plan_expires_at) حين يعجز التحليل عن بناء خطة جديدة — مثل تفرّق الوكلاء مؤقتًا. كل الفحوص اللاحقة (القبول، العائد، التكرار، مسافة السعر) تُطبَّق على الأسعار الحية. اضبطه false للعودة لسلوك 'دورة واحدة فقط'."
+  },
+  "session_plan_delivery": {
+    "enabled": true,
+    "only_when_ready": true,
+    "min_change_points": 60,
+    "min_update_interval_minutes": 25,
+    "description": "Deliver day-map / morning-plan only by Telegram. Send one opening plan per session when the map first becomes ready, then send updates only on material changes and not more frequently than the configured interval. Do not expose it in the public dashboard/API."
+  },
+  "trading_mode": "paper",
+  "paper_trading": {
+    "enabled": true,
+    "starting_balance": 10000,
+    "currency": "USD",
+    "default_lot_size": 0.01,
+    "track_virtual_pnl": true,
+    "description": "وضع تجريبي: يتم حفظ ومتابعة الصفقات افتراضياً بدون تنفيذ حقيقي"
+  },
+  "daily_bias_filter": {
+    "enabled": true,
+    "timeframe": "4H",
+    "ema_fast": 20,
+    "ema_slow": 50,
+    "rsi_period": 14,
+    "slope_lookback": 12,
+    "score_threshold": 1.25,
+    "contrarian_min_confidence": 80,
+    "block_strong_contrarian_below": 80,
+    "description": "فلتر اتجاه أعلى (Daily Bias): الصفقات المعاكسة للاتجاه 4H تحتاج موافقة 3 وكلاء مؤهلين على نفس الاتجاه وثقة إشارة ≥80%. الوكلاء المعارضون يخصمون من قوة الإشارة.",
+    "contrarian_min_confidence_two_agents": 80,
+    "contrarian_min_agents_for_lower_confidence": 3
+  },
+  "dynamic_risk_management": {
+    "enabled": true,
+    "description_enabled": "قاطع الحماية على مستوى الحساب. كان false والنتيجة تُحسب بلا أثر: النظام لا يتوقف مهما خسر. مُفعّل الآن وموصول قبل مسارَي التنفيذ (سلّم المخطِّط والمسار المباشر).",
+    "warn_after_losses": 2,
+    "halt_after_losses": 3,
+    "daily_loss_limit_points": 450,
+    "description_daily_loss_limit_points": "450 نقطة = 45$ ≈ ثلاث صفقات بستوب 150 نقطة، متسق مع halt_after_losses=3. كان 1000 أي بلا إيقاف يومي عملياً.",
+    "recent_trades_limit": 20,
+    "recent_losses_caution": 2,
+    "normal_min_quality_score": 0,
+    "caution_min_confidence": 75,
+    "strict_min_confidence": 82,
+    "caution_min_quality_score": 70,
+    "strict_min_quality_score": 80,
+    "caution_risk_multiplier": 0.75,
+    "strict_risk_multiplier": 0.5,
+    "description": "يرفع شروط الثقة والجودة أو يوقف التداول بعد خسائر متتالية/خسارة يومية",
+    "description_disabled": "معطّل مؤقتاً (enabled:false) في مرحلة التعلّم لترك كل الإشارات تخرج بغض النظر عن نتائج الصفقات السابقة؛ يُعاد تفعيله بعد جمع بيانات كافية."
+  },
+  "news_risk": {
+    "tier1_before_minutes": 60,
+    "tier1_after_minutes": 30,
+    "tier2_before_minutes": 30,
+    "tier2_after_minutes": 15,
+    "warning_before_minutes": 120,
+    "high_risk_day_tier1_count": 3,
+    "description": "تصنيف أخبار Tier 1/2 مع نوافذ منع وتحذير مخصصة للذهب"
+  },
+  "order_execution": {
+    "enabled": true,
+    "mode": "paper",
+    "default_order_type": "AUTO",
+    "entry_style": "hybrid",
+    "description_entry_style": "hybrid: إذا كان السعر ملاصقاً لمنطقة قوية يدخل MARKET، وإذا كانت المنطقة أعلى/أسفل بسحب منطقي يدخل LIMIT/STOP من zone حقيقية. هذا يعيد تفعيل zone execution تدريجياً بدون كسر الحماية الحالية.",
+    "market_threshold_points": 30,
+    "description_market_threshold_points": "في وضع hybrid: إذا كانت أقرب منطقة قوية ضمن 30 نقطة فقط من السعر الحالي، يدخل MARKET بدل تعليق أمر pending.",
+    "pending_threshold_points": 20,
+    "description_pending_threshold_points": "حد تقريبي لتصنيف LIMIT/STOP مقابل MARKET عندما يكون الدخول بعيداً عن السعر الحالي بما يكفي.",
+    "pending_order_max_cycles": 36,
+    "description_pending_order_max_cycles": "في وضع hybrid: إذا بقي الأمر المعلق 36 دورة تحليل بدون fill (حوالي 3 ساعات) يمكن تحويله إلى MARKET حسب منطق OpenTradesManager، بدل المطاردة السريعة بعد 30 دقيقة فقط.",
+    "pending_expire_after_hours": 24,
+    "description_pending_expire_after_hours": "إذا بقي أمر LIMIT/STOP معلقاً أكثر من 24 ساعة بدون تفعيل يُلغى تلقائياً كـ EXPIRED بدل أن يبقى للأبد.",
+    "pending_news_hold": {
+      "enabled": true,
+      "reactivation_delay_minutes": 3,
+      "limit_max_drift_points": 30,
+      "stop_max_drift_points": 20,
+      "require_rr_recheck": true,
+      "require_spread_recheck": true,
+      "cancel_if_drift_exceeds": true,
+      "description": "إذا لُمس الأمر المعلق أثناء نافذة منع الأخبار لا يتفعل. يتحول إلى News Hold ثم يُعاد فحص الخبر والـ drift والـ RR بعد انتهاء المنع. إذا بقي صالحاً يدخل MARKET، وإلا يُلغى بأمان."
     },
-    "dynamic_risk_management": {
-        "enabled": true,
-        "description_enabled": "قاطع الحماية على مستوى الحساب. كان false والنتيجة تُحسب بلا أثر: النظام لا يتوقف مهما خسر. مُفعّل الآن وموصول قبل مسارَي التنفيذ (سلّم المخطِّط والمسار المباشر).",
-        "warn_after_losses": 2,
-        "halt_after_losses": 3,
-        "daily_loss_limit_points": 450,
-        "description_daily_loss_limit_points": "450 نقطة = 45$ ≈ ثلاث صفقات بستوب 150 نقطة، متسق مع halt_after_losses=3. كان 1000 أي بلا إيقاف يومي عملياً.",
-        "recent_trades_limit": 20,
-        "recent_losses_caution": 2,
-        "normal_min_quality_score": 0,
-        "caution_min_confidence": 75,
-        "strict_min_confidence": 82,
-        "caution_min_quality_score": 70,
-        "strict_min_quality_score": 80,
-        "caution_risk_multiplier": 0.75,
-        "strict_risk_multiplier": 0.5,
-        "description": "يرفع شروط الثقة والجودة أو يوقف التداول بعد خسائر متتالية/خسارة يومية",
-        "description_disabled": "معطّل مؤقتاً (enabled:false) في مرحلة التعلّم لترك كل الإشارات تخرج بغض النظر عن نتائج الصفقات السابقة؛ يُعاد تفعيله بعد جمع بيانات كافية."
+    "near_miss_execution": {
+      "enabled": true,
+      "preserve_planned_risk": true,
+      "description_preserve_planned_risk": "عند تحويل الأمر الحدّي إلى أمر سوق بعد خطأ الدخول بفرق بسيط، يُنقل الوقف بنفس مسافة انتقال الدخول لتبقى المخاطرة كما خُطّطت. في 2026-08-03 حُوّل الأمر 2f72579f من دخول 4037.48 إلى 4031.76 مع بقاء الوقف 4077.48، فكبرت المخاطرة من 400 إلى 457 نقطة دون إذن. نفس مبدأ zone_touch_activation.preserve_planned_risk. الوقف لا يتوسّع أبداً: إن كان المخطّط أضيق يُبقى عليه.",
+      "min_halo_points": 12,
+      "max_halo_points": 25,
+      "zone_width_multiplier": 0.75,
+      "recent_range_multiplier": 0.18,
+      "min_confirmation_points": 12,
+      "max_target_progress_pct": 30,
+      "min_remaining_rr": 1.8,
+      "require_planner_context": true,
+      "description": "If price misses a planner limit area by only a few points, then rejects and moves away in the intended direction, allow a controlled market conversion without widening the original POI itself."
     },
-    "news_risk": {
-        "tier1_before_minutes": 60,
-        "tier1_after_minutes": 30,
-        "tier2_before_minutes": 30,
-        "tier2_after_minutes": 15,
-        "warning_before_minutes": 120,
-        "high_risk_day_tier1_count": 3,
-        "description": "تصنيف أخبار Tier 1/2 مع نوافذ منع وتحذير مخصصة للذهب"
+    "zone_touch_activation": {
+      "enabled": true,
+      "grace_minutes": 10,
+      "description_grace_minutes": "ننتظر تفعيل السعر الأصلي أولاً. دورة التحليل 5 دقائق، فالافتراضي 10 = دورتان. إذا بقي السعر داخل المنطقة ولم يتفعل الدخول المرجعي خلالهما، يُعتبر الأمر عميقاً أكثر من اللازم ويُملأ عند الحافة.",
+      "allow_after_return": true,
+      "description_allow_after_return": "مغادرة المنطقة في الاتجاه حدث ثابت. إن غادر السعر ثم عاد قبل أن تلتقطه الدورة، يبقى التفعيل قائماً عند الحافة بغض النظر عن السعر الحالي — لأن الحدث وقع فعلاً.",
+      "description": "تفعيل بلمس المنطقة. الخطة تنشر منطقة دخول كاملة، والدخول المرجعي نقطة واحدة داخلها. في 2026-07-30 لمس السعر 4060.40 داخل منطقة شراء 4054.49-4062.05 ولم يُملأ الأمر لأن المرجع كان 4058.27، ثم صعد إلى 4079.88 مخترقاً TP1. المطاردة بسعر السوق ليست الحل: الوقف ثابت فترتفع المخاطرة من 185 إلى 265 نقطة وينهار RR من 1.90 إلى 1.02 تحت الأرضية. الملء عند حافة المنطقة مع تحريك الوقف بنفس المسافة يبقي المخاطرة 185 نقطة و RR 1.69.",
+      "require_exit_in_favour": true,
+      "description_require_exit_in_favour": "لا يكفي اللمس. يجب أن يغادر السعر المنطقة في اتجاه الصفقة (شراء: فوق الحد العلوي · بيع: تحت الحد السفلي). فتيل يدخل المنطقة ثم ينهار ليس إشارة دخول، ولحظة اللمس لا يمكن التمييز بينهما.",
+      "preserve_planned_risk": true,
+      "description_preserve_planned_risk": "الوقف ينتقل بنفس مسافة انتقال الدخول، فتبقى المخاطرة المخططة كما هي بالضبط. هذا هو الفرق الجوهري عن المطاردة: لا توسيع للمخاطرة.",
+      "min_remaining_rr": 1.5,
+      "description_min_remaining_rr": "نفس أرضية risk_settings.min_rr_ratio — لا رقم جديد.",
+      "max_target_progress_pct": 60,
+      "description_max_target_progress_pct": "لا تركب موجة انتهت. تُقاس من حافة المنطقة إلى TP1: إذا قطع السعر أكثر من هذه النسبة فالمكافأة المتبقية لا تبرر الوقف المخطط. اختبار RR وحده لا يمسك هذا لأن TP2 قد يكون بعيداً.",
+      "require_planner_context": true
     },
-    "order_execution": {
-        "enabled": true,
-        "mode": "paper",
-        "default_order_type": "AUTO",
-        "entry_style": "hybrid",
-        "description_entry_style": "hybrid: إذا كان السعر ملاصقاً لمنطقة قوية يدخل MARKET، وإذا كانت المنطقة أعلى/أسفل بسحب منطقي يدخل LIMIT/STOP من zone حقيقية. هذا يعيد تفعيل zone execution تدريجياً بدون كسر الحماية الحالية.",
-        "market_threshold_points": 30,
-        "description_market_threshold_points": "في وضع hybrid: إذا كانت أقرب منطقة قوية ضمن 30 نقطة فقط من السعر الحالي، يدخل MARKET بدل تعليق أمر pending.",
-        "pending_threshold_points": 20,
-        "description_pending_threshold_points": "حد تقريبي لتصنيف LIMIT/STOP مقابل MARKET عندما يكون الدخول بعيداً عن السعر الحالي بما يكفي.",
-        "pending_order_max_cycles": 36,
-        "description_pending_order_max_cycles": "في وضع hybrid: إذا بقي الأمر المعلق 36 دورة تحليل بدون fill (حوالي 3 ساعات) يمكن تحويله إلى MARKET حسب منطق OpenTradesManager، بدل المطاردة السريعة بعد 30 دقيقة فقط.",
-        "pending_expire_after_hours": 24,
-        "description_pending_expire_after_hours": "إذا بقي أمر LIMIT/STOP معلقاً أكثر من 24 ساعة بدون تفعيل يُلغى تلقائياً كـ EXPIRED بدل أن يبقى للأبد.",
-        "pending_news_hold": {
-            "enabled": true,
-            "reactivation_delay_minutes": 3,
-            "limit_max_drift_points": 30,
-            "stop_max_drift_points": 20,
-            "require_rr_recheck": true,
-            "require_spread_recheck": true,
-            "cancel_if_drift_exceeds": true,
-            "description": "إذا لُمس الأمر المعلق أثناء نافذة منع الأخبار لا يتفعل. يتحول إلى News Hold ثم يُعاد فحص الخبر والـ drift والـ RR بعد انتهاء المنع. إذا بقي صالحاً يدخل MARKET، وإلا يُلغى بأمان."
-        },
-        "near_miss_execution": {
-            "enabled": true,
-            "preserve_planned_risk": true,
-                "description_preserve_planned_risk": "\u0639\u0646\u062f \u062a\u062d\u0648\u064a\u0644 \u0627\u0644\u0623\u0645\u0631 \u0627\u0644\u062d\u062f\u0651\u064a \u0625\u0644\u0649 \u0623\u0645\u0631 \u0633\u0648\u0642 \u0628\u0639\u062f \u062e\u0637\u0623 \u0627\u0644\u062f\u062e\u0648\u0644 \u0628\u0641\u0631\u0642 \u0628\u0633\u064a\u0637\u060c \u064a\u064f\u0646\u0642\u0644 \u0627\u0644\u0648\u0642\u0641 \u0628\u0646\u0641\u0633 \u0645\u0633\u0627\u0641\u0629 \u0627\u0646\u062a\u0642\u0627\u0644 \u0627\u0644\u062f\u062e\u0648\u0644 \u0644\u062a\u0628\u0642\u0649 \u0627\u0644\u0645\u062e\u0627\u0637\u0631\u0629 \u0643\u0645\u0627 \u062e\u064f\u0637\u0651\u0637\u062a. \u0641\u064a 2026-08-03 \u062d\u064f\u0648\u0651\u0644 \u0627\u0644\u0623\u0645\u0631 2f72579f \u0645\u0646 \u062f\u062e\u0648\u0644 4037.48 \u0625\u0644\u0649 4031.76 \u0645\u0639 \u0628\u0642\u0627\u0621 \u0627\u0644\u0648\u0642\u0641 4077.48\u060c \u0641\u0643\u0628\u0631\u062a \u0627\u0644\u0645\u062e\u0627\u0637\u0631\u0629 \u0645\u0646 400 \u0625\u0644\u0649 457 \u0646\u0642\u0637\u0629 \u062f\u0648\u0646 \u0625\u0630\u0646. \u0646\u0641\u0633 \u0645\u0628\u062f\u0623 zone_touch_activation.preserve_planned_risk. \u0627\u0644\u0648\u0642\u0641 \u0644\u0627 \u064a\u062a\u0648\u0633\u0651\u0639 \u0623\u0628\u062f\u0627\u064b: \u0625\u0646 \u0643\u0627\u0646 \u0627\u0644\u0645\u062e\u0637\u0651\u0637 \u0623\u0636\u064a\u0642 \u064a\u064f\u0628\u0642\u0649 \u0639\u0644\u064a\u0647.",
-                "min_halo_points": 12,
-            "max_halo_points": 25,
-            "zone_width_multiplier": 0.75,
-            "recent_range_multiplier": 0.18,
-            "min_confirmation_points": 12,
-            "max_target_progress_pct": 30,
-            "min_remaining_rr": 1.8,
-            "require_planner_context": true,
-            "description": "If price misses a planner limit area by only a few points, then rejects and moves away in the intended direction, allow a controlled market conversion without widening the original POI itself."
-        },
-        "zone_touch_activation": {
-            "enabled": true,
-            "grace_minutes": 10,
-            "description_grace_minutes": "ننتظر تفعيل السعر الأصلي أولاً. دورة التحليل 5 دقائق، فالافتراضي 10 = دورتان. إذا بقي السعر داخل المنطقة ولم يتفعل الدخول المرجعي خلالهما، يُعتبر الأمر عميقاً أكثر من اللازم ويُملأ عند الحافة.",
-            "allow_after_return": true,
-            "description_allow_after_return": "مغادرة المنطقة في الاتجاه حدث ثابت. إن غادر السعر ثم عاد قبل أن تلتقطه الدورة، يبقى التفعيل قائماً عند الحافة بغض النظر عن السعر الحالي — لأن الحدث وقع فعلاً.",
-            "description": "تفعيل بلمس المنطقة. الخطة تنشر منطقة دخول كاملة، والدخول المرجعي نقطة واحدة داخلها. في 2026-07-30 لمس السعر 4060.40 داخل منطقة شراء 4054.49-4062.05 ولم يُملأ الأمر لأن المرجع كان 4058.27، ثم صعد إلى 4079.88 مخترقاً TP1. المطاردة بسعر السوق ليست الحل: الوقف ثابت فترتفع المخاطرة من 185 إلى 265 نقطة وينهار RR من 1.90 إلى 1.02 تحت الأرضية. الملء عند حافة المنطقة مع تحريك الوقف بنفس المسافة يبقي المخاطرة 185 نقطة و RR 1.69.",
-            "require_exit_in_favour": true,
-            "description_require_exit_in_favour": "لا يكفي اللمس. يجب أن يغادر السعر المنطقة في اتجاه الصفقة (شراء: فوق الحد العلوي · بيع: تحت الحد السفلي). فتيل يدخل المنطقة ثم ينهار ليس إشارة دخول، ولحظة اللمس لا يمكن التمييز بينهما.",
-            "preserve_planned_risk": true,
-            "description_preserve_planned_risk": "الوقف ينتقل بنفس مسافة انتقال الدخول، فتبقى المخاطرة المخططة كما هي بالضبط. هذا هو الفرق الجوهري عن المطاردة: لا توسيع للمخاطرة.",
-            "min_remaining_rr": 1.5,
-            "description_min_remaining_rr": "نفس أرضية risk_settings.min_rr_ratio — لا رقم جديد.",
-            "max_target_progress_pct": 60,
-            "description_max_target_progress_pct": "لا تركب موجة انتهت. تُقاس من حافة المنطقة إلى TP1: إذا قطع السعر أكثر من هذه النسبة فالمكافأة المتبقية لا تبرر الوقف المخطط. اختبار RR وحده لا يمسك هذا لأن TP2 قد يكون بعيداً.",
-            "require_planner_context": true
-        },
-        "smart_entry": {
-            "enabled": true,
-            "fill_at": "mid",
-            "zone_width_points": 50,
-            "min_pullback_points": 60,
-            "max_pullback_points": 350,
-            "description": "Zone execution foundation: order blocks / FVG / support-resistance pullbacks generate structured zones with proximal/distal edges. fill_at=mid starts conservatively from midpoint fills."
-        },
-        "fixed_risk": {
-            "max_risk_distance_points": 300,
-            "description_max_risk_distance_points": "300 نقطة (30$). يُستخدم عندما يُفعَّل fixed_risk صراحةً أو في منطق scale-in الحالي.",
-            "sl_buffer_points": 20,
-            "description_sl_buffer_points": "بفر بالأعلى (للبيع) أو الأسفل (للشراء) من المستوى لوضع الستوب. 20 نقطة = 2.00$.",
-            "scale_in_enabled": true,
-            "scale_in_max": 2,
-            "description_scale_in_max": "أقصى عدد من صفقات التعزيز (بالإضافة للأصلية). 2 = يمكن الدخول 3 صفقات في نفس الاتجاه: الأصلية + تعزيز 1 + تعزيز 2. المسافة بين كل تعزيز ≥ 200pts.",
-            "scale_in_trigger_points": 200,
-            "description_scale_in_trigger_points": "مسافة التعزيز: لا يُسمح بالتعزيز إلا بعد أن يبتعد السعر ≥ 200 نقطة (20$) عن دخول الصفقة الأصلية.",
-            "scale_in_size_ratio": 0.5,
-            "description_scale_in_size_ratio": "نسبة حجم التعزيز مقارنة بالصفقة الأصلية. 0.5 = نصف الحجم.",
-            "description": "fixed_risk remains available for legacy/manual runs, but is no longer the default production profile.",
-            "note": "Hybrid is now the preferred execution mode for Sprint 1 immediate fixes.",
-            "description_scale_in": "مفعّل: تعزيز عند اقتراب السعر من مستوى دعم/مقاومة قوي في fixed_risk فقط."
-        },
-        "allowed_order_types": [
-            "BUY_MARKET",
-            "SELL_MARKET",
-            "BUY_LIMIT",
-            "SELL_LIMIT"
-        ],
-        "description": "Paper order classification only: market, limit, or stop based on entry vs current price.",
-        "pending_support_removed": false,
-        "description_allowed_order_types": "أوامر الدخول: ماركت أو ليميت فقط. أُلغي BUY_STOP و SELL_STOP نهائياً. أمر STOP يشتري فوق السوق أو يبيع تحته — أي يدفع سعراً أسوأ من المتاح الآن مقابل انتظار تأكيد الحركة، وهذه مطاردة. صفقة 29 يوليو الخاسرة كانت بهذا الشكل: BUY STOP عند 4028.77 فوق السوق بينما ثلاثة وكلاء مؤهلين يقولون بيع، فامتلأت داخل هبوط 310 نقطة. أمر LIMIT عكسه: يبيع في القوة ويشتري في الضعف بسعر أفضل دائماً. حين يقع المستوى في الجهة التي لا تسمح بذلك، يُنفَّذ ماركت بالسعر الحالي بدل انتظار سعر أسوأ — لا صفقة تُهمَل ولا سعر يُطارَد."
+    "smart_entry": {
+      "enabled": true,
+      "fill_at": "mid",
+      "zone_width_points": 50,
+      "min_pullback_points": 60,
+      "max_pullback_points": 350,
+      "description": "Zone execution foundation: order blocks / FVG / support-resistance pullbacks generate structured zones with proximal/distal edges. fill_at=mid starts conservatively from midpoint fills."
     },
-    "operation_mode": "classic_consensus",
-    "operation_modes": {
-        "classic_consensus": {
-            "description": "Final signal from 5-agent weighted consensus + risk/news/session/duplicate filters.",
-            "requires_three_agents": false,
-            "paper_only": true
-        }
+    "fixed_risk": {
+      "max_risk_distance_points": 300,
+      "description_max_risk_distance_points": "300 نقطة (30$). يُستخدم عندما يُفعَّل fixed_risk صراحةً أو في منطق scale-in الحالي.",
+      "sl_buffer_points": 20,
+      "description_sl_buffer_points": "بفر بالأعلى (للبيع) أو الأسفل (للشراء) من المستوى لوضع الستوب. 20 نقطة = 2.00$.",
+      "scale_in_enabled": true,
+      "scale_in_max": 2,
+      "description_scale_in_max": "أقصى عدد من صفقات التعزيز (بالإضافة للأصلية). 2 = يمكن الدخول 3 صفقات في نفس الاتجاه: الأصلية + تعزيز 1 + تعزيز 2. المسافة بين كل تعزيز ≥ 200pts.",
+      "scale_in_trigger_points": 200,
+      "description_scale_in_trigger_points": "مسافة التعزيز: لا يُسمح بالتعزيز إلا بعد أن يبتعد السعر ≥ 200 نقطة (20$) عن دخول الصفقة الأصلية.",
+      "scale_in_size_ratio": 0.5,
+      "description_scale_in_size_ratio": "نسبة حجم التعزيز مقارنة بالصفقة الأصلية. 0.5 = نصف الحجم.",
+      "description": "fixed_risk remains available for legacy/manual runs, but is no longer the default production profile.",
+      "note": "Hybrid is now the preferred execution mode for Sprint 1 immediate fixes.",
+      "description_scale_in": "مفعّل: تعزيز عند اقتراب السعر من مستوى دعم/مقاومة قوي في fixed_risk فقط."
     },
-    "pending_governor": {
-        "enabled": true,
-        "replace_min_dominance_delta": 8,
-        "keep_if_return_probability_above": 45,
-        "cancel_if_return_probability_below": 25,
-        "require_quality_improvement": true,
-        "description": "Same-direction pending governance: keep dominant thesis, replace weaker pending with stronger new thesis, or cancel stale ones instead of stacking multiple pending orders."
-    },
-    "scenario_governor": {
-        "enabled": true,
-        "cancel_siblings_on_activation": true,
-        "allow_replace_older_pending_scenarios": true,
-        "min_plan_score_improvement": 12,
-        "min_primary_dominance_improvement": 15,
-        "replace_grace_minutes": 30,
-        "description": "Phase 6 foundation: manage PRIMARY/STANDBY pending ladders as one scenario family. When one family member activates, sibling pending orders are cancelled. A newer stronger session-plan family may replace an older pending family for the same symbol/direction.",
-        "description_min_plan_score_improvement": "\u0623\u062f\u0646\u0649 \u0641\u0631\u0642 \u0641\u064a \u062f\u0631\u062c\u0629 \u0627\u0644\u062e\u0637\u0629 \u064a\u0633\u0645\u062d \u0644\u0639\u0627\u0626\u0644\u0629 \u062c\u062f\u064a\u062f\u0629 \u0628\u0625\u0644\u063a\u0627\u0621 \u0623\u0648\u0627\u0645\u0631 \u0642\u0627\u0626\u0645\u0629. \u0631\u064f\u0641\u0639 \u0645\u0646 4 \u0625\u0644\u0649 12: \u0641\u064a 2026-08-03 \u0623\u064f\u0644\u063a\u064a \u0627\u0644\u0623\u0645\u0631 03ed828a (\u062c\u0648\u062f\u0629 74\u060c \u0647\u064a\u0645\u0646\u0629 77.3\u060c \u062d\u0627\u0644\u0629 FRESH) \u0628\u0639\u062f \u062e\u0645\u0633 \u062f\u0642\u0627\u0626\u0642 \u0645\u0646 \u0646\u0634\u0631\u0647 \u0644\u0623\u0646 \u062e\u0637\u0629 \u062c\u062f\u064a\u062f\u0629 \u0633\u062c\u0651\u0644\u062a \u0623\u0631\u0628\u0639 \u0646\u0642\u0627\u0637 \u0623\u0639\u0644\u0649 \u0641\u0642\u0637 \u2014 \u0641\u0631\u0642 \u062f\u0627\u062e\u0644 \u0647\u0627\u0645\u0634 \u0627\u0644\u0636\u0648\u0636\u0627\u0621 \u0644\u0627 \u064a\u0628\u0631\u0651\u0631 \u0625\u0644\u063a\u0627\u0621 \u0623\u0645\u0631 \u0644\u0645 \u062a\u064f\u062a\u062d \u0644\u0647 \u0641\u0631\u0635\u0629 \u0627\u0644\u062a\u0639\u0628\u0626\u0629.",
-        "description_min_primary_dominance_improvement": "\u0645\u062b\u0644\u0647 \u0639\u0644\u0649 \u0645\u062d\u0648\u0631 \u0627\u0644\u0647\u064a\u0645\u0646\u0629\u060c \u0631\u064f\u0641\u0639 \u0645\u0646 5 \u0625\u0644\u0649 15.",
-        "description_replace_grace_minutes": "\u0645\u0647\u0644\u0629 \u0628\u0627\u0644\u062f\u0642\u0627\u0626\u0642 \u064a\u064f\u062d\u0645\u0649 \u0641\u064a\u0647\u0627 \u0627\u0644\u0623\u0645\u0631 \u0627\u0644\u062c\u062f\u064a\u062f \u0645\u0646 \u0627\u0644\u0627\u0633\u062a\u0628\u062f\u0627\u0644. \u0627\u0644\u0623\u0645\u0631 \u0627\u0644\u062d\u062f\u0651\u064a \u064a\u062d\u062a\u0627\u062c \u0648\u0642\u062a\u0627\u064b \u0644\u064a\u0635\u0644\u0647 \u0627\u0644\u0633\u0639\u0631 \u2014 \u0648\u0647\u0630\u0627 \u0643\u0644 \u063a\u0631\u0636\u0647 \u2014 \u0641\u0625\u0644\u063a\u0627\u0624\u0647 \u0628\u0639\u062f \u062f\u0642\u0627\u0626\u0642 \u064a\u0639\u0646\u064a \u0623\u0646\u0647 \u0644\u0645 \u064a\u064f\u0645\u0646\u062d \u0627\u0644\u0641\u0631\u0635\u0629 \u0627\u0644\u062a\u064a \u0628\u064f\u0646\u064a\u062a \u0639\u0644\u064a\u0647ا \u0627\u0644\u062e\u0637\u0629. \u0627\u0644\u0623\u0645\u0631 \u0627\u0644\u0628\u0627\u0626\u062a (STALE) \u0623\u0648 \u0627\u0644\u0645\u064f\u0628\u0637\u064e\u0644 \u064a\u064f\u0633\u062a\u0628\u062f\u064e\u0644 \u0641\u0648\u0631\u0627\u064b \u0645\u0647\u0645\u0627 \u0643\u0627\u0646 \u0639\u0645\u0631\u0647: \u0627\u0644\u0645\u0647\u0644\u0629 \u062a\u062d\u0645\u064a \u0627\u0644\u0623\u0645\u0631 \u0627\u0644\u0635\u063a\u064a\u0631 \u0644\u0627 \u0627\u0644\u0623\u0645\u0631 \u0627\u0644\u062e\u0627\u0637\u0626. \u0627\u0636\u0628\u0637\u0647\u0627 \u0639\u0644\u0649 0 \u0644\u0644\u0639\u0648\u062f\u0629 \u0644\u0644\u0633\u0644\u0648\u0643 \u0627\u0644\u0633\u0627\u0628\u0642."
-    },
-    "adaptive_execution": {
-        "enabled": true,
+    "allowed_order_types": [
+      "BUY_MARKET",
+      "SELL_MARKET",
+      "BUY_LIMIT",
+      "SELL_LIMIT"
+    ],
+    "description": "Paper order classification only: market, limit, or stop based on entry vs current price.",
+    "pending_support_removed": false,
+    "description_allowed_order_types": "أوامر الدخول: ماركت أو ليميت فقط. أُلغي BUY_STOP و SELL_STOP نهائياً. أمر STOP يشتري فوق السوق أو يبيع تحته — أي يدفع سعراً أسوأ من المتاح الآن مقابل انتظار تأكيد الحركة، وهذه مطاردة. صفقة 29 يوليو الخاسرة كانت بهذا الشكل: BUY STOP عند 4028.77 فوق السوق بينما ثلاثة وكلاء مؤهلين يقولون بيع، فامتلأت داخل هبوط 310 نقطة. أمر LIMIT عكسه: يبيع في القوة ويشتري في الضعف بسعر أفضل دائماً. حين يقع المستوى في الجهة التي لا تسمح بذلك، يُنفَّذ ماركت بالسعر الحالي بدل انتظار سعر أسوأ — لا صفقة تُهمَل ولا سعر يُطارَد."
+  },
+  "operation_mode": "classic_consensus",
+  "operation_modes": {
+    "classic_consensus": {
+      "description": "Final signal from 5-agent weighted consensus + risk/news/session/duplicate filters.",
+      "requires_three_agents": false,
+      "paper_only": true
+    }
+  },
+  "pending_governor": {
+    "enabled": true,
+    "replace_min_dominance_delta": 8,
+    "keep_if_return_probability_above": 45,
+    "cancel_if_return_probability_below": 25,
+    "require_quality_improvement": true,
+    "description": "Same-direction pending governance: keep dominant thesis, replace weaker pending with stronger new thesis, or cancel stale ones instead of stacking multiple pending orders."
+  },
+  "scenario_governor": {
+    "enabled": true,
+    "cancel_siblings_on_activation": true,
+    "allow_replace_older_pending_scenarios": true,
+    "min_plan_score_improvement": 12,
+    "min_primary_dominance_improvement": 15,
+    "replace_grace_minutes": 30,
+    "description": "Phase 6 foundation: manage PRIMARY/STANDBY pending ladders as one scenario family. When one family member activates, sibling pending orders are cancelled. A newer stronger session-plan family may replace an older pending family for the same symbol/direction.",
+    "description_min_plan_score_improvement": "أدنى فرق في درجة الخطة يسمح لعائلة جديدة بإلغاء أوامر قائمة. رُفع من 4 إلى 12: في 2026-08-03 أُلغي الأمر 03ed828a (جودة 74، هيمنة 77.3، حالة FRESH) بعد خمس دقائق من نشره لأن خطة جديدة سجّلت أربع نقاط أعلى فقط — فرق داخل هامش الضوضاء لا يبرّر إلغاء أمر لم تُتح له فرصة التعبئة.",
+    "description_min_primary_dominance_improvement": "مثله على محور الهيمنة، رُفع من 5 إلى 15.",
+    "description_replace_grace_minutes": "مهلة بالدقائق يُحمى فيها الأمر الجديد من الاستبدال. الأمر الحدّي يحتاج وقتاً ليصله السعر — وهذا كل غرضه — فإلغاؤه بعد دقائق يعني أنه لم يُمنح الفرصة التي بُنيت عليها الخطة. الأمر البائت (STALE) أو المُبطَل يُستبدَل فوراً مهما كان عمره: المهلة تحمي الأمر الصغير لا الأمر الخاطئ. اضبطها على 0 للعودة للسلوك السابق."
+  },
+  "adaptive_execution": {
+    "enabled": true,
+    "keep_pending_max_move_points": 120,
+    "keep_pending_max_target_progress_pct": 30,
+    "promote_to_market_min_move_points": 60,
+    "promote_to_market_max_move_points": 220,
+    "max_target_progress_for_market_promotion_pct": 55,
+    "min_remaining_rr_for_market_promotion": 1.5,
+    "profiles": {
+      "default": {
         "keep_pending_max_move_points": 120,
         "keep_pending_max_target_progress_pct": 30,
         "promote_to_market_min_move_points": 60,
         "promote_to_market_max_move_points": 220,
         "max_target_progress_for_market_promotion_pct": 55,
-        "min_remaining_rr_for_market_promotion": 1.5,
-        "profiles": {
-            "default": {
-                "keep_pending_max_move_points": 120,
-                "keep_pending_max_target_progress_pct": 30,
-                "promote_to_market_min_move_points": 60,
-                "promote_to_market_max_move_points": 220,
-                "max_target_progress_for_market_promotion_pct": 55,
-                "min_remaining_rr_for_market_promotion": 1.5
-            },
-            "continuation": {
-                "keep_pending_max_move_points": 140,
-                "keep_pending_max_target_progress_pct": 35,
-                "promote_to_market_min_move_points": 70,
-                "promote_to_market_max_move_points": 240,
-                "max_target_progress_for_market_promotion_pct": 60,
-                "min_remaining_rr_for_market_promotion": 1.35,
-                "description": "Trend / continuation setups may allow a wider move-before-fill and slightly lower remaining RR before market promotion."
-            },
-            "reversal": {
-                "keep_pending_max_move_points": 90,
-                "keep_pending_max_target_progress_pct": 20,
-                "promote_to_market_min_move_points": 45,
-                "promote_to_market_max_move_points": 150,
-                "max_target_progress_for_market_promotion_pct": 38,
-                "min_remaining_rr_for_market_promotion": 1.8,
-                "description": "Liquidity reversals need tighter move control and stronger remaining RR before market promotion."
-            },
-            "range": {
-                "keep_pending_max_move_points": 80,
-                "keep_pending_max_target_progress_pct": 18,
-                "promote_to_market_min_move_points": 35,
-                "promote_to_market_max_move_points": 120,
-                "max_target_progress_for_market_promotion_pct": 35,
-                "min_remaining_rr_for_market_promotion": 1.8,
-                "description": "Range fades are short-lived, so promotion/chasing must stay strict."
-            }
-        },
-        "session_adjustments": {
-            "LONDON + NEW YORK AFTERNOON": {
-                "promote_to_market_max_move_points": 250,
-                "max_target_progress_for_market_promotion_pct": 62,
-                "description": "Most liquid session: allow slightly more room before calling the move missed."
-            },
-            "LATE NEW YORK NIGHT": {
-                "promote_to_market_max_move_points": 180,
-                "max_target_progress_for_market_promotion_pct": 40,
-                "min_remaining_rr_for_market_promotion": 1.7,
-                "description": "Late-session promotions should be stricter because follow-through quality often degrades."
-            }
-        },
-        "description": "Adaptive Execution Calibration: when a morning pending family already exists, later 3-agent or 2-agent+confirmation signals choose the best execution now using setup-type and session-aware thresholds — keep pending, promote to market, replace with a continuation thesis, or skip as a missed move."
+        "min_remaining_rr_for_market_promotion": 1.5
+      },
+      "continuation": {
+        "keep_pending_max_move_points": 140,
+        "keep_pending_max_target_progress_pct": 35,
+        "promote_to_market_min_move_points": 70,
+        "promote_to_market_max_move_points": 240,
+        "max_target_progress_for_market_promotion_pct": 60,
+        "min_remaining_rr_for_market_promotion": 1.35,
+        "description": "Trend / continuation setups may allow a wider move-before-fill and slightly lower remaining RR before market promotion."
+      },
+      "reversal": {
+        "keep_pending_max_move_points": 90,
+        "keep_pending_max_target_progress_pct": 20,
+        "promote_to_market_min_move_points": 45,
+        "promote_to_market_max_move_points": 150,
+        "max_target_progress_for_market_promotion_pct": 38,
+        "min_remaining_rr_for_market_promotion": 1.8,
+        "description": "Liquidity reversals need tighter move control and stronger remaining RR before market promotion."
+      },
+      "range": {
+        "keep_pending_max_move_points": 80,
+        "keep_pending_max_target_progress_pct": 18,
+        "promote_to_market_min_move_points": 35,
+        "promote_to_market_max_move_points": 120,
+        "max_target_progress_for_market_promotion_pct": 35,
+        "min_remaining_rr_for_market_promotion": 1.8,
+        "description": "Range fades are short-lived, so promotion/chasing must stay strict."
+      }
     },
-    "directional_authority": {
-        "enabled": true,
-        "min_confidence_for_flip": 88,
-        "min_trigger_score_for_flip": 70,
-        "require_reversal_setup_for_flip": true,
-        "require_rejection_confirmed_for_flip": true,
-        "require_fresh_sweep_for_flip": true,
-        "description": "Phase D: when the day map has a confirmed direction, weak local opposite-direction ideas are blocked. Only a strong reversal / regime-flip setup may override the day map.",
-        "allow_live_book_retirement": true,
-        "min_agents_to_retire_map": 3,
-        "description_live_book_retirement": "تقاعد الخريطة بالكتاب الحيّ. شروط الانقلاب الخمسة أعلاه تصف طريقاً واحداً لإسقاط الخريطة: إعداد انعكاسي برفض مؤكَّد وكنس موافق. حركة استمرارية عكس خريطة قديمة لا تحققها مهما بلغت قوتها، فكانت الخريطة غير قابلة للدحض من الوكلاء الذين تدّعي تلخيصهم. التقاعد ضيّق عمداً: يحتاج نفس الأغلبية المؤهلة التي يحتاجها قبول خطة جديدة (min_agents_to_retire_map)، وصفر وكيل مؤهل ما زال يدافع عن الخريطة، ولا صفقات حيّة عليها — الصفقات المفتوحة تُدار بوقفها وأهدافها ولا تُعاكَس بإشارة جديدة. اضبطه false للعودة لسيادة الخريطة المطلقة."
+    "session_adjustments": {
+      "LONDON + NEW YORK AFTERNOON": {
+        "promote_to_market_max_move_points": 250,
+        "max_target_progress_for_market_promotion_pct": 62,
+        "description": "Most liquid session: allow slightly more room before calling the move missed."
+      },
+      "LATE NEW YORK NIGHT": {
+        "promote_to_market_max_move_points": 180,
+        "max_target_progress_for_market_promotion_pct": 40,
+        "min_remaining_rr_for_market_promotion": 1.7,
+        "description": "Late-session promotions should be stricter because follow-through quality often degrades."
+      }
     },
-    "day_map_sanity": {
-        "enabled": true,
-        "block_when_plan_not_ready": true,
-        "entry_zone_tolerance_points": 40,
-        "require_planner_execution_for_extreme_poi": true,
-        "allowed_execution_modes_for_extreme_poi": [
-            "session_plan_ladder",
-            "session_plan_ladder_market",
-            "adaptive_market_promotion"
-        ],
-        "description": "Phase E: all execution paths must respect the day map. Signals outside the planner zones are blocked, and EXTREME_POI scenarios must use planner-led execution instead of local legacy bypasses.",
-        "require_day_map_for_all_entries": false,
-        "description_require_day_map_for_all_entries": "false = خريطة اليوم الغائبة لا تمنع الإشارة. خلال 300 دورة كانت 294 دورة (98%) بلا خريطة جاهزة — غالباً لأن المخطِّط رفض خريطته هو على اقتناع النمط، لا لأن السوق غير مقروء. فكان إجماع 87.3% بلا معارض يُرفض لغياب رأي ثانٍ لا لخلاف معه. كل البوابات الأخرى تبقى عاملة: بوابة الوكلاء، سقف المعارضة، حارس التكرار، مسافة المسارات، والتحقق النهائي. اضبطه true للعودة لسلوك «لا تداول بلا خريطة»."
-    },
-    "split_execution": {
-        "enabled": true,
-        "starter_risk_share": 0.4,
-        "add_on_risk_share": 0.6,
-        "starter_max_zone_progress_pct": 45,
-        "convert_touched_zone_to_market": true,
-        "description_convert_touched_zone_to_market": "حين يبلغ السعر المنطقة المرسومة تُنفَّذ الرِجل ماركت بدل إلغائها. سابقاً كانت تُرفض بالكامل عند التسعير كـ MARKET، فلا يُنشأ أمر إلا والسعر بعيد، ويُرفض التنفيذ في اللحظة الصحيحة. كل بوابات المخاطرة والتكرار تبقى سارية.",
-        "description": "Phase C: when the planner classifies a zone as EXTREME_POI and price is already inside the first half of the zone, create a starter market entry plus an add-on pending order under one scenario family and one shared risk budget."
-    },
-    "strategy_profiles": {
-        "liquidity_reversal": {
-            "description": "SMC-led reversal profile: sweep + POI + reaction can qualify with 2 strong aligned agents.",
-            "min_agents_agree": 2,
-            "min_consensus_confidence": 70,
-            "agent_min_confidence": 68,
-            "lead_agent": "smc",
-            "require_lead_alignment": true,
-            "min_structure_quality": "MODERATE",
-            "min_poi_rank_score": 32,
-            "min_trigger_score": 60,
-            "required_trigger_states": [
-                "REJECTION_CONFIRMED"
-            ],
-            "require_sweep_confirmation": "MODERATE",
-            "weight_overrides": {
-                "smc": 0.35,
-                "price_action": 0.25,
-                "multitimeframe": 0.2,
-                "classical": 0.1,
-                "technical": 0.1
-            }
-        },
-        "trend_pullback": {
-            "description": "Trend continuation / pullback profile with stronger HTF alignment requirements.",
-            "min_agents_agree": 3,
-            "min_consensus_confidence": 72,
-            "agent_min_confidence": 70,
-            "lead_agent": "multitimeframe",
-            "require_lead_alignment": true,
-            "min_structure_quality": "MODERATE",
-            "min_poi_rank_score": 24,
-            "min_trigger_score": 40,
-            "required_trigger_states": [],
-            "require_sweep_confirmation": null,
-            "weight_overrides": {
-                "multitimeframe": 0.3,
-                "classical": 0.25,
-                "price_action": 0.2,
-                "smc": 0.15,
-                "technical": 0.1
-            }
-        },
-        "range_fade": {
-            "description": "Range/extreme reaction profile with softer lead-agent enforcement.",
-            "min_agents_agree": 2,
-            "min_consensus_confidence": 71,
-            "agent_min_confidence": 68,
-            "lead_agent": "price_action",
-            "require_lead_alignment": false,
-            "min_structure_quality": "WEAK",
-            "min_poi_rank_score": 18,
-            "min_trigger_score": 55,
-            "required_trigger_states": [
-                "REJECTION_CONFIRMED",
-                "TOUCH_NO_REJECTION"
-            ],
-            "require_sweep_confirmation": null,
-            "weight_overrides": {
-                "price_action": 0.3,
-                "classical": 0.25,
-                "smc": 0.2,
-                "technical": 0.15,
-                "multitimeframe": 0.1
-            }
-        }
-    },
-    "weekly_report": {
-        "enabled": true,
-        "day_of_week": 5,
-        "lookback_days": 7,
-        "min_trades_for_report": 5,
-        "max_chars": 3500,
-        "send_telegram": true,
-        "storage_path": "storage/weekly_report.json",
-        "timezone": "Asia/Hebron",
-        "report_time": "10:00",
-        "description": "Weekly AI Performance Report — يرسل السبت 10:00 صباحاً بتوقيتك المحلي"
-    },
-    "symbols": [
-        {
-            "symbol": "XAU/USD",
-            "enabled": true
-        },
-        {
-            "symbol": "WTI/USD",
-            "enabled": false,
-            "description_disabled": "WTI/USD disabled temporarily: the free Twelve Data plan does not provide real time_series data for oil (needs Basic plan or higher). Set this back to true after upgrading the plan or adding an oil-capable data source."
-        }
+    "description": "Adaptive Execution Calibration: when a morning pending family already exists, later 3-agent or 2-agent+confirmation signals choose the best execution now using setup-type and session-aware thresholds — keep pending, promote to market, replace with a continuation thesis, or skip as a missed move."
+  },
+  "directional_authority": {
+    "enabled": true,
+    "min_confidence_for_flip": 88,
+    "min_trigger_score_for_flip": 70,
+    "require_reversal_setup_for_flip": true,
+    "require_rejection_confirmed_for_flip": true,
+    "require_fresh_sweep_for_flip": true,
+    "description": "Phase D: when the day map has a confirmed direction, weak local opposite-direction ideas are blocked. Only a strong reversal / regime-flip setup may override the day map.",
+    "allow_live_book_retirement": true,
+    "min_agents_to_retire_map": 3,
+    "description_live_book_retirement": "تقاعد الخريطة بالكتاب الحيّ. شروط الانقلاب الخمسة أعلاه تصف طريقاً واحداً لإسقاط الخريطة: إعداد انعكاسي برفض مؤكَّد وكنس موافق. حركة استمرارية عكس خريطة قديمة لا تحققها مهما بلغت قوتها، فكانت الخريطة غير قابلة للدحض من الوكلاء الذين تدّعي تلخيصهم. التقاعد ضيّق عمداً: يحتاج نفس الأغلبية المؤهلة التي يحتاجها قبول خطة جديدة (min_agents_to_retire_map)، وصفر وكيل مؤهل ما زال يدافع عن الخريطة، ولا صفقات حيّة عليها — الصفقات المفتوحة تُدار بوقفها وأهدافها ولا تُعاكَس بإشارة جديدة. اضبطه false للعودة لسيادة الخريطة المطلقة."
+  },
+  "day_map_sanity": {
+    "enabled": true,
+    "block_when_plan_not_ready": true,
+    "entry_zone_tolerance_points": 40,
+    "require_planner_execution_for_extreme_poi": true,
+    "allowed_execution_modes_for_extreme_poi": [
+      "session_plan_ladder",
+      "session_plan_ladder_market",
+      "adaptive_market_promotion"
     ],
-    "instruments": [
-        {
-            "symbol": "XAU/USD",
-            "name": "Gold",
-            "category": "metal",
-            "point_size": 0.1,
-            "price_decimals": 2,
-            "min_sl_distance_points": 400,
-            "trailing_distance": 150,
-            "trailing_step": 40,
-            "early_breakeven_points": 150,
-            "duplicate_zone_points": 200,
-            "description_early_breakeven": "early_breakeven_points=150: عند وصول الصفقة إلى +150 نقطة (15$) يُنقل الستوب إلى الدخول فوراً. متناسب مع SL=400pts و trailing gap=150pts."
-        },
-        {
-            "symbol": "WTI/USD",
-            "name": "WTI Crude Oil",
-            "category": "oil",
-            "point_size": 0.01,
-            "price_decimals": 2,
-            "min_sl_distance_points": 120,
-            "trailing_distance": 70,
-            "trailing_step": 25,
-            "early_breakeven_points": 70,
-            "duplicate_zone_points": 100,
-            "description_oil_risk_profile": "Balanced WTI profile: 1 point = $0.01, SL floor 120 pts ($1.20), breakeven at +70 pts ($0.70), trailing gap 70 pts and step 25 pts."
-        }
-    ],
-    "analyst_scoreboard": {
-        "enabled": true,
-        "tie_band_points": 0,
-        "description": "لوحة النتيجة بالنقاط. طبقة التقطير الحالية تقيس هل رأى النظام نفس الرسم (اتجاه/نمط/منطقة) — لا من ربح. في 29 يوليو كانت قراءة النظام للرسم مقبولة ومع ذلك خسر 198 نقطة بينما التقط المحلل 314. تُحسب النقاط للطرفين بنفس القاعدة: خطة المحلل من دخوله ووقفه وأهدافه مقابل مدى ما بعد النشر، وصفقات النظام من تعبئتها وإغلاقها الفعليين. عدم التداول في يوم رابح = صفر لا 'بلا نتيجة'.",
-        "description_tie_band_points": "فجوة ضمن هذا النطاق تُعدّ تعادلاً. صفر = أي فارق يُحسب."
+    "description": "Phase E: all execution paths must respect the day map. Signals outside the planner zones are blocked, and EXTREME_POI scenarios must use planner-led execution instead of local legacy bypasses.",
+    "require_day_map_for_all_entries": false,
+    "description_require_day_map_for_all_entries": "false = خريطة اليوم الغائبة لا تمنع الإشارة. خلال 300 دورة كانت 294 دورة (98%) بلا خريطة جاهزة — غالباً لأن المخطِّط رفض خريطته هو على اقتناع النمط، لا لأن السوق غير مقروء. فكان إجماع 87.3% بلا معارض يُرفض لغياب رأي ثانٍ لا لخلاف معه. كل البوابات الأخرى تبقى عاملة: بوابة الوكلاء، سقف المعارضة، حارس التكرار، مسافة المسارات، والتحقق النهائي. اضبطه true للعودة لسلوك «لا تداول بلا خريطة»."
+  },
+  "split_execution": {
+    "enabled": true,
+    "starter_risk_share": 0.4,
+    "add_on_risk_share": 0.6,
+    "starter_max_zone_progress_pct": 45,
+    "convert_touched_zone_to_market": true,
+    "description_convert_touched_zone_to_market": "حين يبلغ السعر المنطقة المرسومة تُنفَّذ الرِجل ماركت بدل إلغائها. سابقاً كانت تُرفض بالكامل عند التسعير كـ MARKET، فلا يُنشأ أمر إلا والسعر بعيد، ويُرفض التنفيذ في اللحظة الصحيحة. كل بوابات المخاطرة والتكرار تبقى سارية.",
+    "description": "Phase C: when the planner classifies a zone as EXTREME_POI and price is already inside the first half of the zone, create a starter market entry plus an add-on pending order under one scenario family and one shared risk budget."
+  },
+  "strategy_profiles": {
+    "liquidity_reversal": {
+      "description": "SMC-led reversal profile: sweep + POI + reaction can qualify with 2 strong aligned agents.",
+      "min_agents_agree": 2,
+      "min_consensus_confidence": 70,
+      "agent_min_confidence": 68,
+      "lead_agent": "smc",
+      "require_lead_alignment": true,
+      "min_structure_quality": "MODERATE",
+      "min_poi_rank_score": 32,
+      "min_trigger_score": 60,
+      "required_trigger_states": [
+        "REJECTION_CONFIRMED"
+      ],
+      "require_sweep_confirmation": "MODERATE",
+      "weight_overrides": {
+        "smc": 0.35,
+        "price_action": 0.25,
+        "multitimeframe": 0.2,
+        "classical": 0.1,
+        "technical": 0.1
+      }
+    },
+    "trend_pullback": {
+      "description": "Trend continuation / pullback profile with stronger HTF alignment requirements.",
+      "min_agents_agree": 3,
+      "min_consensus_confidence": 72,
+      "agent_min_confidence": 70,
+      "lead_agent": "multitimeframe",
+      "require_lead_alignment": true,
+      "min_structure_quality": "MODERATE",
+      "min_poi_rank_score": 24,
+      "min_trigger_score": 40,
+      "required_trigger_states": [],
+      "require_sweep_confirmation": null,
+      "weight_overrides": {
+        "multitimeframe": 0.3,
+        "classical": 0.25,
+        "price_action": 0.2,
+        "smc": 0.15,
+        "technical": 0.1
+      }
+    },
+    "range_fade": {
+      "description": "Range/extreme reaction profile with softer lead-agent enforcement.",
+      "min_agents_agree": 2,
+      "min_consensus_confidence": 71,
+      "agent_min_confidence": 68,
+      "lead_agent": "price_action",
+      "require_lead_alignment": false,
+      "min_structure_quality": "WEAK",
+      "min_poi_rank_score": 18,
+      "min_trigger_score": 55,
+      "required_trigger_states": [
+        "REJECTION_CONFIRMED",
+        "TOUCH_NO_REJECTION"
+      ],
+      "require_sweep_confirmation": null,
+      "weight_overrides": {
+        "price_action": 0.3,
+        "classical": 0.25,
+        "smc": 0.2,
+        "technical": 0.15,
+        "multitimeframe": 0.1
+      }
     }
+  },
+  "weekly_report": {
+    "enabled": true,
+    "day_of_week": 5,
+    "lookback_days": 7,
+    "min_trades_for_report": 5,
+    "max_chars": 3500,
+    "send_telegram": true,
+    "storage_path": "storage/weekly_report.json",
+    "timezone": "Asia/Hebron",
+    "report_time": "10:00",
+    "description": "Weekly AI Performance Report — يرسل السبت 10:00 صباحاً بتوقيتك المحلي"
+  },
+  "symbols": [
+    {
+      "symbol": "XAU/USD",
+      "enabled": true
+    },
+    {
+      "symbol": "WTI/USD",
+      "enabled": false,
+      "description_disabled": "WTI/USD disabled temporarily: the free Twelve Data plan does not provide real time_series data for oil (needs Basic plan or higher). Set this back to true after upgrading the plan or adding an oil-capable data source."
+    }
+  ],
+  "instruments": [
+    {
+      "symbol": "XAU/USD",
+      "name": "Gold",
+      "category": "metal",
+      "point_size": 0.1,
+      "price_decimals": 2,
+      "min_sl_distance_points": 400,
+      "trailing_distance": 150,
+      "trailing_step": 40,
+      "early_breakeven_points": 150,
+      "duplicate_zone_points": 200,
+      "description_early_breakeven": "early_breakeven_points=150: عند وصول الصفقة إلى +150 نقطة (15$) يُنقل الستوب إلى الدخول فوراً. متناسب مع SL=400pts و trailing gap=150pts."
+    },
+    {
+      "symbol": "WTI/USD",
+      "name": "WTI Crude Oil",
+      "category": "oil",
+      "point_size": 0.01,
+      "price_decimals": 2,
+      "min_sl_distance_points": 120,
+      "trailing_distance": 70,
+      "trailing_step": 25,
+      "early_breakeven_points": 70,
+      "duplicate_zone_points": 100,
+      "description_oil_risk_profile": "Balanced WTI profile: 1 point = $0.01, SL floor 120 pts ($1.20), breakeven at +70 pts ($0.70), trailing gap 70 pts and step 25 pts."
+    }
+  ],
+  "analyst_scoreboard": {
+    "enabled": true,
+    "tie_band_points": 0,
+    "description": "لوحة النتيجة بالنقاط. طبقة التقطير الحالية تقيس هل رأى النظام نفس الرسم (اتجاه/نمط/منطقة) — لا من ربح. في 29 يوليو كانت قراءة النظام للرسم مقبولة ومع ذلك خسر 198 نقطة بينما التقط المحلل 314. تُحسب النقاط للطرفين بنفس القاعدة: خطة المحلل من دخوله ووقفه وأهدافه مقابل مدى ما بعد النشر، وصفقات النظام من تعبئتها وإغلاقها الفعليين. عدم التداول في يوم رابح = صفر لا 'بلا نتيجة'.",
+    "description_tie_band_points": "فجوة ضمن هذا النطاق تُعدّ تعادلاً. صفر = أي فارق يُحسب."
+  }
 }
