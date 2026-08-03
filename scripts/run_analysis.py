@@ -3879,6 +3879,46 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                         except Exception as _g_exc:
                             logger.warning("Path 2: Gemini confirmation failed: %s", _g_exc)
 
+                    # ── The risk agent's verdict is not advisory ──
+                    #
+                    # This path rebuilt the signal straight out of
+                    # ``all_results["risk"]`` -- its entry, its stop, its
+                    # targets -- while ignoring the one field that says
+                    # whether that plan is tradeable at all. So a setup the
+                    # risk agent had already refused was published as a live
+                    # pending order, carrying the refused numbers.
+                    #
+                    # 2026-08-03 16:11, TRADE_..._d0c708d9: SELL 4045.99 with
+                    # a 398-point stop. ``rr_filter`` was False (no mapped
+                    # level pays for that stop) and ``trade_grade_filter`` was
+                    # False, so ``approved`` was False. The card went out
+                    # anyway as "SELL LIMIT ... Status: Pending order".
+                    #
+                    # Every other execution route honours this flag; the
+                    # scale-in path checks it at line ~2552. This one did not,
+                    # which made the whole risk layer optional on the busiest
+                    # path in the system.
+                    #
+                    # Refusing here costs nothing that was ever legitimate: if
+                    # the plan clears the risk agent, ``approved`` is True and
+                    # the branch runs exactly as before.
+                    if (macro_confirmed or gemini_confirmed) and not (
+                        all_results.get("risk", {}) or {}
+                    ).get("approved", True):
+                        _risk = all_results.get("risk", {}) or {}
+                        _failed = [
+                            name for name, ok in
+                            ((_risk.get("risk_metrics") or {}).get("checks") or {}).items()
+                            if not ok
+                        ]
+                        logger.info(
+                            "❌ Path 2 blocked: risk agent refused this plan (%s; failed: %s)",
+                            _risk.get("rejection_reason") or "not approved",
+                            ", ".join(_failed) or "unspecified",
+                        )
+                        macro_confirmed = False
+                        gemini_confirmed = False
+
                     # ── If confirmed → rebuild signal payload and finalize entry ──
                     if macro_confirmed or gemini_confirmed:
                         risk = all_results.get("risk", {}) or {}
