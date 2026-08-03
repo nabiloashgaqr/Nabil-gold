@@ -37,10 +37,23 @@ from agents.open_trades_manager import OpenTradesManager
 SYMBOL = "XAU/USD"
 
 
-def _config() -> dict:
+def _config(silent_action: str = "SCALE_OUT") -> dict:
+    """Config for these tests, with the silent verdict pinned.
+
+    The shipped default is now HOLD: an undecided agent book neither closes
+    nor reduces a position. These tests were written to exercise the
+    SCALE_OUT machinery, so they set it explicitly rather than inheriting
+    whatever config.json currently says. That keeps them testing the
+    mechanism instead of the default, and it means changing the default again
+    cannot quietly turn them into no-ops.
+
+    ``test_silent_book_holds_by_default`` covers the shipped setting.
+    """
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     with open(os.path.join(root, "config.json"), encoding="utf-8") as fh:
-        return json.load(fh)
+        config = json.load(fh)
+    config["trade_management"]["thesis_exit"]["agent_vote"]["silent_action"] = silent_action
+    return config
 
 
 def _book(**agents) -> dict:

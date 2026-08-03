@@ -50,9 +50,18 @@ ENTRY = 4074.78
 STOP = 4089.78
 
 
-def _config() -> dict:
+def _config(silent_action: str = "SCALE_OUT") -> dict:
+    """Config with the silent verdict pinned to SCALE_OUT.
+
+    The shipped default is HOLD (an undecided book changes nothing), but this
+    file exists to prove that WHEN a scale-out does happen it never moves the
+    stop to the wrong side of the market. Pinning the setting keeps that
+    guarantee under test whatever the default becomes.
+    """
     with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as fh:
-        return json.load(fh)
+        config = json.load(fh)
+    config["trade_management"]["thesis_exit"]["agent_vote"]["silent_action"] = silent_action
+    return config
 
 
 def _book(**agents) -> dict:

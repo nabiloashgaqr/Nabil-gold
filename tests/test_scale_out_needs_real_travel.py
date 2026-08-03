@@ -48,7 +48,21 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agents.open_trades_manager import OpenTradesManager  # noqa: E402
 from utils.helpers import load_config  # noqa: E402
 
-CONFIG = load_config()
+def _scaling_config() -> dict:
+    """Config with the silent verdict pinned to SCALE_OUT.
+
+    The shipped default is HOLD -- an undecided agent book neither closes nor
+    reduces a position. This file tests the travel floor that applies WHEN a
+    scale-out is enabled, so it sets the mode explicitly. Otherwise every
+    assertion here would pass vacuously the moment the default changed, which
+    is the quietest way for a guard to stop guarding anything.
+    """
+    config = load_config()
+    config["trade_management"]["thesis_exit"]["agent_vote"]["silent_action"] = "SCALE_OUT"
+    return config
+
+
+CONFIG = _scaling_config()
 ENTRY = 4067.02          # the zone-edge fill
 STOP = 4027.02           # 400 pts
 TP1, TP2 = 4117.02, 4157.02
@@ -150,7 +164,7 @@ def test_an_offside_trade_is_still_refused_for_its_own_reason() -> None:
 
 
 def test_the_floor_can_be_tuned() -> None:
-    config = load_config()
+    config = _scaling_config()
     config["trade_management"]["thesis_exit"]["min_mfe_points"] = 5.0
     result = _evaluate(_live_trade(mfe=8.0), 4067.63, manager=_manager(config))
     assert "THESIS_SCALE_OUT" in result["events"], (
