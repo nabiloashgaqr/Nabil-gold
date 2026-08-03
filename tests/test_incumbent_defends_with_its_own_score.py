@@ -106,7 +106,19 @@ def test_a_clearly_stronger_plan_still_replaces() -> None:
 
 
 def test_a_weak_incumbent_plan_is_still_replaceable() -> None:
-    result = _review(_planner_order(50.0), _new_plan(59.0, 70.0))
+    """A genuinely stronger plan still evicts a weak one.
+
+    The margin is taken from config so this keeps testing the rule after a
+    tuning pass rather than the number it was tuned to.
+    """
+    from utils.helpers import load_config
+    governor = load_config()["scenario_governor"]
+    score_bar = float(governor["min_plan_score_improvement"])
+    dom_bar = float(governor["min_primary_dominance_improvement"])
+    result = _review(
+        _planner_order(50.0),
+        _new_plan(50.0 + score_bar, 70.0 + dom_bar),
+    )
     assert result["action"] == "REPLACE_PENDING_FAMILY"
 
 
@@ -162,7 +174,7 @@ def test_a_dominance_gain_cannot_mask_a_quality_collapse() -> None:
 
 def test_a_quality_gain_cannot_mask_a_dominance_collapse() -> None:
     incumbent = _consensus_order(quality=59.0, dominance=63.0)
-    result = _review(incumbent, _new_plan(88.0, 50.0))
+    result = _review(incumbent, _new_plan(88.0, 40.0))
     assert result["action"] == "KEEP_EXISTING_FAMILY"
 
 
@@ -172,6 +184,17 @@ def test_better_on_both_axes_still_replaces() -> None:
 
 
 def test_better_on_one_axis_and_flat_on_the_other_still_replaces() -> None:
-    """Flat is not a regression: a genuine edge on either axis is enough."""
+    """Flat is not a regression: a genuine edge on either axis is enough.
+
+    The edge is read from config rather than hardcoded. The bars were raised
+    from 4/5 to 12/15 after 2026-08-03, when a five-minute-old FRESH order was
+    cancelled for a four-point improvement; a test that pins the old number
+    would have to be rewritten on every tuning pass, and would quietly stop
+    testing the RULE.
+    """
+    from utils.helpers import load_config
+    bar = float(load_config()["scenario_governor"]["min_primary_dominance_improvement"])
     incumbent = _consensus_order(quality=59.0, dominance=63.8)
-    assert _review(incumbent, _new_plan(59.0, 70.0))["action"] == "REPLACE_PENDING_FAMILY"
+    assert _review(
+        incumbent, _new_plan(59.0, 63.8 + bar)
+    )["action"] == "REPLACE_PENDING_FAMILY"
