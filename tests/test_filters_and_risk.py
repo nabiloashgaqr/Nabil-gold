@@ -135,11 +135,29 @@ def test_risk_agent_rejects_consecutive_losses() -> None:
 
 
 def test_risk_agent_applies_min_sl_floor_and_rescales_targets() -> None:
-    """ATR=4.0 with nearby support normally produces a ~60-point SL (well
-    under a 200-point floor). The floor must widen SL to exactly 200 points
-    AND rescale TP1/TP2 by the same R:R ratios implied by the ATR
-    multipliers, so min_rr_ratio still passes instead of rejecting the trade
-    purely because SL got floored."""
+    """The floor widens the stop; targets stay on real levels.
+
+    UPDATED 2026-08-03. This test previously asserted
+    ``target_method == "rr_from_floored_sl"`` and that TP1/TP2 came back at
+    exactly ``tp_mult/sl_mult`` against the floored stop. That behaviour was
+    the ``-400/+500/+900`` signature the operator kept receiving, and this
+    fixture shows why it was never safe:
+
+    * the fixture's real resistances are 2360 and 2372;
+    * the old ratio rebuild aimed TP2 at 200 x 3.5/1.5 = 466 pts -> 2396.7,
+      which is beyond BOTH of them -- a price no analysis identified;
+    * it then reported that invented level as 2.33R and passed
+      ``min_rr_ratio``.
+
+    A plan is not made safe by measuring an imaginary target against a padded
+    stop. Targets now come from the map, and whether the trade is worth taking
+    is decided by ``rr_filter`` against the stop that actually ships. Here the
+    map cannot pay for a 200-point stop, so the trade is refused -- which is
+    the honest answer, and the one the old assertion was hiding.
+
+    What this still pins, unchanged: the floor must widen the stop to exactly
+    200 points and mark the method with ``min_floor``.
+    """
     config = {
         "risk_settings": {
             "min_rr_ratio": 1.5,
@@ -153,14 +171,24 @@ def test_risk_agent_applies_min_sl_floor_and_rescales_targets() -> None:
     }
     result = RiskManagementAgent(config).evaluate(base_risk_results())
 
+    # The floor still does its job.
     assert result["stop_loss"]["distance_points"] == pytest.approx(200.0, abs=0.5)
     assert "min_floor" in result["stop_loss"]["method"]
-    assert result["risk_metrics"]["target_method"] == "rr_from_floored_sl"
-    # tp ratios must match tp_mult/sl_mult exactly (2.0/1.5 and 3.5/1.5)
-    assert result["take_profit"]["tp1"]["rr_ratio"] == pytest.approx(2.0 / 1.5, abs=0.02)
-    assert result["take_profit"]["tp2"]["rr_ratio"] == pytest.approx(3.5 / 1.5, abs=0.02)
-    # the whole point of rescaling: min_rr_ratio must still be satisfied
-    assert result["take_profit"]["tp2"]["rr_ratio"] >= 1.5
+
+    # Targets come from the map, not from the floored stop.
+    assert result["risk_metrics"]["target_method"].startswith("liquidity_chain")
+
+    # Every shipped target must be a level the analysis actually produced.
+    real_levels = set(base_risk_results()["classical"]["resistance_levels"])
+    assert result["take_profit"]["tp2"]["price"] in real_levels, (
+        "TP2 must be a mapped resistance, not floored_risk x a ratio."
+    )
+
+    # And because the map cannot pay for a 200-point stop, the trade is
+    # refused rather than published with a flattering label.
+    assert result["take_profit"]["tp2"]["rr_ratio"] < 1.5
+    assert result["approved"] is False
+    assert result["risk_metrics"]["checks"]["rr_filter"] is False
 
 
 def test_risk_agent_no_floor_when_atr_sl_already_wider() -> None:
