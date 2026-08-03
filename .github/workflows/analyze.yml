@@ -111,7 +111,8 @@ jobs:
             tests/test_published_zone_meets_the_floor.py \
             tests/test_targets_come_from_liquidity.py \
             tests/test_rejected_setups_are_not_traded.py \
-            tests/test_post_tp2_reentry_block.py
+            tests/test_post_tp2_reentry_block.py \
+            tests/test_scale_out_needs_real_travel.py
 
       - name: 🔎 Validate Production Setup
         run: |
