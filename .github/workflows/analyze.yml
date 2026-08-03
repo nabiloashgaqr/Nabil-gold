@@ -123,7 +123,8 @@ jobs:
             tests/test_consensus_path_uses_dynamic_floor.py \
             tests/test_block_message_states_the_real_window.py \
             tests/test_refused_plans_are_never_published.py \
-            tests/test_stop_derived_rr_earns_nothing.py
+            tests/test_stop_derived_rr_earns_nothing.py \
+            tests/test_smc_projects_liquidity_pools.py
 
       - name: 🔎 Validate Production Setup
         run: |
