@@ -1169,8 +1169,45 @@ class TelegramService:
             lines.append(f"• <b>Status:</b> {html.escape(old_status)} → {html.escape(new_status)}")
         else:
             lines.append(f"• <b>Status:</b> {html.escape(new_status)}")
+        # Report the price the order actually filled at.
+        #
+        # `trade` is the row as it was BEFORE this cycle's update: the send
+        # happens at open_trades_manager.py:543 and the database write at
+        # :566. So on the cycle that fills an order, `trade["entry_price"]`
+        # still holds the PLANNED limit while `updates["entry_price"]` holds
+        # the real fill.
+        #
+        # 2026-08-03, trade 2f72579f: a SELL LIMIT planned at 4037.48 was
+        # converted to MARKET and filled at 4031.76. The activation card said
+        # "Entry: 4037.48 · Current Price: 4031.76 · Distance to activation:
+        # 0 pts" -- three lines that together hide 57 points of slippage and
+        # describe a fill that never happened at that price.
+        #
+        # Every later card reads the same field, so once the row is written
+        # the two agree and this changes nothing.
+        filled_entry = updates.get("entry_price", trade.get("entry_price"))
+        planned_entry = trade.get("entry_price")
+        entry_line = f"• <b>Entry:</b> {self._money(filled_entry, symbol)}"
+        try:
+            if (
+                "ORDER_FILLED" in events
+                and planned_entry is not None
+                and filled_entry is not None
+                and abs(float(filled_entry) - float(planned_entry)) >= 0.01
+            ):
+                from utils.instruments import price_to_points
+
+                slippage = abs(
+                    price_to_points(float(filled_entry) - float(planned_entry), symbol=symbol)
+                )
+                entry_line += (
+                    f" (planned {self._money(planned_entry, symbol)}, "
+                    f"filled {slippage:.0f} pts away)"
+                )
+        except (TypeError, ValueError):
+            pass
         lines.extend([
-            f"• <b>Entry:</b> {self._money(trade.get('entry_price'), symbol)}",
+            entry_line,
             f"• <b>Current Price:</b> {self._money(current_price, symbol)}",
         ])
         if trade_leg_label:
@@ -1184,8 +1221,13 @@ class TelegramService:
             lines.append(f"• <b>Exit Price:</b> {self._money(close_price, symbol)}")
             lines.append(f"• <b>Actual PnL:</b> {self._fmt_points(actual)}")
         elif "NEWS_HOLD" in events or old_status == "PENDING" or new_status == "PENDING":
+            # "Distance to activation" only means something while the order
+            # is still waiting. On the cycle that fills it the value is 0 by
+            # construction, and printing it next to a market conversion that
+            # happened 57 points away from the limit reads as a claim that
+            # price reached the entry. It did not -- that is why it converted.
             pts_to_fill = evaluation.get("pending_distance_points")
-            if pts_to_fill is not None:
+            if pts_to_fill is not None and "ORDER_FILLED" not in events:
                 lines.append(f"• <b>Distance to activation:</b> {float(pts_to_fill):.0f} pts")
             hours_open = evaluation.get("hours_open")
             if hours_open is not None:
