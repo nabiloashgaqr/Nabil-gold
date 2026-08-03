@@ -1224,6 +1224,54 @@ class OpenTradesManager(BaseAgent):
         realized_so_far = self._f(
             updates.get("realized_pnl_points", trade.get("realized_pnl_points")), 0.0
         )
+
+        # A booked partial must survive a missing field.
+        #
+        # The composite needs BOTH numbers. If either is absent -- an older
+        # row, or a Supabase write that dropped an unknown column
+        # (services/database.py:1127 drops-and-retries) -- the settlement
+        # silently reverted to the remaining leg alone and the money already
+        # taken off the table vanished from the record.
+        #
+        # 2026-08-03, trade bdde9a5f: half was booked at +3.0 on the scale-out
+        # and the Breakeven card then reported "Actual PnL: +0.0 pts". The
+        # realized half was real; the zero was not.
+        #
+        # `partial_close` is the flag every scale-out path sets, so it is the
+        # honest signal that a reduction happened. When it is set but the
+        # numbers are missing, fall back to the configured fraction rather
+        # than to zero -- an approximation of a real event beats an exact
+        # record of one that is untrue.
+        # `scale_out_price` is the evidence, and it is deliberately the ONLY
+        # trigger. `partial_close` alone is ambiguous: TP1 sets it too, and an
+        # earlier version of this reconstruction keyed on the flag and halved
+        # every legacy TP1 trade (700 -> 350, 243.3 -> 121.7). Two existing
+        # tests caught that immediately and they were right. A thesis
+        # scale-out always records the price its half left at; a TP1 partial
+        # does not.
+        scale_price = self._f(updates.get("scale_out_price", trade.get("scale_out_price")), 0.0)
+        if partial_close and scale_price > 0 and (closed_fraction_so_far <= 0 or realized_so_far == 0.0):
+            recovered_fraction = closed_fraction_so_far
+            if recovered_fraction <= 0:
+                recovered_fraction = min(max(self.thesis_exit_silent_scale_fraction, 0.0), 1.0)
+            recovered_realized = realized_so_far
+            if recovered_fraction > 0 and recovered_realized == 0.0:
+                recovered_realized = round(
+                    calculate_pips(entry, scale_price, trade_type, symbol) * recovered_fraction, 1
+                )
+            if recovered_fraction != closed_fraction_so_far or recovered_realized != realized_so_far:
+                self.logger.warning(
+                    "Trade %s scaled out at %.2f but its booked numbers were "
+                    "incomplete (fraction=%s, realized=%s); reconstructed %.0f%% at "
+                    "%.1f pts so the closed half is not lost from the result",
+                    trade.get("id"), scale_price,
+                    updates.get("closed_fraction", trade.get("closed_fraction")),
+                    updates.get("realized_pnl_points", trade.get("realized_pnl_points")),
+                    recovered_fraction * 100, recovered_realized,
+                )
+            closed_fraction_so_far = recovered_fraction
+            realized_so_far = recovered_realized
+
         if final_pnl is not None and closed_fraction_so_far > 0 and new_status in self.CLOSED_STATUSES:
             remaining = max(0.0, 1.0 - closed_fraction_so_far)
             composite = round(realized_so_far + final_pnl * remaining, 1)
@@ -2170,6 +2218,45 @@ class OpenTradesManager(BaseAgent):
                             f"{abs(pnl_points):.0f} pts offside, so moving the stop to "
                             f"breakeven would close it rather than protect it; "
                             f"the original stop still governs"
+                        ),
+                        "agent_vote": vote,
+                    }
+
+                # A profit too small to survive noise is not a profit worth
+                # protecting -- and protecting it is what kills the trade.
+                #
+                # Scaling out carries the stop to breakeven. When the trade has
+                # travelled only a few points, breakeven sits inside the spread
+                # and ordinary noise takes it out immediately. The position is
+                # closed not because the thesis failed but because it had not
+                # yet moved.
+                #
+                # 2026-08-03, trade bdde9a5f: a BUY filled at 4067.02 was
+                # scaled at 4067.63 -- SIX POINTS of open profit, 1% of the way
+                # to TP1 -- the stop jumped to entry, and ten minutes later
+                # price touched 4065.33 and closed the whole position flat.
+                # Half was booked at +3.0 points. That is not risk management;
+                # it is a coin flip charged to the account.
+                #
+                # `min_mfe_points` (35) already expresses this idea and already
+                # guards the countertrend branch below. It was never applied
+                # here, so the weakest verdict in the system -- a SILENT agent
+                # book -- could close a trade that had barely left the gate.
+                #
+                # Measured on the trade's best excursion, not its current
+                # price, so a position that genuinely ran and gave the move
+                # back is still protected.
+                min_travel = self.thesis_exit_min_mfe_points
+                if min_travel > 0 and max_favorable_excursion < min_travel:
+                    return {
+                        "exit_now": False,
+                        "scale_out": False,
+                        "kind": "OPPOSITE_CONTINUATION_HELD_TOO_EARLY",
+                        "reason": (
+                            f"Thesis scale-out withheld: the position has only "
+                            f"travelled {max_favorable_excursion:.0f} pts (needs "
+                            f"{min_travel:.0f}), so moving the stop to breakeven "
+                            f"would close it on noise rather than protect a gain"
                         ),
                         "agent_vote": vote,
                     }
