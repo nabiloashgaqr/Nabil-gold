@@ -211,6 +211,7 @@
     "time_warning_hours": 4,
     "expire_after_hours": 24,
     "auto_move_sl_to_entry_after_tp1": true,
+    "description_auto_move_sl_to_entry_after_tp1": "الوعد الموصول (قرار المشغّل 2026-08-04): عند ضرب الهدف الأول يُنقل الستوب إلى الدخول بغض النظر عن قيمة TP1، ويُحجز نصف الصفقة هناك. شرط التفعيل الوحيد: أن تكون الصفقة قد قطعت min_breakeven_rr=0.5R على الأقل — وشرط min_tp1_rr=0.8 يضمن أن كل TP1 منشور (≥0.8R) يتخطاه دائماً. هذا الربط هو ما أزال رفض خرائط TP1-أقرب-من-150 (خريطة A+ 97.8% يوم 4 أغسطس قُتلت به قبل الربط). المُحفَّظ: early_breakeven_points يبقى طبقة تعجيل إضافية للصفقات ذات TP1 الأبعد.",
     "trailing_stop_enabled": true,
     "trailing_activation_at": "TP1",
     "trailing_distance_points": 150,
