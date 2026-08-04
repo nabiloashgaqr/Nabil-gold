@@ -368,7 +368,7 @@ def test_every_ladder_exit_records_a_reason():
 # that has been stored all along.
 
 def _with_opinions(created, ops, gate="planner execution requires 3 qualified agents; got 2"):
-    return {
+    out = {
         "plan_ready": True, "session_bias": "BUY", "planner_grade": "A",
         "payload": {
             "execution_audit": {
@@ -378,6 +378,14 @@ def _with_opinions(created, ops, gate="planner execution requires 3 qualified ag
             "agent_opinions": ops,
         },
     }
+    # UPDATED: the stored row never carried `agent_opinions` -- that key is
+    # only attached to the throwaway copy built for the Telegram card, which
+    # is why the first version of this section printed nothing against live
+    # data. The audit now carries `agent_reads`; both are exercised.
+    out["payload"]["execution_audit"]["agent_reads"] = ops
+    out["payload"]["execution_audit"]["agent_min_confidence"] = 70.0
+    out["payload"]["execution_audit"]["mapped_side"] = "BUY"
+    return out
 
 
 NEAR_OPS = [
@@ -451,3 +459,65 @@ def test_the_bar_is_read_from_config_not_hard_coded(capsys):
     out = capsys.readouterr().out
     # price_action at 68 now clears a 60 bar, so it is no longer a shortfall.
     assert "missed the 60% bar" in out or "AGREED but missed" not in out
+
+
+# ── the agent reads must be PERSISTED, not just rendered ────────────────────
+#
+# The first version of the near-miss section read `payload.agent_opinions`.
+# That key is attached by `_decorate_session_plan_for_delivery`, which builds
+# a deepcopy for the Telegram card and throws it away; the row written to
+# session_plans never had it. So the section was correct, found nothing, and
+# printed nothing against live data -- an assumption about storage that was
+# never checked.
+#
+# `execution_audit.agent_reads` is written with the audit itself.
+
+def test_the_audit_carries_the_agent_reads():
+    src = open(os.path.join(ROOT, "scripts", "run_analysis.py"), encoding="utf-8").read()
+    assert '"agent_reads": _session_plan_agent_opinions(' in src, (
+        "the persisted audit has no agent reads, so the near-miss question "
+        "cannot be answered from history"
+    )
+    assert '"agent_min_confidence": _safe_float(' in src
+    assert '"mapped_side": str(' in src
+
+
+def test_the_section_reads_the_audit_field():
+    src = open(
+        os.path.join(ROOT, "scripts", "analyze_plan_rejections.py"), encoding="utf-8"
+    ).read()
+    assert 'audit.get("agent_reads")' in src
+
+
+def test_missing_agent_reads_are_declared_not_silent(capsys):
+    """Absence must be stated, exactly as the empty-audit state is."""
+    rows = [{
+        "plan_ready": True, "session_bias": "BUY", "planner_grade": "A",
+        "payload": {"execution_audit": {
+            "ladder_created": 0, "planner_gate_allow": False,
+            "planner_gate_reason": "requires 3 qualified agents; got 2",
+            "mapped_side": "BUY",
+        }},
+    } for _ in range(7)]
+    rows += [_refused("x")]
+    report._report("sim", rows, CONFIG)
+    out = capsys.readouterr().out
+    assert "AGREED but missed" in out
+    assert "no agent reads recorded on 7" in out
+
+
+def test_the_bar_comes_from_the_audit_when_present(capsys):
+    """A row recorded under a different bar must be judged against that bar."""
+    ops = [{"key": "price_action", "direction": "BUY", "confidence": 62}]
+    row = {
+        "plan_ready": True, "session_bias": "BUY", "planner_grade": "A",
+        "payload": {"execution_audit": {
+            "ladder_created": 0, "planner_gate_allow": False,
+            "planner_gate_reason": "got 2", "agent_reads": ops,
+            "agent_min_confidence": 65.0, "mapped_side": "BUY",
+        }},
+    }
+    report._report("sim", [row, _refused("x")], CONFIG)
+    out = capsys.readouterr().out
+    # 65 - 62 = 3 point shortfall, not 70 - 62 = 8.
+    assert "median shortfall 3.0 pts" in out
