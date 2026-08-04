@@ -4240,6 +4240,32 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                                 {k: v for k, v in _LAST_LADDER_STOP.items() if k != "reason"}
                                 or None
                             ) if not ladder_created else None,
+                            # THE AGENT COUNT, AS IT STOOD.
+                            #
+                            # "requires 3 qualified agents ... got 2" is the
+                            # largest single reason a READY map produces no
+                            # order. Whether that is the bar working or the
+                            # bar missing by a hair depends on HOW FAR the
+                            # agents that agreed fell short -- and nothing
+                            # recorded it.
+                            #
+                            # `_session_plan_agent_opinions` already computes
+                            # exactly this, but only inside
+                            # `_decorate_session_plan_for_delivery`, which
+                            # builds a throwaway copy for the Telegram card.
+                            # The persisted row never carried it, so the
+                            # question could not be answered from history.
+                            "agent_reads": _session_plan_agent_opinions(
+                                decision.get("agent_details") or {}
+                            ),
+                            "agent_min_confidence": _safe_float(
+                                ((config.get("signal_requirements") or {})
+                                 .get("agent_min_confidence")), 70.0
+                            ),
+                            "mapped_side": str(
+                                (all_results.get("session_plan") or {}).get("session_bias")
+                                or ""
+                            ).upper(),
                         }
                     },
                 )

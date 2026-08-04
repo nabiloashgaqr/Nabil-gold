@@ -273,22 +273,47 @@ def _order_outcome_section(ready: List[Dict[str, Any]], config: Dict[str, Any]) 
         #
         # Reported, never acted on. No threshold is read as a target here.
         near = []
+        missing_reads = 0
         for row in ready:
             payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
             audit = payload.get("execution_audit") or {}
             if int(audit.get("ladder_created") or 0) > 0:
                 continue
-            side = str(row.get("session_bias") or payload.get("session_bias") or "").upper()
+            # Read the audit's own copy first.
+            #
+            # `payload.agent_opinions` is only ever attached to the throwaway
+            # object built for the Telegram card, never to the stored row --
+            # which is why the first version of this section printed nothing
+            # at all. `execution_audit.agent_reads` is written with the audit
+            # itself, so it is the field that actually exists in history.
+            reads = audit.get("agent_reads") or payload.get("agent_opinions") or []
+            bar = _f(audit.get("agent_min_confidence"), min_agent_conf) or min_agent_conf
+            side = str(
+                audit.get("mapped_side")
+                or row.get("session_bias")
+                or payload.get("session_bias")
+                or ""
+            ).upper()
             if side not in {"BUY", "SELL"}:
                 continue
-            for op in payload.get("agent_opinions") or []:
+            if not reads:
+                missing_reads += 1
+                continue
+            for op in reads:
                 if str(op.get("key")) == "macro_fundamental":
                     continue  # confirms separately, not part of the count
                 if str(op.get("direction") or "").upper() != side:
                     continue
                 conf = _f(op.get("confidence"))
-                if 0 < conf < min_agent_conf:
-                    near.append((min_agent_conf - conf, str(op.get("key")), conf))
+                if 0 < conf < bar:
+                    near.append((bar - conf, str(op.get("key")), conf))
+
+        if not near and missing_reads:
+            print(f"\n  Agents that AGREED but missed the {min_agent_conf:.0f}% bar")
+            print(f"    no agent reads recorded on {missing_reads} of these maps")
+            print("    → agent_reads is written with the execution audit, so this\n"
+                  "      stays empty until new maps are published after the change\n"
+                  "      was deployed. Re-run once a fresh READY map exists.")
 
         if near:
             near.sort()
