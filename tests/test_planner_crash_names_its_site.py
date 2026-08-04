@@ -160,4 +160,8 @@ def test_no_behaviour_setting_was_changed():
     req = CONFIG.get("signal_requirements") or {}
     assert float(planner.get("min_primary_quality_score", 70)) == 70
     assert int(req.get("min_agents_agree", 3)) == 3
-    assert float(req.get("agent_min_confidence", 70)) == 70
+    # UPDATED 2026-08-04: agent_min_confidence 70 -> 67 by operator decision.
+    # The assertion is kept, not deleted, so the shipped bar stays pinned to
+    # one number -- it now pins the new one. See
+    # tests/test_agent_bar_is_sixty_seven.py for the evidence behind it.
+    assert float(req.get("agent_min_confidence", 67)) == 67

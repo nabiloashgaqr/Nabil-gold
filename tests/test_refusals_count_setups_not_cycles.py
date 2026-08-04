@@ -151,4 +151,6 @@ def test_no_threshold_was_changed():
     assert float(planner.get("min_primary_quality_score", 70)) == 70
     req = CONFIG.get("signal_requirements") or {}
     assert int(req.get("min_agents_agree", 3)) == 3
-    assert float(req.get("agent_min_confidence", 70)) == 70
+    # UPDATED 2026-08-04: agent_min_confidence 70 -> 67 by operator decision.
+    # Kept, not deleted, so the shipped bar stays pinned to one number.
+    assert float(req.get("agent_min_confidence", 67)) == 67
