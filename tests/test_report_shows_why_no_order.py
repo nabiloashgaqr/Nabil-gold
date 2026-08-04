@@ -172,10 +172,19 @@ def test_maps_without_an_audit_are_counted_not_guessed(capsys):
     assert "no audit recorded   : 4" in out, out
 
 
-def test_no_audited_rows_prints_no_section(capsys):
+def test_no_audited_rows_explains_itself(capsys):
+    """UPDATED 2026-08-04. This asserted the section stays silent when no
+    audit exists. That silence was the defect: three minutes after the
+    feature shipped the report looked byte-identical to the old one and the
+    operator could not tell whether it had deployed. The section now prints
+    an explicit "no audit yet" line instead, and the assertion was inverted
+    to match -- see test_published_maps_with_no_audit_say_so.
+    """
     rows = [{"plan_ready": True, "session_bias": "BUY"}] + [_refused("x")]
     out = _run(rows, capsys)
-    assert "What happened to the published maps" not in out
+    assert "What happened to the published maps" in out
+    assert "no execution audit" in out
+    assert "orders placed" not in out
 
 
 def test_a_healthy_run_reports_every_map_as_an_order(capsys):
@@ -204,3 +213,48 @@ def test_no_admission_threshold_was_changed():
     planner = CONFIG.get("session_planner") or {}
     assert float(planner.get("min_primary_quality_score", 70)) == 70
     assert int(planner.get("min_authority_alignment_count", 2)) == 2
+
+
+# ── the empty state must explain itself ─────────────────────────────────────
+#
+# Added 2026-08-04 after the first deployment. The section was written to
+# print only when at least one audit existed, so three minutes after shipping
+# -- with 21 published maps, none of them audited yet -- the report looked
+# byte-identical to the old one. The operator ran it, saw no new section, and
+# reasonably asked why. "No data yet" and "nothing to report" must not look
+# the same.
+
+def test_published_maps_with_no_audit_say_so(capsys):
+    rows = [{"plan_ready": True, "session_bias": "BUY", "planner_grade": "A"}
+            for _ in range(21)]
+    rows += [_refused("archetype conviction is LOW: X") for _ in range(30)]
+    out = _run(rows, capsys)
+    assert "What happened to the published maps" in out, (
+        "a window with published maps but no audits printed nothing at all, "
+        "which is indistinguishable from the feature not being deployed"
+    )
+    assert "no execution audit on any of the 21 published maps" in out
+    assert "until new maps are published" in out
+
+
+def test_the_empty_state_does_not_claim_orders_were_placed(capsys):
+    rows = [{"plan_ready": True, "session_bias": "BUY"} for _ in range(5)]
+    rows += [_refused("x")]
+    out = _run(rows, capsys)
+    assert "orders placed" not in out
+    assert "Why a READY map produced no order" not in out
+
+
+def test_a_window_with_no_published_maps_stays_quiet(capsys):
+    out = _run([_refused("x") for _ in range(5)], capsys)
+    assert "What happened to the published maps" not in out
+
+
+def test_partial_audits_report_both_numbers(capsys):
+    """Mixed windows during rollout must show audited and un-audited."""
+    rows = [_ready(0, GATE_SHORTFALL) for _ in range(4)]
+    rows += [{"plan_ready": True, "session_bias": "BUY"} for _ in range(6)]
+    rows += [_refused("x")]
+    out = _run(rows, capsys)
+    assert "published, no order  : 4" in out
+    assert "no audit recorded   : 6" in out
