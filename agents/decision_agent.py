@@ -133,11 +133,39 @@ class DecisionAgent(BaseAgent):
         # Weights come exclusively from config.json (single source of truth).
         return self.analyze({**data, "all_agents_results": agents_results})
 
+    def _profile_overridden_in_config(self, profile: Dict[str, Any]) -> bool:
+        """True when config.json tunes this profile's agent bar explicitly.
+
+        Distinguishes a deliberate per-profile setting from the constant
+        compiled into services/strategy_profiles.py. Only the former may
+        outrank ``signal_requirements.agent_min_confidence``.
+        """
+        overrides = (self.config.get("strategy_profiles") or {}) if isinstance(self.config, dict) else {}
+        entry = overrides.get(str(profile.get("name") or "")) if isinstance(overrides, dict) else None
+        return isinstance(entry, dict) and "agent_min_confidence" in entry
+
     def _strategy_profile(self, agents_results: Dict[str, Any]) -> Dict[str, Any]:
         profile = select_strategy_profile(self.config, agents_results)
         profile.setdefault("min_agents_agree", self.min_agents_agree)
         profile.setdefault("min_consensus_confidence", self.min_consensus_confidence)
-        profile.setdefault("agent_min_confidence", self.agent_min_confidence)
+
+        # A BUILT-IN DEFAULT MUST NOT OUTRANK A CONFIGURED VALUE.
+        #
+        # `setdefault` only fills a key that is MISSING, and every profile in
+        # services/strategy_profiles.py ships a hard-coded
+        # `agent_min_confidence` (70 for classic_consensus, 68 for the
+        # reversal families). The number in config.json was therefore never
+        # applied here: editing it looked like it had no effect, because on
+        # this path it genuinely had none.
+        #
+        # Measured 2026-08-04: config set to 67, select_strategy_profile
+        # still returned 70 for classic_consensus.
+        #
+        # `strategy_profiles` in config.json stays authoritative -- an
+        # operator who tunes one profile means it. What loses is the value
+        # compiled into the source, which is a default and nothing more.
+        if not self._profile_overridden_in_config(profile):
+            profile["agent_min_confidence"] = self.agent_min_confidence
         profile.setdefault("lead_agent", None)
         profile.setdefault("require_lead_alignment", False)
         return profile
