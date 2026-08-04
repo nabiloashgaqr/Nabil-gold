@@ -127,7 +127,8 @@ jobs:
             tests/test_smc_projects_liquidity_pools.py \
             tests/test_sl_floor_measures_every_path.py \
             tests/test_dashboard_numbers_agree.py \
-            tests/test_dashboards_read_the_same_trades.py
+            tests/test_dashboards_read_the_same_trades.py \
+            tests/test_refusal_reason_names_the_shortfall.py
 
       - name: 🔎 Validate Production Setup
         run: |
