@@ -956,6 +956,30 @@ class SessionPlannerService:
                 reason_parts.append("aligned liquidity sweep")
             if zone_bonus:
                 reason_parts.append(f"{str(zone_context).lower()} map supports the thesis")
+
+            # SAY WHAT IS MISSING, NOT ONLY WHAT IS PRESENT.
+            #
+            # Everything above describes why the direction is credible. When
+            # the state comes back WEAK this same string is stored as
+            # `plan_reason` (see _fallback_day_map), so a refusal was being
+            # reported in the words of a success:
+            #
+            #     "SELL alignment from macro; premium map supports the thesis"
+            #
+            # Measured over 300 cycles: 51 of 116 refused SELL maps (44%)
+            # carried a reason like that. Read from the outside it looks like
+            # the system contradicting itself -- macro agrees, the zone
+            # agrees, and yet nothing is published -- when the real cause is
+            # simply that one aligned source is not two.
+            #
+            # The shortfall is the reason. Naming it costs nothing and makes
+            # the refusal auditable.
+            if state != "CONFIRMED":
+                reason_parts.append(
+                    f"but authority WEAK — only {count} aligned source(s), "
+                    f"needs {self.min_authority_alignment_count} "
+                    f"(or 1 with both an aligned sweep and zone support)"
+                )
         else:
             reason_parts.append("no directional authority sources")
         return {
