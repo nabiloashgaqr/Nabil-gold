@@ -73,12 +73,12 @@
     "min_consensus_confidence": 72,
     "strong_single_agent_confidence": 0,
     "strong_single_agent_enabled": false,
-    "agent_min_confidence": 70,
+    "agent_min_confidence": 67,
     "two_agent_entry": {
       "enabled": true,
       "min_agents_agree": 2,
       "min_consensus_confidence": 72,
-      "agent_min_confidence": 70,
+      "agent_min_confidence": 67,
       "macro_confirmation": {
         "enabled": true,
         "min_confidence": 55,
@@ -93,7 +93,8 @@
       "cross_entry_distance_points": 200,
       "description_cross_entry": "When a trade from either path is open, any new signal from the OTHER path needs ≥200 pts distance. BUY entries must be LOWER than existing BUY, SELL entries must be HIGHER than existing SELL.",
       "description": "When only 2 agents agree (same 70% individual + 72% net thresholds), require external confirmation. Try macro first (no API cost), fall back to Gemini if needed. Macro ≥55% or Gemini ≥70% to confirm."
-    }
+    },
+    "description_agent_min_confidence": "أدنى ثقة يُحتسب عندها رأي الوكيل في العدّ. خُفّضت من 70 إلى 67 بقرار المشغّل في 2026-08-04. السبب مقيس: خريطة BUY بدرجة A 80.2% نُشرت الساعة 12:38 ولم يصدر لها أمر لأن Price Action كان عند 68% — نقطتان تحت الحاجز — فبقي المؤيدون 2 بدل 3. وبلغ السعر 4088.85 لاحقاً، أي أن TP1 عند 4084.01 تحقق فعلاً بينما النظام واقف. القيمة 67 تُبقي الوكيل المتردد (25-37%) خارج العدّ وتُدخل المتفق الحقيقي فقط."
   },
   "smc_engine": {
     "poi_preference": {
