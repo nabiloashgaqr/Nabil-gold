@@ -1898,11 +1898,19 @@ def _execute_session_plan_ladder(
         ladder_decision["planner_execution_gate"] = deepcopy(gate)
         ladder_decision.setdefault("reasons", []).append(f"Planner admission: {gate.get('reason')}")
         role = _decision_ladder_role(ladder_decision)
+        # EVERY exit from the order loop names itself. On 2026-08-04 nine
+        # published maps that produced no order carried a gate reason that
+        # reads as a PASS, and the audit said "stop not recorded" -- because
+        # these in-loop refusals returned without telling `_LAST_LADDER_STOP`.
+        # The measured replay of the A+ 97.8% Asia Morning map died at final
+        # validation here (breakeven beyond TP1) and left no trace in the row.
         if any(_trade_scenario_id(t) == _decision_scenario_id(ladder_decision) and _trade_ladder_role(t) == role for t in staged_trades):
+            _ladder_stop(f"{role} leg already staged for this scenario")
             continue
         duplicate_reason = duplicate_signal_reason(ladder_decision, database, config)
         if duplicate_reason:
             logger.info("Session-plan ladder %s blocked for %s: %s", role, symbol, duplicate_reason)
+            _ladder_stop(f"{role} blocked by duplicate filter: {duplicate_reason}")
             if role in {"PRIMARY", "STARTER"}:
                 return created
             continue
@@ -1912,6 +1920,7 @@ def _execute_session_plan_ladder(
                 "Session-plan ladder %s failed final validation for %s: %s",
                 role, symbol, "; ".join(ladder_violations),
             )
+            _ladder_stop(f"{role} failed final validation: {'; '.join(ladder_violations)}")
             if role in {"PRIMARY", "STARTER"}:
                 return created
             continue
@@ -1924,6 +1933,7 @@ def _execute_session_plan_ladder(
             logger.warning("Failed to send session-plan ladder signal (%s) for %s: %s", role, symbol, exc)
             delivered = False
         if not delivered:
+            _ladder_stop(f"{role} telegram delivery failed; order not recorded")
             if role in {"PRIMARY", "STARTER"}:
                 return created
             continue
