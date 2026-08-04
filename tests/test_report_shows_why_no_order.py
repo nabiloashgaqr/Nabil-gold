@@ -356,3 +356,98 @@ def test_every_ladder_exit_records_a_reason():
         f"{len(silent)} silent exit(s) left in the ladder; the audit cannot "
         f"say why no order was created"
     )
+
+
+# ── how close was the agent count? ──────────────────────────────────────────
+#
+# "requires 3 qualified agents ... got 2" is the largest single reason a READY
+# map produces no order (11 of 20 on 2026-08-04). That refusal is either the
+# bar working or the bar missing by a hair, and the two call for opposite
+# decisions. `payload.agent_opinions` already records each agent's direction
+# and confidence at plan time, so the distinction is measurable from data
+# that has been stored all along.
+
+def _with_opinions(created, ops, gate="planner execution requires 3 qualified agents; got 2"):
+    return {
+        "plan_ready": True, "session_bias": "BUY", "planner_grade": "A",
+        "payload": {
+            "execution_audit": {
+                "ladder_created": created, "planner_gate_allow": created > 0,
+                "planner_gate_reason": gate,
+            },
+            "agent_opinions": ops,
+        },
+    }
+
+
+NEAR_OPS = [
+    {"key": "technical", "direction": "BUY", "confidence": 92},
+    {"key": "price_action", "direction": "BUY", "confidence": 68},
+    {"key": "smc", "direction": "WAIT", "confidence": 37},
+    {"key": "multitimeframe", "direction": "BUY", "confidence": 92},
+]
+FAR_OPS = [
+    {"key": "technical", "direction": "BUY", "confidence": 92},
+    {"key": "price_action", "direction": "BUY", "confidence": 40},
+    {"key": "multitimeframe", "direction": "BUY", "confidence": 92},
+]
+
+
+def test_a_near_miss_is_reported_as_noise(capsys):
+    rows = [_with_opinions(0, NEAR_OPS) for _ in range(6)] + [_refused("x")]
+    report._report("sim", rows, CONFIG)
+    out = capsys.readouterr().out
+    assert "AGREED but missed" in out
+    assert "within 2 pts: 6" in out
+    assert "separating on noise" in out
+
+
+def test_a_genuine_disagreement_is_reported_as_earned(capsys):
+    rows = [_with_opinions(0, FAR_OPS) for _ in range(6)] + [_refused("x")]
+    report._report("sim", rows, CONFIG)
+    out = capsys.readouterr().out
+    assert "AGREED but missed" in out
+    assert "within 2 pts: 0" in out
+    assert "earning its place" in out
+
+
+def test_the_agent_that_missed_is_named(capsys):
+    rows = [_with_opinions(0, NEAR_OPS) for _ in range(4)] + [_refused("x")]
+    report._report("sim", rows, CONFIG)
+    assert "price_action" in capsys.readouterr().out
+
+
+def test_disagreeing_agents_are_not_counted_as_near_misses(capsys):
+    """SMC read WAIT, not BUY. It is not a shortfall, it is a dissent."""
+    rows = [_with_opinions(0, NEAR_OPS) for _ in range(4)] + [_refused("x")]
+    report._report("sim", rows, CONFIG)
+    out = capsys.readouterr().out
+    block = out[out.index("AGREED but missed"):]
+    assert "smc" not in block.split("→")[0]
+
+
+def test_macro_is_excluded_from_the_agent_count(capsys):
+    """Macro confirms separately; it is not one of the five voting agents."""
+    ops = NEAR_OPS + [{"key": "macro_fundamental", "direction": "BUY", "confidence": 64}]
+    rows = [_with_opinions(0, ops) for _ in range(4)] + [_refused("x")]
+    report._report("sim", rows, CONFIG)
+    block = capsys.readouterr().out
+    block = block[block.index("AGREED but missed"):]
+    assert "macro_fundamental" not in block.split("→")[0]
+
+
+def test_maps_that_produced_orders_are_excluded(capsys):
+    rows = [_with_opinions(1, NEAR_OPS) for _ in range(5)] + [_refused("x")]
+    report._report("sim", rows, CONFIG)
+    assert "AGREED but missed" not in capsys.readouterr().out
+
+
+def test_the_bar_is_read_from_config_not_hard_coded(capsys):
+    import copy as _copy
+    cfg = _copy.deepcopy(CONFIG)
+    cfg.setdefault("signal_requirements", {})["agent_min_confidence"] = 60
+    rows = [_with_opinions(0, NEAR_OPS) for _ in range(4)] + [_refused("x")]
+    report._report("sim", rows, cfg)
+    out = capsys.readouterr().out
+    # price_action at 68 now clears a 60 bar, so it is no longer a shortfall.
+    assert "missed the 60% bar" in out or "AGREED but missed" not in out
