@@ -121,8 +121,10 @@ def test_signal_includes_trade_management_rule():
     assert "Management:" in text
     # Numbers must come from the profile the engine will actually apply, not a
     # hardcoded default. _full_decision() carries no setup type, so it falls
-    # back to default_profile (150/40/150).
-    assert "SL → entry after +150 pts" in text
+    # back to default_profile (150/40/150). Protection is wired to TP1 since
+    # 2026-08-04; the profile's early trigger is named as the earlier arm.
+    assert "SL → entry at TP1" in text
+    assert "may arm earlier at +150 pts" in text
     assert "Trail gap 150 pts / step 40 pts" in text
     assert "check 5m" in text
 
@@ -138,7 +140,7 @@ def test_signal_management_text_matches_the_engine_profile():
     decision["setup_type"] = "LIQUIDITY_REVERSAL"
     decision["setup_context"] = {**(decision.get("setup_context") or {}), "setup_type": "LIQUIDITY_REVERSAL"}
     text = _capture_signal(decision)
-    assert "SL → entry after +100 pts" in text
+    assert "may arm earlier at +100 pts" in text
     assert "Trail gap 120 pts / step 30 pts" in text
     assert "+150 pts" not in text
 

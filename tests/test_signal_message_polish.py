@@ -43,9 +43,10 @@ def test_signal_message_separates_votes_context_and_attribution():
     assert "Daily bias: BULLISH (70%)" in text
     assert "Macro: Bullish Gold (64%)" in text
     assert "News: CAUTION / LOW — no hard block" in text
-    # The protection line now qualifies itself: it states whether the trigger
-    # is actually reachable before TP1, and the R-multiple the trade must
-    # travel first. Here TP1 sits 400 pts out against a 150 pt trigger, so it
-    # genuinely does precede the target.
-    assert "Protection:</b> SL → entry after +150 pts (before TP1)" in text
+    # The protection line names the wiring that actually runs: since
+    # 2026-08-04 the TP1 touch moves the stop to entry (here TP1 sits 400 pts
+    # out = 1.33R, past the 0.50R guard), and the distance trigger is named
+    # only as the earlier arm. The R-guard stays stated — silence misleads.
+    assert "Protection:</b> SL → entry at TP1 (400 pts away, half books there)" in text
+    assert "may arm earlier at +150 pts" in text
     assert "needs ≥0.50R travelled" in text

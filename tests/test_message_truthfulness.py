@@ -72,11 +72,19 @@ def test_protection_is_qualified_when_tp1_is_out_of_reach() -> None:
     assert "TP1 is 5 pts away" in line
 
 
-def test_protection_says_before_tp1_when_that_is_true() -> None:
+def test_protection_names_the_tp1_wiring_when_that_is_the_promise() -> None:
+    """Since 2026-08-04 protection is wired to TP1: the touch of TP1 moves the
+    stop to entry. With TP1 270 pts away (1.8R) that is the promise the line
+    must make — the old "+150 pts before TP1" wording described a trigger the
+    engine no longer relies on, and maps with a nearer TP1 were refused on it.
+    """
     telegram = _Capture(CONFIG)
     telegram.send_signal(_decision(tp1=4055.33))
 
-    assert "(before TP1)" in _line(telegram.sent[0], "Protection")
+    line = _line(telegram.sent[0], "Protection")
+    assert "SL → entry at TP1" in line
+    # The distance trigger still exists and can arm earlier on far targets.
+    assert "may arm earlier at +150 pts" in line
 
 
 def test_protection_states_the_r_multiple_gate() -> None:
