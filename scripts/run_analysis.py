@@ -1725,6 +1725,30 @@ def _dynamic_risk_block_for_cycle(
     return should_block_signal(probe, dynamic_risk)
 
 
+#: Why the last session-plan ladder attempt produced no order.
+#:
+#: `execution_audit` recorded the planner GATE verdict and the order count,
+#: and nothing in between. Measured on 2026-08-04: of 21 published maps only
+#: 1 became an order, and 9 of the 20 failures carried a gate reason that
+#: reads as a PASS ("3 qualified agents aligned with the mapped direction").
+#: The gate had allowed them; something after it stopped the ladder, and the
+#: audit had no field to say what.
+#:
+#: `_execute_session_plan_ladder` has nine early exits after that gate --
+#: a live trade already open, a terminal setup state, an entry too close to
+#: price to rest as a pending order, a scenario family kept, and so on. Each
+#: logs its reason and returns 0. This carries the last one out so the audit
+#: can name it.
+_LAST_LADDER_STOP: Dict[str, Any] = {}
+
+
+def _ladder_stop(reason: str, **detail: Any) -> int:
+    """Record why the ladder produced no order, then return 0."""
+    _LAST_LADDER_STOP.clear()
+    _LAST_LADDER_STOP.update({"reason": reason, **detail})
+    return 0
+
+
 def _execute_session_plan_ladder(
     base_decision: Dict[str, Any],
     all_results: Dict[str, Any],
@@ -1733,13 +1757,16 @@ def _execute_session_plan_ladder(
     telegram: TelegramService,
     config: Dict[str, Any],
 ) -> int:
+    # Clear first: a stale reason from a previous cycle would be worse than
+    # no reason at all, because it would read as fact.
+    _LAST_LADDER_STOP.clear()
     planner_cfg = (config.get("session_planner") or {}) if isinstance(config, dict) else {}
     # Every exit from this function is logged. A plan can be published while no
     # order appears for several independent reasons, and silent returns made
     # that impossible to diagnose from the run output alone.
     if not bool(planner_cfg.get("create_pending_orders_from_plan", True)):
         logger.info("Session-plan ladder skipped: create_pending_orders_from_plan is disabled")
-        return 0
+        return _ladder_stop("create_pending_orders_from_plan disabled")
     plan = base_decision.get("session_plan") or {}
     if not isinstance(plan, dict) or not plan.get("plan_ready"):
         # A map that could not be rebuilt this cycle is not necessarily gone:
@@ -1760,7 +1787,10 @@ def _execute_session_plan_ladder(
                 (plan or {}).get("plan_status") if isinstance(plan, dict) else "no-plan",
                 (plan or {}).get("plan_reason") if isinstance(plan, dict) else "no session_plan on decision",
             )
-            return 0
+            return _ladder_stop(
+                "plan not ready and no unexpired day map",
+                plan_status=(plan or {}).get("plan_status") if isinstance(plan, dict) else None,
+            )
         plan = revived
         base_decision = deepcopy(base_decision)
         base_decision["session_plan"] = revived
@@ -1768,18 +1798,21 @@ def _execute_session_plan_ladder(
     readiness_state = str(readiness.get("state") or "")
     if readiness_state and readiness_state not in {"PENDING_EXECUTION_READY", "MARKET_EXECUTION_READY"}:
         logger.info("Session-plan ladder blocked by execution readiness: %s", readiness.get("reason") or readiness_state or "unknown")
-        return 0
+        return _ladder_stop(
+            f"execution readiness {readiness_state or 'unknown'}",
+            detail=readiness.get("reason"),
+        )
     gate = _planner_execution_gate(base_decision, config)
     if not gate.get("allow"):
         logger.info("Session-plan ladder blocked: %s", gate.get("reason"))
-        return 0
+        return _ladder_stop(str(gate.get("reason") or "planner gate refused"))
     symbol = str(base_decision.get("symbol") or plan.get("symbol") or config.get("symbol", "XAU/USD"))
     normalized_symbol = normalize_symbol(symbol)
     symbol_open_trades = [t for t in (open_trades or []) if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol]
     scenario_review = ScenarioGovernor(config).review_new_plan(plan, symbol_open_trades, database=database)
     if scenario_review.get("action") == "KEEP_EXISTING_FAMILY":
         logger.info("Session-plan family kept for %s: %s", symbol, scenario_review.get("reason"))
-        return 0
+        return _ladder_stop("scenario family kept", detail=scenario_review.get("reason"))
     if scenario_review.get("action") == "REPLACE_PENDING_FAMILY":
         logger.info("Session-plan family replaced for %s: %s", symbol, scenario_review.get("reason"))
         try:
@@ -1796,13 +1829,15 @@ def _execute_session_plan_ladder(
             "Session-plan ladder skipped: %s live trade(s) already open on %s",
             len(live_now), symbol,
         )
-        return 0
+        return _ladder_stop(
+            f"{len(live_now)} live trade(s) already open", live_trades=len(live_now)
+        )
 
     primary = plan.get("primary_poi") or {}
     standby = plan.get("standby_poi") or {}
     if not isinstance(primary, dict) or not primary:
         logger.info("Session-plan ladder skipped: plan carries no primary POI")
-        return 0
+        return _ladder_stop("plan carries no primary POI")
 
     # Terminal-state guard at the execution boundary. The planner already
     # filters these out when ranking, but a plan can be persisted, replayed
@@ -1813,7 +1848,9 @@ def _execute_session_plan_ladder(
             "Session-plan ladder blocked: primary leg is in terminal state %s",
             primary.get("setup_state"),
         )
-        return 0
+        return _ladder_stop(
+            f"primary leg terminal state {primary.get('setup_state')}"
+        )
     if isinstance(standby, dict) and standby and str(standby.get("setup_state") or "").upper() in TERMINAL_SETUP_STATES:
         logger.info(
             "Session-plan add leg dropped: standby is in terminal state %s",
@@ -1845,7 +1882,11 @@ def _execute_session_plan_ladder(
                 "means it would execute now rather than rest as a pending order)",
                 entry_price, current_price, distance,
             )
-            return 0
+            return _ladder_stop(
+                "primary entry too close to price to rest as a pending order",
+                entry=round(entry_price, 2), price=round(current_price, 2),
+                points_apart=round(distance, 1),
+            )
         plan_decisions = [primary_decision] + ([ _build_plan_ladder_decision(base_decision, plan, standby, config) ] if isinstance(standby, dict) and standby else [])
 
     created = 0
@@ -4183,6 +4224,22 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                             "planner_gate_kind": planner_gate_preview.get("kind"),
                             "planner_gate_reason": planner_gate_preview.get("reason"),
                             "ladder_created": int(ladder_created or 0),
+                            # The gate verdict alone was not enough. On
+                            # 2026-08-04, 9 of 20 maps that produced no order
+                            # carried a gate reason that reads as a PASS --
+                            # "3 qualified agents aligned with the mapped
+                            # direction" -- because the gate had allowed them
+                            # and a LATER check stopped the ladder. Without
+                            # this field the audit pointed at the wrong step.
+                            "ladder_stop_reason": (
+                                _LAST_LADDER_STOP.get("reason")
+                                if not ladder_created and _LAST_LADDER_STOP
+                                else None
+                            ),
+                            "ladder_stop_detail": (
+                                {k: v for k, v in _LAST_LADDER_STOP.items() if k != "reason"}
+                                or None
+                            ) if not ladder_created else None,
                         }
                     },
                 )

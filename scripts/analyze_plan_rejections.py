@@ -172,6 +172,88 @@ def main() -> None:
     _report(f"last {len(rows)} cycles", rows, config)
 
 
+def _order_outcome_section(ready: List[Dict[str, Any]]) -> None:
+    """Orders placed vs maps published.
+
+    Called immediately after the published/refused counts, not at the end
+    of the report. The run log is copied out of the Actions UI and four
+    consecutive runs were cut mid-way through the dominance histogram, so
+    everything below it -- including this section -- never reached the
+    operator. The script completed fine each time; the channel was lossy.
+    A conclusion printed below the cut has not been reported.
+    """
+    audited = []
+    for row in ready:
+        payload = row.get("payload")
+        audit = (payload or {}).get("execution_audit") if isinstance(payload, dict) else None
+        if isinstance(audit, dict) and audit:
+            audited.append(audit)
+
+    if ready and not audited:
+        # SILENCE IS NOT AN ANSWER.
+        #
+        # The section below only prints when at least one published map
+        # carries an execution audit. Those audits are written by
+        # run_analysis as each cycle runs, so immediately after the feature
+        # ships every row in the window predates it and the section vanishes
+        # entirely -- looking exactly like the old report and leaving the
+        # operator's question unanswered with no explanation.
+        #
+        # That happened on 2026-08-04: the report was run three minutes after
+        # the change was deployed, 21 maps were published, none carried an
+        # audit, and nothing was printed. Saying so costs one line and
+        # distinguishes "no data yet" from "nothing to report".
+        print("\n  What happened to the published maps")
+        print(f"    no execution audit on any of the {len(ready)} published maps")
+        print(
+            "    → audits are written as each cycle runs, so this stays empty\n"
+            "      until new maps are published after the change was deployed.\n"
+            "      Re-run once a fresh READY map has been produced."
+        )
+
+    if audited:
+        placed = [a for a in audited if int(a.get("ladder_created") or 0) > 0]
+        blocked = [a for a in audited if int(a.get("ladder_created") or 0) == 0]
+        print("\n  What happened to the published maps")
+        print(f"    orders placed        : {len(placed)} of {len(audited)} audited")
+        print(f"    published, no order  : {len(blocked)}")
+        if len(audited) < len(ready):
+            print(f"    (no audit recorded   : {len(ready) - len(audited)})")
+
+        if blocked:
+            # PREFER THE LADDER'S OWN REASON.
+            #
+            # `planner_gate_reason` is the verdict of the admission gate. When
+            # the gate ALLOWED the map and a later check stopped the ladder,
+            # that string reads as a pass -- "3 qualified agents aligned with
+            # the mapped direction" -- and grouping on it points at the wrong
+            # step. Measured on 2026-08-04: 9 of 20 no-order maps looked like
+            # successes for exactly this reason.
+            #
+            # `ladder_stop_reason` names the check that actually fired. Fall
+            # back to the gate reason for rows written before that field
+            # existed, marking them so the two are never confused.
+            def _cause(audit):
+                stop = str(audit.get("ladder_stop_reason") or "").strip()
+                if stop:
+                    return stop[:56]
+                gate = str(audit.get("planner_gate_reason") or "").strip()
+                if audit.get("planner_gate_allow") and gate:
+                    return f"[gate allowed; stop not recorded] {gate}"[:56]
+                return (gate or "unknown")[:56]
+
+            reasons = Counter(_cause(a) for a in blocked)
+            print("\n  Why a READY map produced no order")
+            widest = max(reasons.values())
+            for reason, count in reasons.most_common(10):
+                bar = "█" * max(1, int(count / widest * 24))
+                print(f"    {count:4d}  {bar:<24}  {reason}")
+            print(
+                "\n    → these are NOT planning failures. The map was good enough\n"
+                "      to publish and was then refused at execution."
+            )
+
+
 def _report(window_label: str, rows: List[Dict[str, Any]], config: Dict[str, Any]) -> None:
     ready = [r for r in rows if r.get("plan_ready")]
     refused = [r for r in rows if not r.get("plan_ready")]
@@ -205,6 +287,8 @@ def _report(window_label: str, rows: List[Dict[str, Any]], config: Dict[str, Any
     if crashes:
         print(f"  CRASHED   : {len(crashes)}  ({len(crashes) / len(rows) * 100:.1f}%)"
               "  ← not refusals: cycles that produced no map at all")
+
+    _order_outcome_section(ready)
 
     families = Counter(_reason_family(str(r.get("plan_reason") or "")) for r in refused)
     if families:
@@ -389,58 +473,6 @@ def _report(window_label: str, rows: List[Dict[str, Any]], config: Dict[str, Any
     #
     # Reading it here turns "why are maps refused" into "why are orders not
     # placed", which is the question that matters.
-    audited = []
-    for row in ready:
-        payload = row.get("payload")
-        audit = (payload or {}).get("execution_audit") if isinstance(payload, dict) else None
-        if isinstance(audit, dict) and audit:
-            audited.append(audit)
-
-    if ready and not audited:
-        # SILENCE IS NOT AN ANSWER.
-        #
-        # The section below only prints when at least one published map
-        # carries an execution audit. Those audits are written by
-        # run_analysis as each cycle runs, so immediately after the feature
-        # ships every row in the window predates it and the section vanishes
-        # entirely -- looking exactly like the old report and leaving the
-        # operator's question unanswered with no explanation.
-        #
-        # That happened on 2026-08-04: the report was run three minutes after
-        # the change was deployed, 21 maps were published, none carried an
-        # audit, and nothing was printed. Saying so costs one line and
-        # distinguishes "no data yet" from "nothing to report".
-        print("\n  What happened to the published maps")
-        print(f"    no execution audit on any of the {len(ready)} published maps")
-        print(
-            "    → audits are written as each cycle runs, so this stays empty\n"
-            "      until new maps are published after the change was deployed.\n"
-            "      Re-run once a fresh READY map has been produced."
-        )
-
-    if audited:
-        placed = [a for a in audited if int(a.get("ladder_created") or 0) > 0]
-        blocked = [a for a in audited if int(a.get("ladder_created") or 0) == 0]
-        print("\n  What happened to the published maps")
-        print(f"    orders placed        : {len(placed)} of {len(audited)} audited")
-        print(f"    published, no order  : {len(blocked)}")
-        if len(audited) < len(ready):
-            print(f"    (no audit recorded   : {len(ready) - len(audited)})")
-
-        if blocked:
-            reasons = Counter(
-                str(a.get("planner_gate_reason") or "unknown")[:56] for a in blocked
-            )
-            print("\n  Why a READY map produced no order")
-            widest = max(reasons.values())
-            for reason, count in reasons.most_common(10):
-                bar = "█" * max(1, int(count / widest * 24))
-                print(f"    {count:4d}  {bar:<24}  {reason}")
-            print(
-                "\n    → these are NOT planning failures. The map was good enough\n"
-                "      to publish and was then refused at execution."
-            )
-
     archetypes = Counter()
     for row in rows:
         payload = row.get("payload")
