@@ -396,6 +396,28 @@ def _report(window_label: str, rows: List[Dict[str, Any]], config: Dict[str, Any
         if isinstance(audit, dict) and audit:
             audited.append(audit)
 
+    if ready and not audited:
+        # SILENCE IS NOT AN ANSWER.
+        #
+        # The section below only prints when at least one published map
+        # carries an execution audit. Those audits are written by
+        # run_analysis as each cycle runs, so immediately after the feature
+        # ships every row in the window predates it and the section vanishes
+        # entirely -- looking exactly like the old report and leaving the
+        # operator's question unanswered with no explanation.
+        #
+        # That happened on 2026-08-04: the report was run three minutes after
+        # the change was deployed, 21 maps were published, none carried an
+        # audit, and nothing was printed. Saying so costs one line and
+        # distinguishes "no data yet" from "nothing to report".
+        print("\n  What happened to the published maps")
+        print(f"    no execution audit on any of the {len(ready)} published maps")
+        print(
+            "    → audits are written as each cycle runs, so this stays empty\n"
+            "      until new maps are published after the change was deployed.\n"
+            "      Re-run once a fresh READY map has been produced."
+        )
+
     if audited:
         placed = [a for a in audited if int(a.get("ladder_created") or 0) > 0]
         blocked = [a for a in audited if int(a.get("ladder_created") or 0) == 0]
