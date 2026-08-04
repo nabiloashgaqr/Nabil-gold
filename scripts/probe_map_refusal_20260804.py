@@ -228,7 +228,7 @@ def main():
     # ── 6) one instrumented close look at the publishing price ──────────────
     section("6) LEG PRICING DETAIL · _build_plan_ladder_decision @ price 4061 (aug-3)")
     leg = ra._build_plan_ladder_decision(base_decision(4061.0), build_plan(),
-                                         build_plan()["primary_poi"], config_aug3)
+                                         build_plan()["primary_poi"], config_aug3 or config_now)
     if leg is None:
         print("  leg = None (no order possible)")
     else:

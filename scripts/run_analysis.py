@@ -406,16 +406,28 @@ def _resolve_reward_target(
     candidate: Dict[str, Any] | None,
     min_rr: float,
     min_tp1_rr: float = 0.0,
+    prefer_far: bool = True,
+    max_rr: float = 0.0,
 ) -> tuple[float, float, str | None]:
     """Pick TP1 and TP2 from the liquidity map.
 
     Returns (tp1, tp2, rejection_reason).
 
-    The nearest mapped liquidity is a real place price is drawn to, so it makes
-    a good first target even when it sits close. Viability is judged on TP2 --
-    the level the trade is actually held for -- rather than on TP1, because
-    requiring the first target alone to clear min_rr rejected sound structural
-    setups whose stop had been widened by the risk floor.
+    TARGET POLICY (operator directive, 2026-08-04): look at FAR liquidity
+    first, then near -- far liquidity is better. TP2 is the level the trade
+    is actually held for, so it aims at the FURTHEST real pool whose reward
+    the risk justifies (rr >= min_rr), never beyond max_rr when a cap is set,
+    so the pick stays a level the map actually drew. Near pools are used only
+    when nothing far qualifies. Before this directive the nearest qualifying
+    pool was taken, which left the move's real objective unaimed at -- the
+    same gap the manual analyst flagged on 2026-07-30 when his extended target
+    sat 257 points beyond the system's shipped TP2.
+
+    TP1 stays the nearest usable real level short of TP2 (at least
+    min_tp1_rr away): it books the first half and arms breakeven early, while
+    the runner is aimed at the far objective. A level closer than min_tp1_rr
+    is skipped rather than rejected; only if nothing usable remains does TP1
+    fall back to the midpoint of the run.
 
     Targets are still never invented: TP2 must be an actual level from the
     liquidity map or the plan, otherwise the leg is rejected.
@@ -451,7 +463,15 @@ def _resolve_reward_target(
     qualifying = [lv for lv in ordered if _rr(lv) >= min_rr]
 
     if qualifying:
-        tp2 = qualifying[0]
+        if prefer_far:
+            # Farthest real pool the risk can justify, kept inside the max_rr
+            # cap so the pick remains a level the map drew. Nothing inside the
+            # cap falls back to the nearest qualifying pool (the old pick),
+            # which downstream may still cap.
+            within_cap = [lv for lv in qualifying if max_rr <= 0 or _rr(lv) <= max_rr]
+            tp2 = within_cap[-1] if within_cap else qualifying[0]
+        else:
+            tp2 = qualifying[0]
         # TP1 is the nearest real level short of TP2, but it must still be far
         # enough away to be worth taking. Picking the literal nearest level
         # produced first targets 5 points from entry against a 150-point stop
@@ -532,9 +552,13 @@ def _planner_trade_levels(
     # A first target must be far enough to survive normal noise, because
     # reaching it arms the breakeven stop. See _resolve_reward_target.
     min_tp1_rr = _safe_float(risk_cfg.get("min_tp1_rr"), 0.8)
+    # Operator directive (2026-08-04): far liquidity first, near as fallback.
+    prefer_far = bool(risk_cfg.get("prefer_far_liquidity", True))
     tp1, tp2, reject_reason = _resolve_reward_target(
         direction, entry_price, adjusted_stop, target_price, candidate, min_rr,
         min_tp1_rr=min_tp1_rr,
+        prefer_far=prefer_far,
+        max_rr=max_rr,
     )
     if reject_reason:
         return {
