@@ -10,6 +10,7 @@ import logging
 import os
 import sys
 import html
+import traceback
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -2868,6 +2869,39 @@ def _should_send_session_plan_telegram(current_plan: Dict[str, Any], previous_sn
     return _session_plan_delivery_reason(current_plan, previous_snapshot, config, symbol=symbol) is not None
 
 
+def _crash_site(exc: BaseException) -> str:
+    """The deepest frame inside this repository, as ``file.py:line in func``.
+
+    An exception message describes the symptom. ``'NoneType' object has no
+    attribute 'get'`` fits every one of the hundreds of ``.get(`` calls under
+    the planner, so on its own it is not actionable -- five crashed cycles
+    appeared in every rejection report from 2026-08-04 onward with no way to
+    find them.
+
+    The traceback is already written to the run log by ``logger.exception``,
+    but the report reads the stored row, not the log. Folding the frame into
+    the stored reason puts the location where the analysis can see it.
+
+    Frames from site-packages and the standard library are skipped: the last
+    frame is usually inside a dependency, while the line worth fixing is the
+    last one we own.
+    """
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    site_marker = os.sep + "site-packages" + os.sep
+    best = None
+    try:
+        for frame in traceback.extract_tb(exc.__traceback__):
+            path = os.path.abspath(frame.filename)
+            if site_marker in path or not path.startswith(root):
+                continue
+            best = frame
+    except Exception:  # noqa: BLE001 - diagnostics must never raise
+        return "unknown"
+    if best is None:
+        return "outside project"
+    return f"{os.path.basename(best.filename)}:{best.lineno} in {best.name}"
+
+
 def _session_plan_agent_opinions(agent_details: Dict[str, Any]) -> List[Dict[str, Any]]:
     opinions: List[Dict[str, Any]] = []
     for key in ["technical", "classical", "smc", "price_action", "multitimeframe", "macro_fundamental"]:
@@ -3782,7 +3816,28 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 "plan_status": "ERROR",
                 # Keep the type in the stored reason so the rejection report
                 # can separate real refusals from crashes at a glance.
-                "plan_reason": f"planner crashed: {type(exc).__name__}: {exc}",
+                #
+                # ...and the LOCATION. "'NoneType' object has no attribute
+                # 'get'" names the symptom, never the site: there are
+                # hundreds of `.get(` calls under build_plan and the message
+                # fits every one of them. Five crashed cycles have been
+                # sitting in every report since #16 with no way to act on
+                # them, because `logger.exception` writes the traceback to
+                # the run log while the REPORT reads the stored row, and the
+                # stored row had only the text.
+                #
+                # The last in-project frame is the one that matters -- the
+                # deepest line inside this repository, skipping site-packages
+                # -- so it is folded into the reason the report already
+                # groups on. Truncated because that grouping key is 48 chars.
+                "plan_reason": (
+                    f"planner crashed: {type(exc).__name__}: {exc}"
+                    f" @ {_crash_site(exc)}"
+                ),
+                "crash_site": _crash_site(exc),
+                "crash_traceback": "".join(
+                    traceback.format_exception(type(exc), exc, exc.__traceback__)
+                )[-4000:],
             }
             try:
                 session_plan_snapshot_id = database.save_session_plan(all_results["session_plan"], session_plan_context)

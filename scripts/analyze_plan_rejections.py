@@ -74,6 +74,20 @@ def _is_crash(reason: str) -> bool:
 def _reason_family(reason: str) -> str:
     text = (reason or "").lower()
     if _is_crash(reason):
+        # Group crashes by WHERE, not by the first 44 characters.
+        #
+        # Every planner crash reads "planner crashed: AttributeError:
+        # 'NoneType' object has no attribute 'get'". Truncated to 44 chars
+        # they collapse into one bucket, so five crashes at five different
+        # lines looked like one recurring fault -- and none of them could be
+        # located. The site is now appended to the stored reason as
+        # "... @ file.py:line in func"; keying on it separates them.
+        site = ""
+        if " @ " in (reason or ""):
+            site = str(reason).rsplit(" @ ", 1)[-1].strip()
+        kind = str(reason or "")[len("planner crashed: "):].split(":")[0].strip()
+        if site:
+            return f"⚠ CRASH — {kind} @ {site}"[:56]
         return f"⚠ CRASH — {(reason or '')[:44]}"
     # "execution refused the leg" held a flat 20 across reports #17, #7 and
     # #8 -- three different code states, three different market days, the
