@@ -403,12 +403,18 @@ class TelegramService:
             breakeven = float(params.get("early_breakeven_points", breakeven) or breakeven)
         except Exception:  # noqa: BLE001 - never block a signal on formatting
             pass
-        # Describe the protection that will actually run. Two conditions gate
-        # it, and stating only the points threshold produced a promise the
-        # engine could not keep: a signal announced "SL → entry after +170 pts
-        # before TP1" while TP1 sat 22 points away, so the +170 trigger could
-        # never fire before the target it was supposed to precede.
-        protection = f"• <b>Protection:</b> SL → entry after +{breakeven:.0f} pts"
+        # Describe the protection that will actually run. The engine has two
+        # wirings and the line must name the one in force:
+        #   * auto_move_sl_to_entry_after_tp1: the TP1 touch moves the stop to
+        #     entry whatever TP1's value, gated only by min_breakeven_rr of
+        #     travel. Stating the old "+N pts" promise alone is what refused
+        #     sound maps at the gate on 2026-08-04 (TP1 140.5 pts vs +150).
+        #   * legacy distance trigger only: SL -> entry after +N pts.
+        mgmt = (mgmt_config.get("trade_management") or {}) if isinstance(mgmt_config, dict) else {}
+        auto_be_at_tp1 = bool(mgmt.get("auto_move_sl_to_entry_after_tp1", True))
+        min_be_rr = float(mgmt.get("min_breakeven_rr") or 0)
+        tp1_pts = 0.0
+        tp1_rr = 0.0
         try:
             from utils.instruments import price_to_points
 
@@ -419,16 +425,28 @@ class TelegramService:
             tp1_price = float(signal.get("tp1") or 0)
             if entry_price > 0 and tp1_price > 0:
                 tp1_pts = abs(price_to_points(tp1_price - entry_price, symbol=symbol))
-                if breakeven > 0 and tp1_pts > 0 and breakeven < tp1_pts:
-                    protection += " (before TP1)"
-                elif tp1_pts > 0:
-                    protection += f" (TP1 is {tp1_pts:.0f} pts away — partial close first)"
-            mgmt = (mgmt_config.get("trade_management") or {}) if isinstance(mgmt_config, dict) else {}
-            min_be_rr = float(mgmt.get("min_breakeven_rr") or 0)
-            if min_be_rr > 0 and entry_price > 0 and stop_price > 0:
-                protection += f" · needs ≥{min_be_rr:.2f}R travelled"
+                risk_pts = abs(price_to_points(entry_price - stop_price, symbol=symbol)) if stop_price > 0 else 0.0
+                tp1_rr = (tp1_pts / risk_pts) if risk_pts > 0 else 0.0
         except Exception:  # noqa: BLE001 - never block a signal on formatting
-            protection += " before TP1"
+            pass
+
+        if auto_be_at_tp1 and tp1_pts > 0 and (min_be_rr <= 0 or tp1_rr >= min_be_rr):
+            # The wired promise: reaching TP1 arms the breakeven stop.
+            protection = f"• <b>Protection:</b> SL → entry at TP1 ({tp1_pts:.0f} pts away, half books there)"
+            if breakeven > 0 and tp1_pts > breakeven:
+                protection += f" · may arm earlier at +{breakeven:.0f} pts"
+        else:
+            protection = f"• <b>Protection:</b> SL → entry after +{breakeven:.0f} pts"
+            if tp1_pts > 0:
+                if breakeven > 0 and breakeven < tp1_pts:
+                    protection += " (before TP1)"
+                else:
+                    suffix = f"TP1 is {tp1_pts:.0f} pts away — partial close first"
+                    if auto_be_at_tp1 and min_be_rr > 0 and tp1_rr < min_be_rr:
+                        suffix += "; breakeven at TP1 deferred (below the R-guard)"
+                    protection += f" ({suffix})"
+        if min_be_rr > 0:
+            protection += f" · needs ≥{min_be_rr:.2f}R travelled"
         return [
             protection,
             f"• <b>Management:</b> Trail gap {trailing:.0f} pts / step {step:.0f} pts · check 5m",
