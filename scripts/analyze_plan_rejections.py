@@ -374,6 +374,51 @@ def _report(window_label: str, rows: List[Dict[str, Any]], config: Dict[str, Any
         print(f"    grades: {dict(grades)}")
         print(f"    bias  : {dict(biases)}")
 
+    # ── What happened to the maps that WERE published? ──────────────────
+    #
+    # "published" counts maps the planner was willing to build. It does not
+    # count orders. A READY map still has to clear `_planner_execution_gate`,
+    # and when that refuses, nothing reaches the market -- yet the map is
+    # filed here as a success.
+    #
+    # That gap is exactly the question the operator kept asking: plans arrive,
+    # orders do not. On 2026-08-04 a BUY map scored A 80.2% and published, and
+    # no pending order was created, because only two qualified agents backed
+    # it. The refusal was recorded in `payload.execution_audit` by
+    # run_analysis, and nothing ever read it back.
+    #
+    # Reading it here turns "why are maps refused" into "why are orders not
+    # placed", which is the question that matters.
+    audited = []
+    for row in ready:
+        payload = row.get("payload")
+        audit = (payload or {}).get("execution_audit") if isinstance(payload, dict) else None
+        if isinstance(audit, dict) and audit:
+            audited.append(audit)
+
+    if audited:
+        placed = [a for a in audited if int(a.get("ladder_created") or 0) > 0]
+        blocked = [a for a in audited if int(a.get("ladder_created") or 0) == 0]
+        print("\n  What happened to the published maps")
+        print(f"    orders placed        : {len(placed)} of {len(audited)} audited")
+        print(f"    published, no order  : {len(blocked)}")
+        if len(audited) < len(ready):
+            print(f"    (no audit recorded   : {len(ready) - len(audited)})")
+
+        if blocked:
+            reasons = Counter(
+                str(a.get("planner_gate_reason") or "unknown")[:56] for a in blocked
+            )
+            print("\n  Why a READY map produced no order")
+            widest = max(reasons.values())
+            for reason, count in reasons.most_common(10):
+                bar = "█" * max(1, int(count / widest * 24))
+                print(f"    {count:4d}  {bar:<24}  {reason}")
+            print(
+                "\n    → these are NOT planning failures. The map was good enough\n"
+                "      to publish and was then refused at execution."
+            )
+
     archetypes = Counter()
     for row in rows:
         payload = row.get("payload")
