@@ -1020,10 +1020,34 @@ class RiskManagementAgent(BaseAgent):
         # Nearest first: the order price would meet them in.
         ordered = sorted(set(levels), key=lambda lv: abs(lv - entry))
 
-        # TP2 is the first pool far enough to be worth holding for. Reaching
-        # for the furthest level would invent a target the map does not
-        # support; taking the first qualifying one keeps it honest.
-        tp2 = next((lv for lv in ordered if abs(lv - entry) / risk >= min_rr), None)
+        # TARGET POLICY (operator directive, 2026-08-04): look at FAR
+        # liquidity first, then near -- far liquidity is better. TP2 is the
+        # level the trade is held for, so aim it at the FURTHEST real pool
+        # whose reward the risk justifies (rr >= min_rr), never beyond
+        # max_rr_ratio when a cap is set, so the pick stays a level the map
+        # actually drew. This is exactly the docstring's old promise --
+        # "reaching for the furthest level the real risk can justify" --
+        # which the previous nearest-first pick did not keep: on 2026-07-30
+        # the manual analyst booked 257 points more than the shipped TP2 on
+        # the same map because his eye went to the far pool first.
+        max_rr = self._f(self.settings.get("max_rr_ratio"), 0.0)
+        prefer_far = bool(self.settings.get("prefer_far_liquidity", True))
+
+        def _pick(pool_risk: float) -> float | None:
+            if pool_risk <= 0:
+                return None
+            qualifying = [lv for lv in ordered if abs(lv - entry) / pool_risk >= min_rr]
+            if not qualifying:
+                return None
+            if not prefer_far:
+                return qualifying[0]
+            within_cap = [
+                lv for lv in qualifying
+                if max_rr <= 0 or abs(lv - entry) / pool_risk <= max_rr
+            ]
+            return within_cap[-1] if within_cap else qualifying[0]
+
+        tp2 = _pick(risk)
         method = "liquidity_chain"
 
         if tp2 is None and structural_risk and structural_risk > 0:
@@ -1071,19 +1095,19 @@ class RiskManagementAgent(BaseAgent):
             # against the shipped stop -- which is why the 16:11 setup is now
             # refused outright instead of being published with invented
             # targets.
-            tp2 = next(
-                (lv for lv in ordered if abs(lv - entry) / structural_risk >= min_rr),
-                None,
-            )
+            tp2 = _pick(structural_risk)
             if tp2 is not None:
                 method = "liquidity_chain_structural"
 
         if tp2 is None:
             return None, None, ""
 
-        # TP1 is the nearest pool short of TP2. When TP2 is itself the nearest
-        # level, split the distance rather than stacking both targets on one
-        # price -- a TP1 equal to TP2 makes the partial close meaningless.
+        # TP1 is the nearest pool short of TP2: it books the first half and
+        # arms the protection early, while the runner stays aimed at the far
+        # objective -- the manual-analyst pattern of a near TP1 with a far
+        # extension. When TP2 is itself the nearest level, split the distance
+        # rather than stacking both targets on one price -- a TP1 equal to TP2
+        # makes the partial close meaningless.
         nearer = [lv for lv in ordered if abs(lv - entry) < abs(tp2 - entry)]
         tp1 = nearer[0] if nearer else round((entry + tp2) / 2.0, 2)
 
