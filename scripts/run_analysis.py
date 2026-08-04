@@ -853,12 +853,35 @@ def validate_signal_before_send(
     if tp1 > 0 and tp2 > 0 and abs(tp2 - entry) < abs(tp1 - entry):
         violations.append("tp2 is nearer than tp1")
 
-    # 3. Coherence between protection and the first target. A breakeven trigger
-    #    beyond TP1 can never fire in the order the message describes.
+    # 3. Coherence between protection and the first target.
+    #
+    # Two wirings exist, and the check must judge the one that actually runs:
+    #   * auto_move_sl_to_entry_after_tp1 (the wired promise): on a TP1 touch
+    #     the stop moves to entry whatever TP1's value, so a "breakeven beyond
+    #     TP1" ordering contradiction cannot arise. What must hold instead is
+    #     that TP1 is far enough for the manager's R-guard (min_breakeven_rr)
+    #     to let the touch arm the stop -- otherwise TP1 hits, the partial
+    #     books, and the promised protection still does not apply.
+    #   * legacy distance-only breakeven (auto_be false): a +N trigger beyond
+    #     TP1 can never fire before the target it claims to precede.
+    #
+    # The 2026-08-04 A+ 97.8% map died under the old text: TP1 140.5 pts away
+    # against a 150-pt trigger -- refused -- while the manager would have
+    # armed breakeven at TP1 anyway. The validator judged a promise the
+    # engine no longer exclusively makes.
     tm_cfg = (config.get("trade_management") or {}) if isinstance(config, dict) else {}
     breakeven_points = _safe_float(tm_cfg.get("early_breakeven_points"), 0.0)
     tp1_points = abs(price_to_points(tp1 - entry, symbol=symbol)) if tp1 > 0 else 0.0
-    if breakeven_points > 0 and tp1_points > 0 and breakeven_points >= tp1_points:
+    auto_be_at_tp1 = bool(tm_cfg.get("auto_move_sl_to_entry_after_tp1", True))
+    if auto_be_at_tp1:
+        min_be_rr = _safe_float(tm_cfg.get("min_breakeven_rr"), 0.0)
+        if tp1 > 0 and min_be_rr > 0 and risk_points > 0 and tp1_rr < min_be_rr:
+            violations.append(
+                f"tp1 is only {tp1_rr:.2f}R away; the manager arms breakeven at TP1 "
+                f"only from {min_be_rr:.2f}R travelled, so the promised protection "
+                "would not apply"
+            )
+    elif breakeven_points > 0 and tp1_points > 0 and breakeven_points >= tp1_points:
         violations.append(
             f"breakeven trigger (+{breakeven_points:.0f} pts) is not reachable before "
             f"tp1 ({tp1_points:.0f} pts away); the promised protection cannot apply"
