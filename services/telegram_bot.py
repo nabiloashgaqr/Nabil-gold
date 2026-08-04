@@ -754,6 +754,44 @@ class TelegramService:
             if tp2 is not None:
                 target_bits.append(f"TP2 {self._money(tp2, symbol)}")
             lines.append(f"🎯 <b>TARGETS</b> · {' · '.join(target_bits)}")
+        # Operator directive (2026-08-04): the map card must name the near and
+        # far liquidity as numbers, so the operator sees the pools the targets
+        # are anchored to. The levels come from the very map the execution
+        # resolvers read (primary_poi.details.liquidity), so the card says
+        # what the engine will actually aim at -- near first, far included.
+        try:
+            primary_poi = plan.get("primary_poi") or {}
+            poi_details = primary_poi.get("details") if isinstance(primary_poi, dict) else {}
+            liq_map = poi_details.get("liquidity") if isinstance(poi_details, dict) else {}
+            entry_ref = _f(plan.get("primary_entry_price"))
+            if isinstance(liq_map, dict) and entry_ref is not None and bias in {"BUY", "SELL"}:
+                side_key = "buy_side" if bias == "BUY" else "sell_side"
+                ahead: List[float] = []
+                for raw in liq_map.get(side_key) or []:
+                    lv = _f(raw)
+                    if lv is None or lv <= 0:
+                        continue
+                    if (bias == "BUY" and lv > entry_ref) or (bias == "SELL" and lv < entry_ref):
+                        ahead.append(lv)
+                ahead = sorted(set(ahead), key=lambda lv: abs(lv - entry_ref))
+                if ahead:
+                    stop_run = _f(stop_level)
+                    risk_run = abs(entry_ref - stop_run) if stop_run is not None else 0.0
+
+                    def _with_r(level: float) -> str:
+                        text = self._money(level, symbol)
+                        if risk_run > 0:
+                            text += f" ({abs(level - entry_ref) / risk_run:.1f}R)"
+                        return text
+
+                    liq_bits = [f"Near {_with_r(ahead[0])}"]
+                    if len(ahead) > 1:
+                        liq_bits.append(f"Far {_with_r(ahead[-1])}")
+                    if len(ahead) > 2:
+                        liq_bits.append(f"{len(ahead)} pools ahead")
+                    lines.append(f"💧 <b>LIQUIDITY</b> · {' · '.join(liq_bits)}")
+        except Exception:  # noqa: BLE001 - never block map delivery on formatting
+            pass
         if risk_note:
             lines.append(f"⚠️ <b>Risk note:</b> {html.escape(risk_note)}")
         exec_summary = execution_items[0] if execution_items else str(plan.get("execution_preference") or scenario)
