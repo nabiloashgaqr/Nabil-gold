@@ -258,3 +258,101 @@ def test_partial_audits_report_both_numbers(capsys):
     out = _run(rows, capsys)
     assert "published, no order  : 4" in out
     assert "no audit recorded   : 6" in out
+
+
+# ── the answer must survive a truncated log ─────────────────────────────────
+#
+# Added 2026-08-04. The section was correct and complete, and the operator
+# still never saw it: four consecutive runs (#16-#19) were copied out of the
+# Actions UI cut at the same point, mid dominance-histogram. Everything after
+# that was absent. The script completed each time; the channel was lossy.
+
+def _head(rows, capsys, n=18):
+    report._report("last 300 cycles", rows, CONFIG)
+    return "\n".join(capsys.readouterr().out.splitlines()[:n])
+
+
+def test_the_order_outcome_appears_near_the_top(capsys):
+    head = _head(_rows(), capsys)
+    assert "What happened to the published maps" in head, (
+        "the answer sits below the fold; a truncated log will not carry it"
+    )
+    assert "orders placed" in head
+
+
+def test_it_precedes_the_refusal_families(capsys):
+    report._report("last 300 cycles", _rows(), CONFIG)
+    out = capsys.readouterr().out
+    assert out.index("What happened to the published maps") < out.index("Why refused")
+
+
+# ── the cause must name the step that actually fired ────────────────────────
+#
+# `planner_gate_reason` is the ADMISSION verdict. When the gate allowed the
+# map and a later check stopped the ladder, that string reads as a pass --
+# "3 qualified agents aligned with the mapped direction" -- and grouping on
+# it blames the wrong step. Measured on 2026-08-04: 9 of 20 no-order maps.
+
+def _audited(created, gate, allow, stop=None):
+    return {
+        "plan_ready": True, "session_bias": "BUY", "planner_grade": "A",
+        "payload": {"execution_audit": {
+            "ladder_created": created, "planner_gate_allow": allow,
+            "planner_gate_reason": gate, "ladder_stop_reason": stop,
+        }},
+    }
+
+
+def test_the_ladder_stop_reason_is_preferred_over_the_gate_verdict(capsys):
+    rows = [_audited(0, "3 qualified agents aligned with the mapped direction",
+                     True, "1 live trade(s) already open")] + [_refused("x")]
+    out = _head(rows, capsys, 20)
+    assert "1 live trade(s) already open" in out
+    assert "3 qualified agents aligned" not in out, (
+        "a passing gate verdict was reported as the cause of a refusal"
+    )
+
+
+def test_an_allowing_gate_with_no_stop_reason_is_flagged(capsys):
+    """Rows written before the field existed must not read as causes."""
+    rows = [_audited(0, "2 qualified agents + macro context confirms SELL", True)]
+    rows += [_refused("x")]
+    out = _head(rows, capsys, 20)
+    assert "gate allowed; stop not recorded" in out
+
+
+def test_a_refusing_gate_still_reports_its_own_reason(capsys):
+    rows = [_audited(0, "planner execution requires 3 qualified agents; got 2", False)]
+    rows += [_refused("x")]
+    out = _head(rows, capsys, 20)
+    assert "requires 3 qualified agents" in out
+    assert "gate allowed" not in out
+
+
+def test_the_recorder_is_cleared_between_cycles():
+    """A stale reason would read as fact."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "ra_stop", os.path.join(ROOT, "scripts", "run_analysis.py"))
+    ra = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ra)
+    ra._ladder_stop("primary leg terminal state ENTRY_TRIGGERED")
+    assert ra._LAST_LADDER_STOP["reason"].startswith("primary leg terminal")
+    ra._ladder_stop("2 live trade(s) already open", live_trades=2)
+    assert ra._LAST_LADDER_STOP == {
+        "reason": "2 live trade(s) already open", "live_trades": 2
+    }
+
+
+def test_every_ladder_exit_records_a_reason():
+    """No silent `return 0` may remain in the ladder."""
+    import re
+    src = open(os.path.join(ROOT, "scripts", "run_analysis.py"), encoding="utf-8").read()
+    start = src.index("def _execute_session_plan_ladder(")
+    end = src.index("\ndef ", start + 10)
+    body = src[start:end]
+    silent = re.findall(r"^\s+return 0\s*$", body, re.M)
+    assert not silent, (
+        f"{len(silent)} silent exit(s) left in the ladder; the audit cannot "
+        f"say why no order was created"
+    )
