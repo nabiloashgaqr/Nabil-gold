@@ -131,7 +131,8 @@ jobs:
             tests/test_refusal_reason_names_the_shortfall.py \
             tests/test_report_shows_why_no_order.py \
             tests/test_planner_crash_names_its_site.py \
-            tests/test_refusals_count_setups_not_cycles.py
+            tests/test_refusals_count_setups_not_cycles.py \
+            tests/test_agent_bar_is_sixty_seven.py
 
       - name: 🔎 Validate Production Setup
         run: |
