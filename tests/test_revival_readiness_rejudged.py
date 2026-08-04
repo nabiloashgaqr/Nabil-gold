@@ -25,7 +25,11 @@ import scripts.run_analysis as ra
 from services.database import DatabaseService
 from utils.helpers import load_config
 
-NOW = datetime(2026, 8, 4, 17, 25, 0, tzinfo=timezone.utc)
+# All stored timestamps are relative to the test's own start, never a fixed
+# wall-clock instant: the ladder revives against datetime.now(timezone.utc),
+# so a hardcoded expiry turned this test into a time bomb that detonated on
+# CI the moment the runner's clock passed it (2026-08-04, run #1).
+NOW = datetime.now(timezone.utc)
 
 
 def _config() -> dict:
