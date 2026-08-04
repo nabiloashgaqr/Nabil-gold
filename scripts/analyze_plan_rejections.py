@@ -444,6 +444,67 @@ def _report(window_label: str, rows: List[Dict[str, Any]], config: Dict[str, Any
             print("    → the misses are spread well below the floor;")
             print("      the bar is separating weak setups, as intended.")
 
+        # ── DISTINCT SETUPS, OR ONE SETUP SEEN REPEATEDLY? ──────────────
+        #
+        # Every count in this report is a count of CYCLES, not of trading
+        # opportunities. The loop runs every ~5 minutes against the same
+        # structure, so an unchanged setup is re-scored and re-refused on
+        # each pass and appears as a fresh row.
+        #
+        # That distinction decides what the numbers mean. "91 refusals" is
+        # 91 missed chances if they are 91 different setups, and roughly a
+        # dozen if the same handful kept repeating. On 2026-08-04 the score
+        # histogram showed 17 rows at exactly 68 while its neighbours held 3
+        # and 5 -- a 4.2x spike no scoring formula produces. Two hypotheses
+        # were tested against the real `_setup_quality` and both failed:
+        # the +4 award does not quantise the score (`rank_score * 0.12` is
+        # continuous), and an exhaustive simulation of every input
+        # combination gives a flat distribution (66:332, 68:325, 67:323),
+        # not a peak.
+        #
+        # The remaining explanation is repetition, and `primary_poi.state_key`
+        # -- which encodes role, direction, scenario and zone bounds -- is
+        # already stored on each row, so it can be counted rather than
+        # assumed.
+        keys = []
+        unkeyed = 0
+        for row in refused:
+            text = str(row.get("plan_reason") or "")
+            if "below planner floor" not in text.lower():
+                continue
+            payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+            poi = payload.get("primary_poi") if isinstance(payload.get("primary_poi"), dict) else {}
+            key = str(poi.get("state_key") or "").strip()
+            if key:
+                keys.append(key)
+            else:
+                unkeyed += 1
+
+        if keys:
+            counts = Counter(keys)
+            repeats = sum(c for c in counts.values() if c > 1)
+            print(f"\n  Distinct setups behind those {len(quality_scores)} refusals")
+            print(f"    unique setups : {len(counts)}")
+            print(f"    rows from a repeated setup : {repeats}")
+            if unkeyed:
+                print(f"    (no state_key recorded : {unkeyed})")
+            for key, count in counts.most_common(3):
+                if count < 2:
+                    break
+                tail = key.split("::")[-1] if "::" in key else key
+                print(f"    {count:4d}x  {tail[:44]}")
+            if len(counts) and repeats / max(1, len(keys)) >= 0.5:
+                print("\n    → most refusals are the same few setups re-scored each\n"
+                      "      cycle. The refusal COUNT overstates how many distinct\n"
+                      "      opportunities were actually turned away.")
+            else:
+                print("\n    → the refusals are mostly distinct setups, so the count\n"
+                      "      reflects genuinely separate opportunities.")
+        elif unkeyed:
+            print(f"\n  Distinct setups behind those {len(quality_scores)} refusals")
+            print(f"    no state_key recorded on {unkeyed} of them")
+            print("    → cannot tell distinct setups from repeats on these rows.")
+
     # Which direction is the system refusing to map?
     #
     # A report of 300 cycles published eleven maps and every one was BUY, on a
