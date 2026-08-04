@@ -1631,6 +1631,7 @@ def _revive_recent_ready_plan(
     symbol: str,
     now: datetime,
     base_decision: Dict[str, Any] | None = None,
+    all_results: Dict[str, Any] | None = None,
 ) -> Dict[str, Any] | None:
     """Reuse a still-valid day map when this cycle could not rebuild one.
 
@@ -1729,6 +1730,66 @@ def _revive_recent_ready_plan(
         revived["original_plan_expires_at"] = payload.get("plan_expires_at")
         revived["plan_expires_at"] = renewed.replace(microsecond=0).isoformat()
         revived["plan_expiry_renewed_on_revival"] = True
+        # RE-JUDGE EXECUTION READINESS AGAINST THE LIVE BOOK.
+        #
+        # The gate recheck above re-counts the agents, but the readiness the
+        # ladder's next gate reads was still the stamp written when the map
+        # was BUILT. A map stored as WATCH_EXECUTION at 12:45 therefore stayed
+        # "waiting for stronger execution confirmation" forever, even after
+        # the live agents and macro lined up -- measured on 2026-08-04 17:25:
+        # the revived BUY map was blocked by a readiness sentence describing
+        # the 12:45 book while the same cycle confirmed BUY via 2 agents at
+        # 92% and macro at 68%. The sentence looked live; it was a fossil.
+        #
+        # This is the readiness half of the same repair the re-authorisation
+        # above already does for the agent count: reviving a thesis must earn
+        # its permission to trade again from the current book, in BOTH gates.
+        # The function recomputed here is the very one the planner uses, run
+        # with fallback_day_map strictness, so a revived map is judged by the
+        # same standard as a fresh one -- including the direction where live
+        # support has DRIFFED and a stored READY must degrade back to WATCH.
+        if isinstance(all_results, dict):
+            try:
+                old_readiness = payload.get("execution_readiness") or {}
+                # Judge readiness from the SAME live evidence the agent gate
+                # above was judged on: cycle agent results first, falling back
+                # to this cycle's agent_details for any agent missing from
+                # all_results. Two different books for the two gates is how a
+                # fossil stamp survives under a fresh coat of paint.
+                live_for_readiness = dict(all_results)
+                details = (base_decision or {}).get("agent_details") or {}
+                for _agent_name in ("technical", "classical", "smc",
+                                    "price_action", "multitimeframe"):
+                    if not isinstance(live_for_readiness.get(_agent_name), dict):
+                        _detail = details.get(_agent_name)
+                        if isinstance(_detail, dict):
+                            live_for_readiness[_agent_name] = {
+                                "signal": _detail.get("direction") or "WAIT",
+                                "confidence": _detail.get("confidence") or 0.0,
+                            }
+                fresh_readiness = SessionPlannerService(config)._execution_readiness(
+                    planner_source="fallback_day_map",
+                    direction=revived_bias,
+                    primary=payload.get("primary_poi") or {},
+                    standby=payload.get("standby_poi") or None,
+                    all_results=live_for_readiness,
+                    preferred_execution_family=str(
+                        payload.get("preferred_execution_family")
+                        or payload.get("scenario_type") or ""
+                    ),
+                    macro=all_results.get("macro_fundamental") or {},
+                )
+                revived["readiness_at_revival"] = {
+                    "stored_state": str(old_readiness.get("state") or ""),
+                    "stored_reason": str(old_readiness.get("reason") or ""),
+                }
+                revived["execution_readiness"] = fresh_readiness
+                revived["readiness_rejudged_on_revival"] = True
+            except Exception as exc:  # noqa: BLE001 - keep the stored verdict rather than drop the map
+                logger.warning(
+                    "Readiness re-judgement failed on revival for %s; keeping the stored verdict: %s",
+                    symbol, exc,
+                )
         logger.info(
             "Revived day map expiry renewed: %s -> %s (orders judged by their "
             "own age, not the source map's)",
@@ -1825,8 +1886,11 @@ def _execute_session_plan_ladder(
             database, config, symbol=str(base_decision.get("symbol") or config.get("symbol", "XAU/USD")),
             now=datetime.now(timezone.utc),
             # Carries this cycle's agent_details so the snapshot is re-judged
-            # against the live book rather than its own stored verdict.
+            # against the live book rather than its own stored verdict -- and
+            # all_results so EXECUTION READINESS is re-judged the same way,
+            # not replayed as the stamp the build cycle wrote.
             base_decision=base_decision,
+            all_results=all_results,
         )
         if not revived:
             logger.info(
