@@ -172,7 +172,7 @@ def main() -> None:
     _report(f"last {len(rows)} cycles", rows, config)
 
 
-def _order_outcome_section(ready: List[Dict[str, Any]]) -> None:
+def _order_outcome_section(ready: List[Dict[str, Any]], config: Dict[str, Any]) -> None:
     """Orders placed vs maps published.
 
     Called immediately after the published/refused counts, not at the end
@@ -182,6 +182,9 @@ def _order_outcome_section(ready: List[Dict[str, Any]]) -> None:
     operator. The script completed fine each time; the channel was lossy.
     A conclusion printed below the cut has not been reported.
     """
+    sig_cfg = (config.get("signal_requirements") or {}) if isinstance(config, dict) else {}
+    min_agent_conf = _f(sig_cfg.get("agent_min_confidence"), 70.0) or 70.0
+
     audited = []
     for row in ready:
         payload = row.get("payload")
@@ -253,6 +256,58 @@ def _order_outcome_section(ready: List[Dict[str, Any]]) -> None:
                 "      to publish and was then refused at execution."
             )
 
+        # ── HOW CLOSE WAS THE AGENT COUNT? ──────────────────────────────
+        #
+        # "requires 3 qualified agents ... got 2" is the single largest
+        # reason a READY map produces no order. That refusal is either the
+        # bar doing its job, or the bar missing by a hair -- and the two
+        # call for opposite decisions.
+        #
+        # The distinction is measurable from data already stored:
+        # `payload.agent_opinions` records each agent's direction and
+        # confidence at plan time. An agent that agreed with the map but
+        # fell short of `agent_min_confidence` is a NEAR MISS. If most
+        # shortfalls are within a point or two, the threshold is filtering
+        # on noise; if they are far below, the agents genuinely disagreed
+        # and the silence is correct.
+        #
+        # Reported, never acted on. No threshold is read as a target here.
+        near = []
+        for row in ready:
+            payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+            audit = payload.get("execution_audit") or {}
+            if int(audit.get("ladder_created") or 0) > 0:
+                continue
+            side = str(row.get("session_bias") or payload.get("session_bias") or "").upper()
+            if side not in {"BUY", "SELL"}:
+                continue
+            for op in payload.get("agent_opinions") or []:
+                if str(op.get("key")) == "macro_fundamental":
+                    continue  # confirms separately, not part of the count
+                if str(op.get("direction") or "").upper() != side:
+                    continue
+                conf = _f(op.get("confidence"))
+                if 0 < conf < min_agent_conf:
+                    near.append((min_agent_conf - conf, str(op.get("key")), conf))
+
+        if near:
+            near.sort()
+            within_2 = sum(1 for gap, _, _ in near if gap <= 2.0)
+            within_5 = sum(1 for gap, _, _ in near if gap <= 5.0)
+            print(f"\n  Agents that AGREED but missed the {min_agent_conf:.0f}% bar")
+            print(f"    occurrences: {len(near)} · within 2 pts: {within_2} · "
+                  f"within 5 pts: {within_5}")
+            by_agent = Counter(key for _, key, _ in near)
+            for key, count in by_agent.most_common(6):
+                gaps = [g for g, k, _ in near if k == key]
+                print(f"    {count:4d}  {key:<16} median shortfall {sorted(gaps)[len(gaps) // 2]:.1f} pts")
+            if within_2 >= max(3, len(near) // 2):
+                print("\n    → most shortfalls are within 2 points. The bar is\n"
+                      "      separating on noise, not on disagreement.")
+            else:
+                print("\n    → shortfalls are spread well below the bar; the\n"
+                      "      agents genuinely disagreed. The bar is earning its place.")
+
 
 def _report(window_label: str, rows: List[Dict[str, Any]], config: Dict[str, Any]) -> None:
     ready = [r for r in rows if r.get("plan_ready")]
@@ -288,7 +343,7 @@ def _report(window_label: str, rows: List[Dict[str, Any]], config: Dict[str, Any
         print(f"  CRASHED   : {len(crashes)}  ({len(crashes) / len(rows) * 100:.1f}%)"
               "  ← not refusals: cycles that produced no map at all")
 
-    _order_outcome_section(ready)
+    _order_outcome_section(ready, config)
 
     families = Counter(_reason_family(str(r.get("plan_reason") or "")) for r in refused)
     if families:
