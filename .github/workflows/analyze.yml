@@ -129,7 +129,8 @@ jobs:
             tests/test_dashboard_numbers_agree.py \
             tests/test_dashboards_read_the_same_trades.py \
             tests/test_refusal_reason_names_the_shortfall.py \
-            tests/test_report_shows_why_no_order.py
+            tests/test_report_shows_why_no_order.py \
+            tests/test_planner_crash_names_its_site.py
 
       - name: 🔎 Validate Production Setup
         run: |
