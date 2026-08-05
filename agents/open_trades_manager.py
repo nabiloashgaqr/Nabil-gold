@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 from agents.base_agent import BaseAgent
@@ -214,6 +214,26 @@ class OpenTradesManager(BaseAgent):
             self.pending_touch_min_age_minutes = float(_min_age)
         except (TypeError, ValueError):
             self.pending_touch_min_age_minutes = 15.0
+        # Candle timestamps govern touch detection (operator directive,
+        # 2026-08-05). The manager used to receive "the latest candle" with no
+        # timestamp and trust its extremes on an age proxy alone -- so a stale
+        # or mislabeled bar could fill orders and trip stops at prices the
+        # market never printed (TRADE_..._2e09b05c activated at 4090.25 while
+        # every displayed price stayed above 4093). Two guards now:
+        #   * a candle older than max_candle_age_minutes is a price-reading
+        #     failure: its extremes are collapsed to the live price, and
+        #     pending orders wait for a fresh bar before activating;
+        #   * a fresh candle may only fill an order with action from a window
+        #     that started at or after the order existed (a straddling bar is
+        #     judged by the live price alone).
+        _bar_tf = str((self.config.get("data_source") or {}).get("base_timeframe", "5m") or "5m")
+        _bar_minutes = {"1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240}.get(_bar_tf, 5)
+        self.pending_touch_bar_minutes = float(_bar_minutes)
+        _max_age = ptr.get("max_candle_age_minutes", _bar_minutes * 2)
+        try:
+            self.pending_touch_max_candle_age_minutes = float(_max_age)
+        except (TypeError, ValueError):
+            self.pending_touch_max_candle_age_minutes = float(_bar_minutes * 2)
         self.pending_touch_revalidation_min_confirmation_points = float(ptr.get("min_confirmation_points", 15) or 15)
         self.pending_touch_revalidation_limit_max_drift_points = float(ptr.get("limit_max_drift_points", 40) or 40)
         self.pending_touch_revalidation_stop_max_drift_points = float(ptr.get("stop_max_drift_points", 25) or 25)
@@ -499,6 +519,7 @@ class OpenTradesManager(BaseAgent):
         news_context: Dict[str, Any] | None = None,
         market_data_source: str | None = None,
         agent_details: Dict[str, Any] | None = None,
+        candle_time: str | None = None,
     ) -> List[Dict[str, Any]]:
         """Evaluate all open trades, persist updates and send Telegram events.
 
@@ -522,6 +543,7 @@ class OpenTradesManager(BaseAgent):
                 database=database,
                 market_data_source=market_data_source,
                 agent_details=agent_details,
+                candle_time=candle_time,
             )
             evaluations.append(evaluation)
             trade_id = str(trade.get("id", ""))
@@ -599,6 +621,7 @@ class OpenTradesManager(BaseAgent):
         database: Any | None = None,
         market_data_source: str | None = None,
         agent_details: Dict[str, Any] | None = None,
+        candle_time: str | None = None,
     ) -> Dict[str, Any]:
         """Return updates/events for a single trade without external side effects.
 
@@ -606,8 +629,26 @@ class OpenTradesManager(BaseAgent):
         provides the latest candle high/low, hard level checks use those extremes:
         BUY targets use high, BUY stops use low; SELL targets use low, SELL stops
         use high. This catches TP/SL touches within a 5-minute candle.
+
+        ``candle_time`` is that candle's own timestamp. When it is present and
+        older than the freshness window, the candle is a price-reading failure:
+        its extremes are collapsed to the live price for THIS evaluation, so a
+        stale bar can neither fill an order nor stop one out.
         """
         now = now or datetime.now(timezone.utc)
+        candle_dt = self._parse_dt(str(candle_time or "")) if candle_time else None
+        if candle_dt is not None and (candle_high is not None or candle_low is not None):
+            candle_age_minutes = (now - candle_dt).total_seconds() / 60.0
+            if candle_age_minutes > self.pending_touch_max_candle_age_minutes:
+                self.logger.warning(
+                    "PRICE READ FAILURE for %s: latest candle is from %s (%.0f min old, "
+                    "freshness window %.0f min). Its extremes are ignored this cycle; "
+                    "levels are judged by the live price only.",
+                    trade.get("id"), candle_time, candle_age_minutes,
+                    self.pending_touch_max_candle_age_minutes,
+                )
+                candle_high = current_price
+                candle_low = current_price
         trade_type = str(trade.get("type", "BUY")).upper()
         symbol = str(trade.get("symbol") or self.config.get("symbol", "XAU/USD"))
         old_status = str(trade.get("status", "OPEN")).upper()
@@ -652,6 +693,7 @@ class OpenTradesManager(BaseAgent):
                 news_context=news_context,
                 database=database,
                 market_data_source=market_data_source,
+                candle_time=candle_time,
             )
 
         pnl_points = calculate_pips(entry, current_price, trade_type, symbol)
@@ -2494,6 +2536,7 @@ class OpenTradesManager(BaseAgent):
         news_context: Dict[str, Any] | None = None,
         database: Any | None = None,
         market_data_source: str | None = None,
+        candle_time: str | None = None,
     ):
         """Activate a pending order on touch, else keep it waiting (no PnL).
 
@@ -2511,23 +2554,58 @@ class OpenTradesManager(BaseAgent):
             high_price, low_price = low_price, high_price
         market_source = str(market_data_source or trade.get("market_data_source") or "")
         touch_source_reliable = market_source not in {"swissquote_spot_quote_fallback", "synthetic_demo", "quote"}
+        candle_dt = self._parse_dt(str(candle_time or "")) if candle_time else None
+        if candle_dt is not None:
+            candle_age_minutes = (now - candle_dt).total_seconds() / 60.0
+            if candle_age_minutes > self.pending_touch_max_candle_age_minutes:
+                # A stale "latest candle" is a price-reading failure. Its
+                # extremes (collapsed to the live price upstream) must not
+                # activate anything: pending orders wait for a fresh bar,
+                # exactly as they wait out the quote-fallback sources.
+                touch_source_reliable = False
+                self.logger.warning(
+                    "Pending %s for %s: touch detection degraded — latest candle %s "
+                    "is %.0f min old (window %.0f min); waiting for a fresh bar",
+                    order_type or trade_type, trade.get("id"), candle_time,
+                    candle_age_minutes, self.pending_touch_max_candle_age_minutes,
+                )
         theoretical_touch = self._order_filled(order_type, trade_type, entry, current_price, high_price, low_price)
         filled_touch = theoretical_touch if touch_source_reliable else False
 
         # A pending order can only be filled by price action that happened
-        # after it existed. The candle handed in here is simply "the latest
-        # bar", and on a 5m/15m frame that bar often opened before the order
-        # did -- so an order created at 12:21 was activated in the same cycle
-        # by a high printed earlier in the same bar.
-        #
-        # The live case: BUY STOP at 4028.77 reported "Waiting: 0.0h" and
-        # "Current Price: 4017.65" -- filled 111 points below its own trigger,
-        # because the bar's high (~4036) predated the order.
-        #
-        # Require the market to actually reach the trigger while the order is
-        # live: on the creation cycle, judge by the price now rather than by a
-        # high the order never saw.
-        if filled_touch and not self._touch_is_after_creation(trade, now):
+        # after it existed. When the filling candle carries its own timestamp
+        # (operator directive, 2026-08-05), judge by the timestamp, not by an
+        # age proxy: a bar whose window ENDED before the order existed cannot
+        # fill it whatever its extremes show, and a bar that STRADDLES the
+        # creation moment is judged by the live price alone, because its
+        # extreme may belong to the minutes before the order.
+        if filled_touch and candle_dt is not None:
+            created = self._parse_dt(str(trade.get("created_at") or trade.get("entry_time") or ""))
+            if created is not None:
+                candle_end = candle_dt + timedelta(minutes=self.pending_touch_bar_minutes)
+                predates = candle_end <= created
+                straddles = candle_dt < created < candle_end
+                if predates or straddles:
+                    live_touch = self._order_filled(
+                        order_type, trade_type, entry, current_price, current_price, current_price
+                    )
+                    if not live_touch:
+                        self.logger.info(
+                            "Pending %s for %s not activated: the filling candle %s "
+                            "%s the order (created %s); only the live price may fill it "
+                            "(entry %.2f, price now %.2f)",
+                            order_type or trade_type, trade.get("id"), candle_time,
+                            "predates" if predates else "straddles", created.isoformat(),
+                            entry, current_price,
+                        )
+                        filled_touch = False
+        elif filled_touch and not self._touch_is_after_creation(trade, now):
+            # Legacy path: no candle timestamp available. Age is the only
+            # proxy: once the order has outlived the bar interval, any extreme
+            # in the current bar is necessarily from after it was placed.
+            # Below that age, the live price alone decides. (The live case:
+            # BUY STOP at 4028.77 filled 111 points below its trigger by a
+            # high printed earlier in the same bar.)
             live_touch = self._order_filled(
                 order_type, trade_type, entry, current_price, current_price, current_price
             )
@@ -3319,6 +3397,14 @@ class OpenTradesManager(BaseAgent):
                     delayed_touch_revalidation_reason=late_reason,
                     activated_after_touch_revalidation=True,
                 )
+            _persist_runtime(
+                # THE FILLING CANDLE, NAMED. Before this, a phantom activation
+                # could not be audited: the row kept the extreme that fired it
+                # but not which candle printed it. (TRADE_..._2e09b05c: filled
+                # at 4090.25 while every displayed price stayed above 4093.)
+                fill_candle_time=str(candle_time or "") or None,
+                fill_judged_by="candle_timestamp" if candle_dt is not None else "legacy_age_proxy",
+            )
             base_updates.update({
                 "status": "OPEN",
                 "entry_time": self._iso(now),
