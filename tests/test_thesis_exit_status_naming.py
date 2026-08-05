@@ -164,13 +164,15 @@ def test_execution_metrics_and_reports_include_thesis_exit() -> None:
 
 
 def test_database_schema_accepts_the_new_status() -> None:
-    """Postgres rejects an unlisted status outright, so the CHECK must allow it."""
+    """Postgres rejects an unlisted status outright, so the CHECK must allow it.
+
+    The constraint now lives only in the unified schema (the one-off
+    THESIS_EXIT_STATUS_MIGRATION.sql was consolidated and removed on
+    2026-08-05), so assert against that single source of truth.
+    """
     schema = open(os.path.join(ROOT, "supabase_schema_unified.sql"), encoding="utf-8").read()
     assert "'THESIS_EXIT'" in schema
-    migration = os.path.join(ROOT, "THESIS_EXIT_STATUS_MIGRATION.sql")
-    assert os.path.exists(migration), "the DB constraint change needs a migration file"
-    body = open(migration, encoding="utf-8").read()
-    assert "THESIS_EXIT" in body and "trades_status_check" in body
+    assert "CHECK (status IN (" in schema
 
 
 def test_no_status_list_anywhere_forgets_thesis_exit() -> None:
