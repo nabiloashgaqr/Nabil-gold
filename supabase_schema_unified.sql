@@ -916,6 +916,36 @@ ALTER TABLE analyst_labels ENABLE ROW LEVEL SECURITY;
 ALTER TABLE analyst_comparisons ENABLE ROW LEVEL SECURITY;
 
 -- =====================================================
+-- decision_audit (folded from DECISION_AUDIT_MIGRATION.sql)
+-- Records which gate ended each cycle and why (SENT | BLOCKED).
+-- =====================================================
+CREATE TABLE IF NOT EXISTS decision_audit (
+    id              TEXT PRIMARY KEY,
+    symbol          TEXT,
+    stage           TEXT,
+    outcome         TEXT,
+    side            TEXT,
+    reason          TEXT,
+    entry_price     NUMERIC,
+    stop_loss       NUMERIC,
+    tp1             NUMERIC,
+    tp2             NUMERIC,
+    tp1_rr          NUMERIC,
+    tp2_rr          NUMERIC,
+    confidence      NUMERIC,
+    support_count   INTEGER,
+    oppose_count    INTEGER,
+    entry_mode      TEXT,
+    trade_id        TEXT,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_decision_audit_created  ON decision_audit (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_decision_audit_symbol   ON decision_audit (symbol, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_decision_audit_stage    ON decision_audit (stage, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_decision_audit_outcome  ON decision_audit (outcome, created_at DESC);
+ALTER TABLE decision_audit ENABLE ROW LEVEL SECURITY;
+
+-- =====================================================
 -- Final: Reload PostgREST schema cache
 -- =====================================================
 NOTIFY pgrst, 'reload schema';
