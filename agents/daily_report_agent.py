@@ -40,6 +40,7 @@ class DailyReportAgent(BaseAgent):
         breakeven = [t for t in resolved_trades if t.get("status") == "BE_HIT" or self._pnl(t) == 0]
         
         open_trades = [t for t in trades if t.get("status") in {"OPEN", "TP1_HIT", "PARTIAL"}]
+        pending_trades = [t for t in trades if t.get("status") == "PENDING"]
         
         pnl_values = [self._pnl(t) for t in resolved_trades]
         gross_profit = sum(x for x in pnl_values if x > 0)
@@ -68,6 +69,7 @@ class DailyReportAgent(BaseAgent):
             "losses": len(losers),
             "breakeven": len(breakeven),
             "open": len(open_trades),
+            "pending": len(pending_trades),
             "win_rate": win_rate,
             "net_points": net,
             "best_trade": round(best, 1),
@@ -137,7 +139,7 @@ class DailyReportAgent(BaseAgent):
 
 📈 SUMMARY
   Total: {stats['total']} trades
-  ✅ Wins: {stats['wins']}  |  ❌ Losses: {stats['losses']}  |  ⚪ BE: {stats['breakeven']}  |  🔄 Open: {stats['open']}
+  ✅ Wins: {stats['wins']}  |  ❌ Losses: {stats['losses']}  |  ⚪ BE: {stats['breakeven']}  |  🔄 Open: {stats['open']}  |  ⏳ Pending: {stats.get('pending', 0)} (no P&L)
   🎯 Win Rate: {stats['win_rate']}%
 {separator}
 
@@ -210,11 +212,12 @@ class DailyReportAgent(BaseAgent):
         if not trades:
             return ""
 
-        closed = [t for t in trades if t.get("status") not in {"OPEN", "TP1_HIT", "PARTIAL"}]
-        if not closed:
-            return ""
+        closed = [t for t in trades if t.get("status") not in {"OPEN", "TP1_HIT", "PARTIAL", "PENDING"}]
+        pending = [t for t in trades if t.get("status") == "PENDING"]
 
-        lines = ["TRADE DETAILS"]
+        lines = []
+        if closed:
+            lines.append("TRADE DETAILS")
         for t in closed[-10:]:  # Last 10 trades
             symbol = str(t.get("symbol") or "XAU/USD")
             side = str(t.get("type") or t.get("side") or "?").upper()
@@ -248,6 +251,27 @@ class DailyReportAgent(BaseAgent):
                 f"{pnl:+.1f} pts | "
                 f"{status_text}"
             )
+
+        # Pending orders are NOT open trades and carry NO profit/loss yet.
+        # Listing them among results made them read as live positions; keep them
+        # in their own clearly-labelled block so the report never implies a P&L.
+        if pending:
+            if lines:
+                lines.append("")
+            lines.append("PENDING ORDERS (waiting — no profit / no loss)")
+            for t in pending:
+                symbol = str(t.get("symbol") or "XAU/USD")
+                side = str(t.get("type") or t.get("side") or "?").upper()
+                entry = self._f(t.get("entry_price"))
+                sl = self._f(t.get("stop_loss"))
+                tp2 = self._f(t.get("tp2"))
+                lines.append(
+                    f"  [~] {side} {symbol} | "
+                    f"Entry {format_price(entry, symbol)} | "
+                    f"SL {format_price(sl, symbol)} | "
+                    f"TP2 {format_price(tp2, symbol)} | "
+                    f"0.0 pts | PENDING — not active, no P&L"
+                )
 
         return "\n".join(lines)
 
