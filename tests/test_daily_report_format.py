@@ -189,3 +189,29 @@ def test_daily_report_includes_day_map_execution_block(monkeypatch):
     assert "Add needed:" in text
     assert "Management Brief" in text
     assert "Operator Focus" in text
+
+
+def test_pending_orders_are_labelled_pending_with_no_pnl():
+    """A PENDING order must never read as an open/closed position: it goes in
+    its own block, shows 0.0 pts and an explicit 'no P&L' note, and is counted
+    separately in the summary. Fault injection: re-adding PENDING to the closed
+    list (or dropping the pending block) makes this fail."""
+    from agents.daily_report_agent import DailyReportAgent
+
+    agent = DailyReportAgent({"symbol": "XAU/USD"})
+    trades = [
+        {"symbol": "XAU/USD", "type": "BUY", "status": "TP2_HIT",
+         "entry_price": 4060.0, "stop_loss": 4045.0, "tp1": 4075.0, "tp2": 4090.0,
+         "final_pnl_points": 290.0},
+        {"symbol": "XAU/USD", "type": "BUY", "status": "PENDING",
+         "entry_price": 4160.6, "stop_loss": 4145.6, "tp1": 4178.0, "tp2": 4216.7,
+         "current_pnl_points": 0.0},
+    ]
+    text = agent.generate(trades)["text"]
+
+    assert "PENDING ORDERS (waiting — no profit / no loss)" in text
+    assert "PENDING — not active, no P&L" in text
+    assert "Pending: 1" in text
+    # The pending row must show zero points, never a realised P&L.
+    pending_line = next(l for l in text.splitlines() if "PENDING — not active" in l)
+    assert "0.0 pts" in pending_line
