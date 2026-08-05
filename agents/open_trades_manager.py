@@ -673,6 +673,22 @@ class OpenTradesManager(BaseAgent):
         if high_price < low_price:
             high_price, low_price = low_price, high_price
 
+        # ── Missed-cycle sequential replay (operator directive 2026-08-05) ──
+        # If the engine was down for a cycle, several bars are unexamined. They
+        # must be replayed IN ORDER (raise trailing from an early high before a
+        # later low is tested against it) rather than collapsed into one window.
+        if old_status in self.OPEN_STATUSES:
+            unexamined = self._ordered_unexamined_candles(trade, recent_candles)
+            if len(unexamined) >= 2:
+                seq = self._missed_candles_review(
+                    trade=trade, trade_type=trade_type, entry=entry,
+                    stop_loss=stop_loss, sl_moved_to_entry=sl_moved_to_entry,
+                    partial_close=partial_close, tp1=tp1, tp2=tp2,
+                    management=management, symbol=symbol, unexamined=unexamined,
+                )
+                if seq is not None:
+                    return seq
+
         # ── PENDING (un-filled LIMIT/STOP) order handling ───────────────────
         # A pending order is NOT a live position: it has no PnL until price
         # actually touches the entry. Only then does it become OPEN. This fixes
@@ -1648,6 +1664,151 @@ class OpenTradesManager(BaseAgent):
         if not highs or not lows:
             return None, None
         return max(highs), min(lows)
+
+    def _ordered_unexamined_candles(
+        self, trade: Dict[str, Any], recent_candles: List[Dict[str, Any]] | None
+    ) -> List[Dict[str, Any]]:
+        """Candles printed after the last examined bar, oldest first.
+
+        `trailing_stop_source_time` is re-stamped to the newest bar every cycle,
+        so on a healthy run this list holds only the current bar (len 1) and the
+        sequential reviewer stays out of the way. After a missed cycle (downtime)
+        it holds every unexamined bar, and they must be replayed IN ORDER so a
+        trailing stop is raised by an early high before a later low is tested
+        against it (operator directive 2026-08-05).
+        """
+        stamp = self._parse_dt(str(trade.get("trailing_stop_source_time") or ""))
+        if stamp is None or not recent_candles:
+            return []
+        out: List[tuple] = []
+        for candle in recent_candles:
+            if not isinstance(candle, dict):
+                continue
+            dt = self._parse_dt(str(candle.get("time") or ""))
+            if dt is not None and dt > stamp:
+                out.append((dt, candle))
+        out.sort(key=lambda item: item[0])
+        return [c for _, c in out]
+
+    def _missed_candles_review(
+        self,
+        *,
+        trade: Dict[str, Any],
+        trade_type: str,
+        entry: float,
+        stop_loss: float,
+        sl_moved_to_entry: bool,
+        partial_close: bool,
+        tp1: float,
+        tp2: float,
+        management: Dict[str, Any],
+        symbol: str,
+        unexamined: List[Dict[str, Any]],
+    ) -> Dict[str, Any] | None:
+        """Replay unexamined bars in chronological order and decide the outcome.
+
+        Within each bar the protective stop is tested against the stop level that
+        existed BEFORE this bar's high could raise it (a stop ratcheted by this
+        bar cannot be executed by this bar), then trailing ratchets from the high,
+        then TP1/TP2 are tested. Returns a full evaluation dict on a terminal or
+        state-changing result, else None to defer to the normal per-cycle path.
+        """
+        buy = trade_type == "BUY"
+        trail_enabled = bool(management.get("trailing_enabled"))
+        trail_gap = self._f(management.get("trailing_distance_points"), 0.0)
+        stop = entry if sl_moved_to_entry else stop_loss
+        sl_moved = sl_moved_to_entry
+        partial = partial_close
+        events: List[str] = []
+        realized = closed_fraction = scale_price = None
+        terminal = None  # (status, event, close_price, result)
+
+        for candle in unexamined:
+            high = self._f(candle.get("high"), 0.0)
+            low = self._f(candle.get("low"), 0.0)
+            if high <= 0 or low <= 0:
+                continue
+            prev_stop = stop
+            # 1) protective stop tested against the level that existed before
+            #    this bar's high could raise it.
+            hit = (low <= prev_stop) if buy else (high >= prev_stop)
+            if hit:
+                if sl_moved:
+                    pnl = calculate_pips(entry, prev_stop, trade_type, symbol)
+                    beyond = (prev_stop > entry) if buy else (prev_stop < entry)
+                    terminal = (
+                        "SL_HIT" if beyond else "BE_HIT",
+                        "TRAILING_SL_HIT" if beyond else "BE_HIT",
+                        prev_stop,
+                        ("WIN" if pnl > 0 else "BREAKEVEN"),
+                    )
+                else:
+                    terminal = ("SL_HIT", "SL_HIT", stop_loss, "LOSS")
+                break
+            # 2) trailing ratchet from this bar's high (only once protected).
+            if sl_moved and trail_enabled and trail_gap > 0:
+                # BUY ratchets up from the bar high; SELL ratchets down from the
+                # bar low (the favorable extreme for each side).
+                cand = (high - points_to_price(trail_gap, symbol)) if buy else (
+                    low + points_to_price(trail_gap, symbol)
+                )
+                if (cand > stop) if buy else (cand < stop):
+                    stop = cand
+            # 3) TP1 books the half and arms breakeven.
+            tp1_hit = (high >= tp1) if buy else (low <= tp1)
+            if tp1_hit and not partial and tp1 > 0:
+                partial = True
+                sl_moved = True
+                stop = max(stop, entry) if buy else min(stop, entry)
+                events.append("TP1_HIT")
+                booked = self._book_tp1_partial(trade, management, entry, tp1, trade_type, symbol)
+                if booked is not None:
+                    realized, closed_fraction, scale_price = booked
+            # 4) TP2 settles the rest.
+            tp2_hit = (high >= tp2) if buy else (low <= tp2)
+            if tp2_hit and tp2 > 0:
+                terminal = ("TP2_HIT", "TP2_HIT", tp2, "WIN")
+                break
+
+        if terminal is None and not events and stop == (entry if sl_moved_to_entry else stop_loss) and sl_moved == sl_moved_to_entry:
+            return None
+
+        status, event, close_price, result = terminal if terminal else (None, None, None, None)
+        if terminal and event not in events:
+            events.append(event)
+        updates: Dict[str, Any] = {
+            "status": status if status else ("TP1_HIT" if partial else trade.get("status")),
+            "sl_moved_to_entry": sl_moved,
+            "partial_close": partial,
+            "last_updated": self._iso(datetime.now(timezone.utc)),
+        }
+        if terminal:
+            updates.update({
+                "result": result,
+                "close_price": round(close_price, 2),
+                "close_time": self._iso(datetime.now(timezone.utc)),
+                "final_pnl": round(calculate_pips(entry, close_price, trade_type, symbol), 1),
+                "final_pnl_points": round(calculate_pips(entry, close_price, trade_type, symbol), 1),
+            })
+        if stop != stop_loss or sl_moved:
+            updates["stop_loss"] = round(stop, 2)
+        if realized is not None:
+            updates["realized_pnl_points"] = realized
+            updates["closed_fraction"] = closed_fraction
+            updates["scale_out_price"] = scale_price
+        stamp = self._newest_candle_time(unexamined)
+        if stamp is not None:
+            updates["trailing_stop_source_time"] = self._iso(stamp)
+        return {
+            "trade_id": trade.get("id"),
+            "old_status": str(trade.get("status", "OPEN")),
+            "new_status": updates["status"],
+            "pnl_points": self._f(updates.get("final_pnl_points"), 0.0),
+            "events": events,
+            "updates": updates,
+            "progress_to_tp1": 0.0,
+            "hours_open": 0.0,
+        }
 
     def _zone_width_points(self, trade: Dict[str, Any], entry: float, symbol: str) -> float:
         snapshot = self._trade_snapshot(trade)
