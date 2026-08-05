@@ -1263,17 +1263,16 @@ class OpenTradesManager(BaseAgent):
         }
         if new_stop_loss is not None:
             updates["stop_loss"] = round(new_stop_loss, 2)
-            # Stamp the newest bar this stop was derived from, so a later
-            # cycle cannot execute it using the very bar that created it.
-            # A trailed stop needs the stamp; a breakeven stop now needs it too,
-            # because the wick-guard lets completed candles printed after the
-            # arming execute the breakeven (see the protected-trade branch).
-            at_or_beyond = self._beyond_breakeven(trade_type, new_stop_loss, entry) or abs(
-                new_stop_loss - entry
-            ) < 1e-9
-            if at_or_beyond:
-                source_time = self._newest_candle_time(recent_candles) or now
-                updates["trailing_stop_source_time"] = self._iso(source_time)
+        # Re-stamp the newest bar EVERY cycle (operator directive 2026-08-05:
+        # "measure only the previous candle"). A trailed stop is executable only
+        # by bars newer than the stamp; re-stamping each cycle shrinks that window
+        # to the current bar, so a low printed several bars back -- when the stop
+        # sat lower -- can never execute a stop that has since been raised. This is
+        # what produced the repeated phantom trailing exits (exit 4176.13 while
+        # price stood at 4189.02).
+        _stamp = self._newest_candle_time(recent_candles)
+        if _stamp is not None:
+            updates["trailing_stop_source_time"] = self._iso(_stamp)
         # Publish the gap and step that were actually used this cycle.
         #
         # The Telegram card used to state "150-point gap / 40-point step" as a
