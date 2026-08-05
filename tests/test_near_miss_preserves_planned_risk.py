@@ -67,6 +67,11 @@ BARS = [
 def _config(**near_miss) -> dict:
     with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as fh:
         config = json.load(fh)
+    # These tests exercise the near-miss MECHANISM itself. The operator ruled
+    # it OFF by default on 2026-08-05 (b8ae314a converted to market 48 pts
+    # from entry without ever touching it), so we re-enable it locally here to
+    # prove the mechanism still behaves safely IF someone turns it back on.
+    config["order_execution"]["near_miss_execution"]["enabled"] = True
     if near_miss:
         config["order_execution"]["near_miss_execution"].update(near_miss)
     return config
@@ -203,9 +208,29 @@ def test_the_behaviour_can_be_switched_off() -> None:
 
 
 def test_the_setting_is_recorded_in_config() -> None:
-    near_miss = _config()["order_execution"]["near_miss_execution"]
+    # Operator ruling 2026-08-05: near-miss is OFF in the live config. The
+    # mechanism tests above re-enable it locally only to prove its safety.
+    with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as fh:
+        live = json.load(fh)
+    near_miss = live["order_execution"]["near_miss_execution"]
     assert near_miss["preserve_planned_risk"] is True
-    assert near_miss["enabled"] is True
+    assert near_miss["enabled"] is False, (
+        "near-miss market conversion must stay off by default after b8ae314a; "
+        "only a real entry/zone touch may fill a placed pending order"
+    )
+
+
+def test_with_live_config_a_near_miss_does_not_convert() -> None:
+    """The b8ae314a incident: price missed the entry by 20 pts (halo 25) and
+    the order was force-converted to market 48 pts away. With the ruling in
+    the live config, the same setup must stay PENDING."""
+    with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as fh:
+        live = json.load(fh)
+    result = _convert(config=live)
+    assert "ORDER_FILLED" not in result["events"], (
+        "near-miss must not convert by default; wait for a real touch"
+    )
+    assert result["new_status"] == "PENDING"
 
 
 def test_the_runtime_notes_that_risk_was_preserved() -> None:
