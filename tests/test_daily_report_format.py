@@ -215,3 +215,23 @@ def test_pending_orders_are_labelled_pending_with_no_pnl():
     # The pending row must show zero points, never a realised P&L.
     pending_line = next(l for l in text.splitlines() if "PENDING — not active" in l)
     assert "0.0 pts" in pending_line
+
+
+def test_sent_daily_summary_labels_pending_separately_with_no_pnl(monkeypatch):
+    """The sent EOD summary (run_daily_report) must not read a PENDING order as
+    an open position with floating P&L: it goes in its own 'Pending Orders'
+    block with 0.0 pts, and Floating/Combined net exclude it."""
+    pending = {
+        "symbol": "XAU/USD", "type": "BUY", "status": "PENDING",
+        "entry_price": 4160.6, "current_price": 4247.0,
+        "stop_loss": 4145.6, "tp2": 4216.7,
+        "created_at": "2026-08-05T06:40:00+00:00", "closed_at": "",
+    }
+    text = _run(today=[pending], open_t=[], monkeypatch=monkeypatch)
+
+    assert "Pending Orders" in text
+    assert "PENDING, not active" in text
+    assert "pending, no P&L" in text
+    # Pending must not be counted as an open trade nor add floating P&L.
+    assert "Open Trades: 1" not in text
+    assert "Floating Net" not in text
