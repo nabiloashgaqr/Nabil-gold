@@ -941,6 +941,30 @@ class OpenTradesManager(BaseAgent):
                 # the full window as before.
                 if self._beyond_breakeven(trade_type, active_protective_stop, entry):
                     active_stop_touched = _trailed_stop_touched(active_protective_stop)
+                elif protected_trade:
+                    # A breakeven stop (at entry) on a protected trade must NOT
+                    # be executed by a wick of the current/formation candle that
+                    # closes far above it. Repeated phantom BE_HIT (b8ae314a:
+                    # low wick 4162 vs close 4180.75) came from judging the
+                    # breakeven on the raw candle low. Allow execution only by:
+                    #   * the current candle CLOSING through the stop, or
+                    #   * a COMPLETED candle (excluding the latest) printed after
+                    #     the stop was armed whose extreme pierced it.
+                    cur_through = (
+                        current_price <= active_protective_stop
+                        if trade_type == "BUY"
+                        else current_price >= active_protective_stop
+                    )
+                    completed = (recent_candles or [])[:-1]
+                    adverse_closed = self._adverse_extreme_after(
+                        completed, trade_type, stop_source_time
+                    )
+                    closed_through = adverse_closed is not None and (
+                        adverse_closed <= active_protective_stop
+                        if trade_type == "BUY"
+                        else adverse_closed >= active_protective_stop
+                    )
+                    active_stop_touched = cur_through or closed_through
                 else:
                     active_stop_touched = _stop_touched(active_protective_stop)
 
@@ -1241,9 +1265,13 @@ class OpenTradesManager(BaseAgent):
             updates["stop_loss"] = round(new_stop_loss, 2)
             # Stamp the newest bar this stop was derived from, so a later
             # cycle cannot execute it using the very bar that created it.
-            # Only a stop trailed into profit needs the stamp; a breakeven or
-            # original stop is not derived from the window at all.
-            if self._beyond_breakeven(trade_type, new_stop_loss, entry):
+            # A trailed stop needs the stamp; a breakeven stop now needs it too,
+            # because the wick-guard lets completed candles printed after the
+            # arming execute the breakeven (see the protected-trade branch).
+            at_or_beyond = self._beyond_breakeven(trade_type, new_stop_loss, entry) or abs(
+                new_stop_loss - entry
+            ) < 1e-9
+            if at_or_beyond:
                 source_time = self._newest_candle_time(recent_candles) or now
                 updates["trailing_stop_source_time"] = self._iso(source_time)
         # Publish the gap and step that were actually used this cycle.
