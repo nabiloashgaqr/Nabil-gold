@@ -204,6 +204,10 @@
       "limit_max_drift_points": 40,
       "stop_max_drift_points": 25,
       "cancel_on_failed_revalidation": true,
+      "min_age_minutes_for_candle_fill": 15,
+      "max_candle_age_minutes": 10,
+      "description_min_age_minutes_for_candle_fill": "المسار القديم (بلا طابع زمني للشمعة): أدنى عمر للأمر قبل أن تُصدَّق قيم الشمعة المتطرفة في تعبئته؛ دون ذلك السعر الحي وحده يقرر.",
+      "description_max_candle_age_minutes": "حارس حداثة الشمعة (قرار المشغّل 2026-08-05): إذا كانت آخر شمعة أقدم من هذا العدد من الدقائق فهي فشل في قراءة السعر — تُهمل قيمها المتطرفة لهذه الدورة (تُضغط إلى السعر الحي)، والأوامر المعلقة تنتظر شمعة طازجة قبل التفعيل. الافتراضي ضعفا فترة الإطار (5د × 2 = 10).",
       "description": "Phase 4 foundation: if a stale / revalidation-required pending order is touched late, do not activate blindly. Require fresh confirmation plus acceptable drift and RR, otherwise cancel it safely."
     },
     "description": "Phase 3/4 foundation: classify waiting pending orders as FRESH / AGING / STALE / REVALIDATION_REQUIRED based on time, excursion without fill, target-path progress, and session/plan decay."
@@ -606,8 +610,8 @@
     "default_order_type": "AUTO",
     "entry_style": "hybrid",
     "description_entry_style": "hybrid: إذا كان السعر ملاصقاً لمنطقة قوية يدخل MARKET، وإذا كانت المنطقة أعلى/أسفل بسحب منطقي يدخل LIMIT/STOP من zone حقيقية. هذا يعيد تفعيل zone execution تدريجياً بدون كسر الحماية الحالية.",
-    "market_threshold_points": 30,
-    "description_market_threshold_points": "في وضع hybrid: إذا كانت أقرب منطقة قوية ضمن 30 نقطة فقط من السعر الحالي، يدخل MARKET بدل تعليق أمر pending.",
+    "market_threshold_points": 80,
+    "description_market_threshold_points": "في وضع hybrid: يُعلَّق أمر pending فقط إذا كان الدخول على بعد يزيد عن 80 نقطة من السعر الحالي. إذا كان أقرب من ذلك (≤80 نقطة) يدخل MARKET فوراً بدل تعليق أمر قد لا يصله السعر. قرار المشغّل 2026-08-05 بعد حادثة الأمر الذي عُلّق على بعد 34.7 نقطة ثم عبّأه النظام تعبئةً شبحية.",
     "pending_threshold_points": 20,
     "description_pending_threshold_points": "حد تقريبي لتصنيف LIMIT/STOP مقابل MARKET عندما يكون الدخول بعيداً عن السعر الحالي بما يكفي.",
     "pending_order_max_cycles": 36,
