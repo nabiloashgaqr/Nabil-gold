@@ -1716,7 +1716,12 @@ class OpenTradesManager(BaseAgent):
         buy = trade_type == "BUY"
         trail_enabled = bool(management.get("trailing_enabled"))
         trail_gap = self._f(management.get("trailing_distance_points"), 0.0)
-        stop = entry if sl_moved_to_entry else stop_loss
+        # Start from the PERSISTED protective stop (breakeven or an already
+        # trailed level). Initialising from the entry -- as an earlier version
+        # did -- rebuilt the trail from scratch and could LOWER a previously
+        # higher trailing stop (7ebe8906: 4250.14 -> 4238.80), giving back
+        # locked profit. The replay may only ratchet UP from the current stop.
+        stop = stop_loss if stop_loss > 0 else entry
         sl_moved = sl_moved_to_entry
         partial = partial_close
         events: List[str] = []
@@ -1770,7 +1775,7 @@ class OpenTradesManager(BaseAgent):
                 terminal = ("TP2_HIT", "TP2_HIT", tp2, "WIN")
                 break
 
-        if terminal is None and not events and stop == (entry if sl_moved_to_entry else stop_loss) and sl_moved == sl_moved_to_entry:
+        if terminal is None and not events and abs(stop - stop_loss) < 1e-9 and sl_moved == sl_moved_to_entry:
             return None
 
         status, event, close_price, result = terminal if terminal else (None, None, None, None)
