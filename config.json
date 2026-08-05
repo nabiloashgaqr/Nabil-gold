@@ -629,7 +629,7 @@
       "description": "إذا لُمس الأمر المعلق أثناء نافذة منع الأخبار لا يتفعل. يتحول إلى News Hold ثم يُعاد فحص الخبر والـ drift والـ RR بعد انتهاء المنع. إذا بقي صالحاً يدخل MARKET، وإلا يُلغى بأمان."
     },
     "near_miss_execution": {
-      "enabled": true,
+      "enabled": false,
       "preserve_planned_risk": true,
       "description_preserve_planned_risk": "عند تحويل الأمر الحدّي إلى أمر سوق بعد خطأ الدخول بفرق بسيط، يُنقل الوقف بنفس مسافة انتقال الدخول لتبقى المخاطرة كما خُطّطت. في 2026-08-03 حُوّل الأمر 2f72579f من دخول 4037.48 إلى 4031.76 مع بقاء الوقف 4077.48، فكبرت المخاطرة من 400 إلى 457 نقطة دون إذن. نفس مبدأ zone_touch_activation.preserve_planned_risk. الوقف لا يتوسّع أبداً: إن كان المخطّط أضيق يُبقى عليه.",
       "min_halo_points": 12,
@@ -640,7 +640,8 @@
       "max_target_progress_pct": 30,
       "min_remaining_rr": 1.8,
       "require_planner_context": true,
-      "description": "If price misses a planner limit area by only a few points, then rejects and moves away in the intended direction, allow a controlled market conversion without widening the original POI itself."
+      "description": "If price misses a planner limit area by only a few points, then rejects and moves away in the intended direction, allow a controlled market conversion without widening the original POI itself.",
+      "description_disabled_20260805": "أُطفئت بقرار المشغّل 2026-08-05 بعد تفعيل b8ae314a بتعبئة ماركت على بعد 48 نقطة دون لمس الدخول (missed by 20 within halo 25). القاعدة الجديدة: بعد وضع الأمر المعلق لا تفعيل إلا بلمس فعلي لسعر الدخول أو حافة الزون (zone_touch_activation تبقى مفعّلة). تحويل «كاد يلمس» إلى ماركت لم يعد مقبولاً."
     },
     "zone_touch_activation": {
       "enabled": true,
