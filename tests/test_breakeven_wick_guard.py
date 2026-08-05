@@ -108,3 +108,37 @@ def test_a_completed_candle_after_arming_piercing_breakeven_hits_it() -> None:
     ]
     result = _evaluate(_protected_trade(), 4180.0, 4180.0, 4175.0, candles)
     assert result.get("new_status") == "BE_HIT"
+
+
+# --- per-cycle re-stamp narrows the trailing window ------------------------
+
+def test_a_stale_low_cannot_execute_a_raised_trailing_stop() -> None:
+    """With the stamp re-written every cycle, only bars newer than the previous
+    cycle may execute the stop. A low printed 3 bars back (when the stop sat
+    lower) must not close the trade while price stands above the stop."""
+    stop = 4176.13
+    t = _protected_trade()
+    t["stop_loss"] = stop
+    t["trailing_stop_source_time"] = (NOW - timedelta(minutes=5)).isoformat()
+    candles = [
+        {"time": (NOW - timedelta(minutes=15)).isoformat(), "high": 4180.0, "low": 4170.0, "close": 4178.0},
+        {"time": (NOW - timedelta(minutes=5)).isoformat(), "high": 4187.0, "low": 4180.0, "close": 4186.0},
+        {"time": (NOW - timedelta(minutes=1)).isoformat(), "high": 4189.02, "low": 4185.0, "close": 4189.02},
+    ]
+    result = _evaluate(t, 4189.02, 4189.02, 4185.0, candles)
+    assert result.get("new_status") != "SL_HIT", (
+        "a multi-bar-old low executed a raised trailing stop"
+    )
+
+
+def test_a_genuine_pullback_through_the_trailing_stop_still_closes() -> None:
+    stop = 4176.13
+    t = _protected_trade()
+    t["stop_loss"] = stop
+    t["trailing_stop_source_time"] = (NOW - timedelta(minutes=5)).isoformat()
+    candles = [
+        {"time": (NOW - timedelta(minutes=5)).isoformat(), "high": 4187.0, "low": 4180.0, "close": 4186.0},
+        {"time": (NOW - timedelta(minutes=1)).isoformat(), "high": 4180.0, "low": 4174.0, "close": 4175.0},
+    ]
+    result = _evaluate(t, 4175.0, 4180.0, 4174.0, candles)
+    assert result.get("new_status") == "SL_HIT"
