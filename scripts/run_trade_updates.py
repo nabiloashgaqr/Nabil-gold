@@ -275,6 +275,10 @@ def main() -> None:
             except (TypeError, ValueError):
                 candle_high = current_price
                 candle_low = current_price
+            # The candle's own timestamp travels with its extremes: the manager
+            # refuses fills/stop-outs from a bar older than the freshness
+            # window, and never lets a bar that predates an order fill it.
+            candle_time = str(latest_candle.get("time") or "") or None
             if not _payload_supports_pending_activation(price_payload) and any(str(t.get("status") or "").upper() == "PENDING" for t in symbol_trades):
                 integrity = price_payload.get("source_integrity") or {}
                 logger.warning(
@@ -296,6 +300,7 @@ def main() -> None:
                 news_blocked=news_blocked,
                 news_context=news_result,
                 market_data_source=str(price_payload.get("source") or ""),
+                candle_time=candle_time,
             ))
         total_events = 0
         for evaluation in evaluations:
