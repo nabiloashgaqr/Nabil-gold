@@ -119,3 +119,30 @@ def test_a_single_new_bar_defers_to_the_normal_path() -> None:
     )
     # No terminal from the replay; trade stays open-ish (TP1_HIT) this cycle.
     assert result["new_status"] in ("TP1_HIT", "OPEN", "SL_HIT", "BE_HIT")
+
+
+def test_replay_never_lowers_an_already_trailed_stop() -> None:
+    """7ebe8906 regression: the persisted trailing stop (4250.14) was higher than
+    what a from-scratch replay would build (4238.80). The replay must ratchet UP
+    from the persisted stop only, and a later drop exits at the HIGHER stop."""
+    entry = 4205.82
+    trade = _open_trade(20)
+    trade["entry_price"] = entry
+    trade["stop_loss"] = 4250.14          # already trailed high
+    trade["initial_stop_loss"] = 4190.00
+    trade["tp1"] = 4220.00
+    trade["tp2"] = 4260.00
+    candles = [
+        _candle(15, 4255.8, 4250.5, 4254.0),   # would build 4238.8 from scratch
+        _candle(10, 4256.0, 4234.4, 4240.0),   # drops through the HIGH stop
+        _candle(1, 4240.0, 4234.4, 4238.0),
+    ]
+    result = _manager().evaluate_trade(
+        trade, 4238.0, NOW, candle_high=4240.0, candle_low=4234.4,
+        recent_candles=candles, market_data_source="twelvedata",
+        candle_time=(NOW - timedelta(minutes=1)).isoformat(),
+    )
+    assert result["new_status"] == "SL_HIT"
+    assert result["updates"]["close_price"] == 4250.14, (
+        f"must exit at the persisted higher stop, got {result['updates']['close_price']}"
+    )
