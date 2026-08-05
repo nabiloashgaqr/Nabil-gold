@@ -559,8 +559,16 @@ def main() -> None:
         day_map_execution = summarize_day_map_execution(today_trades)
         stats["day_map_execution"] = day_map_execution
         
-        open_trades = open_at_that_time
+        # Pending orders are NOT open positions and carry no profit/loss.
+        # Counting them as open made the report show floating P&L for orders
+        # that never filled. Split them out and label them clearly.
+        live_open = [t for t in open_at_that_time
+                     if str(t.get("status", "")).upper() in {"OPEN", "TP1_HIT", "PARTIAL"}]
+        pending_now = [t for t in open_at_that_time
+                       if str(t.get("status", "")).upper() == "PENDING"]
+        open_trades = live_open
         stats["open"] = len(open_trades)
+        stats["pending"] = len(pending_now)
         
         def _pts(trade) -> float:
             return _trade_points(trade)
@@ -590,7 +598,7 @@ def main() -> None:
         combined_net = net_pts + open_pts
 
         lines.append("📊 <b>Performance (today)</b>")
-        lines.append(f"• Trades: {stats.get('total', 0)} (✅ {stats.get('wins', 0)} · ❌ {stats.get('losses', 0)} · ➖ {stats.get('breakeven', 0)} · 🔄 {stats.get('open', 0)})")
+        lines.append(f"• Trades: {stats.get('total', 0)} (✅ {stats.get('wins', 0)} · ❌ {stats.get('losses', 0)} · ➖ {stats.get('breakeven', 0)} · 🔄 {stats.get('open', 0)} · ⏳ {stats.get('pending', 0)} pending, no P&L)")
         lines.append(f"• Win rate: {stats.get('win_rate', 0)}%")
         lines.append(f"• Closed Net: {net_pts:+.0f} pts ({_usd(net_pts):+.1f}$)")
         if open_trades:
@@ -698,6 +706,21 @@ def main() -> None:
             lines.append("")
         else:
             lines.append("🔄 <b>Open Trades:</b> none")
+            lines.append("")
+
+        # Pending orders: waiting, not active, no profit / no loss. Kept in their
+        # own block so they never read as live positions with floating P&L.
+        if pending_now:
+            lines.append(f"⏳ <b>Pending Orders:</b> {len(pending_now)} (waiting — no profit / no loss)")
+            for t in pending_now[:8]:
+                entry = float(t.get("entry_price", 0) or 0)
+                typ = str(t.get("type") or t.get("trade_type", "BUY")).upper()
+                sl = float(t.get("stop_loss", 0) or 0)
+                tp2 = float(t.get("tp2", 0) or 0)
+                sym = str(t.get("symbol") or "XAU/USD")
+                lines.append(
+                    f"➖ {typ} {sym} @ {entry:.2f} | SL {sl:.2f} | TP2 {tp2:.2f} | 0.0 pts — PENDING, not active"
+                )
             lines.append("")
 
         learning_section = _read_eod_section("learning")
