@@ -460,44 +460,51 @@ def _resolve_reward_target(
             levels.append(level)
 
     ordered = sorted(set(levels), key=lambda lv: abs(lv - entry_price))
-    # Operator directive (2026-08-06): look ONLY at the nearest liquidity and
-    # the one that follows it -- never farther. Far projected pools (4400+)
-    # were stretching TP2 to absurd distances. If these two nearest pools do
-    # not clear min_rr, the leg is rejected honestly rather than stretched.
-    ordered = ordered[:2]
-    qualifying = [lv for lv in ordered if _rr(lv) >= min_rr]
-
-    if qualifying:
-        if prefer_far:
-            # Farthest real pool the risk can justify, kept inside the max_rr
-            # cap so the pick remains a level the map drew. Nothing inside the
-            # cap falls back to the nearest qualifying pool (the old pick),
-            # which downstream may still cap.
-            within_cap = [lv for lv in qualifying if max_rr <= 0 or _rr(lv) <= max_rr]
-            tp2 = within_cap[-1] if within_cap else qualifying[0]
-        else:
-            tp2 = qualifying[0]
-        # TP1 is the nearest real level short of TP2, but it must still be far
-        # enough away to be worth taking. Picking the literal nearest level
-        # produced first targets 5 points from entry against a 150-point stop
-        # -- 0.03R. Because reaching TP1 moves the stop to breakeven, such a
-        # target guarantees the sequence: touch TP1 within one candle, lock the
-        # stop at entry, then get shaken out by ordinary noise. The setup was
-        # right and the trade still closed flat.
-        #
-        # A level closer than min_tp1_rr is skipped rather than rejected: it is
-        # simply not a target worth acting on. Only if nothing usable remains
-        # do we fall back to a proportional partial.
-        nearer = [lv for lv in ordered if abs(lv - entry_price) < abs(tp2 - entry_price)]
-        viable = [lv for lv in nearer if _rr(lv) >= min_tp1_rr]
-        if viable:
-            tp1 = viable[0]
-        else:
-            # Half-way to TP2 is structural enough to act on and always clears
-            # the floor, since TP2 itself already passed min_rr.
+    # Operator directive (2026-08-06): a pool closer than min_tp1_rr (0.8R) is
+    # NOT a target -- a pool at ~0R sits at the entry itself and is nonsense as
+    # an objective. The first pool >= 0.8R is "liquidity-1" (TP1); the one that
+    # follows it is "liquidity-2" (TP2). Targets always come from liquidity-2,
+    # and both are kept inside [min_rr, max_rr] so the numbers stay sensible.
+    acceptable = [lv for lv in ordered if _rr(lv) >= min_tp1_rr]
+    if not acceptable:
+        # No liquidity pools carried on the candidate: fall back to the mapped
+        # target itself (a real level the map drew) if it is within the sensible
+        # band; otherwise reject honestly.
+        if target_price > 0 and _is_ahead(target_price) and min_rr <= _rr(target_price) <= (
+            max_rr if max_rr > 0 else float("inf")
+        ):
+            tp2 = target_price
             midpoint = round((entry_price + tp2) / 2.0, 2)
             tp1 = midpoint if _rr(midpoint) >= min_tp1_rr else tp2
-        return tp1, tp2, None
+            return tp1, tp2, None
+        return 0.0, 0.0, (
+            f"no usable liquidity: no pool reaches {min_tp1_rr:.2f}R; "
+            "pools nearer than that sit at the entry and are not objectives"
+        )
+    liq1 = acceptable[0]
+    liq2 = acceptable[1] if len(acceptable) > 1 else None
+    tp1 = liq1
+
+    def _in_band(lv: float) -> bool:
+        return _rr(lv) >= min_rr and (max_rr <= 0 or _rr(lv) <= max_rr)
+
+    # Targets always come from liquidity-2 (the pool after the first acceptable).
+    # If liquidity-2 cannot carry the 1.5R minimum (or is absent), fall back to
+    # liquidity-1 as a single target -- never look beyond the two accepted pools.
+    if liq2 is not None and _in_band(liq2):
+        tp2 = liq2
+    elif _in_band(liq1):
+        tp2 = liq1
+    else:
+        l2_txt = (
+            f" nor liquidity-2 ({liq2:.2f}, {_rr(liq2):.2f}R)"
+            if liq2 is not None else " and no liquidity-2 exists"
+        )
+        return 0.0, 0.0, (
+            f"neither liquidity-1 ({liq1:.2f}, {_rr(liq1):.2f}R){l2_txt} "
+            f"clears {min_rr:.2f}R within {max_rr:.1f}R"
+        )
+    return tp1, tp2, None
 
     mapped_rr = _rr(target_price) if target_price > 0 and _is_ahead(target_price) else 0.0
     return 0.0, 0.0, (
