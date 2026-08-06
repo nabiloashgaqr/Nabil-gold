@@ -3394,6 +3394,7 @@ def _build_market_status_message(
                 direction = str(t.get("type") or t.get("side") or "BUY").upper()
                 entry = _safe_float(t.get("entry_price"), 0.0)
                 tp1 = _safe_float(t.get("tp1"), 0.0)
+                tp2 = _safe_float(t.get("tp2"), 0.0)
                 pnl_pts = _safe_float(t.get("current_pnl_points"), 0.0)
                 if pnl_pts == 0 and entry > 0 and current_price > 0:
                     raw = (current_price - entry) if direction == "BUY" else (entry - current_price)
@@ -3410,8 +3411,17 @@ def _build_market_status_message(
                 elif tp1 and entry and ((direction == "BUY" and current_price >= tp1) or (direction == "SELL" and current_price <= tp1)):
                     prog_txt = " · ✅TP1"
                 status_txt = "" if status == "OPEN" else f" [{html.escape(status)}]"
+                # Operator directive (2026-08-06): show entry / TP1 / TP2 / P&L
+                # clearly for every open trade in the status message.
+                levels_txt = ""
+                if entry:
+                    levels_txt += f" · Entry {entry:.2f}"
+                if tp1:
+                    levels_txt += f" · TP1 {tp1:.2f}"
+                if tp2:
+                    levels_txt += f" · TP2 {tp2:.2f}"
                 trade_lines.append(
-                    f"{marker} {direction} <code>#{html.escape(short)}</code>  "
+                    f"{marker} {direction} <code>#{html.escape(short)}</code>{levels_txt} · "
                     f"{pnl_pts:+.0f}pts ({usd:+.1f}$){prog_txt}{status_txt}"
                 )
             if len(live_trades) > 20:
