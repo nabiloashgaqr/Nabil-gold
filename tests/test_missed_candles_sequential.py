@@ -146,3 +146,28 @@ def test_replay_never_lowers_an_already_trailed_stop() -> None:
     assert result["updates"]["close_price"] == 4250.14, (
         f"must exit at the persisted higher stop, got {result['updates']['close_price']}"
     )
+
+
+def test_sequential_close_sets_closed_at_so_dashboard_lists_it():
+    """A terminal close from the missed-candle replay must set closed_at (not
+    only close_time), else the dashboard's closed_at DESC NULLS LAST ordering
+    drops the trade out of Latest Closed Trades (f3cc72c2)."""
+    entry = 4205.82
+    trade = _open_trade(20)
+    trade["entry_price"] = entry
+    trade["stop_loss"] = 4250.14
+    trade["tp1"] = 4220.00
+    trade["tp2"] = 4260.00
+    candles = [
+        _candle(15, 4255.8, 4250.5, 4254.0),
+        _candle(10, 4256.0, 4234.4, 4240.0),   # drops through the raised stop
+        _candle(1, 4240.0, 4234.4, 4238.0),
+    ]
+    result = _manager().evaluate_trade(
+        trade, 4238.0, NOW, candle_high=4240.0, candle_low=4234.4,
+        recent_candles=candles, market_data_source="twelvedata",
+        candle_time=(NOW - timedelta(minutes=1)).isoformat(),
+    )
+    assert result["new_status"] == "SL_HIT"
+    assert result["updates"].get("closed_at"), "terminal close must set closed_at"
+    assert result["updates"].get("close_time"), "terminal close must set close_time"
