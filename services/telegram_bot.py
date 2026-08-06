@@ -784,11 +784,11 @@ class TelegramService:
                             text += f" ({abs(level - entry_ref) / risk_run:.1f}R)"
                         return text
 
+                    # Operator directive (2026-08-06): show ONLY the nearest
+                    # liquidity and the one that follows it -- never farther.
                     liq_bits = [f"Near {_with_r(ahead[0])}"]
                     if len(ahead) > 1:
-                        liq_bits.append(f"Far {_with_r(ahead[-1])}")
-                    if len(ahead) > 2:
-                        liq_bits.append(f"{len(ahead)} pools ahead")
+                        liq_bits.append(f"Next {_with_r(ahead[1])}")
                     lines.append(f"💧 <b>LIQUIDITY</b> · {' · '.join(liq_bits)}")
         except Exception:  # noqa: BLE001 - never block map delivery on formatting
             pass
