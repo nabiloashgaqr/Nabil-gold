@@ -460,6 +460,11 @@ def _resolve_reward_target(
             levels.append(level)
 
     ordered = sorted(set(levels), key=lambda lv: abs(lv - entry_price))
+    # Operator directive (2026-08-06): look ONLY at the nearest liquidity and
+    # the one that follows it -- never farther. Far projected pools (4400+)
+    # were stretching TP2 to absurd distances. If these two nearest pools do
+    # not clear min_rr, the leg is rejected honestly rather than stretched.
+    ordered = ordered[:2]
     qualifying = [lv for lv in ordered if _rr(lv) >= min_rr]
 
     if qualifying:
