@@ -441,16 +441,19 @@ def test_near_liquidity_becomes_tp1_while_tp2_carries_the_reward_test() -> None:
     almost immediately, which is exactly how a correct BUY was closed flat.
     A pool short of min_tp1_rr is skipped, not fatal.
     """
-    levels = _levels(4079.0, 4064.74, liquidity=[4064.74, 4030.00, 3985.15])
+    # Directive 2026-08-06: only the nearest two pools are considered. Here the
+    # 2nd pool (4015.0) clears min_rr (1.5), so it becomes TP2; the 3rd (3985.15)
+    # also clears 1.5R but is the 3rd-nearest and is never looked at.
+    levels = _levels(4079.0, 4064.74, liquidity=[4064.74, 4015.0, 3985.15])
     assert not levels.get("reject_reason")
-    assert levels["tp2"] in {4030.00, 3985.15}
-    assert levels["rr"] >= 1.5
+    assert levels["tp2"] == 4015.0, "TP2 must come from the nearest two pools only"
 
-    entry, stop = 4075.15, levels["stop_loss"]
-    risk = abs(stop - entry)
-    tp1_rr = abs(entry - levels["tp1"]) / risk
-    assert tp1_rr >= 0.8, f"TP1 at {tp1_rr:.2f}R would arm breakeven too early"
-    assert abs(entry - levels["tp1"]) < abs(entry - levels["tp2"])
+
+def test_a_far_third_pool_does_not_rescue_a_failing_near_pair() -> None:
+    """Nearest two pools fail min_rr; the far 3rd clears it but is ignored, so
+    the leg is rejected honestly instead of being stretched far away."""
+    levels = _levels(4079.0, 4064.74, liquidity=[4064.74, 4030.00, 3985.15])
+    assert levels.get("reject_reason"), "nearest two fail 1.5R; far pool must not rescue"
 
 
 def test_targets_are_never_invented_when_no_further_liquidity_exists() -> None:

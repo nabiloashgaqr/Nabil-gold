@@ -30,16 +30,29 @@ BUY_CANDIDATE = {
 }
 
 
-def test_resolver_aims_tp2_at_the_farthest_pool_within_the_cap() -> None:
-    # Risk 15.0 (entry 4060, stop 4045): pools at 1.67R / 3.0R / 4.67R,
-    # mapped target 4080 (1.33R, under min_rr). Cap 4.0R excludes 4130.
+def test_resolver_looks_only_at_nearest_and_next_pools() -> None:
+    # Directive 2026-08-06 reversed far-first: consider ONLY the nearest
+    # liquidity and the one after it. Risk 15.0 (entry 4060, stop 4045):
+    # ordered[:2] = [4080 (1.33R), 4085 (1.67R)]; the far pools 4105/4130 are
+    # never considered. TP2 = the next pool that clears min_rr (4085).
     tp1, tp2, reject = ra._resolve_reward_target(
         "BUY", 4060.0, 4045.0, 4080.0, BUY_CANDIDATE,
         min_rr=1.5, min_tp1_rr=0.8, prefer_far=True, max_rr=4.0,
     )
     assert reject is None
-    assert tp2 == 4105.0, "TP2 must be the FARTHEST pool inside the cap, not the nearest qualifying"
-    assert tp1 == 4080.0, "TP1 stays the nearest usable level short of the far objective"
+    assert tp2 == 4085.0, "TP2 must come from the nearest two pools only, never a far one"
+    assert tp1 == 4080.0, "TP1 stays the nearest usable level short of the objective"
+
+
+def test_a_third_pool_is_ignored_even_if_it_clears_min_rr() -> None:
+    # The 3rd-nearest pool (4300, 16R) clears min_rr, but only the nearest two
+    # are considered -- so the leg is REJECTED honestly, not stretched to it.
+    candidate = {"details": {"liquidity": {"buy_side": [4066.0, 4070.0, 4300.0]}}}
+    tp1, tp2, reject = ra._resolve_reward_target(
+        "BUY", 4060.0, 4045.0, 4066.0, candidate,
+        min_rr=1.5, min_tp1_rr=0.8, prefer_far=True, max_rr=4.0,
+    )
+    assert reject is not None, "nearest two fail min_rr; the far 3rd pool must not rescue it"
 
 
 def test_resolver_nearest_first_is_restorable() -> None:

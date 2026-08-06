@@ -61,10 +61,12 @@ def test_buy_card_shows_near_and_far_liquidity_with_r_multiples(monkeypatch) -> 
     text = sent["text"]
 
     line = next(l for l in text.split("\n") if "LIQUIDITY" in l)
-    # risk = 4060.95 - 4045.95 = 150 pts; near 4075 = 0.9R, far 4105 = 2.9R
+    # Directive 2026-08-06: only nearest + the one after it.
+    # risk = 150 pts; near 4075 = 0.9R, next 4090 = 1.9R. Far 4105 not shown.
     assert "Near 4075.00 (0.9R)" in line
-    assert "Far 4105.00 (2.9R)" in line
-    assert "3 pools ahead" in line
+    assert "Next 4090.00 (1.9R)" in line
+    assert "4105.00" not in line
+    assert "pools ahead" not in line
     # The behind-entry pool is not an objective.
     assert "4055.00" not in line
 
@@ -85,9 +87,10 @@ def test_sell_card_reads_the_sell_side_below_entry(monkeypatch) -> None:
     text = sent["text"]
 
     line = next(l for l in text.split("\n") if "LIQUIDITY" in l)
-    # risk = 23.0; near 4010 = 0.5R, far 3965 = 2.5R
+    # risk = 23.0; near 4010 = 0.5R, next 3995 = 1.2R. Far 3965 not shown.
     assert "Near 4010.00 (0.5R)" in line
-    assert "Far 3965.00 (2.5R)" in line
+    assert "Next 3995.00 (1.2R)" in line
+    assert "3965.00" not in line
     assert "4030.00" not in line  # behind a SELL entry, not an objective
 
 
