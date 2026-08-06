@@ -1181,6 +1181,64 @@ class TelegramService:
         except (TypeError, ValueError):
             return "+0.0 pts"
 
+    def _progress_report(self, trade: Dict[str, Any], updates: Dict[str, Any],
+                         evaluation: Dict[str, Any]) -> str | None:
+        """Human-readable TP1/TP2 progress.
+
+        Operator directive (2026-08-06): never print a stuck/zero progress. When
+        price is between TP1 and TP2 show TP1 done plus how much is left to TP2;
+        when TP2 is hit show both completed; below TP1 show both percentages.
+        """
+        try:
+            entry = float(trade.get("entry_price") or 0)
+            tp1 = float(trade.get("tp1") or 0)
+            tp2 = float(trade.get("tp2") or 0)
+        except (TypeError, ValueError):
+            return None
+        if entry <= 0 or (tp1 <= 0 and tp2 <= 0):
+            return None
+        price = 0.0
+        for source in (updates or {}, trade or {}):
+            for key in ("close_price", "current_price"):
+                try:
+                    v = float(source.get(key))
+                    if v:
+                        price = v
+                        break
+                except (TypeError, ValueError):
+                    continue
+            if price:
+                break
+        if price <= 0:
+            return None
+        trade_type = str(trade.get("type") or trade.get("side") or "BUY").upper()
+
+        def frac(target: float) -> float | None:
+            dist = abs(target - entry)
+            if dist <= 0:
+                return None
+            move = (price - entry) if trade_type == "BUY" else (entry - price)
+            return move / dist
+
+        def pts_left(target: float) -> float:
+            return abs(target - price) / 0.10
+
+        p1 = frac(tp1) if tp1 > 0 else None
+        p2 = frac(tp2) if tp2 > 0 else None
+        tp1_done = p1 is not None and p1 >= 1
+        tp2_done = p2 is not None and p2 >= 1
+        if tp2_done:
+            return "TP1 ✓ · TP2 ✓ completed"
+        if tp1_done and p2 is not None:
+            return (f"TP1 ✓ · TP2 {max(0.0, min(p2, 1)) * 100:.0f}% "
+                    f"({pts_left(tp2):.0f} pts left)")
+        parts = []
+        if p1 is not None:
+            parts.append(f"TP1 {max(0.0, min(p1, 1)) * 100:.0f}%")
+        if p2 is not None:
+            parts.append(f"TP2 {max(0.0, min(p2, 1)) * 100:.0f}%")
+        return " · ".join(parts) or None
+
     @staticmethod
     def _first_reason(*sources: Any) -> str | None:
         for source in sources:
@@ -1313,7 +1371,10 @@ class TelegramService:
             lines.append(f"• <b>Current PnL:</b> {self._fmt_points(pnl_points)}")
 
         progress = evaluation.get("progress_to_tp1")
-        if progress is not None:
+        progress_line = self._progress_report(trade, updates, evaluation)
+        if progress_line:
+            lines.append(f"• <b>Progress:</b> {progress_line}")
+        elif progress is not None:
             try:
                 p = float(progress)
                 progress_text = "completed" if p >= 1 else f"{max(0, min(p, 1)) * 100:.0f}%"
