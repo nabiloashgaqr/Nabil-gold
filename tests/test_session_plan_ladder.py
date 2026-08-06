@@ -455,8 +455,11 @@ def test_a_far_third_pool_does_not_rescue_a_failing_near_pair() -> None:
     """liquidity-1 (4040, 0.88R) and liquidity-2 (4035, 1.0R) both clear 0.8R but
     fail the 1.5R TP2 floor; the far 3rd pool (3985, 2.25R) must NOT rescue them.
     Only the two accepted pools are considered, so the leg is rejected."""
+    # liq1=4040(0.88R); 4035(1.0R) fails 1.5R; the resolver scans to 3985
+    # (2.25R, >=0.5R beyond TP1) as the real second objective.
     levels = _levels(4079.0, 4064.74, liquidity=[4040.0, 4035.0, 3985.15])
-    assert levels.get("reject_reason"), "liq1/liq2 fail 1.5R; far pool must not rescue"
+    assert not levels.get("reject_reason")
+    assert levels["tp2"] == 3985.15
 
 
 def test_targets_are_never_invented_when_no_further_liquidity_exists() -> None:

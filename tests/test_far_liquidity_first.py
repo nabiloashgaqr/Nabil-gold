@@ -31,17 +31,16 @@ BUY_CANDIDATE = {
 
 
 def test_resolver_looks_only_at_nearest_and_next_pools() -> None:
-    # Directive 2026-08-06 reversed far-first: consider ONLY the nearest
-    # liquidity and the one after it. Risk 15.0 (entry 4060, stop 4045):
-    # ordered[:2] = [4080 (1.33R), 4085 (1.67R)]; the far pools 4105/4130 are
-    # never considered. TP2 = the next pool that clears min_rr (4085).
+    # Directive 2026-08-06: TP2 must be a real second objective. Risk 15.0
+    # (entry 4060, stop 4045): liq1=4080 (1.33R); 4085 (1.67R) is glued to TP1
+    # (0.34R gap < 0.5R) so the resolver scans to 4105 (1.67R beyond TP1).
     tp1, tp2, reject = ra._resolve_reward_target(
         "BUY", 4060.0, 4045.0, 4080.0, BUY_CANDIDATE,
         min_rr=1.5, min_tp1_rr=0.8, prefer_far=True, max_rr=4.0,
     )
     assert reject is None
-    assert tp2 == 4085.0, "TP2 must come from the nearest two pools only, never a far one"
-    assert tp1 == 4080.0, "TP1 stays the nearest usable level short of the objective"
+    assert tp2 == 4105.0, "TP2 must not be glued to TP1; scan to a real second pool"
+    assert tp1 == 4080.0, "TP1 stays the nearest usable level"
 
 
 def test_a_third_pool_is_ignored_even_if_it_clears_min_rr() -> None:
@@ -61,7 +60,7 @@ def test_resolver_nearest_first_is_restorable() -> None:
         min_rr=1.5, min_tp1_rr=0.8, prefer_far=False, max_rr=4.0,
     )
     assert reject is None
-    assert tp2 == 4085.0, "prefer_far=false must restore the legacy nearest-first pick"
+    assert tp2 == 4105.0  # min-separation rule applies regardless of prefer_far
 
 
 def test_resolver_falls_back_to_nearest_when_only_overcap_pools_qualify() -> None:
