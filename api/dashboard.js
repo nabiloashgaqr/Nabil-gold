@@ -203,7 +203,11 @@ function normalizeTrade(rawTrade) {
     raw_pnl: Number(rawPnl) || 0,
     pnl,
     created_at: t.created_at || t.entry_time || t.opened_at || t.updated_at || '',
-    closed_at: t.closed_at || t.close_time || '',
+    // A closed trade must always carry a display/sort time. A manual correction
+    // that set status=closed but left closed_at NULL used to be pushed to the
+    // end by `closed_at DESC NULLS LAST` and dropped out of "Latest Closed
+    // Trades (50)". Fall back through the timestamps that prove when it closed.
+    closed_at: t.closed_at || t.close_time || t.last_updated || t.updated_at || t.created_at || t.entry_time || '',
   };
 }
 
