@@ -12,10 +12,10 @@
 -- التريلنج حسب بطاقة الصفقة: فجوة 120 نقطة (12.00$) / خطوة 30
 --
 -- النزول: 4265.03 - 4223.83 (قاع الشارت M5) = 41.20$ = 412.0 نقطة
---   · TP1 مضروب وزيادة: 4231.37 - 4223.83 = 75.4 نقطة تجاوز
+--   · TP1 مضروب وزيادة: القاع أخفض من 4231.37 بـ 75.4 نقطة
 --   · TP2 لم يضرب: القاع أعلى منه بـ 238.3 نقطة
 --
--- التريلنج ستوب: بعد حجز نصف عند TP1 ينتقل الوقف للدخول ثم يرتد من القاع:
+-- التريلنج ستوب: بعد حجز النصف عند TP1 ينتقل الوقف للدخول ثم يرتد من القاع:
 --   4223.83 + 12.00 = 4235.83   (≈ 4235 عند المشغّل)
 -- الارتداد: أول شمعة M5 بعد القاع بلغ عاليها 4235.83 أغلقت النصف الثاني عندها.
 --
@@ -25,6 +25,18 @@
 -- المجموع الموزون ≈ +314.3 نقطة · نتيجة WIN
 -- ============================================================
 
+-- ── 0) أكمل الأعمدة الناقصة أولاً (آمن: IF NOT EXISTS، قابل للتكرار) ──
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS closed_fraction     DECIMAL(18, 6) DEFAULT 0;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS realized_pnl_points DECIMAL(18, 6) DEFAULT 0;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS scale_out_price     DECIMAL(18, 6);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS partial_close       BOOLEAN DEFAULT FALSE;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS updates_sent        JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS management_phase    VARCHAR(40);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS trailing_distance_points DECIMAL(18, 6);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS trailing_step_points     DECIMAL(18, 6);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS max_favorable_excursion  DECIMAL(18, 6) DEFAULT 0;
+
+-- ── 1) إصلاح الصفقة ─────────────────────────────────────────
 UPDATE trades SET
   -- الإغلاق كما يسمّيه المحرك: إغلاق بالوقف المُترَيل = SL_HIT + WIN
   status                = 'SL_HIT',
@@ -53,7 +65,7 @@ UPDATE trades SET
   last_updated          = NOW()
 WHERE id = 'TRADE_20260806_142059_102220_d4351dad';
 
--- ── تحقق: يجب أن يعيد سطراً واحداً بالحالة SL_HIT / WIN / 4235.83 ──
+-- ── 2) تحقق: يجب أن يعيد سطراً واحداً SL_HIT / WIN / 4235.83 ──
 SELECT id, status, result, close_price, final_pnl_points,
        realized_pnl_points, closed_fraction, scale_out_price,
        stop_loss, max_favorable_excursion, closed_at

@@ -147,6 +147,9 @@ CREATE TABLE IF NOT EXISTS trades (
 
     sl_moved_to_entry BOOLEAN DEFAULT FALSE,
     partial_close BOOLEAN DEFAULT FALSE,
+    closed_fraction DECIMAL(18, 6) DEFAULT 0,
+    realized_pnl_points DECIMAL(18, 6) DEFAULT 0,
+    scale_out_price DECIMAL(18, 6),
     updates_sent JSONB DEFAULT '[]'::jsonb,
     exit_warning TEXT,
     management_phase VARCHAR(40),
@@ -221,6 +224,9 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS sweep_side          TEXT;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS displacement_score  DECIMAL(10, 4);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS sl_moved_to_entry   BOOLEAN DEFAULT FALSE;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS partial_close       BOOLEAN DEFAULT FALSE;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS closed_fraction     DECIMAL(18, 6) DEFAULT 0;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS realized_pnl_points DECIMAL(18, 6) DEFAULT 0;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS scale_out_price     DECIMAL(18, 6);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS updates_sent        JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS exit_warning        TEXT;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS trailing_distance_points DECIMAL(18, 6);
