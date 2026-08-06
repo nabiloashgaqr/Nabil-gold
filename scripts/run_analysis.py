@@ -408,6 +408,7 @@ def _resolve_reward_target(
     min_tp1_rr: float = 0.0,
     prefer_far: bool = True,
     max_rr: float = 0.0,
+    min_tp2_beyond_rr: float = 0.5,
 ) -> tuple[float, float, str | None]:
     """Pick TP1 and TP2 from the liquidity map.
 
@@ -482,28 +483,37 @@ def _resolve_reward_target(
             "pools nearer than that sit at the entry and are not objectives"
         )
     liq1 = acceptable[0]
-    liq2 = acceptable[1] if len(acceptable) > 1 else None
     tp1 = liq1
 
     def _in_band(lv: float) -> bool:
         return _rr(lv) >= min_rr and (max_rr <= 0 or _rr(lv) <= max_rr)
 
-    # Targets always come from liquidity-2 (the pool after the first acceptable).
-    # If liquidity-2 cannot carry the 1.5R minimum (or is absent), fall back to
-    # liquidity-1 as a single target -- never look beyond the two accepted pools.
-    if liq2 is not None and _in_band(liq2):
-        tp2 = liq2
-    elif _in_band(liq1):
-        tp2 = liq1
-    else:
-        l2_txt = (
-            f" nor liquidity-2 ({liq2:.2f}, {_rr(liq2):.2f}R)"
-            if liq2 is not None else " and no liquidity-2 exists"
-        )
-        return 0.0, 0.0, (
-            f"neither liquidity-1 ({liq1:.2f}, {_rr(liq1):.2f}R){l2_txt} "
-            f"clears {min_rr:.2f}R within {max_rr:.1f}R"
-        )
+    # Operator directive (2026-08-06): TP2 must be a REAL second objective, not
+    # a pool glued to TP1 (a 40-pt gap is not a target). Require TP2 to sit at
+    # least min_tp2_beyond_rr beyond TP1; if the next pool is glued, scan the
+    # farther acceptable pools. Only when none qualifies do we fall back to a
+    # single target (liq1) or reject honestly.
+    tp2 = None
+    for lv in acceptable[1:]:
+        if _in_band(lv) and (_rr(lv) - _rr(tp1)) >= min_tp2_beyond_rr:
+            tp2 = lv
+            break
+    if tp2 is None:
+        if _in_band(liq1):
+            tp2 = liq1
+            midpoint = round((entry_price + tp2) / 2.0, 2)
+            if _rr(midpoint) >= min_tp1_rr:
+                tp1 = midpoint
+        else:
+            l2 = acceptable[1] if len(acceptable) > 1 else None
+            l2_txt = (
+                f" nor liquidity-2 ({l2:.2f}, {_rr(l2):.2f}R)"
+                if l2 is not None else " and no liquidity-2 exists"
+            )
+            return 0.0, 0.0, (
+                f"neither liquidity-1 ({liq1:.2f}, {_rr(liq1):.2f}R){l2_txt} "
+                f"clears {min_rr:.2f}R within {max_rr:.1f}R"
+            )
     return tp1, tp2, None
 
     mapped_rr = _rr(target_price) if target_price > 0 and _is_ahead(target_price) else 0.0
@@ -566,11 +576,14 @@ def _planner_trade_levels(
     min_tp1_rr = _safe_float(risk_cfg.get("min_tp1_rr"), 0.8)
     # Operator directive (2026-08-04): far liquidity first, near as fallback.
     prefer_far = bool(risk_cfg.get("prefer_far_liquidity", True))
+    # Operator directive (2026-08-06): TP2 must sit meaningfully beyond TP1.
+    min_tp2_beyond_rr = _safe_float(risk_cfg.get("min_tp2_beyond_tp1_rr"), 0.5)
     tp1, tp2, reject_reason = _resolve_reward_target(
         direction, entry_price, adjusted_stop, target_price, candidate, min_rr,
         min_tp1_rr=min_tp1_rr,
         prefer_far=prefer_far,
         max_rr=max_rr,
+        min_tp2_beyond_rr=min_tp2_beyond_rr,
     )
     if reject_reason:
         return {
