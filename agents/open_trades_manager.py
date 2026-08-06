@@ -1792,6 +1792,7 @@ class OpenTradesManager(BaseAgent):
                 "result": result,
                 "close_price": round(close_price, 2),
                 "close_time": self._iso(datetime.now(timezone.utc)),
+                "closed_at": self._iso(datetime.now(timezone.utc)),
                 "final_pnl": round(calculate_pips(entry, close_price, trade_type, symbol), 1),
                 "final_pnl_points": round(calculate_pips(entry, close_price, trade_type, symbol), 1),
             })
