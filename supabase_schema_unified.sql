@@ -148,7 +148,7 @@ CREATE TABLE IF NOT EXISTS trades (
     sl_moved_to_entry BOOLEAN DEFAULT FALSE,
     partial_close BOOLEAN DEFAULT FALSE,
     updates_sent JSONB DEFAULT '[]'::jsonb,
-    exit_warning BOOLEAN DEFAULT FALSE,
+    exit_warning TEXT,
     management_phase VARCHAR(40),
     last_candle_high DECIMAL(18, 6),
     last_candle_low DECIMAL(18, 6),
@@ -222,7 +222,7 @@ ALTER TABLE trades ADD COLUMN IF NOT EXISTS displacement_score  DECIMAL(10, 4);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS sl_moved_to_entry   BOOLEAN DEFAULT FALSE;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS partial_close       BOOLEAN DEFAULT FALSE;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS updates_sent        JSONB DEFAULT '[]'::jsonb;
-ALTER TABLE trades ADD COLUMN IF NOT EXISTS exit_warning        BOOLEAN DEFAULT FALSE;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS exit_warning        TEXT;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS trailing_distance_points DECIMAL(18, 6);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS trailing_step_points DECIMAL(18, 6);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS trailing_stop_source_time TIMESTAMPTZ;
