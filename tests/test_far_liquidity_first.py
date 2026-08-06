@@ -70,8 +70,9 @@ def test_resolver_falls_back_to_nearest_when_only_overcap_pools_qualify() -> Non
         "BUY", 4060.0, 4045.0, 4150.0, candidate,
         min_rr=1.5, min_tp1_rr=0.8, prefer_far=True, max_rr=4.0,
     )
-    assert reject is None
-    assert tp2 == 4150.0, "nothing inside the cap -> nearest qualifying pool (downstream may cap it)"
+    # A single pool beyond max_rr is unreasonable; the leg is rejected, not stretched.
+    assert reject is not None
+    assert tp2 == 0.0
 
 
 def _agent(prefer_far: bool) -> RiskManagementAgent:

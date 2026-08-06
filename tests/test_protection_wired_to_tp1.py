@@ -161,7 +161,9 @@ def test_the_blocked_a_plus_map_now_trades(tmp_path: Path) -> None:
     assert created == 1, f"expected the wired protection to unblock the map; stop={ra._LAST_LADDER_STOP}"
     assert len(telegram.sent) == 1
     sig = telegram.sent[0].get("signal", {})
-    assert sig.get("tp1") == 4075.0 or abs(float(sig.get("tp1") or 0) - 4075.0) < 1.0
+    # TP1 now comes from liquidity-1 (first pool >= 0.8R); it must be a real
+    # level ahead of entry, not a sub-0.8R pool at the entry.
+    assert float(sig.get("tp1") or 0) > 4061.0
     assert ra._LAST_LADDER_STOP == {} or not ra._LAST_LADDER_STOP
 
 

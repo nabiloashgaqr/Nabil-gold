@@ -48,7 +48,7 @@ def test_rejected_leg_is_refused_by_name_not_by_accident() -> None:
 
     assert ok is False
     assert "execution refused the main leg" in reason
-    assert "qualifying liquidity" in reason
+    assert "usable liquidity" in reason
     assert diagnostics["execution_reject_reason"]
 
 

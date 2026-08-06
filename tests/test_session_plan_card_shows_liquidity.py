@@ -61,10 +61,10 @@ def test_buy_card_shows_near_and_far_liquidity_with_r_multiples(monkeypatch) -> 
     text = sent["text"]
 
     line = next(l for l in text.split("\n") if "LIQUIDITY" in l)
-    # Directive 2026-08-06: only nearest + the one after it.
-    # risk = 150 pts; near 4075 = 0.9R, next 4090 = 1.9R. Far 4105 not shown.
-    assert "Near 4075.00 (0.9R)" in line
-    assert "Next 4090.00 (1.9R)" in line
+    # Directive 2026-08-06: skip pools <0.8R; show liquidity-1 + liquidity-2.
+    # risk = 150 pts; L1 4075 = 0.9R, L2 4090 = 1.9R. Far 4105 not shown.
+    assert "L1 4075.00 (0.9R)" in line
+    assert "L2 4090.00 (1.9R)" in line
     assert "4105.00" not in line
     assert "pools ahead" not in line
     # The behind-entry pool is not an objective.
@@ -87,10 +87,10 @@ def test_sell_card_reads_the_sell_side_below_entry(monkeypatch) -> None:
     text = sent["text"]
 
     line = next(l for l in text.split("\n") if "LIQUIDITY" in l)
-    # risk = 23.0; near 4010 = 0.5R, next 3995 = 1.2R. Far 3965 not shown.
-    assert "Near 4010.00 (0.5R)" in line
-    assert "Next 3995.00 (1.2R)" in line
-    assert "3965.00" not in line
+    # risk = 23.0; 4010 (0.5R) is <0.8R so skipped; L1 3995 = 1.2R, L2 3965 = 2.5R.
+    assert "L1 3995.00 (1.2R)" in line
+    assert "L2 3965.00 (2.5R)" in line
+    assert "4010.00" not in line  # too close (<0.8R), not an objective
     assert "4030.00" not in line  # behind a SELL entry, not an objective
 
 
@@ -109,5 +109,5 @@ def test_single_pool_shows_near_only(monkeypatch) -> None:
     service, sent = _capture(monkeypatch)
     service.send_session_plan(plan)
     line = next(l for l in sent["text"].split("\n") if "LIQUIDITY" in l)
-    assert "Near 4090.00 (1.9R)" in line
-    assert "Far " not in line
+    assert "L1 4090.00 (1.9R)" in line
+    assert "L2" not in line

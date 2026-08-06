@@ -444,22 +444,25 @@ def test_near_liquidity_becomes_tp1_while_tp2_carries_the_reward_test() -> None:
     # Directive 2026-08-06: only the nearest two pools are considered. Here the
     # 2nd pool (4015.0) clears min_rr (1.5), so it becomes TP2; the 3rd (3985.15)
     # also clears 1.5R but is the 3rd-nearest and is never looked at.
+    # Pools <0.8R skipped: 4064.74 (0.26R) ignored. liquidity-1 = 4015 (1.5R),
+    # liquidity-2 = 3985.15 (2.25R). TP2 always from liquidity-2.
     levels = _levels(4079.0, 4064.74, liquidity=[4064.74, 4015.0, 3985.15])
     assert not levels.get("reject_reason")
-    assert levels["tp2"] == 4015.0, "TP2 must come from the nearest two pools only"
+    assert levels["tp2"] == 3985.15, "TP2 must be liquidity-2"
 
 
 def test_a_far_third_pool_does_not_rescue_a_failing_near_pair() -> None:
-    """Nearest two pools fail min_rr; the far 3rd clears it but is ignored, so
-    the leg is rejected honestly instead of being stretched far away."""
-    levels = _levels(4079.0, 4064.74, liquidity=[4064.74, 4030.00, 3985.15])
-    assert levels.get("reject_reason"), "nearest two fail 1.5R; far pool must not rescue"
+    """liquidity-1 (4040, 0.88R) and liquidity-2 (4035, 1.0R) both clear 0.8R but
+    fail the 1.5R TP2 floor; the far 3rd pool (3985, 2.25R) must NOT rescue them.
+    Only the two accepted pools are considered, so the leg is rejected."""
+    levels = _levels(4079.0, 4064.74, liquidity=[4040.0, 4035.0, 3985.15])
+    assert levels.get("reject_reason"), "liq1/liq2 fail 1.5R; far pool must not rescue"
 
 
 def test_targets_are_never_invented_when_no_further_liquidity_exists() -> None:
     levels = _levels(4079.0, 4064.74, liquidity=None)
     assert levels.get("reject_reason")
-    assert "no further qualifying liquidity" in levels["reject_reason"]
+    assert "no usable liquidity" in levels["reject_reason"]
 
 
 def test_dynamic_floor_scales_risk_with_structure() -> None:
