@@ -774,21 +774,25 @@ class TelegramService:
                     if (bias == "BUY" and lv > entry_ref) or (bias == "SELL" and lv < entry_ref):
                         ahead.append(lv)
                 ahead = sorted(set(ahead), key=lambda lv: abs(lv - entry_ref))
+                stop_run = _f(stop_level)
+                risk_run = abs(entry_ref - stop_run) if stop_run is not None else 0.0
+
+                def _with_r(level: float) -> str:
+                    text = self._money(level, symbol)
+                    if risk_run > 0:
+                        text += f" ({abs(level - entry_ref) / risk_run:.1f}R)"
+                    return text
+
+                # Operator directive (2026-08-06): a pool closer than 0.8R sits
+                # at the entry and is not an objective. Show liquidity-1 (first
+                # pool >= 0.8R) and liquidity-2 (the one after) -- never farther.
+                if risk_run > 0:
+                    ahead = [lv for lv in ahead
+                             if abs(lv - entry_ref) / risk_run >= 0.8]
                 if ahead:
-                    stop_run = _f(stop_level)
-                    risk_run = abs(entry_ref - stop_run) if stop_run is not None else 0.0
-
-                    def _with_r(level: float) -> str:
-                        text = self._money(level, symbol)
-                        if risk_run > 0:
-                            text += f" ({abs(level - entry_ref) / risk_run:.1f}R)"
-                        return text
-
-                    # Operator directive (2026-08-06): show ONLY the nearest
-                    # liquidity and the one that follows it -- never farther.
-                    liq_bits = [f"Near {_with_r(ahead[0])}"]
+                    liq_bits = [f"L1 {_with_r(ahead[0])}"]
                     if len(ahead) > 1:
-                        liq_bits.append(f"Next {_with_r(ahead[1])}")
+                        liq_bits.append(f"L2 {_with_r(ahead[1])}")
                     lines.append(f"💧 <b>LIQUIDITY</b> · {' · '.join(liq_bits)}")
         except Exception:  # noqa: BLE001 - never block map delivery on formatting
             pass
