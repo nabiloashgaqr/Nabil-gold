@@ -111,3 +111,17 @@ def test_market_status_pending_orders_are_not_shown_as_open_trades() -> None:
     assert "pts to fill" in msg
     assert "waiting" in msg
     assert "+48pts" not in msg and "+48 pts" not in msg
+
+
+def test_market_status_open_trade_shows_entry_targets_and_pnl() -> None:
+    """Operator directive (2026-08-06): an open trade line must clearly show
+    entry, TP1, TP2 and the P&L."""
+    decision = {"decision": "WAIT", "confidence": 45, "current_price": 4190.78}
+    ctx = _technical_context()
+    ctx["news"] = {"can_trade": True, "market_status": "SAFE"}
+    msg = _build_market_status_message(decision, ctx, _DBWithTrade())
+    line = next(l for l in msg.splitlines() if "#8e102119" in l)
+    assert "Entry 4178.78" in line
+    assert "TP1 4218.78" in line
+    assert "TP2 4248.78" in line
+    assert "+120pts" in line
