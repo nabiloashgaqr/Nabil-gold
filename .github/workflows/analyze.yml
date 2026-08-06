@@ -29,18 +29,24 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - name: 📥 Checkout
-        uses: actions/checkout@v4
+      # Hardened (2026-08-06): NO external actions. For hours the GitHub
+      # "resolve action download info" service returned 503/500, killing every
+      # run at "Prepare all required actions" before checkout. A direct git
+      # clone with the built-in GITHUB_TOKEN plus the runner's preinstalled
+      # Python removes that dependency entirely.
+      - name: 📥 Checkout (no external action)
+        run: |
+          git clone --depth 1 "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" .
 
-      - name: 🐍 Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
+      - name: 🐍 Prepare Python (system)
+        run: |
+          sudo ln -sf "$(command -v python3)" /usr/local/bin/python || true
+          python --version
+          python -m pip install --upgrade pip
 
       - name: 📦 Install Dependencies
         run: |
-          pip install -r requirements.txt
+          python -m pip install -r requirements.txt
 
       # SAFETY GATE: never emit live signals from a broken execution path.
       #

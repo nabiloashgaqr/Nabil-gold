@@ -101,16 +101,17 @@ jobs:
         run: |
           echo "No OPEN/PARTIAL/TP1_HIT/PENDING trades found in Supabase. Skipping checkout, pip install, market data fetch, and Telegram."
 
-      - name: 📥 Checkout
+      - name: 📥 Checkout (no external action)
         if: steps.active_trades.outputs.has_active == 'true'
-        uses: actions/checkout@v4
+        run: |
+          git clone --depth 1 "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" .
 
-      - name: 🐍 Setup Python
+      - name: 🐍 Prepare Python (system)
         if: steps.active_trades.outputs.has_active == 'true'
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
+        run: |
+          sudo ln -sf "$(command -v python3)" /usr/local/bin/python || true
+          python --version
+          python -m pip install --upgrade pip
 
       - name: 📦 Install Dependencies
         if: steps.active_trades.outputs.has_active == 'true'
