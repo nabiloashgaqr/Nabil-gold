@@ -484,3 +484,30 @@ def test_votes_fall_back_to_summary_when_agent_has_no_signals():
         },
     })
     assert any("H1 and H4 aligned bullish" in ln for ln in lines)
+
+
+def test_progress_report_between_targets_shows_tp2_remaining():
+    from services.telegram_bot import TelegramService
+    bot = TelegramService({"telegram": {}})
+    trade = {"type": "BUY", "entry_price": 4261.23, "tp1": 4300.0, "tp2": 4400.0}
+    # price between TP1 and TP2 -> TP1 done, show TP2 % and pts left
+    line = bot._progress_report(trade, {"current_price": 4330.0}, {})
+    assert line.startswith("TP1 ✓")
+    assert "TP2" in line and "pts left" in line
+
+
+def test_progress_report_tp2_hit_shows_completed():
+    from services.telegram_bot import TelegramService
+    bot = TelegramService({"telegram": {}})
+    trade = {"type": "BUY", "entry_price": 4261.23, "tp1": 4300.0, "tp2": 4400.0}
+    line = bot._progress_report(trade, {"close_price": 4400.0}, {})
+    assert "completed" in line and "TP1 ✓" in line and "TP2 ✓" in line
+
+
+def test_progress_report_below_tp1_never_zero_when_in_profit():
+    from services.telegram_bot import TelegramService
+    bot = TelegramService({"telegram": {}})
+    trade = {"type": "BUY", "entry_price": 4261.23, "tp1": 4300.0, "tp2": 4400.0}
+    line = bot._progress_report(trade, {"close_price": 4269.71}, {})
+    assert "TP1 22%" in line and "TP2 6%" in line
+    assert "0%" not in line.replace("22%", "").replace("6%", "")
