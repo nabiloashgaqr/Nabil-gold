@@ -213,3 +213,28 @@ def test_manager_returns_unified_trailing_for_each_profile():
             symbol="XAU/USD")
         assert params["trailing_distance_points"] == 150, name
         assert params["trailing_step_points"] == 40, name
+
+
+def test_profile_overlay_cannot_move_the_unified_trailing():
+    """Even a profile that still carries old trailing numbers is overruled."""
+    import copy
+    from agents.open_trades_manager import OpenTradesManager
+    cfg = copy.deepcopy(CONFIG)
+    cfg["trade_management"]["profiles"]["reversal_profile"]["trailing_distance_points"] = 120
+    cfg["trade_management"]["profiles"]["reversal_profile"]["trailing_step_points"] = 30
+    mgr = OpenTradesManager(cfg)
+    params = mgr._management_params(
+        {"signal_snapshot": {"setup_context": {},
+                             "risk": {"management_profile": "reversal_profile"}}},
+        symbol="XAU/USD")
+    assert params["trailing_distance_points"] == 150
+    assert params["trailing_step_points"] == 40
+    # early breakeven remains per-profile (reversal 100)
+    assert params["early_breakeven_points"] == 100
+
+
+def test_loader_profile_aware_early_breakeven():
+    assert tr.trailing_params(CONFIG, "reversal_profile")["early_breakeven_points"] == 100
+    assert tr.trailing_params(CONFIG, "continuation_profile")["early_breakeven_points"] == 170
+    assert tr.trailing_params(CONFIG)["early_breakeven_points"] == 150
+    assert tr.trailing_params(CONFIG, "reversal_profile")["distance_points"] == 150
