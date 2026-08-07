@@ -164,20 +164,53 @@ def targets_law(
 
 # ── trailing / breakeven ────────────────────────────────────────────────────
 
-def trailing_params(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """Same priority as the manager always used: trade_management then the
-    legacy trailing_stop section."""
+def trailing_params(cfg: Dict[str, Any], profile: str | None = None) -> Dict[str, Any]:
+    """Single source for trailing, with the precedence the engine always had:
+
+        canonical trading_rules.trailing  >  specialised profile  >  root
+        trade_management  >  default_profile  >  legacy trailing_stop.
+
+    2026-08-07 "150/40 للكل": the shipped config carries the canonical block,
+    so every profile gets 150/40 regardless. Legacy configs without the
+    canonical block keep the old profile freedom (root outranks
+    default_profile; specialised profiles outrank root). early_breakeven
+    follows the same chain (unification covered trailing only).
+    """
     canon = _block(cfg, "trailing")
+    profiles = ((cfg or {}).get("trade_management") or {}).get("profiles") or {}
+    pname = profile or "default_profile"
+    prof = profiles.get(pname) or {}
+    is_default = pname == "default_profile"
     tm = (cfg or {}).get("trade_management") or {}
     ts = (cfg or {}).get("trailing_stop") or {}
     out = dict(DEFAULT_TRAILING)
-    out["enabled"] = bool(canon.get("enabled", tm.get("trailing_stop_enabled", ts.get("enabled", out["enabled"]))))
-    out["distance_points"] = _f(canon.get("distance_points",
-        tm.get("trailing_distance_points", ts.get("trailing_distance"))), out["distance_points"])
-    out["step_points"] = _f(canon.get("step_points",
-        tm.get("trailing_step_points", ts.get("trailing_step"))), out["step_points"])
-    out["early_breakeven_points"] = _f(canon.get("early_breakeven_points",
-        tm.get("early_breakeven_points", ts.get("early_breakeven_points"))), 200.0)
+
+    def _pick(canon_k: str | None, prof_k: str, tm_k: str, ts_k: str, dflt: float) -> float:
+        if canon_k and _f(canon.get(canon_k), 0.0) > 0:
+            return _f(canon.get(canon_k))
+        if not is_default and _f(prof.get(prof_k), 0.0) > 0:
+            return _f(prof.get(prof_k))
+        if _f(tm.get(tm_k), 0.0) > 0:
+            return _f(tm.get(tm_k))
+        if _f(prof.get(prof_k), 0.0) > 0:
+            return _f(prof.get(prof_k))
+        if _f(ts.get(ts_k), 0.0) > 0:
+            return _f(ts.get(ts_k))
+        return dflt
+
+    out["enabled"] = bool(canon.get("enabled", prof.get("trailing_enabled",
+        tm.get("trailing_stop_enabled", ts.get("enabled", out["enabled"])))) or out["enabled"])
+    out["distance_points"] = _pick("distance_points", "trailing_distance_points",
+                                   "trailing_distance_points", "trailing_distance",
+                                   out["distance_points"])
+    out["step_points"] = _pick("step_points", "trailing_step_points",
+                               "trailing_step_points", "trailing_step",
+                               out["step_points"])
+    # early_breakeven stays per-profile (no canonical key): unification
+    # covered trailing only.
+    out["early_breakeven_points"] = _pick(None, "early_breakeven_points",
+                                          "early_breakeven_points", "early_breakeven_points",
+                                          200.0)
     out["activation_at"] = str(canon.get("activation_at", tm.get("trailing_activation_at", "TP1")))
     return out
 
