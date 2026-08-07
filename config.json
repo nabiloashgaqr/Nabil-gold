@@ -968,8 +968,8 @@
       "enabled": true,
       "distance_points": 150,
       "step_points": 40,
-      "early_breakeven_points": 150,
-      "activation_at": "TP1"
+      "activation_at": "TP1",
+      "description": "توجيه 2026-08-07: تريلنج موحد 150/40 للكل (الرسمي يغلب البروفايلات). التعادل المبكر يبقى لكل بروفايل كما كان — لم يشمله التوحيد."
     },
     "post_tp2": {
       "enabled": true,
