@@ -1737,6 +1737,17 @@ class OpenTradesManager(BaseAgent):
             # 1) protective stop tested against the level that existed before
             #    this bar's high could raise it.
             hit = (low <= prev_stop) if buy else (high >= prev_stop)
+            # 2026-08-07 (trailing unification audit): replay must honour the
+            # same wick protection as the live cycle (b8ae314a). A breakeven
+            # stop at entry is NOT executed by a bar that only wicks through
+            # it and closes back in favour; require an adverse close.
+            if hit and sl_moved and abs(prev_stop - entry) < 1e-9                     and candle is unexamined[-1]:
+                # Only the freshest bar (the live "current" candle) gets the
+                # wick protection; earlier COMPLETED bars execute on their
+                # adverse extreme exactly like the live cycle does.
+                close = self._f(candle.get("close"), 0.0)
+                if close > 0 and not ((close <= prev_stop) if buy else (close >= prev_stop)):
+                    hit = False
             if hit:
                 if sl_moved:
                     pnl = calculate_pips(entry, prev_stop, trade_type, symbol)
