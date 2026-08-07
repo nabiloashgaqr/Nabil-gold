@@ -2992,7 +2992,18 @@ class OpenTradesManager(BaseAgent):
             elif max_excursion_points >= self.pending_freshness_stale_after_excursion_points:
                 state = "STALE"
                 revalidation_required = True
-                reasons.append(f"market moved {max_excursion_points:.0f} pts without fill")
+                # Operator 2026-08-07: state the baseline explicitly. The
+                # excursion is measured from the CREATION price (market
+                # movement), not from the entry (order depth) -- the card
+                # reader must see both numbers to avoid reading a
+                # contradiction (368-pts-deep order vs 256-pts movement).
+                born_gap = abs(calculate_pips(entry, creation_price, trade_type, symbol))
+                reasons.append(
+                    f"market moved {max_excursion_points:.0f} pts from the "
+                    f"{creation_price:.2f} creation price without fill; the order "
+                    f"was born {born_gap:.0f} pts from entry and is still "
+                    f"{distance_to_entry_points:.0f} pts away"
+                )
             elif progress_pct >= self.pending_freshness_stale_after_target_progress_pct:
                 state = "STALE"
                 revalidation_required = True
