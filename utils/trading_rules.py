@@ -182,6 +182,26 @@ def trailing_params(cfg: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+# ── display wording (phase 3) ───────────────────────────────────────────────
+
+def stop_rule_note(cfg: Dict[str, Any]) -> str:
+    """The one sentence every card prints about the stop rule; built from the
+    live numbers so a config change rewrites every card automatically."""
+    r = stop_rule(cfg)
+    return (f"Execution stop set by the operator liquidity rule "
+            f"(ignore <{r['min_liquidity_points']:.0f} pts, "
+            f"+{r['safety_buffer_points']:.0f} safety, "
+            f"cap {r['max_stop_points']:.0f}).")
+
+
+def post_tp2_note(cfg: Dict[str, Any]) -> str:
+    r = post_tp2_rule(cfg)
+    window = f"{r['window_hours']:g}h"
+    return (f"Post-TP2 same-direction re-entry blocked within "
+            f"{r['min_distance_points']:.0f} pts of the exhausted TP2 for "
+            f"{window} (absolute, no early release).")
+
+
 # ── post-TP2 re-entry ───────────────────────────────────────────────────────
 
 def post_tp2_rule(cfg: Dict[str, Any]) -> Dict[str, Any]:
