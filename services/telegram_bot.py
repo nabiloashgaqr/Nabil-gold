@@ -551,6 +551,14 @@ class TelegramService:
             )
             if adaptive.get("reason"):
                 lines.append(f"• <b>Execution reason:</b> {self._clean_text(adaptive.get('reason'))}")
+        golden = decision.get("golden_dual_entry") or {}
+        if isinstance(golden, dict) and golden.get("action") == "GOLDEN_DUAL_ENTRY":
+            lv = golden.get("levels") or {}
+            lines.append(
+                "• <b>Golden dual entry:</b> market at 0.618 close-confirm "
+                f"({lv.get('l618')}) + pending kept at 0.786 band "
+                f"({lv.get('l786')}) — two-entry exception"
+            )
         invalidation = (decision.get("ai") or {}).get("invalidation") or setup.get("invalidation") or setup.get("entry_reason")
         if self._should_show_invalidation(invalidation, signal.get("stop_loss")):
             label = "Invalidation" if (decision.get("ai") or {}).get("invalidation") else "Structural trigger"
