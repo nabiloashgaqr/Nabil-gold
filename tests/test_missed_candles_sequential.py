@@ -67,13 +67,14 @@ def _candle(minutes_ago, high, low, close):
 
 
 def test_an_early_high_raises_the_trail_before_a_later_low_tests_it() -> None:
-    """Downtime of 3 bars: bar1 makes a new high (raises the trail to ~4178),
+    """Downtime of 3 bars: bar1 makes a new high (raises the trail to ~4183
+    at the unified 150-pt gap),
     bar2 pulls back through the RAISED stop. Replayed in order, the exit is at
     the raised level (a WIN). The unordered window cannot see this: it keeps the
     persisted breakeven (4163) and never exits -- so this differentiates replay."""
     trade = _open_trade(20)   # stamp 20 min ago -> 3 unexamined bars
     candles = [
-        _candle(15, 4190.0, 4170.0, 4188.0),   # new high -> trail up to ~4178
+        _candle(15, 4199.0, 4170.0, 4197.0),   # new high -> trail (150 gap) ~4183
         _candle(10, 4186.0, 4176.0, 4184.0),   # low 4176 pierces raised trail
         _candle(1, 4185.0, 4180.0, 4184.0),
     ]

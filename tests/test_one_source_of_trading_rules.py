@@ -193,3 +193,23 @@ def test_stop_rule_note_follows_the_config():
     assert "cap 350" in tr.stop_rule_note(cfg)
     post = tr.post_tp2_note(cfg)
     assert "250 pts" in post and "2.5h" in post
+
+
+# ── 2026-08-07: trailing unified 150/40 for EVERY profile ─────────────────
+
+def test_every_profile_trails_at_150_40():
+    profiles = CONFIG["trade_management"]["profiles"]
+    for name, prof in profiles.items():
+        assert prof["trailing_distance_points"] == 150, name
+        assert prof["trailing_step_points"] == 40, name
+
+
+def test_manager_returns_unified_trailing_for_each_profile():
+    from agents.open_trades_manager import OpenTradesManager
+    mgr = OpenTradesManager(json.loads(json.dumps(CONFIG)))
+    for name in CONFIG["trade_management"]["profiles"]:
+        params = mgr._management_params(
+            {"signal_snapshot": {"setup_context": {}, "risk": {"management_profile": name}}},
+            symbol="XAU/USD")
+        assert params["trailing_distance_points"] == 150, name
+        assert params["trailing_step_points"] == 40, name
