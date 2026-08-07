@@ -1281,7 +1281,14 @@ class SessionPlannerService:
         if standby and self._zones_overlap(primary, standby) and not diagnostics["same_box_ladder"]:
             return False, "add area overlaps the main area", diagnostics
         if diagnostics["main_rr"] < self.min_main_rr_for_ready:
-            return False, f"main area RR {diagnostics['main_rr']:.2f} below {self.min_main_rr_for_ready:.2f}", diagnostics
+            # Operator directive 2026-08-07c: a plan the agents approved is
+            # NEVER refused on RR. The 0.8/1.5 minimums are enforced BY
+            # CONSTRUCTION in target selection (farther of liquidity vs
+            # stop ratio), so this stays an audit note, not a veto.
+            diagnostics["rr_below_floor_note"] = (
+                f"main area RR {diagnostics['main_rr']:.2f} below "
+                f"{self.min_main_rr_for_ready:.2f} (note only, 2026-08-07c)"
+            )
         if diagnostics.get("available_count", 0) > 0:
             if diagnostics["support_count"] < self.min_supporting_agents_for_ready:
                 return False, f"only {diagnostics['support_count']} supporting agents for the mapped direction", diagnostics
