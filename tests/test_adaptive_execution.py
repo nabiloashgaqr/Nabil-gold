@@ -251,3 +251,31 @@ def test_adaptive_execution_replaces_with_continuation_when_new_thesis_is_materi
     )
     review = service.review(decision, [old_pending])
     assert review["action"] == "REPLACE_WITH_CONTINUATION"
+
+
+def test_replacement_pending_is_labelled_main_not_add() -> None:
+    """Operator 2026-08-07: a standby that replaces a stale main is the main.
+
+    The 17:02 card shipped as "ADD BUY AREA / STANDBY" even though the old
+    MAIN pending had just been cancelled as stale -- the replacement is the
+    only leg, so it must carry the MAIN label."""
+    service = AdaptiveExecutionService(_config())
+    old_pending = _pending_trade(
+        scenario_id="SCENARIO::OLD", setup_type="LIQUIDITY_REVERSAL",
+        trigger_state="AWAY_FROM_POI", trigger_score=42.0, dominance=58.0,
+        return_probability=40.0, entry_price=4020.0, stop_loss=4044.0,
+        tp2=3965.0,
+    )
+    decision = _decision(
+        current_price=4000.0, scenario_id="SCENARIO::NEW",
+        setup_type="STRUCTURE_CONTINUATION", trigger_state="REJECTION_CONFIRMED",
+        trigger_score=74.0, dominance=72.0, tp2=3950.0, stop_loss=4030.0,
+    )
+    setup = decision.setdefault("setup_context", {})
+    setup["pending_plan_role"] = "STANDBY"
+    setup["selection_role"] = "STANDBY"
+    review = service.review(decision, [old_pending])
+    assert review["action"] == "REPLACE_WITH_CONTINUATION"
+    from scripts.run_analysis import _decision_ladder_role
+    assert _decision_ladder_role(review["decision"]) == "PRIMARY"
+    assert review["decision"]["adaptive_execution_promoted_from"] == "STANDBY"
