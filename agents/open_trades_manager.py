@@ -15,6 +15,7 @@ from agents.base_agent import BaseAgent
 from services.pending_governor import PendingGovernor
 from services.scenario_governor import ScenarioGovernor
 from utils.helpers import calculate_pips, canonical_session_label, load_config
+from utils import trading_rules as _tr
 from utils.instruments import points_to_price
 
 
@@ -92,13 +93,12 @@ class OpenTradesManager(BaseAgent):
         tm = self.management  # trade_management
         ts_config = self.config.get("trailing_stop", {})  # legacy section
 
-        self.trailing_enabled = bool(tm.get("trailing_stop_enabled", ts_config.get("enabled", False)))
-        self.trailing_distance = float(
-            tm.get("trailing_distance_points", ts_config.get("trailing_distance", 150.0))
-        )
-        self.trailing_step = float(
-            tm.get("trailing_step_points", ts_config.get("trailing_step", 40.0))
-        )
+        # 2026-08-07 audit: trailing parameters come from the single source
+        # of truth (utils.trading_rules.trailing_params).
+        _trail = _tr.trailing_params(self.config)
+        self.trailing_enabled = bool(_trail["enabled"])
+        self.trailing_distance = float(_trail["distance_points"])
+        self.trailing_step = float(_trail["step_points"])
         self.trailing_min_profit_lock = float(ts_config.get("min_profit_lock", 0.0))
         self.early_breakeven_points = float(
             tm.get("early_breakeven_points", ts_config.get("early_breakeven_points", 200.0))

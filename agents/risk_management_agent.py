@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Tuple
 
 from agents.base_agent import BaseAgent
 from utils.helpers import calculate_pips, load_config, get_agent_weights
+from utils import trading_rules as _tr
 from utils.instruments import points_to_price, price_to_points
 from services.moment_quality import MomentQualityService
 
@@ -771,35 +772,12 @@ class RiskManagementAgent(BaseAgent):
         liquidity_map: Dict[str, Any],
         rule_cfg: Dict[str, Any],
     ) -> float:
-        """Operator directive 2026-08-07b: the stop distance in points.
-
-        Liquidity closer than ``min_liquidity_points`` (200) is swept noise:
-        ignored. The stop sits ``safety_buffer_points`` (70) beyond the first
-        eligible opposing level; a first level past ``max_stop_points`` (400)
-        -- or no eligible level at all -- ships the 400 cap directly.
-        Examples: first pool at 350 -> 420 -> capped 400; at 250 -> 320;
-        none >= 200 -> 400. Minimum possible stop: 200 + 70 = 270.
-        """
-        min_liq = self._f(rule_cfg.get("min_liquidity_points"), 200.0)
-        buffer = self._f(rule_cfg.get("safety_buffer_points"), 70.0)
-        max_stop = self._f(rule_cfg.get("max_stop_points"), 400.0)
-        liquidity_map = liquidity_map or {}
-        side = "sell_side" if direction == "BUY" else "buy_side"
-        distances = []
-        for raw in list(liquidity_map.get(side) or []):
-            level = self._f(raw, 0.0)
-            if level <= 0:
-                continue
-            on_the_right_side = (level < entry) if direction == "BUY" else (level > entry)
-            if on_the_right_side:
-                distances.append(abs(price_to_points(entry - level, self.symbol)))
-        eligible = sorted(d for d in distances if d >= min_liq)
-        if not eligible:
-            return max_stop
-        first = eligible[0]
-        if first > max_stop:
-            return max_stop
-        return min(first + buffer, max_stop)
+        """Thin delegation to the single source of truth
+        (utils.trading_rules.stop_from_liquidity_points). 2026-08-07 audit:
+        the formula lives ONCE in the loader."""
+        return _tr.stop_from_liquidity_points(
+            direction=direction, entry=entry, liquidity_map=liquidity_map,
+            cfg=self.config, symbol=self.symbol, rule=rule_cfg)
 
     def _stop_loss(
         self,
@@ -1011,8 +989,7 @@ class RiskManagementAgent(BaseAgent):
         risk = abs(entry - stop_loss)
         if risk <= 0 or entry <= 0:
             return None, None, ""
-        min_rr = self._f(self.settings.get("min_rr_ratio"), 1.5) or 1.5
-        min_tp1_rr = self._f(self.settings.get("min_tp1_rr"), 0.8) or 0.8
+        # ratios live in utils.trading_rules; this function only gathers levels.
         liquidity_map = liquidity_map or {}
         side_key = "buy_side" if direction == "BUY" else "sell_side"
         structure = resistances if direction == "BUY" else supports
@@ -1033,28 +1010,10 @@ class RiskManagementAgent(BaseAgent):
         def _level(rr_r: float) -> float:
             return entry + risk * rr_r if direction == "BUY" else entry - risk * rr_r
 
-        # Operator directive 2026-08-07w: a pool only becomes a target when
-        # it is within max_tp2_beyond_tp1_points (200 pts) of the ratio rung
-        # it replaces or follows.
-        max_beyond = points_to_price(
-            self._f(self.settings.get("max_tp2_beyond_tp1_points"), 200.0), self.symbol)
-        d_ratio = _dist(_level(min_tp1_rr))
-        tp1_pools = [lv for lv in ordered
-                     if d_ratio <= _dist(lv) <= d_ratio + max_beyond]
-        used_pool = bool(tp1_pools)
-        tp1 = min(tp1_pools, key=_dist) if tp1_pools else _level(min_tp1_rr)
-        # TP2 = double TP1; liquidity AFTER the adjusted level, within the
-        # 200-pt band, is a better objective and wins.
-        mult = self._f(self.settings.get("min_tp2_multiple_of_tp1"), 2.0) or 2.0
-        d1 = _dist(tp1)
-        d2_default = mult * d1
-        beyond = [lv for lv in ordered
-                  if d2_default < _dist(lv) <= d2_default + max_beyond]
-        if beyond:
-            tp2 = max(beyond, key=_dist)
-            used_pool = True
-        else:
-            tp2 = (entry + d2_default) if direction == "BUY" else (entry - d2_default)
+        # 2026-08-07 audit: the target law lives ONCE in utils.trading_rules.
+        tp1, tp2, used_pool = _tr.targets_law(
+            direction=direction, entry=entry, risk_price=risk,
+            levels=ordered, cfg=self.config, symbol=self.symbol)
         method = "liquidity_chain" if used_pool else "rr_from_floored_sl"
         return round(tp1, 2), round(tp2, 2), method
 

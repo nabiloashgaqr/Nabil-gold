@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Tuple
 from zoneinfo import ZoneInfo
 
 from agents.base_agent import BaseAgent
+from utils import trading_rules as _tr
 from utils.indicators import calculate_atr, detect_swing_points
 
 Candle = Dict[str, Any]
@@ -2217,10 +2218,8 @@ class SMCAgent(BaseAgent):
         # Noise is why the stop is wide; distance is what pays for it. Both
         # sides of that trade have to be modelled, not just the stop.
         risk_cfg = (self.config.get("risk_settings") or {}) if isinstance(self.config, dict) else {}
-        rule_cfg = (risk_cfg.get("stop_from_liquidity") or {}) if isinstance(risk_cfg, dict) else {}
-        widest_stop_points = self._f(rule_cfg.get("max_stop_points")) or self._f(
-            risk_cfg.get("min_sl_distance_points")
-        ) or 400.0
+        # 2026-08-07 phase 1: read via the single source of truth.
+        widest_stop_points = _tr.stop_rule(self.config or {})["max_stop_points"]
         min_rr = self._f(risk_cfg.get("min_rr_ratio")) or 1.5
         # Points -> USD on gold (point_size 0.10). One extra multiple of the
         # requirement so the furthest rung is reachable rather than exactly on
