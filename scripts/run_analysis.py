@@ -405,11 +405,13 @@ def _resolve_reward_target(
     target_price: float,
     candidate: Dict[str, Any] | None,
     min_rr: float,
+    symbol: str = "XAU/USD",
     min_tp1_rr: float = 0.0,
     prefer_far: bool = True,
     max_rr: float = 0.0,
     min_tp2_beyond_rr: float = 0.5,
     tp2_multiple: float = 2.0,
+    risk_cfg: Dict[str, Any] | None = None,
 ) -> tuple[float, float, str | None]:
     """Pick TP1 and TP2 from the liquidity map.
 
@@ -476,18 +478,27 @@ def _resolve_reward_target(
     def _level(rr_r: float) -> float:
         return entry_price + risk * rr_r if direction == "BUY" else entry_price - risk * rr_r
 
-    tp1 = _level(min_tp1_rr)
-    tp2 = _level(min_rr)
-    if ordered:
-        if _dist(ordered[0]) > _dist(tp1):
-            tp1 = ordered[0]
-        if _dist(ordered[-1]) > _dist(tp2):
-            tp2 = ordered[-1]
-    # Operator directive 2026-08-07d: TP2 must be at least DOUBLE the TP1
-    # distance; the multiple extends the 1.5R floor whenever 2xTP1 outruns it.
-    mult = tp2_multiple if tp2_multiple and tp2_multiple > 1 else 2.0
-    if _dist(tp2) < mult * _dist(tp1):
-        tp2 = (entry_price + mult * _dist(tp1)) if direction == "BUY" else (entry_price - mult * _dist(tp1))
+    # Operator directive 2026-08-07w: a pool only becomes a target if it is
+    # within max_tp2_beyond_tp1_points (200 pts) of the ratio rung it would
+    # replace or follow. 4500 on the 11:01 card (1559 pts beyond TP1) is not
+    # a target; it is a different trade.
+    risk_cfg = risk_cfg or {}
+    max_beyond = points_to_price(
+        _safe_float(risk_cfg.get("max_tp2_beyond_tp1_points"), 200.0), symbol=symbol)
+    d_ratio = _dist(_level(min_tp1_rr))
+    tp1_pools = [lv for lv in ordered
+                 if d_ratio <= _dist(lv) <= d_ratio + max_beyond]
+    tp1 = min(tp1_pools, key=_dist) if tp1_pools else _level(min_tp1_rr)
+    # TP2 = TP1 + the same distance again (double), unless real liquidity
+    # sits beyond TP1 within the 200-pt band -- then the farthest such pool
+    # is the objective.
+    d1 = _dist(tp1)
+    beyond = [lv for lv in ordered if d1 < _dist(lv) <= d1 + max_beyond]
+    if beyond:
+        tp2 = max(beyond, key=_dist)
+    else:
+        mult = tp2_multiple if tp2_multiple and tp2_multiple > 1 else 2.0
+        tp2 = (entry_price + mult * d1) if direction == "BUY" else (entry_price - mult * d1)
     return round(tp1, 2), round(tp2, 2), None
 
 
@@ -586,11 +597,13 @@ def _planner_trade_levels(
     min_tp2_beyond_rr = _safe_float(risk_cfg.get("min_tp2_beyond_tp1_rr"), 0.5)
     tp1, tp2, reject_reason = _resolve_reward_target(
         direction, entry_price, adjusted_stop, target_price, candidate, min_rr,
+        symbol=symbol,
         min_tp1_rr=min_tp1_rr,
         prefer_far=prefer_far,
         max_rr=max_rr,
         min_tp2_beyond_rr=min_tp2_beyond_rr,
         tp2_multiple=_safe_float(risk_cfg.get("min_tp2_multiple_of_tp1"), 2.0),
+        risk_cfg=risk_cfg,
     )
     if reject_reason:
         return {
