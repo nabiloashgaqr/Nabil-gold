@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 
 import requests
 
+from utils import trading_rules as _tr
 from utils.helpers import format_price, load_config
 
 
@@ -360,9 +361,11 @@ class TelegramService:
         profile (reversal 120/30/100, continuation 170/45/170, range
         110/25/90), so the published numbers were wrong for every signal.
         """
-        trailing = 150.0
-        step = 40.0
-        breakeven = 150.0
+        # Phase 3: even the last-resort defaults come from the single source.
+        _trail0 = _tr.trailing_params(self.config if isinstance(self.config, dict) else {})
+        trailing = float(_trail0["distance_points"])
+        step = float(_trail0["step_points"])
+        breakeven = float(_trail0["early_breakeven_points"])
         try:
             from agents.open_trades_manager import OpenTradesManager
             from utils.helpers import load_config
@@ -417,7 +420,6 @@ class TelegramService:
         tp1_rr = 0.0
         try:
             from utils.instruments import price_to_points
-
             symbol = str(decision.get("symbol") or "XAU/USD")
             entry_price = float((signal.get("entry") or {}).get("price")
                                 or decision.get("current_price") or 0)
