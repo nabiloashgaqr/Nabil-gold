@@ -1933,41 +1933,63 @@ class SessionPlannerService:
             # importable (kept so the planner stays usable standalone).
             pass
 
+        # 2026-08-07 audit: the standalone fallback must speak the SAME rule
+        # as both execution doors (liquidity-rule stop + 0.8R rung / 200-pt
+        # band / double TP2). The old flat-floor + 1.25/2.25 ratio maths here
+        # would resurrect a dead era on an ImportError.
         risk_cfg = (self.config.get("risk_settings") or {}) if isinstance(self.config, dict) else {}
-        min_sl_points = self._f(risk_cfg.get("min_sl_distance_points"), 0.0)
-        min_sl_distance = points_to_price(min_sl_points, symbol) if min_sl_points > 0 else 0.0
-        max_rr = self._f(risk_cfg.get("max_rr_ratio"), 0.0)
+        rule_cfg = (risk_cfg.get("stop_from_liquidity") or {}) if isinstance(risk_cfg, dict) else {}
         floor_applied = False
         adjusted_stop = float(stop_loss)
 
-        if min_sl_distance > 0 and abs(entry_price - adjusted_stop) < min_sl_distance:
-            adjusted_stop = entry_price - min_sl_distance if direction == "BUY" else entry_price + min_sl_distance
-            sl_mult = self._f(risk_cfg.get("atr_multiplier_sl"), 2.0) or 2.0
-            tp1_ratio = (self._f(risk_cfg.get("atr_multiplier_tp1"), 2.5) or 2.5) / sl_mult
-            tp2_ratio = (self._f(risk_cfg.get("atr_multiplier_tp2"), 4.5) or 4.5) / sl_mult
-            if direction == "BUY":
-                tp1 = entry_price + min_sl_distance * tp1_ratio
-                tp2 = entry_price + min_sl_distance * tp2_ratio
-            else:
-                tp1 = entry_price - min_sl_distance * tp1_ratio
-                tp2 = entry_price - min_sl_distance * tp2_ratio
+        def _dist(lv: float) -> float:
+            return abs(lv - entry_price)
+
+        if bool(rule_cfg.get("enabled", False)):
+            min_liq = self._f(rule_cfg.get("min_liquidity_points"), 200.0)
+            buffer = self._f(rule_cfg.get("safety_buffer_points"), 70.0)
+            max_stop = self._f(rule_cfg.get("max_stop_points"), 400.0)
+            liq0 = ((candidate or {}).get("details") or {}).get("liquidity") or {}
+            side0 = "sell_side" if direction == "BUY" else "buy_side"
+            dists = []
+            for raw in list(liq0.get(side0) or []):
+                lv = self._f(raw, 0.0)
+                if lv > 0 and ((lv < entry_price) if direction == "BUY" else (lv > entry_price)):
+                    dists.append(abs(price_to_points(entry_price - lv, symbol)))
+            eligible = sorted(d for d in dists if d >= min_liq)
+            pts = max_stop if (not eligible or eligible[0] > max_stop) else min(eligible[0] + buffer, max_stop)
+            adjusted_stop = (entry_price - points_to_price(pts, symbol)) if direction == "BUY" else (entry_price + points_to_price(pts, symbol))
             floor_applied = True
-            target_method = "rr_from_floored_sl"
         else:
-            tp1, tp2, _ = self._plan_targets(direction, entry_price, adjusted_stop, target_price)
-            target_method = "mapped_target"
+            min_sl_points = self._f(risk_cfg.get("min_sl_distance_points"), 0.0)
+            min_sl_distance = points_to_price(min_sl_points, symbol) if min_sl_points > 0 else 0.0
+            if min_sl_distance > 0 and abs(entry_price - adjusted_stop) < min_sl_distance:
+                adjusted_stop = entry_price - min_sl_distance if direction == "BUY" else entry_price + min_sl_distance
+                floor_applied = True
 
         risk = abs(adjusted_stop - entry_price)
-        if max_rr > 0 and risk > 0:
-            max_tp2_distance = risk * max_rr
-            if direction == "BUY" and tp2 - entry_price > max_tp2_distance:
-                tp2 = entry_price + max_tp2_distance
-                target_method += "+max_rr_cap"
-            elif direction == "SELL" and entry_price - tp2 > max_tp2_distance:
-                tp2 = entry_price - max_tp2_distance
-                target_method += "+max_rr_cap"
-
-        rr = abs(tp2 - entry_price) / risk if risk > 0 else 0.0
+        max_beyond = points_to_price(
+            self._f(risk_cfg.get("max_tp2_beyond_tp1_points"), 200.0), symbol)
+        ordered = []
+        liq = ((candidate or {}).get("details") or {}).get("liquidity") or {}
+        side = "buy_side" if direction == "BUY" else "sell_side"
+        for raw in list(liq.get(side) or []):
+            lv = self._f(raw, 0.0)
+            if lv > 0 and ((lv > entry_price) if direction == "BUY" else (lv < entry_price)):
+                ordered.append(lv)
+        ordered = sorted(set(ordered), key=_dist)
+        d_ratio = risk * (self._f(risk_cfg.get("min_tp1_rr"), 0.8) or 0.8)
+        tp1_pools = [lv for lv in ordered if d_ratio <= _dist(lv) <= d_ratio + max_beyond]
+        tp1 = min(tp1_pools, key=_dist) if tp1_pools else (
+            entry_price + d_ratio if direction == "BUY" else entry_price - d_ratio)
+        mult = self._f(risk_cfg.get("min_tp2_multiple_of_tp1"), 2.0) or 2.0
+        d1 = _dist(tp1)
+        d2_default = mult * d1
+        beyond = [lv for lv in ordered if d2_default < _dist(lv) <= d2_default + max_beyond]
+        tp2 = max(beyond, key=_dist) if beyond else (
+            entry_price + d2_default if direction == "BUY" else entry_price - d2_default)
+        target_method = "liquidity_rule_fallback" if (tp1_pools or beyond) else "rr_from_floored_sl"
+        rr = _dist(tp2) / risk if risk > 0 else 0.0
         return {
             "entry_price": round(entry_price, 2),
             "stop_loss": round(adjusted_stop, 2),
