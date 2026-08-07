@@ -4494,6 +4494,55 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 }
                 logger.info("Adaptive execution %s for %s %s: %s", adaptive_action, decision_type, symbol, adaptive.get("reason"))
 
+            # ── Golden dual-entry exception (operator 2026-08-07) ────────
+            # Only while a same-direction pending is alive: price tags 0.618,
+            # a candle CLOSES back beyond it, >=2 qualified supporters, and
+            # the pending rests inside the 0.618-0.786 band -> FULL market
+            # now + the pending kept as a second full entry (the single
+            # exception to the >=200-pt separation rule).
+            golden_dual = None
+            if decision_type in {"BUY", "SELL"} and open_trades_snapshot:
+                try:
+                    from services.golden_dual_entry import review_golden_dual_entry
+                    from utils.indicators import detect_swing_points as _gsp
+                    _g_candles = (((data.get("timeframes", {}) or {}).get("5m") or {})
+                                  .get("data") or data.get("data") or [])
+                    _pendings = [
+                        t for t in open_trades_snapshot
+                        if str(t.get("status") or "").upper() == "PENDING"
+                        and str(t.get("type") or t.get("side") or "").upper() == decision_type
+                    ]
+                    if _g_candles and _pendings:
+                        _sw = _gsp(_g_candles)
+                        _hi = float((_sw.get("highs") or [{}])[-1].get("price") or 0.0)
+                        _lo = float((_sw.get("lows") or [{}])[-1].get("price") or 0.0)
+                        _min_conf = float(
+                            ((config.get("signal_requirements") or {})
+                             .get("agent_min_confidence"))
+                            or config.get("agent_min_confidence") or 67)
+                        _sup = 0
+                        for _an in ("technical", "classical", "smc", "price_action",
+                                  "multitimeframe", "macro_fundamental"):
+                            _ar = all_results.get(_an) or {}
+                            if (float(_ar.get("confidence") or 0) >= _min_conf
+                                    and str(_ar.get("direction") or "").upper() == decision_type):
+                                _sup += 1
+                        golden_dual = review_golden_dual_entry(
+                            direction=decision_type, candles=_g_candles,
+                            swing_low=_lo, swing_high=_hi,
+                            pending_entry=float(_pendings[0].get("entry_price") or 0.0),
+                            qualified_support=_sup, config=config)
+                except Exception as exc:  # noqa: BLE001 - never break the cycle
+                    logger.warning("Golden dual review failed: %s", exc)
+            if golden_dual and golden_dual.get("action") == "GOLDEN_DUAL_ENTRY":
+                decision["golden_dual_entry"] = golden_dual
+                logger.info("Golden dual entry armed for %s %s: %s",
+                            decision_type, symbol, golden_dual.get("reason"))
+                if not str((decision.get("signal") or {}).get("order_type") or ""
+                           ).upper().endswith("MARKET"):
+                    decision = AdaptiveExecutionService(config)._promote_to_market(
+                        decision, float(decision.get("current_price") or 0.0))
+
             # Phase E: even if legacy path 1 / path 2 found an entry, it must
             # still be inside or near the confirmed day map. This prevents small
             # local execution zones from bypassing a stronger planner view.
@@ -4524,7 +4573,13 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                     )
                     return
 
-            if adaptive_action in {"PROMOTE_TO_MARKET", "REPLACE_WITH_CONTINUATION"}:
+            if golden_dual and golden_dual.get("action") == "GOLDEN_DUAL_ENTRY":
+                governance = {
+                    "action": "ALLOW_NEW",
+                    "reason": "golden dual entry exception (0.618 close-confirm, pending inside 0.786 band)",
+                    "cancelled_ids": [],
+                }
+            elif adaptive_action in {"PROMOTE_TO_MARKET", "REPLACE_WITH_CONTINUATION"}:
                 governance = {
                     "action": "ALLOW_NEW",
                     "reason": f"adaptive execution {adaptive_action.lower()} bypassed normal pending duplication gate",
@@ -4660,7 +4715,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             except Exception as exc:  # noqa: BLE001
                 telegram.send_error_alert(f"Signal delivery failed: {exc}")
                 return
-            if delivered:
+            if delivered and not decision.get("golden_dual_entry"):
                 cancelled_pending = 0
                 try:
                     cancelled_pending = database.cancel_pending_orders(
