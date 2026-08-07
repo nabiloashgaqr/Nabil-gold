@@ -67,20 +67,23 @@ def test_ratio_floors_ship_when_pools_are_noise() -> None:
     )
     assert reject is None
     assert tp1 == 4072.0
-    assert tp2 == 4082.5
+    # 2026-08-07d: TP2 must be >= 2x TP1 distance (24 pts) -> 4084.0.
+    assert tp2 == 4084.0
 
 
-def test_a_single_far_pool_sets_both_and_the_guard_separates() -> None:
-    # One pool at 90 pts wins both comparisons; the tp2>tp1 guard then
-    # pushes TP2 half a risk beyond TP1 instead of collapsing onto it.
+def test_a_single_far_pool_sets_tp1_and_double_rule_sets_tp2() -> None:
+    # One pool at 90 pts wins both comparisons; the 2026-08-07d double rule
+    # then pushes TP2 to 2x TP1 (180 pts) instead of collapsing onto it.
     candidate = {"details": {"liquidity": {"buy_side": [4150.0]}}}
     tp1, tp2, reject = ra._resolve_reward_target(
         "BUY", 4060.0, 4045.0, 4150.0, candidate,
         min_rr=1.5, min_tp1_rr=0.8, prefer_far=True, max_rr=4.0,
+        tp2_multiple=2.0,
     )
     assert reject is None
     assert tp1 == 4150.0
-    assert tp2 == 4157.5
+    # 2 x 90.0 (TP1 distance) = 180.0 above entry.
+    assert tp2 == 4240.0
 
 
 def _agent(prefer_far: bool) -> RiskManagementAgent:
@@ -105,7 +108,7 @@ def test_risk_agent_chain_aims_at_the_far_pool() -> None:
         supports=[], resistances=[], atr=2.0,
     )
     assert method == "liquidity_chain"
-    assert tp2 == 4105.0, "classic path must aim TP2 at the farthest pool within the cap"
+    assert tp2 == 4130.0, "2026-08-07c: the farthest pool, no cap"
     assert tp1 == 4085.0, "TP1 books the nearest pool short of the far objective"
 
 
@@ -116,7 +119,7 @@ def test_risk_agent_chain_nearest_first_is_restorable() -> None:
         liquidity_map={"buy_side": [4085.0, 4105.0, 4130.0]},
         supports=[], resistances=[], atr=2.0,
     )
-    assert tp2 == 4085.0
+    assert tp2 == 4130.0  # farther wins regardless of prefer_far
 
 
 def test_config_pins_the_directive_on() -> None:

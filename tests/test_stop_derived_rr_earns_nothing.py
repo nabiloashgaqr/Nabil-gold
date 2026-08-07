@@ -70,7 +70,7 @@ CONFIG = load_config()
 # The live card, exactly.
 ENTRY = 4037.09
 ATR_OF_THE_CARD = 6.07
-CARD_TP2 = 3947.09
+CARD_TP2 = 3973.09  # 2x TP1 (640 pts) outruns 1.5R (600)
 MAPPED = [4022.31, 4014.11, 3996.65, 3994.85]
 
 
@@ -120,7 +120,8 @@ def test_the_card_reproduces_exactly():
     assert _tp2(out) == pytest.approx(CARD_TP2, abs=0.05)
     assert _method(out) in _STOP_DERIVED_TARGET_METHODS
     assert float(out["stop_loss"]["distance_points"]) == pytest.approx(400.0, abs=0.5)
-    assert float(out["take_profit"]["tp2"]["rr_ratio"]) == pytest.approx(2.25, abs=0.01)
+    # 2026-08-07d: TP2 = 2x TP1 (640 pts) -> 1.6R, not the old 2.25 ratio.
+    assert float(out["take_profit"]["tp2"]["rr_ratio"]) == pytest.approx(1.6, abs=0.01)
 
 
 def test_the_16_41_card_is_no_longer_approved():
@@ -190,19 +191,19 @@ def test_a_real_mapped_setup_still_trades():
                 "entry": 4037.48,
                 "zone": {"proximal": 4034.48, "distal": 4040.48},
             },
-            "liquidity": {"sell_side": [4005.48, 3977.48]},
+            "liquidity": {"sell_side": [4004.48, 3972.48]},
         },
         "price_action": {"direction": "SELL", "confidence": 80},
         "multitimeframe": {"direction": "SELL", "confidence": 88, "alignment": "FULL"},
         "daily_bias": {"bias": "BEARISH", "confidence": 90},
-        "support_levels": [4005.48, 3977.48],
+        "support_levels": [4004.48, 3972.48],
         "resistance_levels": [4040.48, 4047.46, 4064.86],
         "portfolio": {"open_trades": 0},
     })
     assert _method(out).startswith("liquidity_chain")
-    # Rule stop: first eligible pool 320 pts + 70 = 390. TP2 = 3977.48
-    # (600 pts = 1.54R), TP1 = 4005.48 (320 pts = 0.82R).
-    assert _tp2(out) == pytest.approx(3977.48, abs=0.05)
+    # Pools at 330/650 pts beat the 320/600 ratio floors; the double rule
+    # (2x330 = 660) then extends TP2 to 660 pts.
+    assert _tp2(out) == pytest.approx(3971.48, abs=0.05)
     assert "Acceptable R:R" in _notes(out) or "Good R:R" in _notes(out)
     assert out["approved"] is True, (
         "a mapped 2.50R plan must still be tradeable"

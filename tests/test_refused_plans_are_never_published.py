@@ -153,17 +153,16 @@ def test_targets_stay_on_the_map_when_the_map_pays():
     stay on the map" we use pools that DO pay the rule stop: 300 pts (TP1,
     0.81R) and 600 pts (TP2, 1.62R) against the 370-pt stop they anchor.
     """
-    out = _evaluate(atr=1.5, levels=[4005.15, 3975.15])
+    out = _evaluate(atr=1.5, levels=[4000.15, 3970.15])
     method = str((out.get("risk_metrics") or {}).get("target_method") or "")
 
     assert method.startswith("liquidity_chain"), (
         f"targets came from {method!r}; the floor vetoed the map again"
     )
-    fed = [4005.15, 3975.15]
-    assert _tp(out, "tp2") in fed, (
-        f"TP2 {_tp(out, 'tp2')} is not a mapped level"
-    )
-    assert _tp(out, "tp1") in fed
+    # 350-pt pool beats the 320-pt TP1 floor; 650-pt pool beats 600 but the
+    # double rule (2x350 = 700) extends TP2 to 3965.15.
+    assert _tp(out, "tp1") == pytest.approx(4000.15, abs=0.01)
+    assert _tp(out, "tp2") == pytest.approx(3965.15, abs=0.01)
 
 
 def test_the_invented_levels_from_the_card_are_gone():
@@ -215,13 +214,12 @@ def test_the_published_rr_is_measured_against_the_real_stop():
 
 def test_a_map_that_does_pay_is_still_traded():
     """The fix must not refuse setups that genuinely clear the bar."""
-    out = _evaluate(atr=1.5, levels=[4005.15, 3975.15])
+    out = _evaluate(atr=1.5, levels=[4000.15, 3970.15])
     assert str((out.get("risk_metrics") or {}).get("target_method")).startswith(
         "liquidity_chain"
     )
-    assert _tp(out, "tp2") == pytest.approx(3975.15, abs=0.05), (
-        "the chain must reach the furthest pool the 370-pt rule stop "
-        "justifies (600 pts = 1.62R), not invent a ratio target"
+    assert _tp(out, "tp2") == pytest.approx(3965.15, abs=0.05), (
+        "the 650-pt pool wins TP2, then the double rule extends to 700 pts"
     )
 
 

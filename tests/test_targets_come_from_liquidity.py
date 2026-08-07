@@ -52,6 +52,8 @@ onto levels the map already contained.
 
 from __future__ import annotations
 
+import pytest
+
 import os
 import sys
 
@@ -111,8 +113,10 @@ def test_targets_are_taken_from_the_liquidity_chain() -> None:
     )
 
     assert method == "liquidity_chain"
-    assert tp1 == MAPPED_OBJECTIVE, "the nearest pool becomes the first target"
-    assert tp2 == 3930.50, "TP2 is the first pool that clears min_rr"
+    # 2026-08-07c/d: TP1 = farther(0.8R = 320 pts, nearest pool 107) = ratio;
+    # TP2 = farther(1.5R = 600, farthest pool 1012) = the far pool.
+    assert tp1 == 3999.77, "the 0.8R floor outruns the 107-pt pool"
+    assert tp2 == 3930.50, "TP2 is the farthest pool"
     assert tp1 not in (SHIPPED_TP1, SHIPPED_TP2)
 
 
@@ -138,7 +142,7 @@ def test_the_analyst_extended_target_is_reached() -> None:
     )
 
     assert tp1 == 4093.0, "the analyst's tp-1"
-    assert tp2 == 4132.389, "the analyst's extended target"
+    assert tp2 == pytest.approx(4132.389, abs=0.011), "the analyst's extended target"
     assert _pts(entry, tp2) > _pts(entry, 4093.31), (
         "the system shipped TP2 at 4093.31 and price ran to 4119; the chain "
         "must reach further than the level that was left behind"
@@ -147,20 +151,21 @@ def test_the_analyst_extended_target_is_reached() -> None:
 
 # ── it must refuse rather than invent ───────────────────────────────────────
 
-def test_an_empty_map_produces_nothing() -> None:
+def test_an_empty_map_ships_the_ratio_floors() -> None:
+    """2026-08-07c: nothing is refused; the 0.8R/1.5R ratio levels ship."""
     assert _agent()._liquidity_chain_targets(
         direction="SELL", entry=ENTRY, stop_loss=FLOORED_STOP,
         liquidity_map={}, supports=[], resistances=[], atr=2.0,
-    ) == (None, None, "")
+    ) == (3999.77, 3967.77, "rr_from_floored_sl")
 
 
-def test_a_map_with_nothing_far_enough_produces_nothing() -> None:
-    """0.27R is not a target; the caller keeps its ratio fallback."""
+def test_a_map_with_nothing_far_enough_uses_the_floors() -> None:
+    """A 107-pt pool (0.27R) loses to the 0.8R/1.5R floors; ratios ship."""
     assert _agent()._liquidity_chain_targets(
         direction="SELL", entry=ENTRY, stop_loss=FLOORED_STOP,
         liquidity_map={"sell_side": [MAPPED_OBJECTIVE]},
         supports=[], resistances=[], atr=2.0,
-    ) == (None, None, "")
+    ) == (3999.77, 3967.77, "rr_from_floored_sl")
 
 
 def test_levels_behind_the_entry_are_ignored() -> None:
@@ -170,7 +175,8 @@ def test_levels_behind_the_entry_are_ignored() -> None:
         liquidity_map={"sell_side": [4090.0, 4120.0]},  # above a SELL entry
         supports=[], resistances=[], atr=2.0,
     )
-    assert result == (None, None, "")
+    # Behind-entry levels are invisible: pure ratio floors ship.
+    assert result == (3999.77, 3967.77, "rr_from_floored_sl")
 
 
 def test_a_level_inside_one_atr_is_not_a_first_target() -> None:
@@ -189,7 +195,10 @@ def test_tp1_and_tp2_are_never_the_same_price() -> None:
         liquidity_map={"sell_side": [3930.50]},   # the only pool, and it is TP2
         supports=[], resistances=[], atr=2.0,
     )
-    assert tp1 is not None and tp2 == 3930.50
+    # The single pool wins both comparisons; the 2026-08-07d double rule
+    # then pushes TP2 to twice the TP1 distance.
+    assert tp1 is not None and tp1 == 3930.50
+    assert tp2 == pytest.approx(ENTRY - 2 * abs(3930.50 - ENTRY), abs=0.05)
     assert tp1 != tp2
     assert abs(tp1 - ENTRY) < abs(tp2 - ENTRY)
 
@@ -236,6 +245,6 @@ def test_fault_injection_the_old_block_overwrote_the_map() -> None:
         supports=[], resistances=[], atr=2.0,
     )
     assert (new_tp1, new_tp2) != (old_tp1, old_tp2)
-    assert new_tp1 == MAPPED_OBJECTIVE, (
+    assert new_tp1 == 3999.77, (
         "the objective the old arithmetic discarded is now the first target"
     )

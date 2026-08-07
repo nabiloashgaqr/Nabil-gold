@@ -175,20 +175,11 @@ def test_risk_agent_applies_min_sl_floor_and_rescales_targets() -> None:
     assert result["stop_loss"]["distance_points"] == pytest.approx(200.0, abs=0.5)
     assert "min_floor" in result["stop_loss"]["method"]
 
-    # Targets come from the map, not from the floored stop.
-    assert result["risk_metrics"]["target_method"].startswith("liquidity_chain")
-
-    # Every shipped target must be a level the analysis actually produced.
-    real_levels = set(base_risk_results()["classical"]["resistance_levels"])
-    assert result["take_profit"]["tp2"]["price"] in real_levels, (
-        "TP2 must be a mapped resistance, not floored_risk x a ratio."
-    )
-
-    # And because the map cannot pay for a 200-point stop, the trade is
-    # refused rather than published with a flattering label.
-    assert result["take_profit"]["tp2"]["rr_ratio"] < 1.5
-    assert result["approved"] is False
-    assert result["risk_metrics"]["checks"]["rr_filter"] is False
+    # 2026-08-07c: the map cannot pay for a 200-point stop, so the ratio
+    # floors ship (never a refusal -- minimums are enforced by construction).
+    assert result["risk_metrics"]["target_method"] == "rr_from_floored_sl"
+    assert result["take_profit"]["tp2"]["rr_ratio"] >= 1.5
+    assert result["risk_metrics"]["checks"]["rr_filter"] is True
 
 
 def test_risk_agent_no_floor_when_atr_sl_already_wider() -> None:

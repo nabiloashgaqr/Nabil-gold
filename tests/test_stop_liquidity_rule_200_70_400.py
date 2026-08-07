@@ -122,9 +122,10 @@ def test_planner_door_applies_the_rule_stop():
 
 
 def test_hybrid_far_liquidity_keeps_the_map():
-    """620 pts pays 1.59R against the 390-pt rule stop -> stays TP2."""
+    """TP1 = 320-pt pool (0.82R of the 390 stop). The 620-pt pool falls short
+    of the 2026-08-07d double rule (2x320 = 640), so TP2 extends to 640."""
     out = _planner([lv(320)], [below(320), below(620)], below(620))
-    assert float(out["tp2"]) == pytest.approx(below(620), abs=0.01)
+    assert float(out["tp2"]) == pytest.approx(below(640), abs=0.01)
     assert not out.get("reject_reason")
 
 
@@ -133,12 +134,38 @@ def test_hybrid_near_only_ships_the_ratio_floors():
     0.8R/1.5R of the 400-pt rule stop instead of being refused."""
     out = _planner([lv(100)], [below(100)], below(100))
     assert not out.get("reject_reason")
-    assert float(out["tp2"]) == pytest.approx(ENTRY - 60.0, abs=0.5)
+    # 2x TP1 (320 pts) = 640 pts outruns the 1.5R floor (60).
+    assert float(out["tp2"]) == pytest.approx(ENTRY - 64.0, abs=0.5)
 
 
 # ---------------------------------------------------------------------------
 # Config guard.
 # ---------------------------------------------------------------------------
+
+def test_tp2_is_at_least_double_tp1_on_both_doors():
+    """Operator directive 2026-08-07d, pinned on both doors."""
+    import json as _json
+    agent = RiskManagementAgent(copy_cfg())
+    pts = agent._stop_from_liquidity_points("SELL", ENTRY, {"buy_side": [lv(250)]}, RULE)
+    out = agent.evaluate({
+        "current_price": ENTRY, "atr": 1.5,
+        "technical": {"direction": "SELL", "confidence": 90},
+        "classical": {"direction": "SELL", "confidence": 85},
+        "smc": {"direction": "SELL", "confidence": 85,
+                "entry_suggestion": {"entry": ENTRY,
+                                     "zone": {"proximal": ENTRY - 3, "distal": ENTRY + 3}},
+                "liquidity": {"buy_side": [lv(250)],
+                              "sell_side": [below(300)]}},
+        "price_action": {"direction": "SELL", "confidence": 85},
+        "multitimeframe": {"direction": "SELL", "confidence": 90},
+        "support_levels": [below(300)], "resistance_levels": [lv(250)],
+        "portfolio": {"open_trades": 0},
+    })
+    tp = out.get("take_profit") or {}
+    d1 = abs(ENTRY - float((tp.get("tp1") or {}).get("price") or 0))
+    d2 = abs(ENTRY - float((tp.get("tp2") or {}).get("price") or 0))
+    assert d2 >= 2 * d1 - 1e-6, f"TP2 {d2} pts must be >= 2x TP1 {d1} pts"
+
 
 def test_config_carries_the_operator_numbers():
     assert RULE["min_liquidity_points"] == 200
