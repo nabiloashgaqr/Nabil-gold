@@ -229,12 +229,18 @@ def test_profile_overlay_cannot_move_the_unified_trailing():
         symbol="XAU/USD")
     assert params["trailing_distance_points"] == 150
     assert params["trailing_step_points"] == 40
-    # early breakeven remains per-profile (reversal 100)
-    assert params["early_breakeven_points"] == 100
+    # early breakeven unified at 150 (2026-08-07)
+    assert params["early_breakeven_points"] == 150
 
 
-def test_loader_profile_aware_early_breakeven():
-    assert tr.trailing_params(CONFIG, "reversal_profile")["early_breakeven_points"] == 100
-    assert tr.trailing_params(CONFIG, "continuation_profile")["early_breakeven_points"] == 170
-    assert tr.trailing_params(CONFIG)["early_breakeven_points"] == 150
+def test_early_breakeven_unified_at_150_for_all_profiles():
+    """2026-08-07 operator directive: early BE unified like trailing."""
+    for profile in ("default_profile", "reversal_profile",
+                    "continuation_profile", "range_profile"):
+        assert tr.trailing_params(CONFIG, profile)["early_breakeven_points"] == 150
     assert tr.trailing_params(CONFIG, "reversal_profile")["distance_points"] == 150
+
+
+def test_trailing_activates_at_breakeven_not_tp1():
+    assert CONFIG["trading_rules"]["trailing"]["activation_at"] == "BREAKEVEN"
+    assert CONFIG["trade_management"]["trailing_activation_at"] == "BREAKEVEN"

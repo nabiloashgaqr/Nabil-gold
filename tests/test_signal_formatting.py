@@ -140,9 +140,8 @@ def test_signal_management_text_matches_the_engine_profile():
     decision["setup_type"] = "LIQUIDITY_REVERSAL"
     decision["setup_context"] = {**(decision.get("setup_context") or {}), "setup_type": "LIQUIDITY_REVERSAL"}
     text = _capture_signal(decision)
-    # 2026-08-07: trailing unified to 150/40 for ALL profiles; only the
-    # early-BE trigger still differs per profile (reversal +100).
-    assert "may arm earlier at +100 pts" in text
+    # 2026-08-07: trailing AND early BE unified to 150/40/150 for ALL profiles.
+    assert "may arm earlier at +150 pts" in text
     assert "Trail gap 150 pts / step 40 pts" in text
 
 
