@@ -552,12 +552,18 @@ def _planner_trade_levels(
     # Scale it instead. The structural stop already embeds an ATR buffer, so a
     # multiple of it tracks volatility, bounded so it can neither collapse to
     # the POI width nor exceed the configured ceiling.
+    # Operator directive (2026-08-07): "تحت السيولة، حد أدنى 70 نقطة".
+    # The structural stop already sits BEYOND the nearest opposing liquidity
+    # with an ATR buffer (_stop_loss), so the floor must NOT multiply or
+    # rewrite it -- it only clamps it between the absolute noise minimum and
+    # the configured ceiling. The earlier x3 era flattened tight structural
+    # stops (30-70 pts on session maps) into a constant, inflated R and made
+    # the liquidity map look illogical.
     floor_cfg = (risk_cfg.get("dynamic_sl_floor") or {}) if isinstance(risk_cfg, dict) else {}
     if bool(floor_cfg.get("enabled", False)) and structural_points > 0:
-        multiplier = _safe_float(floor_cfg.get("structural_multiplier"), 3.0) or 3.0
-        hard_min = _safe_float(floor_cfg.get("min_points"), 150.0)
+        hard_min = _safe_float(floor_cfg.get("min_points"), 70.0)
         hard_max = _safe_float(floor_cfg.get("max_points"), min_sl_points or 400.0)
-        scaled = max(hard_min, min(structural_points * multiplier, hard_max))
+        scaled = max(hard_min, min(structural_points, hard_max))
         min_sl_points = scaled
         min_sl_distance = points_to_price(scaled, symbol=symbol)
 
