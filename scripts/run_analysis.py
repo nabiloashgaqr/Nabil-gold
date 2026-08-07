@@ -3594,6 +3594,15 @@ def _setup_context_payload(decision: Dict[str, Any], all_results: Dict[str, Any]
         "entry_reason": selected.get("entry_reason"),
         "details": selected.get("details") or {},
     }
+    # Operator audit 2026-08-07 (card 17:02): never publish a wrong-side
+    # target liquidity (BUY target below market, SELL above) from ANY source.
+    _ref = float(decision.get("current_price") or 0.0)
+    _tl = payload.get("target_liquidity")
+    if _tl and _ref > 0:
+        _wrong = (_tl <= _ref) if decision_type == "BUY" else (_tl >= _ref)
+        if _wrong:
+            payload["target_liquidity"] = None
+    # (the final filter drops the None, so the card omits wrong-side targets)
     return {k: v for k, v in payload.items() if v not in (None, "", {}, [])}
 
 
