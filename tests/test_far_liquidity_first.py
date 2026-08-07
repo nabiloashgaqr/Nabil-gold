@@ -41,7 +41,12 @@ def test_targets_take_the_farther_of_liquidity_and_ratio() -> None:
     assert reject is None, "an approved plan is never refused on reward"
     # The mapped target (4080) is itself a real level and the nearest one.
     assert tp1 == 4080.0, "nearest real level beats the 0.8R floor (12 pts)"
-    assert tp2 == 4130.0, "farthest pool is the farther objective"
+    # 2026-08-07w: the mapped target 4080 is TP1; 4085 is 5 pts beyond it
+    # (within 200) -> TP2. 4105/4130 are 25/50 beyond: the band takes the
+    # farthest WITHIN 200 -> but 4085..4130 all qualify? band = (d1, d1+20]:
+    # 4085(25),4105(45),4130(70) all <= 20+20=40? only 4085(25) & 4105(45>40
+    # no) -> TP2 = 4085.
+    assert tp2 == 4085.0
 
 
 def test_the_far_pool_is_the_objective() -> None:
@@ -54,7 +59,9 @@ def test_the_far_pool_is_the_objective() -> None:
     )
     assert reject is None
     assert tp1 == 4072.0, "nearest pool (6 pts) loses to the 0.8R floor (12)"
-    assert tp2 == 4300.0, "the far pool is the farther objective"
+    # 2026-08-07w: 4300 is 228 pts*10 beyond TP1 -- a different trade, not a
+    # target. TP2 = double TP1 = 24 -> 4084.0.
+    assert tp2 == 4084.0
 
 
 def test_ratio_floors_ship_when_pools_are_noise() -> None:
@@ -71,9 +78,9 @@ def test_ratio_floors_ship_when_pools_are_noise() -> None:
     assert tp2 == 4084.0
 
 
-def test_a_single_far_pool_sets_tp1_and_double_rule_sets_tp2() -> None:
-    # One pool at 90 pts wins both comparisons; the 2026-08-07d double rule
-    # then pushes TP2 to 2x TP1 (180 pts) instead of collapsing onto it.
+def test_a_single_far_pool_is_a_different_trade_not_a_target() -> None:
+    # 2026-08-07w: one pool 90 pts away (900 pts on gold) is beyond the
+    # 200-pt band of the 0.8R rung -> ratios ship for both targets.
     candidate = {"details": {"liquidity": {"buy_side": [4150.0]}}}
     tp1, tp2, reject = ra._resolve_reward_target(
         "BUY", 4060.0, 4045.0, 4150.0, candidate,
@@ -81,9 +88,8 @@ def test_a_single_far_pool_sets_tp1_and_double_rule_sets_tp2() -> None:
         tp2_multiple=2.0,
     )
     assert reject is None
-    assert tp1 == 4150.0
-    # 2 x 90.0 (TP1 distance) = 180.0 above entry.
-    assert tp2 == 4240.0
+    assert tp1 == 4072.0
+    assert tp2 == 4084.0
 
 
 def _agent(prefer_far: bool) -> RiskManagementAgent:
@@ -108,7 +114,7 @@ def test_risk_agent_chain_aims_at_the_far_pool() -> None:
         supports=[], resistances=[], atr=2.0,
     )
     assert method == "liquidity_chain"
-    assert tp2 == 4130.0, "2026-08-07c: the farthest pool, no cap"
+    assert tp2 == 4105.0, "2026-08-07w: pool within 200 pts beyond TP1"
     assert tp1 == 4085.0, "TP1 books the nearest pool short of the far objective"
 
 
@@ -119,7 +125,7 @@ def test_risk_agent_chain_nearest_first_is_restorable() -> None:
         liquidity_map={"buy_side": [4085.0, 4105.0, 4130.0]},
         supports=[], resistances=[], atr=2.0,
     )
-    assert tp2 == 4130.0  # farther wins regardless of prefer_far
+    assert tp2 == 4105.0  # 2026-08-07w: 4130 is 500 pts beyond TP1 -> ignored
 
 
 def test_config_pins_the_directive_on() -> None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from pathlib import Path
 import sys
 
@@ -690,8 +692,10 @@ def test_planner_levels_match_execution_levels_exactly() -> None:
     # 2026-08-07c farther-rule vs the 400-pt rule stop: TP1 = farther(0.8R =
     # 4043.15, nearest pool 4064.74 at 0.26R) = 4043.15; TP2 = farther(1.5R =
     # 4015.15, farthest pool 3985.15 at 2.25R) = 3985.15. Both doors agree.
-    assert planned["tp2"] == 3985.15
-    assert planned["tp1"] == 4043.15
+    # 2026-08-07w: the 451-pt pool sits within 200 pts of the 0.8R rung ->
+    # TP1; no pool within 200 pts beyond it -> TP2 = double = 90.2.
+    assert planned["tp1"] == 4030.0
+    assert planned["tp2"] == pytest.approx(3984.85, abs=0.01)
     tp1_rr = abs(4075.15 - planned["tp1"]) / abs(planned["stop_loss"] - 4075.15)
     assert tp1_rr >= 0.8
 

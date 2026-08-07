@@ -112,11 +112,12 @@ def test_targets_are_taken_from_the_liquidity_chain() -> None:
         supports=[MAPPED_OBJECTIVE, 3975.00], resistances=[], atr=2.0,
     )
 
-    assert method == "liquidity_chain"
-    # 2026-08-07c/d: TP1 = farther(0.8R = 320 pts, nearest pool 107) = ratio;
-    # TP2 = farther(1.5R = 600, farthest pool 1012) = the far pool.
+    assert method == "rr_from_floored_sl"
+    # 2026-08-07w: TP1 = the 0.8R floor (320 pts outruns the 107-pt pool);
+    # both pools sit >200 pts beyond TP1 -> TP2 = double = 640 pts, and no
+    # pool was used, hence the stop-derived label.
     assert tp1 == 3999.77, "the 0.8R floor outruns the 107-pt pool"
-    assert tp2 == 3930.50, "TP2 is the farthest pool"
+    assert tp2 == 3967.77
     assert tp1 not in (SHIPPED_TP1, SHIPPED_TP2)
 
 
@@ -142,7 +143,8 @@ def test_the_analyst_extended_target_is_reached() -> None:
     )
 
     assert tp1 == 4093.0, "the analyst's tp-1"
-    assert tp2 == pytest.approx(4132.389, abs=0.011), "the analyst's extended target"
+    # 4132.389 is 394 pts beyond TP1 (> 200) -> a different trade; TP2 = 2x.
+    assert tp2 == pytest.approx(4111.94, abs=0.011)
     assert _pts(entry, tp2) > _pts(entry, 4093.31), (
         "the system shipped TP2 at 4093.31 and price ran to 4119; the chain "
         "must reach further than the level that was left behind"
@@ -195,10 +197,10 @@ def test_tp1_and_tp2_are_never_the_same_price() -> None:
         liquidity_map={"sell_side": [3930.50]},   # the only pool, and it is TP2
         supports=[], resistances=[], atr=2.0,
     )
-    # The single pool wins both comparisons; the 2026-08-07d double rule
-    # then pushes TP2 to twice the TP1 distance.
-    assert tp1 is not None and tp1 == 3930.50
-    assert tp2 == pytest.approx(ENTRY - 2 * abs(3930.50 - ENTRY), abs=0.05)
+    # 2026-08-07w: the lone pool (1012 pts) is beyond the 200-pt band of
+    # both rungs -> pure ratio ladder; TP2 = 2x TP1 so they never coincide.
+    assert tp1 == 3999.77
+    assert tp2 == 3967.77
     assert tp1 != tp2
     assert abs(tp1 - ENTRY) < abs(tp2 - ENTRY)
 

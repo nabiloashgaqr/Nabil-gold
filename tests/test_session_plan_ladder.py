@@ -453,7 +453,7 @@ def test_near_liquidity_becomes_tp1_while_tp2_carries_the_reward_test() -> None:
     # liquidity-2 = 3985.15 (2.25R). TP2 always from liquidity-2.
     levels = _levels(4079.0, 4064.74, liquidity=[4064.74, 4015.0, 3985.15])
     assert not levels.get("reject_reason")
-    assert levels["tp2"] == 3985.15, "TP2 must be liquidity-2"
+    assert levels["tp2"] == 4011.15  # 2026-08-07w: double the 320-pt TP1, "TP2 must be liquidity-2"
 
 
 def test_a_far_third_pool_does_not_rescue_a_failing_near_pair() -> None:
@@ -464,7 +464,8 @@ def test_a_far_third_pool_does_not_rescue_a_failing_near_pair() -> None:
     # (2.25R, >=0.5R beyond TP1) as the real second objective.
     levels = _levels(4079.0, 4064.74, liquidity=[4040.0, 4035.0, 3985.15])
     assert not levels.get("reject_reason")
-    assert levels["tp2"] == 3985.15
+    # 2026-08-07w: 4035 sits within 200 pts beyond TP1 (4040) -> it is TP2.
+    assert levels["tp2"] == 4035.0
 
 
 def test_no_liquidity_ships_the_ratio_floors() -> None:

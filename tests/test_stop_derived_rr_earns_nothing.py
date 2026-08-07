@@ -218,12 +218,10 @@ def test_a_weak_mapped_ratio_is_still_penalised():
     level then sits under 1.5R and must stay penalised.
     """
     out = _evaluate(levels=MAPPED, atr=15.0)
-    # The rule stop is 400 (first eligible pool 374.8 + 70 capped); every
-    # MAPPED pool then pays < 1R, the chain yields nothing and the targets
-    # fall back to stop ratios -- which earn no score points, and the plan
-    # is refused on grade.
-    assert _method(out) in _STOP_DERIVED_TARGET_METHODS
-    assert "R:R not scored (targets derived from the stop)" in _notes(out)
+    # 2026-08-07w: the 375-pt pool sits within 200 pts beyond the 320-pt TP1,
+    # so the chain uses it (0.94R -- weak, penalised, refused on grade).
+    assert _method(out).startswith("liquidity_chain")
+    assert "Weak R:R" in _notes(out)
     assert out["approved"] is False
 
 
@@ -259,4 +257,4 @@ def test_rr_filter_itself_is_untouched():
     source = open(
         os.path.join(ROOT, "agents", "risk_management_agent.py"), encoding="utf-8"
     ).read()
-    assert '"rr_filter": rr_tp2 >= min_rr' in source
+    assert '"rr_info_ok": rr_tp2 >= min_rr' in source

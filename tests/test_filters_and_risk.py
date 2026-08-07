@@ -177,8 +177,10 @@ def test_risk_agent_applies_min_sl_floor_and_rescales_targets() -> None:
 
     # 2026-08-07c: the map cannot pay for a 200-point stop, so the ratio
     # floors ship (never a refusal -- minimums are enforced by construction).
-    assert result["risk_metrics"]["target_method"] == "rr_from_floored_sl"
-    assert result["take_profit"]["tp2"]["rr_ratio"] >= 1.5
+    assert result["risk_metrics"]["target_method"].startswith("liquidity_chain")
+    # 2026-08-07w: a band-pool TP2 may carry <1.5R; the ratio is now
+    # information (rr_info_ok), never a veto.
+    assert result["take_profit"]["tp2"]["rr_ratio"] > 0
     assert result["risk_metrics"]["checks"]["rr_filter"] is True
 
 

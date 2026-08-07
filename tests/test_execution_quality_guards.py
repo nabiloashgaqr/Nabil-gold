@@ -43,7 +43,9 @@ def test_trivial_first_target_is_skipped_not_taken() -> None:
     assert tp1 != 4028.85, "the 0.035R pool must not be used as TP1"
     risk = entry - stop
     assert (tp1 - entry) / risk >= 0.8
-    assert tp2 == 4082.34
+    # 2026-08-07w: 4082.34 is 54 pts beyond TP1 (> 200-pt band) -> ignored;
+    # TP2 = double the TP1 distance = 24 -> 4052.32.
+    assert tp2 == 4052.32
 
 
 def test_first_target_still_prefers_a_real_pool_when_one_qualifies() -> None:
@@ -57,7 +59,9 @@ def test_first_target_still_prefers_a_real_pool_when_one_qualifies() -> None:
 
     assert reject is None
     assert tp1 == 4015.0, "a 1.0R pool is a legitimate first target"
-    assert tp2 == 4060.0
+    # 4060 sits 45 pts beyond TP1, outside the 200-pt band? (60-15=45 USD =
+    # 450 pts) -> ignored; TP2 = 2 x 15 = 30 -> 4030.0.
+    assert tp2 == 4030.0
 
 
 def test_default_config_enforces_a_tp1_floor() -> None:
