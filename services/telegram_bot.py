@@ -556,8 +556,8 @@ class TelegramService:
             lv = golden.get("levels") or {}
             lines.append(
                 "• <b>Golden dual entry:</b> market at 0.618 close-confirm "
-                f"({lv.get('l618')}) + pending kept at 0.786 band "
-                f"({lv.get('l786')}) — two-entry exception"
+                f"({lv.get('l618')}) + pending kept at >= 0.70 fibo "
+                f"({lv.get('l70')}) — two-entry exception; exits via stops/thesis"
             )
         invalidation = (decision.get("ai") or {}).get("invalidation") or setup.get("invalidation") or setup.get("entry_reason")
         if self._should_show_invalidation(invalidation, signal.get("stop_loss")):
