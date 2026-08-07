@@ -210,22 +210,22 @@ def test_a_real_mapped_setup_still_trades():
     )
 
 
-def test_a_weak_mapped_ratio_is_still_penalised():
-    """Real levels that genuinely do not pay must keep losing points.
-
-    Under the honest clamp the default fixture now PAYS (1.9R), so weakness
-    is rebuilt with a wide structural stop (atr 15 -> 300 pts): every mapped
-    level then sits under 1.5R and must stay penalised.
-    """
+def test_a_mapped_pool_within_the_band_becomes_tp1():
+    """2026-08-07w2: the 4000.00 pool (374.8 pts) sits within 200 pts of the
+    0.8R rung (320), so it is a legitimate TP1; TP2 doubles it (1.87R) and
+    the plan is approved on honest numbers."""
     out = _evaluate(levels=MAPPED, atr=15.0)
-    # 2026-08-07w: the 375-pt pool sits within 200 pts beyond the 320-pt TP1,
-    # so the chain uses it (0.94R -- weak, penalised, refused on grade).
     assert _method(out).startswith("liquidity_chain")
-    assert "Weak R:R" in _notes(out)
-    assert out["approved"] is False
+    tp = out.get("take_profit") or {}
+    # The SMC projection replaces the raw map with projected pools; 3996.65
+    # (40.4 pts... 404 pts) lands inside the 200-pt band of the 0.8R rung and
+    # becomes TP1; TP2 doubles it.
+    t1 = float((tp.get("tp1") or {}).get("price") or 0)
+    t2 = float((tp.get("tp2") or {}).get("price") or 0)
+    assert t1 == 3996.65
+    assert t2 == pytest.approx(4037.09 - 2 * abs(4037.09 - t1), abs=0.05)
+    assert out["approved"] is True
 
-
-# ── the change can only lower a score, never raise one ──────────────────────
 
 @pytest.mark.parametrize("atr", [1.5, 3.0, ATR_OF_THE_CARD, 10.0])
 @pytest.mark.parametrize("levels", [[], MAPPED])

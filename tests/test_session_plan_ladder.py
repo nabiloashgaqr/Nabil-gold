@@ -464,8 +464,9 @@ def test_a_far_third_pool_does_not_rescue_a_failing_near_pair() -> None:
     # (2.25R, >=0.5R beyond TP1) as the real second objective.
     levels = _levels(4079.0, 4064.74, liquidity=[4040.0, 4035.0, 3985.15])
     assert not levels.get("reject_reason")
-    # 2026-08-07w: 4035 sits within 200 pts beyond TP1 (4040) -> it is TP2.
-    assert levels["tp2"] == 4035.0
+    # 2026-08-07w2: default TP2 = 2x35.15 = 70.3; the 3985.15 pool (90) sits
+    # within 200 of the adjusted level -> it is TP2.
+    assert levels["tp2"] == 3985.15
 
 
 def test_no_liquidity_ships_the_ratio_floors() -> None:

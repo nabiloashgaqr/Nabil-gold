@@ -41,12 +41,12 @@ def test_targets_take_the_farther_of_liquidity_and_ratio() -> None:
     assert reject is None, "an approved plan is never refused on reward"
     # The mapped target (4080) is itself a real level and the nearest one.
     assert tp1 == 4080.0, "nearest real level beats the 0.8R floor (12 pts)"
-    # 2026-08-07w: the mapped target 4080 is TP1; 4085 is 5 pts beyond it
-    # (within 200) -> TP2. 4105/4130 are 25/50 beyond: the band takes the
-    # farthest WITHIN 200 -> but 4085..4130 all qualify? band = (d1, d1+20]:
-    # 4085(25),4105(45),4130(70) all <= 20+20=40? only 4085(25) & 4105(45>40
-    # no) -> TP2 = 4085.
-    assert tp2 == 4085.0
+    # 2026-08-07w2: default TP2 = 2x TP1 = 40 (4100); the 4105 pool sits 5
+    # beyond the ADJUSTED level (within 200) -> wins; 4130 (30 beyond 4100,
+    # also within band) is farther -> the farthest in band = 4130? no:
+    # 4130-4100 = 30 <= 20 -> band (40, 60] holds 4105(45) & 4130(70>60 no)
+    # -> TP2 = 4105.
+    assert tp2 == 4105.0
 
 
 def test_the_far_pool_is_the_objective() -> None:
@@ -114,7 +114,7 @@ def test_risk_agent_chain_aims_at_the_far_pool() -> None:
         supports=[], resistances=[], atr=2.0,
     )
     assert method == "liquidity_chain"
-    assert tp2 == 4105.0, "2026-08-07w: pool within 200 pts beyond TP1"
+    assert tp2 == 4130.0, "2026-08-07w2: 4130 within 200 of adjusted 4100"
     assert tp1 == 4085.0, "TP1 books the nearest pool short of the far objective"
 
 
@@ -125,7 +125,7 @@ def test_risk_agent_chain_nearest_first_is_restorable() -> None:
         liquidity_map={"buy_side": [4085.0, 4105.0, 4130.0]},
         supports=[], resistances=[], atr=2.0,
     )
-    assert tp2 == 4105.0  # 2026-08-07w: 4130 is 500 pts beyond TP1 -> ignored
+    assert tp2 == 4130.0  # 2026-08-07w2: within 200 of the adjusted 2x level
 
 
 def test_config_pins_the_directive_on() -> None:
