@@ -362,6 +362,13 @@ class OpenTradesManager(BaseAgent):
             if root_outranks and (key in root or root_aliases.get(key) in root):
                 continue
             params[key] = override[key]
+        # 2026-08-07: trailing (gap/step/enabled/early-BE) is decided ONCE in
+        # utils.trading_rules with precedence canonical > profile > legacy.
+        _trail = _tr.trailing_params(self.config, profile)
+        params["trailing_enabled"] = bool(_trail["enabled"])
+        params["trailing_distance_points"] = float(_trail["distance_points"])
+        params["trailing_step_points"] = float(_trail["step_points"])
+        params["early_breakeven_points"] = float(_trail["early_breakeven_points"])
         params["symbol"] = symbol
         return params
 
