@@ -2217,8 +2217,8 @@ class SMCAgent(BaseAgent):
         # Noise is why the stop is wide; distance is what pays for it. Both
         # sides of that trade have to be modelled, not just the stop.
         risk_cfg = (self.config.get("risk_settings") or {}) if isinstance(self.config, dict) else {}
-        floor_cfg = (risk_cfg.get("dynamic_sl_floor") or {}) if isinstance(risk_cfg, dict) else {}
-        widest_stop_points = self._f(floor_cfg.get("max_points")) or self._f(
+        rule_cfg = (risk_cfg.get("stop_from_liquidity") or {}) if isinstance(risk_cfg, dict) else {}
+        widest_stop_points = self._f(rule_cfg.get("max_stop_points")) or self._f(
             risk_cfg.get("min_sl_distance_points")
         ) or 400.0
         min_rr = self._f(risk_cfg.get("min_rr_ratio")) or 1.5

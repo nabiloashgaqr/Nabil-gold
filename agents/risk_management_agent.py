@@ -126,21 +126,30 @@ class RiskManagementAgent(BaseAgent):
             # 400 and remains the ceiling (dynamic_sl_floor.max_points), and
             # min_rr_ratio is untouched. This only makes the second door read
             # the floor the first door already uses.
-            # Operator directive (2026-08-07): "تحت السيولة، حد أدنى 70 نقطة".
-            # The structural stop is already beyond the nearest opposing
-            # liquidity with an ATR buffer; the floor only clamps it between
-            # the absolute noise minimum and the ceiling. Never multiply it:
-            # the x3 era flattened tight structural stops into a constant and
-            # inflated the R ruler (see STOP_LIQUIDITY_DIAGNOSIS_AR.md).
+            # Operator directive (2026-08-07b) — the liquidity rule for stops:
+            # liquidity closer than min_liquidity_points (200) is swept noise:
+            # ignore it and look farther. The stop sits safety_buffer_points
+            # (70) beyond the first eligible level; if that level is past
+            # max_stop_points (400), or nothing qualifies, the stop ships the
+            # 400 cap directly. The permitted band is [270, 400] points.
+            # Targets are HYBRID (operator choice, same day): the liquidity
+            # chain keeps the map when it clears min_rr_ratio against this
+            # stop; otherwise the targets are multiples of the stop itself.
             min_sl_points = self._f(self.settings.get("min_sl_distance_points"), 0.0)
             structural_points = abs(price_to_points(entry_price - stop_loss, self.symbol))
-            floor_cfg = self.settings.get("dynamic_sl_floor") or {}
-            if bool(floor_cfg.get("enabled", False)) and structural_points > 0:
-                hard_min = self._f(floor_cfg.get("min_points"), 70.0)
-                hard_max = self._f(floor_cfg.get("max_points"), min_sl_points or 400.0)
-                min_sl_points = max(hard_min, min(structural_points, hard_max))
-            min_sl_distance = points_to_price(min_sl_points, self.symbol)
-            if min_sl_distance > 0 and abs(entry_price - stop_loss) < min_sl_distance:
+            rule_cfg = self.settings.get("stop_from_liquidity") or {}
+            rule_active = bool(rule_cfg.get("enabled", False))
+            if rule_active:
+                structural_points = self._stop_from_liquidity_points(
+                    direction, entry_price, liquidity_map, rule_cfg)
+                sl_method = "liquidity_rule_200_70_400"
+            min_sl_distance = points_to_price(
+                structural_points if rule_active else min_sl_points, self.symbol)
+            if rule_active:
+                stop_loss = (entry_price - min_sl_distance) if direction == "BUY" \
+                    else (entry_price + min_sl_distance)
+
+            if min_sl_distance > 0 and (rule_active or abs(entry_price - stop_loss) < min_sl_distance):
                 sl_mult = self._f(self.settings.get("atr_multiplier_sl"), 2.0) or 2.0
                 tp1_ratio = self._f(self.settings.get("atr_multiplier_tp1"), 2.5) / sl_mult
                 tp2_ratio = self._f(self.settings.get("atr_multiplier_tp2"), 4.5) / sl_mult
@@ -149,7 +158,8 @@ class RiskManagementAgent(BaseAgent):
                     stop_loss = entry_price - min_sl_distance
                 else:
                     stop_loss = entry_price + min_sl_distance
-                sl_method = f"{sl_method}+min_floor"
+                if not rule_active:
+                    sl_method = f"{sl_method}+min_floor"
 
                 # Widening the stop must not delete the map.
                 #
@@ -240,16 +250,12 @@ class RiskManagementAgent(BaseAgent):
                 target_method=target_method,
             )
             checks["trade_grade_filter"] = risk_profile["grade"] not in {"D", "F"}
-            # Operator policy (16:41 incident; reaffirmed with the 2026-08-07
-            # floor change): a plan whose targets were invented from the stop
-            # -- no usable liquidity map -- must never be approved on its
-            # ratio. Under the old inflated floor this held BY ACCIDENT: the
-            # fake 364-pt stop tripped the width filters. With honest
-            # structural stops the rule must be explicit, or the 16:41 bug
-            # returns through the door the inflation used to block.
-            checks["mapped_targets_filter"] = (
-                target_method not in _STOP_DERIVED_TARGET_METHODS
-            )
+            # 2026-08-07b (operator chose HYBRID): stop-derived targets are a
+            # designed fallback for maps that cannot pay the honest wide stop
+            # (270-400 pts), not a defect -- so they no longer veto approval.
+            # They still earn no R:R score points (_trade_risk_profile), so a
+            # ratio can never BUY a grade; the 16:41 protection now lives in
+            # the scoring, not in a blanket refusal.
             approved = all(checks.values())
             rejection_reason = None if approved else self._first_failed_reason(checks)
             # Grade sizes the setup; moment quality sizes the conditions it is
@@ -787,6 +793,43 @@ class RiskManagementAgent(BaseAgent):
         if str(mtf.get("timing_state") or "").upper() in {"EARLY", "VALID"} and str(mtf.get("alignment") or "").upper() in {"FULL", "PARTIAL"}:
             return "continuation_profile"
         return "default_profile"
+
+    def _stop_from_liquidity_points(
+        self,
+        direction: str,
+        entry: float,
+        liquidity_map: Dict[str, Any],
+        rule_cfg: Dict[str, Any],
+    ) -> float:
+        """Operator directive 2026-08-07b: the stop distance in points.
+
+        Liquidity closer than ``min_liquidity_points`` (200) is swept noise:
+        ignored. The stop sits ``safety_buffer_points`` (70) beyond the first
+        eligible opposing level; a first level past ``max_stop_points`` (400)
+        -- or no eligible level at all -- ships the 400 cap directly.
+        Examples: first pool at 350 -> 420 -> capped 400; at 250 -> 320;
+        none >= 200 -> 400. Minimum possible stop: 200 + 70 = 270.
+        """
+        min_liq = self._f(rule_cfg.get("min_liquidity_points"), 200.0)
+        buffer = self._f(rule_cfg.get("safety_buffer_points"), 70.0)
+        max_stop = self._f(rule_cfg.get("max_stop_points"), 400.0)
+        liquidity_map = liquidity_map or {}
+        side = "sell_side" if direction == "BUY" else "buy_side"
+        distances = []
+        for raw in list(liquidity_map.get(side) or []):
+            level = self._f(raw, 0.0)
+            if level <= 0:
+                continue
+            on_the_right_side = (level < entry) if direction == "BUY" else (level > entry)
+            if on_the_right_side:
+                distances.append(abs(price_to_points(entry - level, self.symbol)))
+        eligible = sorted(d for d in distances if d >= min_liq)
+        if not eligible:
+            return max_stop
+        first = eligible[0]
+        if first > max_stop:
+            return max_stop
+        return min(first + buffer, max_stop)
 
     def _stop_loss(
         self,
