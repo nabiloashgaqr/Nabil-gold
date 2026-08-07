@@ -2317,42 +2317,41 @@ def _post_tp2_reentry_block(
         if hours_since < 0 or hours_since > window_hours:
             continue
 
-        # Distance back toward where the move began. A SELL retreats upward
-        # from its TP2; a BUY retreats downward from its own. A negative
-        # value means the entry is on the far side of TP2 -- already beyond
-        # the exhausted level -- which is not a repeat of the same move.
+        # Operator directive 2026-08-07 (داac4022): the rule is ABSOLUTE for
+        # the whole window. A new BUY must sit at least min_distance_points
+        # BELOW the exhausted TP2 (a SELL, above it) -- an entry ON or BEYOND
+        # the exhausted level is chasing the consumed move, which is exactly
+        # what the rule exists to refuse. The earlier "far side is not a
+        # repeat" exemption let the 10:02 BUY at 4317.26 sail 172 pts ABOVE
+        # the 4300.00 TP2 taken hours earlier.
         if direction == "SELL":
             distance = price_to_points(entry_price - tp2, symbol=symbol)
             side_word = "above"
         else:
             distance = price_to_points(tp2 - entry_price, symbol=symbol)
             side_word = "below"
-        if distance >= min_distance_points or distance < 0:
+        if distance >= min_distance_points:
             continue
 
-        review = _post_exit_revalidation_review(
-            decision, trade, config, now=now, symbol=symbol
-        )
-        if review.get("allow"):
-            logger.info(
-                "Post-TP2 re-entry allowed for %s despite being %.0f pts %s "
-                "TP2 %.2f: %s",
-                symbol, distance, side_word, tp2, review.get("reason"),
-            )
-            continue
-
-        detail = str(review.get("reason") or "").strip()
-        suffix = f" No new thesis: {detail}." if detail else ""
+        # 2026-08-07 (operator option 1): NO early release. The "new thesis"
+        # revalidation override is gone; the block expires only by the
+        # window. _post_exit_revalidation_review stays in use by the other
+        # post-exit cooldown path, untouched.
+        if distance < 0:
+            where = (f"{-distance:.0f} pts BEYOND the TP2 (chasing the "
+                     f"consumed move)")
+        else:
+            where = f"only {distance:.0f} pts {side_word} the TP2"
         return (
-            f"Post-TP2 re-entry blocked: {direction} entry {entry_price:.2f} is only "
-            f"{distance:.0f} pts {side_word} the TP2 {tp2:.2f} taken {hours_since:.1f}h ago "
+            f"Post-TP2 re-entry blocked: {direction} entry {entry_price:.2f} is "
+            f"{where} {tp2:.2f} taken {hours_since:.1f}h ago "
             # The window accepts fractions (2.5 since 2026-08-03). ".0f"
             # rounded it for display, so a 2.5-hour rule announced itself as
             # "within 2h" -- a message that contradicts the rule it is
             # reporting. Trim only a trailing ".0" so whole numbers still
             # read "3h" rather than "3.0h".
-            f"(needs ≥{min_distance_points:.0f} pts within {_trim_zero(window_hours)}h)."
-            f"{suffix}"
+            f"(needs ≥{min_distance_points:.0f} pts {side_word} within "
+            f"{_trim_zero(window_hours)}h; absolute, no early release)."
         )
     return None
 
