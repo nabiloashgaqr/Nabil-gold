@@ -1065,18 +1065,31 @@ class SessionPlannerService:
         if not prices:
             return None
         half_width = points_to_price(self.fallback_zone_half_width_points, symbol)
+        # Operator audit 2026-08-07 (card 17:02): a BUY target BELOW the
+        # entry (or SELL above) is nonsense -- every source must be validated
+        # for side; a wrong-side midpoint must never ship as "target".
         if direction == "SELL":
             zone_low = min(prices)
             zone_high = max(prices)
             entry_price = zone_low
             stop_loss = zone_high
-            target_price = self._f((liquidity.get("session_liquidity") or {}).get("low"), 0.0) or self._f((liquidity.get("previous_day_levels") or {}).get("low"), 0.0) or self._f(dealing_range.get("midpoint"), current_price)
+            sources = [
+                self._f((liquidity.get("session_liquidity") or {}).get("low"), 0.0),
+                self._f((liquidity.get("previous_day_levels") or {}).get("low"), 0.0),
+                self._f(dealing_range.get("midpoint"), 0.0),
+            ]
+            target_price = next((t for t in sources if t > 0 and t < entry_price), None)
         else:
             zone_high = max(prices)
             zone_low = min(prices)
             entry_price = zone_high
             stop_loss = zone_low
-            target_price = self._f((liquidity.get("session_liquidity") or {}).get("high"), 0.0) or self._f((liquidity.get("previous_day_levels") or {}).get("high"), 0.0) or self._f(dealing_range.get("midpoint"), current_price)
+            sources = [
+                self._f((liquidity.get("session_liquidity") or {}).get("high"), 0.0),
+                self._f((liquidity.get("previous_day_levels") or {}).get("high"), 0.0),
+                self._f(dealing_range.get("midpoint"), 0.0),
+            ]
+            target_price = next((t for t in sources if t > 0 and t > entry_price), None)
         scenario_type = "LIQUIDITY_REVERSAL" if self._aligned_sweep(direction, (liquidity.get("recent_sweep") or {})) else "STRUCTURE_CONTINUATION"
         setup_state = "ENTRY_ARMED" if abs(entry_price - current_price) <= half_width else "POI_MARKED"
         role = rank_label.upper()
@@ -1095,8 +1108,8 @@ class SessionPlannerService:
             "selection_rank": 1 if role == "PRIMARY" else 2,
             "entry_price": round(entry_price, 2),
             "stop_loss": round(stop_loss, 2),
-            "target_price": round(target_price, 2),
-            "target_liquidity": round(target_price, 2),
+            "target_price": round(target_price, 2) if target_price else None,
+            "target_liquidity": round(target_price, 2) if target_price else None,
             "poi_type": "extreme_day_map_zone",
             "poi_zone": {"top": round(zone_high, 2), "bottom": round(zone_low, 2)},
             "poi_low": round(zone_low, 2),
