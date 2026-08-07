@@ -2936,7 +2936,12 @@ class OpenTradesManager(BaseAgent):
             creation_price = self._f(runtime.get("creation_price"), 0.0)
             if creation_price <= 0:
                 creation_price = current_price
-            drift_points = abs(calculate_pips(creation_price, current_price, trade_type, symbol))
+            # Operator logic 2026-08-07 (card 17:02): only movement AWAY from
+            # activation counts as "the market moved on". For a BUY pullback
+            # LIMIT, price falling TOWARD the entry is the setup WORKING --
+            # the absolute-value drift cancelled an order that was about to
+            # fill, reporting movement toward us as if it were movement away.
+            drift_points = max(0.0, calculate_pips(creation_price, current_price, trade_type, symbol))
             max_excursion_points = max(self._f(runtime.get("max_excursion_points"), 0.0), drift_points)
             # Distance still to travel before the order can fill. Used only for
             # target-path progress, never as a staleness trigger.
