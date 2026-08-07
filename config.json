@@ -946,5 +946,31 @@
     "tie_band_points": 0,
     "description": "لوحة النتيجة بالنقاط. طبقة التقطير الحالية تقيس هل رأى النظام نفس الرسم (اتجاه/نمط/منطقة) — لا من ربح. في 29 يوليو كانت قراءة النظام للرسم مقبولة ومع ذلك خسر 198 نقطة بينما التقط المحلل 314. تُحسب النقاط للطرفين بنفس القاعدة: خطة المحلل من دخوله ووقفه وأهدافه مقابل مدى ما بعد النشر، وصفقات النظام من تعبئتها وإغلاقها الفعليين. عدم التداول في يوم رابح = صفر لا 'بلا نتيجة'.",
     "description_tie_band_points": "فجوة ضمن هذا النطاق تُعدّ تعادلاً. صفر = أي فارق يُحسب."
+  },
+  "trading_rules": {
+    "description": "البيت الرسمي لقوانين التداول (توجيه 2026-08-07 المرحلة ٢): عدّل هنا ويلتزم الجميع. المفاتيح القديمة في risk_settings/trade_management/trailing_stop/post_tp2_reentry تبقى aliases للقراءة القديمة ويغلبها هذا البلوك عند الاختلاف.",
+    "stop": {
+      "enabled": true,
+      "min_liquidity_points": 200,
+      "safety_buffer_points": 70,
+      "max_stop_points": 400
+    },
+    "targets": {
+      "min_tp1_rr": 0.8,
+      "tp2_multiple": 2.0,
+      "max_beyond_points": 200
+    },
+    "trailing": {
+      "enabled": true,
+      "distance_points": 150,
+      "step_points": 40,
+      "early_breakeven_points": 150,
+      "activation_at": "TP1"
+    },
+    "post_tp2": {
+      "enabled": true,
+      "min_distance_points": 250,
+      "window_hours": 2.5
+    }
   }
 }
