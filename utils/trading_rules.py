@@ -206,9 +206,9 @@ def trailing_params(cfg: Dict[str, Any], profile: str | None = None) -> Dict[str
     out["step_points"] = _pick("step_points", "trailing_step_points",
                                "trailing_step_points", "trailing_step",
                                out["step_points"])
-    # early_breakeven stays per-profile (no canonical key): unification
-    # covered trailing only.
-    out["early_breakeven_points"] = _pick(None, "early_breakeven_points",
+    # 2026-08-07 (operator): early breakeven unified at 150 for ALL profiles;
+    # the canonical key now outranks profiles like the rest of trailing.
+    out["early_breakeven_points"] = _pick("early_breakeven_points", "early_breakeven_points",
                                           "early_breakeven_points", "early_breakeven_points",
                                           200.0)
     out["activation_at"] = str(canon.get("activation_at", tm.get("trailing_activation_at", "TP1")))
