@@ -1067,15 +1067,18 @@ class RiskManagementAgent(BaseAgent):
                      if d_ratio <= _dist(lv) <= d_ratio + max_beyond]
         used_pool = bool(tp1_pools)
         tp1 = min(tp1_pools, key=_dist) if tp1_pools else _level(min_tp1_rr)
-        # TP2 = double TP1 unless a pool sits beyond TP1 within the band.
+        # TP2 = double TP1; liquidity AFTER the adjusted level, within the
+        # 200-pt band, is a better objective and wins.
+        mult = self._f(self.settings.get("min_tp2_multiple_of_tp1"), 2.0) or 2.0
         d1 = _dist(tp1)
-        beyond = [lv for lv in ordered if d1 < _dist(lv) <= d1 + max_beyond]
+        d2_default = mult * d1
+        beyond = [lv for lv in ordered
+                  if d2_default < _dist(lv) <= d2_default + max_beyond]
         if beyond:
             tp2 = max(beyond, key=_dist)
             used_pool = True
         else:
-            mult = self._f(self.settings.get("min_tp2_multiple_of_tp1"), 2.0) or 2.0
-            tp2 = (entry + mult * d1) if direction == "BUY" else (entry - mult * d1)
+            tp2 = (entry + d2_default) if direction == "BUY" else (entry - d2_default)
         method = "liquidity_chain" if used_pool else "rr_from_floored_sl"
         return round(tp1, 2), round(tp2, 2), method
 
