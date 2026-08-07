@@ -147,12 +147,13 @@ def test_the_16_41_pool_now_reaches_the_analysts_own_level():
     "SELLSIDE STOP HUNT" level does not clear the bar once the stop is that
     wide.
 
-    That is a genuine finding and it belongs to a different defect. The stop
-    being too wide for the day's map is governed by
-    ``dynamic_sl_floor.structural_multiplier``, which the operator has not
-    authorised changing. Projection must not paper over it by inventing
-    distance -- doing so would recreate the exact fiction (3955.15) that
-    this whole change exists to remove.
+    That is a genuine finding and it belonged to a different defect. The stop
+    being too wide for the day's map was governed by the x3 multiplier era of
+    ``dynamic_sl_floor``; the operator's 2026-08-07 directive ("تحت السيولة،
+    حد أدنى 70 نقطة") replaced it with an honest clamp, so structural stops
+    now pass through untouched. Projection still must not paper over risk by
+    inventing distance -- doing so would recreate the exact fiction (3955.15)
+    that this whole change exists to remove.
 
     So what is pinned here is what projection is actually for: the pool must
     reach the round-number shelf a human would mark, so the plan has
@@ -289,7 +290,7 @@ def test_no_risk_setting_was_changed():
     assert float(risk["min_rr_ratio"]) == 1.5
     assert float(risk["min_sl_distance_points"]) == 400.0
     floor = risk["dynamic_sl_floor"]
-    assert float(floor["min_points"]) == 150.0
+    assert float(floor["min_points"]) == 70.0
     assert float(floor["max_points"]) == 400.0
 
 

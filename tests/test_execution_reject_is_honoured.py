@@ -94,8 +94,8 @@ def test_planner_rr_gate_still_applies_to_an_accepted_leg() -> None:
     service = _service(min_main_rr_for_ready=2.5)
     levels = service._execution_levels(
         direction="SELL", entry_price=4051.18, stop_loss=4066.18,
-        target_price=3971.18, symbol="XAU/USD",
-        candidate={"details": {"liquidity": {"sell_side": [3971.18]}}},
+        target_price=4021.18, symbol="XAU/USD",
+        candidate={"details": {"liquidity": {"sell_side": [4021.18]}}},
     )
 
     assert not levels["reject_reason"]

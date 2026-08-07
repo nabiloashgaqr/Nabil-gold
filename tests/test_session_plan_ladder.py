@@ -470,24 +470,39 @@ def test_targets_are_never_invented_when_no_further_liquidity_exists() -> None:
 
 def test_dynamic_floor_scales_risk_with_structure() -> None:
     """A tight POI should not inherit the full fixed floor."""
-    dynamic = _levels(
-        4079.0, 4064.74, liquidity=[4064.74, 4030.00],
-        cfg_overrides={"dynamic_sl_floor": {"enabled": True, "structural_multiplier": 3.0,
-                                            "min_points": 150, "max_points": 400}},
+    inside = _levels(
+        4085.15, 4064.74, liquidity=[4064.74, 4030.00],
+        cfg_overrides={"dynamic_sl_floor": {"enabled": True,
+                                            "min_points": 70, "max_points": 400}},
     )
-    risk = round((dynamic["stop_loss"] - 4075.15) * 10)
-    assert risk == 150, "structural 38 pts x3 is below the 150 pt lower bound"
-    assert dynamic["rr"] > 2.0
+    assert round((inside["stop_loss"] - 4075.15) * 10) == 100, (
+        "a 100-pt structural stop must pass through untouched (no multiplier)"
+    )
+    raised = _levels(
+        4079.0, 4064.74, liquidity=[4064.74, 4030.00],
+        cfg_overrides={"dynamic_sl_floor": {"enabled": True,
+                                            "min_points": 70, "max_points": 400}},
+    )
+    risk = round((raised["stop_loss"] - 4075.15) * 10)
+    assert risk == 70, "structural 38 pts is raised to the 70 pt lower bound"
 
 
 def test_dynamic_floor_is_bounded_by_max_points() -> None:
     wide = _levels(
         4090.0, 4064.74, liquidity=[4064.74, 3985.15],
-        cfg_overrides={"dynamic_sl_floor": {"enabled": True, "structural_multiplier": 3.0,
-                                            "min_points": 150, "max_points": 400}},
+        cfg_overrides={"dynamic_sl_floor": {"enabled": True,
+                                            "min_points": 70, "max_points": 400}},
     )
     risk = round((wide["stop_loss"] - 4075.15) * 10)
-    assert risk == 400, "148 pts x3 exceeds the ceiling and must be capped"
+    assert risk == 148, "a 148-pt structural stop stays 148 (inside the band)"
+    capped = _levels(
+        4079.0, 4064.74, liquidity=[4064.74, 3985.15],
+        cfg_overrides={"dynamic_sl_floor": {"enabled": True,
+                                            "min_points": 70, "max_points": 100}},
+    )
+    assert round((capped["stop_loss"] - 4075.15) * 10) == 70, (
+        "max_points caps the raise: max(70, min(38, 100)) = 70"
+    )
 
 
 def test_dynamic_floor_disabled_keeps_the_fixed_behaviour() -> None:

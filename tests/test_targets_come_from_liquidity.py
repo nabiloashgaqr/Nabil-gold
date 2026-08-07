@@ -204,7 +204,7 @@ def test_no_risk_setting_was_changed() -> None:
     assert float(risk["min_tp1_rr"]) == 0.8
     floor = risk["dynamic_sl_floor"]
     assert floor["enabled"] is True
-    assert float(floor["min_points"]) == 150.0
+    assert float(floor["min_points"]) == 70.0
     assert float(floor["max_points"]) == 400.0
 
 

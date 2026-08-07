@@ -172,7 +172,7 @@ def test_no_risk_setting_was_changed():
     assert float(risk["min_rr_ratio"]) == 1.5
     assert float(risk["min_sl_distance_points"]) == 400.0
     floor = risk["dynamic_sl_floor"]
-    assert float(floor["min_points"]) == 150.0
+    assert float(floor["min_points"]) == 70.0
     assert float(floor["max_points"]) == 400.0
 
 

@@ -84,8 +84,8 @@ ZONE_DISTAL = 4040.48
 MAPPED_LIQUIDITY = [4028.20, 4022.31, 4020.00, 4000.00]
 
 
-def _config(*, enabled: bool = True, multiplier: float = 3.0,
-            min_points: float = 150.0, max_points: float = 400.0,
+def _config(*, enabled: bool = True,
+            min_points: float = 70.0, max_points: float = 400.0,
             flat: float = 400.0) -> dict:
     return {
         "symbol": SYMBOL,
@@ -98,7 +98,6 @@ def _config(*, enabled: bool = True, multiplier: float = 3.0,
             "atr_multiplier_tp2": 4.5,
             "dynamic_sl_floor": {
                 "enabled": enabled,
-                "structural_multiplier": multiplier,
                 "min_points": min_points,
                 "max_points": max_points,
             },
@@ -168,10 +167,10 @@ def test_the_real_2026_08_03_signal_ships_a_scaled_stop():
         "The flat 400-point floor is still being applied on the consensus "
         "path. This is the stop the operator received on 2026-08-03."
     )
-    assert shipped == pytest.approx(150.0, abs=0.5), (
-        f"Expected the configured min_points floor of 150, got {shipped}."
+    assert shipped == pytest.approx(70.0, abs=0.5), (
+        f"Operator directive 2026-08-07: minimum 70 pts. Got {shipped}."
     )
-    assert _shipped_sl_price(out) == pytest.approx(4052.48, abs=0.05)
+    assert _shipped_sl_price(out) == pytest.approx(4044.48, abs=0.05)
 
 
 def test_scaled_floor_lets_the_liquidity_chain_ship_mapped_targets():
@@ -185,8 +184,9 @@ def test_scaled_floor_lets_the_liquidity_chain_ship_mapped_targets():
     assert _tp(out, "tp1") == pytest.approx(4028.20, abs=0.05), (
         "TP1 must be the mapped objective from the operator's card."
     )
-    assert _tp(out, "tp2") == pytest.approx(4000.00, abs=0.05), (
-        "TP2 must be the SELLSIDE STOP HUNT level from the analyst's chart."
+    assert _tp(out, "tp2") == pytest.approx(4020.00, abs=0.05), (
+        "Against a 70-pt stop the 4000.00 level is 5.35R (> max_rr 4.0); "
+        "the chain must settle on the next real level, 4020.00 (2.50R)."
     )
     for invented in (3987.48, 3947.48):
         assert _tp(out, "tp1") != pytest.approx(invented, abs=0.05)
@@ -247,37 +247,31 @@ def test_consensus_stop_matches_planner_stop(atr):
 @pytest.mark.parametrize(
     "atr, expected_structural, expected_shipped",
     [
-        (0.5, 10.0, 150.0),   # clamped up to min_points
-        (1.5, 30.0, 150.0),   # the real signal
-        (3.0, 60.0, 180.0),   # 3x, inside the band
-        (5.0, 100.0, 300.0),  # 3x, inside the band
-        (7.0, 140.0, 400.0),  # 3x hits the ceiling
-        (15.0, 300.0, 400.0),  # still the ceiling
-        (30.0, 600.0, 600.0),  # structure already wider: untouched
+        (0.5, 10.0, 70.0),    # below the operator minimum: raised to 70
+        (1.5, 30.0, 70.0),    # the real signal: raised to 70
+        (3.0, 60.0, 70.0),    # still below 70: raised
+        (5.0, 100.0, 100.0),  # inside the band: UNTOUCHED (no multiplier!)
+        (7.0, 140.0, 140.0),  # inside the band: UNTOUCHED
+        (15.0, 300.0, 300.0),  # inside the band: UNTOUCHED
+        (30.0, 600.0, 600.0),  # wider than the ceiling: never tightened
     ],
 )
-def test_the_floor_is_three_times_structural_clamped(atr, expected_structural,
-                                                     expected_shipped):
-    """Pin the real formula: clamp(3 x structural, min_points, max_points).
+def test_the_floor_clamps_structural_to_operator_band(atr, expected_structural,
+                                                      expected_shipped):
+    """Pin the operator formula (2026-08-07): clamp(structural, min, lift-cap).
 
-    THIS TEST WAS REWRITTEN, NOT DELETED.
+    THIS TEST WAS REWRITTEN AGAIN, NOT DELETED -- the spec changed by
+    explicit operator directive: "تحت السيولة، حد أدنى 70 نقطة".
 
-    It first asserted "a structural stop wider than the floor is left alone,
-    because a floor is a minimum, not a target", and it failed at 250 points:
-    the floor came back as 400.
+    The structural stop already sits beyond the nearest opposing liquidity
+    with an ATR buffer, so the floor must not multiply it. It only raises
+    stops below the absolute 70-pt noise minimum; `max_points` caps that
+    raise, never the structural stop itself (a floor may widen, never
+    tighten -- the last row proves it).
 
-    The assertion was wrong, not the code. `dynamic_sl_floor` is not a plain
-    minimum. It is a SCALING of the structural stop -- `structural_multiplier`
-    is 3.0 -- bounded by `min_points` and `max_points`. So it keeps widening
-    the stop until the structural distance itself reaches `max_points` (400).
-    Above ~133 structural points, 3x already exceeds the ceiling and the
-    "dynamic" floor is indistinguishable from the old flat 400.
-
-    That band is recorded here deliberately: the scaled floor only changes
-    anything for structural stops under ~133 points. Gold POI zones are a few
-    dollars wide, which is exactly that band, which is why the fix moves the
-    real cases -- but nobody should read this feature as softening risk on
-    wide-structure setups. It does not, and the last row proves it.
+    The dead bug this table now guards: any reintroduced multiplier. Under
+    the old x3 formula the 100/140/300-pt rows would ship 300/400/400 and
+    this test would fail.
     """
     out = _evaluate(_config(), atr=atr)
     structural = float((out.get("risk_metrics") or {}).get("structural_sl_points") or 0.0)
@@ -340,4 +334,4 @@ def test_risk_settings_are_not_mutated():
     _evaluate(config)
     assert config["risk_settings"]["min_sl_distance_points"] == 400
     assert config["risk_settings"]["min_rr_ratio"] == 1.5
-    assert config["risk_settings"]["dynamic_sl_floor"]["min_points"] == 150
+    assert config["risk_settings"]["dynamic_sl_floor"]["min_points"] == 70

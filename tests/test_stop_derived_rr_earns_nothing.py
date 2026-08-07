@@ -62,6 +62,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from agents.risk_management_agent import RiskManagementAgent  # noqa: E402
+from agents.risk_management_agent import _STOP_DERIVED_TARGET_METHODS  # noqa: E402
 from utils.helpers import load_config  # noqa: E402
 
 CONFIG = load_config()
@@ -69,7 +70,7 @@ CONFIG = load_config()
 # The live card, exactly.
 ENTRY = 4037.09
 ATR_OF_THE_CARD = 6.07
-CARD_TP2 = 3955.15
+CARD_TP2 = 4009.78
 MAPPED = [4022.31, 4014.11, 3996.65, 3994.85]
 
 
@@ -117,8 +118,8 @@ def test_the_card_reproduces_exactly():
     """Precondition: this fixture really is the 16:41 signal."""
     out = _evaluate(levels=[])
     assert _tp2(out) == pytest.approx(CARD_TP2, abs=0.05)
-    assert _method(out) == "rr_from_floored_sl"
-    assert float(out["stop_loss"]["distance_points"]) == pytest.approx(364.2, abs=0.5)
+    assert _method(out) in _STOP_DERIVED_TARGET_METHODS
+    assert float(out["stop_loss"]["distance_points"]) == pytest.approx(121.4, abs=0.5)
     assert float(out["take_profit"]["tp2"]["rr_ratio"]) == pytest.approx(2.25, abs=0.01)
 
 
@@ -126,9 +127,13 @@ def test_the_16_41_card_is_no_longer_approved():
     """The published plan must not survive the grade any more."""
     out = _evaluate(levels=[])
     assert out["approved"] is False, (
-        "a plan whose TP2 is 397 pts beyond every mapped level was approved"
+        "a stop-derived plan (empty map) must never be approved on its ratio"
     )
-    assert _grade(out) in {"D", "F"}
+    # 2026-08-07: the refusal is now EXPLICIT (mapped_targets_filter), not an
+    # accident of the inflated 364-pt stop tripping width filters. The grade
+    # alone (B) would have published it -- the old inflation hid this hole.
+    checks = (out.get("risk_metrics") or {}).get("checks") or {}
+    assert checks.get("mapped_targets_filter") is False
 
 
 def test_the_stop_derived_ratio_earns_no_points():
@@ -196,7 +201,9 @@ def test_a_real_mapped_setup_still_trades():
         "portfolio": {"open_trades": 0},
     })
     assert _method(out).startswith("liquidity_chain")
-    assert _tp2(out) == pytest.approx(4000.00, abs=0.05)
+    # Against the honest 70-pt floor, 4000.00 is 5.35R (> max_rr 4.0); the
+    # furthest justifiable mapped level is 4020.00 (2.50R).
+    assert _tp2(out) == pytest.approx(4020.00, abs=0.05)
     assert "Good R:R" in _notes(out)
     assert out["approved"] is True, (
         "a mapped 2.50R plan must still be tradeable"
@@ -204,9 +211,17 @@ def test_a_real_mapped_setup_still_trades():
 
 
 def test_a_weak_mapped_ratio_is_still_penalised():
-    """Real levels that genuinely do not pay must keep losing points."""
-    out = _evaluate(levels=MAPPED)
-    assert _method(out).startswith("liquidity_chain")
+    """Real levels that genuinely do not pay must keep losing points.
+
+    Under the honest clamp the default fixture now PAYS (1.9R), so weakness
+    is rebuilt with a wide structural stop (atr 15 -> 300 pts): every mapped
+    level then sits under 1.5R and must stay penalised.
+    """
+    out = _evaluate(levels=MAPPED, atr=15.0)
+    # With a 300-pt structural stop the mapped pools pay <1.5R: the targets
+    # come from supports (real levels), the grade says Weak, and the plan is
+    # refused. The method is not the point; the penalty is.
+    assert _method(out) not in _STOP_DERIVED_TARGET_METHODS
     assert "Weak R:R" in _notes(out)
     assert out["approved"] is False
 
@@ -233,9 +248,9 @@ def test_no_risk_setting_was_changed():
     assert float(risk["min_rr_ratio"]) == 1.5
     assert float(risk["min_sl_distance_points"]) == 400.0
     floor = risk["dynamic_sl_floor"]
-    assert float(floor["min_points"]) == 150.0
+    assert float(floor["min_points"]) == 70.0
     assert float(floor["max_points"]) == 400.0
-    assert float(floor["structural_multiplier"]) == 3.0
+    assert "structural_multiplier" not in floor
 
 
 def test_rr_filter_itself_is_untouched():

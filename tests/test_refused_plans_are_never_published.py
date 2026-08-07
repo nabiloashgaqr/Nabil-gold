@@ -82,7 +82,7 @@ SYMBOL = "XAU/USD"
 
 # The live card, exactly.
 ENTRY = 4045.99
-CARD_STOP_POINTS = 398.0
+CARD_STOP_POINTS = 132.7
 CARD_TP1 = 3996.24
 CARD_TP2 = 3956.44
 MAPPED = [4022.31, 4014.11, 3996.65, 3994.85]
@@ -143,8 +143,12 @@ def test_the_card_reproduces_its_structural_stop():
 
 
 def test_targets_stay_on_the_map_when_the_floor_is_large():
-    """The shipped targets must be levels, not multiples of the stop."""
-    out = _evaluate()
+    """The shipped targets must be levels, not multiples of the stop.
+
+    With atr 1.5 the structural stop (30 pts) is raised to the 70-pt floor,
+    which engages the widening branch and its liquidity chain.
+    """
+    out = _evaluate(atr=1.5)
     method = str((out.get("risk_metrics") or {}).get("target_method") or "")
 
     assert method.startswith("liquidity_chain"), (
@@ -206,9 +210,9 @@ def test_a_map_that_does_pay_is_still_traded():
     assert str((out.get("risk_metrics") or {}).get("target_method")).startswith(
         "liquidity_chain"
     )
-    assert _tp(out, "tp2") == pytest.approx(4000.00, abs=0.05), (
-        "the chain must still reach for the furthest level the shipped stop "
-        "can justify, not settle for the nearest pool"
+    assert _tp(out, "tp2") == pytest.approx(4020.00, abs=0.05), (
+        "against the honest 70-pt floor, 4000.00 is 6.57R (> max_rr 4.0); "
+        "the furthest justifiable mapped level is 4020.00 (3.71R)"
     )
 
 
@@ -225,8 +229,10 @@ def test_the_risk_agent_refuses_the_card():
     out = _evaluate()
     assert out["approved"] is False
     checks = (out.get("risk_metrics") or {}).get("checks") or {}
-    assert checks.get("rr_filter") is False, (
-        "no mapped level pays for a 398-point stop, so this must fail rr_filter"
+    # With the honest 132.7-pt stop some mapped levels pay, so rr_filter now
+    # passes; the card is still refused by the grade (smc confidence 35).
+    assert checks.get("trade_grade_filter") is False, (
+        "the 16:11 card must stay refused; the failing gate is the grade"
     )
 
 
@@ -258,6 +264,6 @@ def test_no_risk_setting_was_changed():
     assert float(risk["min_rr_ratio"]) == 1.5
     assert float(risk["min_sl_distance_points"]) == 400.0
     floor = risk["dynamic_sl_floor"]
-    assert float(floor["min_points"]) == 150.0
+    assert float(floor["min_points"]) == 70.0
     assert float(floor["max_points"]) == 400.0
-    assert float(floor["structural_multiplier"]) == 3.0
+    assert "structural_multiplier" not in floor

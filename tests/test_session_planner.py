@@ -678,7 +678,7 @@ def test_planner_levels_match_execution_levels_exactly() -> None:
     config = _json.loads((_Path(__file__).resolve().parents[1] / "config.json").read_text())
     service = SessionPlannerService(config)
     candidate = {"details": {"liquidity": {"sell_side": [4064.74, 4030.0, 3985.15]}}}
-    args = dict(direction="SELL", entry_price=4075.15, stop_loss=4079.0,
+    args = dict(direction="SELL", entry_price=4075.15, stop_loss=4090.15,
                 target_price=4064.74, symbol="XAU/USD")
 
     planned = service._execution_levels(candidate=candidate, **args)
