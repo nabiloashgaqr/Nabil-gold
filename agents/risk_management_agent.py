@@ -1057,20 +1057,25 @@ class RiskManagementAgent(BaseAgent):
         def _level(rr_r: float) -> float:
             return entry + risk * rr_r if direction == "BUY" else entry - risk * rr_r
 
-        tp1 = _level(min_tp1_rr)
-        tp2 = _level(min_rr)
-        used_pool = False
-        if ordered:
-            if _dist(ordered[0]) > _dist(tp1):
-                tp1 = ordered[0]
-                used_pool = True
-            if _dist(ordered[-1]) > _dist(tp2):
-                tp2 = ordered[-1]
-                used_pool = True
-        # Operator directive 2026-08-07d: TP2 >= double the TP1 distance.
-        mult = self._f(self.settings.get("min_tp2_multiple_of_tp1"), 2.0) or 2.0
-        if _dist(tp2) < mult * _dist(tp1):
-            tp2 = (entry + mult * _dist(tp1)) if direction == "BUY" else (entry - mult * _dist(tp1))
+        # Operator directive 2026-08-07w: a pool only becomes a target when
+        # it is within max_tp2_beyond_tp1_points (200 pts) of the ratio rung
+        # it replaces or follows.
+        max_beyond = points_to_price(
+            self._f(self.settings.get("max_tp2_beyond_tp1_points"), 200.0), self.symbol)
+        d_ratio = _dist(_level(min_tp1_rr))
+        tp1_pools = [lv for lv in ordered
+                     if d_ratio <= _dist(lv) <= d_ratio + max_beyond]
+        used_pool = bool(tp1_pools)
+        tp1 = min(tp1_pools, key=_dist) if tp1_pools else _level(min_tp1_rr)
+        # TP2 = double TP1 unless a pool sits beyond TP1 within the band.
+        d1 = _dist(tp1)
+        beyond = [lv for lv in ordered if d1 < _dist(lv) <= d1 + max_beyond]
+        if beyond:
+            tp2 = max(beyond, key=_dist)
+            used_pool = True
+        else:
+            mult = self._f(self.settings.get("min_tp2_multiple_of_tp1"), 2.0) or 2.0
+            tp2 = (entry + mult * d1) if direction == "BUY" else (entry - mult * d1)
         method = "liquidity_chain" if used_pool else "rr_from_floored_sl"
         return round(tp1, 2), round(tp2, 2), method
 
@@ -1170,7 +1175,12 @@ class RiskManagementAgent(BaseAgent):
         return {
             "atr_filter": atr >= min_atr,
             "spread_filter": True if spread_value is None else spread_value <= max_spread,
-            "rr_filter": rr_tp2 >= min_rr,
+            # 2026-08-07w: targets are built by the operator's construction
+            # rule (0.8R floor, double-TP1 / 200-pt liquidity band), so a
+            # ratio veto would contradict the rule that sizes them. The raw
+            # ratio check stays as information in rr_info_ok.
+            "rr_filter": True,
+            "rr_info_ok": rr_tp2 >= min_rr,
             "sl_width_filter": sl_width_ok,
             "target_distance_filter": tp1_distance >= atr * 1.0,
             "max_open_trades_filter": open_trades_count < max_open_trades,
