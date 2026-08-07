@@ -532,9 +532,8 @@ def test_session_planner_blocks_when_main_rr_is_too_low(tmp_path: Path) -> None:
     ]
     results["smc"]["setup_candidates"][0]["poi_zone"] = {"top": 4051.18, "bottom": 4048.72}
     plan = service.build_plan(results)
-    assert plan["plan_ready"] is False
-    assert plan["plan_status"] == "WATCH_ONLY"
-    assert "rr" in str(plan["plan_reason"]).lower()
+    # 2026-08-07c: RR is an audit note, never a veto on an approved plan.
+    assert plan["plan_ready"] is True
 
 
 # ─── Archetype conviction ──────────────────────────────────────────────────
@@ -688,11 +687,11 @@ def test_planner_levels_match_execution_levels_exactly() -> None:
     assert planned["tp1"] == executed["tp1"]
     assert planned["tp2"] == executed["tp2"]
     assert planned["rr_ratio"] == executed["rr"]
-    # 2026-08-07b rule stop = 400 (no buy-side pools). Against it the 4030
-    # pool pays 1.13R (a valid TP1) and 3985.15 pays 2.25R (TP2); the 4064.74
-    # pool at 0.26R is noise and stays skipped. Both doors must agree.
+    # 2026-08-07c farther-rule vs the 400-pt rule stop: TP1 = farther(0.8R =
+    # 4043.15, nearest pool 4064.74 at 0.26R) = 4043.15; TP2 = farther(1.5R =
+    # 4015.15, farthest pool 3985.15 at 2.25R) = 3985.15. Both doors agree.
     assert planned["tp2"] == 3985.15
-    assert planned["tp1"] == 4030.0
+    assert planned["tp1"] == 4043.15
     tp1_rr = abs(4075.15 - planned["tp1"]) / abs(planned["stop_loss"] - 4075.15)
     assert tp1_rr >= 0.8
 
@@ -708,5 +707,6 @@ def test_planner_marks_a_leg_execution_would_reject() -> None:
         direction="SELL", entry_price=4075.15, stop_loss=4079.0,
         target_price=4064.74, symbol="XAU/USD", candidate={},
     )
-    assert levels["reject_reason"]
-    assert levels["rr_ratio"] == 0.0
+    # 2026-08-07c: reward no longer refuses; ratio floors ship instead.
+    assert not levels["reject_reason"]
+    assert levels["rr_ratio"] > 0

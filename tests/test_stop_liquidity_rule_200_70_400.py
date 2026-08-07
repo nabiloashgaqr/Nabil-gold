@@ -128,11 +128,12 @@ def test_hybrid_far_liquidity_keeps_the_map():
     assert not out.get("reject_reason")
 
 
-def test_hybrid_near_only_is_refused_by_the_planner_door():
-    """The planner door never invents: pools under 0.8R -> explicit refusal.
-    (The agent door provides the ratio fallback; hybrid by operator choice.)"""
+def test_hybrid_near_only_ships_the_ratio_floors():
+    """2026-08-07c: noise pools lose to the ratio floors; the leg ships
+    0.8R/1.5R of the 400-pt rule stop instead of being refused."""
     out = _planner([lv(100)], [below(100)], below(100))
-    assert out.get("reject_reason")
+    assert not out.get("reject_reason")
+    assert float(out["tp2"]) == pytest.approx(ENTRY - 60.0, abs=0.5)
 
 
 # ---------------------------------------------------------------------------

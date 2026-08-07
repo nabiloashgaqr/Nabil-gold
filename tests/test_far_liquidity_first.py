@@ -30,48 +30,57 @@ BUY_CANDIDATE = {
 }
 
 
-def test_resolver_looks_only_at_nearest_and_next_pools() -> None:
-    # Directive 2026-08-06: TP2 must be a real second objective. Risk 15.0
-    # (entry 4060, stop 4045): liq1=4080 (1.33R); 4085 (1.67R) is glued to TP1
-    # (0.34R gap < 0.5R) so the resolver scans to 4105 (1.67R beyond TP1).
+def test_targets_take_the_farther_of_liquidity_and_ratio() -> None:
+    # Directive 2026-08-07c: TP1 = farther(0.8R, nearest pool),
+    # TP2 = farther(1.5R, farthest pool). Risk 15.0: ratios at 4072 / 4082.5.
+    # Nearest pool 4080 beats the TP1 ratio; farthest 4105 beats TP2 ratio.
     tp1, tp2, reject = ra._resolve_reward_target(
         "BUY", 4060.0, 4045.0, 4080.0, BUY_CANDIDATE,
         min_rr=1.5, min_tp1_rr=0.8, prefer_far=True, max_rr=4.0,
     )
-    assert reject is None
-    assert tp2 == 4105.0, "TP2 must not be glued to TP1; scan to a real second pool"
-    assert tp1 == 4080.0, "TP1 stays the nearest usable level"
+    assert reject is None, "an approved plan is never refused on reward"
+    # The mapped target (4080) is itself a real level and the nearest one.
+    assert tp1 == 4080.0, "nearest real level beats the 0.8R floor (12 pts)"
+    assert tp2 == 4130.0, "farthest pool is the farther objective"
 
 
-def test_a_third_pool_is_ignored_even_if_it_clears_min_rr() -> None:
-    # The 3rd-nearest pool (4300, 16R) clears min_rr, but only the nearest two
-    # are considered -- so the leg is REJECTED honestly, not stretched to it.
+def test_the_far_pool_is_the_objective() -> None:
+    # Directive 2026-08-07c: "اهداف الابعد نقارن" -- the far pool (4300) IS
+    # the TP2 objective; near noise pools lose to the ratio floors.
     candidate = {"details": {"liquidity": {"buy_side": [4066.0, 4070.0, 4300.0]}}}
     tp1, tp2, reject = ra._resolve_reward_target(
         "BUY", 4060.0, 4045.0, 4066.0, candidate,
         min_rr=1.5, min_tp1_rr=0.8, prefer_far=True, max_rr=4.0,
     )
-    assert reject is not None, "nearest two fail min_rr; the far 3rd pool must not rescue it"
+    assert reject is None
+    assert tp1 == 4072.0, "nearest pool (6 pts) loses to the 0.8R floor (12)"
+    assert tp2 == 4300.0, "the far pool is the farther objective"
 
 
-def test_resolver_nearest_first_is_restorable() -> None:
+def test_ratio_floors_ship_when_pools_are_noise() -> None:
+    # Pools nearer than the ratio floors lose: 4066 (6 pts) < 12, so the
+    # 0.8R ratio level ships as TP1.
+    candidate = {"details": {"liquidity": {"buy_side": [4066.0, 4070.0]}}}
     tp1, tp2, reject = ra._resolve_reward_target(
-        "BUY", 4060.0, 4045.0, 4080.0, BUY_CANDIDATE,
+        "BUY", 4060.0, 4045.0, 4066.0, candidate,
         min_rr=1.5, min_tp1_rr=0.8, prefer_far=False, max_rr=4.0,
     )
     assert reject is None
-    assert tp2 == 4105.0  # min-separation rule applies regardless of prefer_far
+    assert tp1 == 4072.0
+    assert tp2 == 4082.5
 
 
-def test_resolver_falls_back_to_nearest_when_only_overcap_pools_qualify() -> None:
-    candidate = {"details": {"liquidity": {"buy_side": [4150.0]}}}  # 6.0R, beyond cap 4.0
+def test_a_single_far_pool_sets_both_and_the_guard_separates() -> None:
+    # One pool at 90 pts wins both comparisons; the tp2>tp1 guard then
+    # pushes TP2 half a risk beyond TP1 instead of collapsing onto it.
+    candidate = {"details": {"liquidity": {"buy_side": [4150.0]}}}
     tp1, tp2, reject = ra._resolve_reward_target(
         "BUY", 4060.0, 4045.0, 4150.0, candidate,
         min_rr=1.5, min_tp1_rr=0.8, prefer_far=True, max_rr=4.0,
     )
-    # A single pool beyond max_rr is unreasonable; the leg is rejected, not stretched.
-    assert reject is not None
-    assert tp2 == 0.0
+    assert reject is None
+    assert tp1 == 4150.0
+    assert tp2 == 4157.5
 
 
 def _agent(prefer_far: bool) -> RiskManagementAgent:

@@ -227,16 +227,20 @@ def test_unprotective_stop_blocks_a_market_conversion() -> None:
     assert order == "NO_ENTRY"
 
 
-def test_converted_leg_still_respects_the_reward_gate() -> None:
-    """Conversion is not a bypass: a leg without reward is still refused."""
+def test_converted_leg_ships_construction_minimum_targets() -> None:
+    """2026-08-07c: no reward veto; a near-only map ships the ratio floors
+    (0.8R/1.5R of the rule stop) instead of being refused."""
     from scripts.run_analysis import _build_plan_ladder_decision
 
     plan, candidate = _plan_and_candidate()
-    candidate["target_price"] = 4029.90          # ~0.02R away
-    candidate["details"] = {"liquidity": {"buy_side": [4029.90]}}
+    candidate["target_price"] = 4029.90          # ~0.02R away: noise
+    candidate["details"] = {"liquidity": {"buy_side": [4029.90],
+                                          "sell_side": [4004.64]}}
     base = {"symbol": "XAU/USD", "current_price": 4029.64, "decision": "BUY"}
 
-    assert _build_plan_ladder_decision(base, plan, candidate, CONFIG) is None
+    leg = _build_plan_ladder_decision(base, plan, candidate, CONFIG)
+    assert leg is not None
+    assert leg["signal"]["tp2"] > leg["signal"]["tp1"]
 
 
 def test_distant_price_still_produces_a_pending_order() -> None:

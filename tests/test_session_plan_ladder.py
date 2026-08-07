@@ -467,10 +467,14 @@ def test_a_far_third_pool_does_not_rescue_a_failing_near_pair() -> None:
     assert levels["tp2"] == 3985.15
 
 
-def test_targets_are_never_invented_when_no_further_liquidity_exists() -> None:
+def test_no_liquidity_ships_the_ratio_floors() -> None:
+    """2026-08-07c: with no pools the stop ratios (0.8R/1.5R) ship; nothing
+    is refused, nothing is 'invented' beyond the operator's own formula."""
     levels = _levels(4079.0, 4064.74, liquidity=None)
-    assert levels.get("reject_reason")
-    assert "no usable liquidity" in levels["reject_reason"]
+    assert not levels.get("reject_reason")
+    entry = 4075.15
+    assert levels["tp1"] > 0
+    assert abs(entry - levels["tp2"]) > abs(entry - levels["tp1"])
 
 
 def test_liquidity_rule_stop_200_70_400() -> None:

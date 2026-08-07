@@ -40,17 +40,21 @@ def _guard(service, levels, direction="BUY"):
 def test_rejected_leg_is_refused_by_name_not_by_accident() -> None:
     """The live 2026-07-29 levels: no qualifying liquidity ahead."""
     service = _service()
+    # 2026-08-07c: reward can no longer refuse; an empty map ships ratio
+    # targets. The by-name guard still honours any EXECUTION refusal.
     levels = service._execution_levels(
         direction="BUY", entry_price=4028.32, stop_loss=4027.0,
         target_price=4028.85, symbol="XAU/USD", candidate={},
     )
-    assert levels["reject_reason"], "fixture no longer reproduces a rejection"
+    assert not levels["reject_reason"]
 
-    ok, reason, diagnostics = _guard(service, levels)
+    refused = dict(levels)
+    refused["reject_reason"] = "stop engine offline"
+    ok, reason, diagnostics = _guard(service, refused)
 
     assert ok is False
     assert "execution refused the main leg" in reason
-    assert "usable liquidity" in reason
+    assert "stop engine offline" in reason
     assert diagnostics["execution_reject_reason"]
 
 
@@ -104,9 +108,11 @@ def test_planner_rr_gate_still_applies_to_an_accepted_leg() -> None:
     assert not levels["reject_reason"]
     assert levels["rr_ratio"] == pytest.approx(1.62, abs=0.01)
 
+    # 2026-08-07c: the RR bar is an audit note, never a veto on an
+    # agent-approved plan.
     ok, reason, _ = _guard(service, levels, direction="SELL")
-    assert ok is False
-    assert "RR 1.62 below 2.50" in reason
+    assert ok is True
+    assert reason is None
 
 
 def test_the_reason_names_the_real_cause() -> None:
@@ -117,6 +123,8 @@ def test_the_reason_names_the_real_cause() -> None:
         target_price=4028.85, symbol="XAU/USD", candidate={},
     )
 
-    _, reason, _ = _guard(service, levels)
+    ok, reason, _ = _guard(service, levels)
 
-    assert "RR 0.00" not in reason, "the old message blamed the wrong thing"
+    # No refusal at all now: the empty map ships ratio targets by design.
+    assert ok is True
+    assert reason is None
