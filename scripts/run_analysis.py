@@ -461,66 +461,30 @@ def _resolve_reward_target(
             levels.append(level)
 
     ordered = sorted(set(levels), key=lambda lv: abs(lv - entry_price))
-    # Operator directive (2026-08-06): a pool closer than min_tp1_rr (0.8R) is
-    # NOT a target -- a pool at ~0R sits at the entry itself and is nonsense as
-    # an objective. The first pool >= 0.8R is "liquidity-1" (TP1); the one that
-    # follows it is "liquidity-2" (TP2). Targets always come from liquidity-2,
-    # and both are kept inside [min_rr, max_rr] so the numbers stay sensible.
-    acceptable = [lv for lv in ordered if _rr(lv) >= min_tp1_rr]
-    if not acceptable:
-        # No liquidity pools carried on the candidate: fall back to the mapped
-        # target itself (a real level the map drew) if it is within the sensible
-        # band; otherwise reject honestly.
-        if target_price > 0 and _is_ahead(target_price) and min_rr <= _rr(target_price) <= (
-            max_rr if max_rr > 0 else float("inf")
-        ):
-            tp2 = target_price
-            midpoint = round((entry_price + tp2) / 2.0, 2)
-            tp1 = midpoint if _rr(midpoint) >= min_tp1_rr else tp2
-            return tp1, tp2, None
-        return 0.0, 0.0, (
-            f"no usable liquidity: no pool reaches {min_tp1_rr:.2f}R; "
-            "pools nearer than that sit at the entry and are not objectives"
-        )
-    liq1 = acceptable[0]
-    tp1 = liq1
+    # Operator directive 2026-08-07c: an approved plan is NEVER refused on
+    # reward. Targets compare liquidity against stop ratios and ship the
+    # FARTHER objective:
+    #     TP1 = farther(0.8R of the stop, nearest pool)
+    #     TP2 = farther(1.5R of the stop, farthest pool)
+    # Example (operator's own): stop 270 -> ratio TP1 216~220 pts; a pool at
+    # 250 is farther -> TP1 = 250. Minimums are enforced BY CONSTRUCTION;
+    # nothing is rejected, so the agent-approved map always ships.
+    def _dist(lv: float) -> float:
+        return abs(lv - entry_price)
 
-    def _in_band(lv: float) -> bool:
-        return _rr(lv) >= min_rr and (max_rr <= 0 or _rr(lv) <= max_rr)
+    def _level(rr_r: float) -> float:
+        return entry_price + risk * rr_r if direction == "BUY" else entry_price - risk * rr_r
 
-    # Operator directive (2026-08-06): TP2 must be a REAL second objective, not
-    # a pool glued to TP1 (a 40-pt gap is not a target). Require TP2 to sit at
-    # least min_tp2_beyond_rr beyond TP1; if the next pool is glued, scan the
-    # farther acceptable pools. Only when none qualifies do we fall back to a
-    # single target (liq1) or reject honestly.
-    tp2 = None
-    for lv in acceptable[1:]:
-        if _in_band(lv) and (_rr(lv) - _rr(tp1)) >= min_tp2_beyond_rr:
-            tp2 = lv
-            break
-    if tp2 is None:
-        if _in_band(liq1):
-            tp2 = liq1
-            midpoint = round((entry_price + tp2) / 2.0, 2)
-            if _rr(midpoint) >= min_tp1_rr:
-                tp1 = midpoint
-        else:
-            l2 = acceptable[1] if len(acceptable) > 1 else None
-            l2_txt = (
-                f" nor liquidity-2 ({l2:.2f}, {_rr(l2):.2f}R)"
-                if l2 is not None else " and no liquidity-2 exists"
-            )
-            return 0.0, 0.0, (
-                f"neither liquidity-1 ({liq1:.2f}, {_rr(liq1):.2f}R){l2_txt} "
-                f"clears {min_rr:.2f}R within {max_rr:.1f}R"
-            )
-    return tp1, tp2, None
-
-    mapped_rr = _rr(target_price) if target_price > 0 and _is_ahead(target_price) else 0.0
-    return 0.0, 0.0, (
-        f"target liquidity {target_price:.2f} is only {mapped_rr:.2f}R from entry "
-        f"(minimum {min_rr:.2f}R) and no further qualifying liquidity exists"
-    )
+    tp1 = _level(min_tp1_rr)
+    tp2 = _level(min_rr)
+    if ordered:
+        if _dist(ordered[0]) > _dist(tp1):
+            tp1 = ordered[0]
+        if _dist(ordered[-1]) > _dist(tp2):
+            tp2 = ordered[-1]
+    if _dist(tp2) <= _dist(tp1):
+        tp2 = (entry_price + _dist(tp1) + risk * 0.5) if direction == "BUY" else (entry_price - _dist(tp1) - risk * 0.5)
+    return round(tp1, 2), round(tp2, 2), None
 
 
 def _stop_from_liquidity_points(
