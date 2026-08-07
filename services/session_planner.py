@@ -449,7 +449,7 @@ class SessionPlannerService:
             "tp2": primary_execution.get("tp2"),
         }
         if primary_execution.get("floor_applied"):
-            manual_plan["risk_note"] = f"Execution stop normalized to the configured {primary_execution.get('min_sl_distance_points', 0):.0f}-point minimum."
+            manual_plan["risk_note"] = "Execution stop set by the operator liquidity rule (ignore <200 pts, +70 safety, cap 400)."
 
         # Authority is a claim about independent agreement, so it has to be
         # resolved from the evidence rather than asserted by the path that
@@ -806,7 +806,7 @@ class SessionPlannerService:
             "tp2": primary_execution.get("tp2"),
         }
         if primary_execution.get("floor_applied"):
-            manual_plan["risk_note"] = f"Execution stop normalized to the configured {primary_execution.get('min_sl_distance_points', 0):.0f}-point minimum."
+            manual_plan["risk_note"] = "Execution stop set by the operator liquidity rule (ignore <200 pts, +70 safety, cap 400)."
 
         fallback.update(
             {
