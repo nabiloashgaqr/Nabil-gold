@@ -117,6 +117,22 @@ class AdaptiveExecutionService:
 
         adapted = deepcopy(decision)
         adapted.setdefault("reasons", []).append(f"Adaptive execution: replaced old pending family because {material.get('reason')}")
+        # Operator observation 2026-08-07 (card 17:02): the replacement IS
+        # the main leg -- this very action cancels the old MAIN family, so a
+        # promoted standby must not keep the ADD/STANDBY label of a leg that
+        # no longer has a main sibling.
+        setup_ctx = adapted.get("setup_context")
+        if isinstance(setup_ctx, dict):
+            promoted_from = str(setup_ctx.get("pending_plan_role")
+                                or setup_ctx.get("selection_role") or "").upper()
+            setup_ctx["pending_plan_role"] = "PRIMARY"
+            setup_ctx["selection_role"] = "PRIMARY"
+            if promoted_from and promoted_from != "PRIMARY":
+                adapted["adaptive_execution_promoted_from"] = promoted_from
+                adapted.setdefault("reasons", []).append(
+                    f"Adaptive execution: promoted {promoted_from} replacement "
+                    "becomes the MAIN leg (old main cancelled by this action)."
+                )
         adapted["adaptive_execution"] = {
             "action": "REPLACE_WITH_CONTINUATION",
             "reason": material.get("reason"),
