@@ -130,6 +130,7 @@ jobs:
             tests/test_block_message_states_the_real_window.py \
             tests/test_refused_plans_are_never_published.py \
             tests/test_stop_derived_rr_earns_nothing.py \
+            tests/test_stop_floor_clamps_not_multiplies.py \
             tests/test_smc_projects_liquidity_pools.py \
             tests/test_sl_floor_measures_every_path.py \
             tests/test_dashboard_numbers_agree.py \
