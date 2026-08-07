@@ -4542,6 +4542,26 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                            ).upper().endswith("MARKET"):
                     decision = AdaptiveExecutionService(config)._promote_to_market(
                         decision, float(decision.get("current_price") or 0.0))
+                # Both entries carry stops/targets from the unified law
+                # (liquidity rule stop + liquidity/RR targets) computed from
+                # the market entry's OWN price. The pending keeps the levels
+                # it was created with; management stays per-trade.
+                try:
+                    _g_cand = _select_setup_candidate(decision_type, all_results) or {}
+                    _g_lv = _planner_trade_levels(
+                        config, direction=decision_type,
+                        entry_price=float(decision.get("current_price") or 0.0),
+                        stop_loss=float((decision.get("signal") or {})
+                                      .get("stop_loss") or 0.0),
+                        target_price=float(_g_cand.get("target_liquidity")
+                                         or _g_cand.get("target_price") or 0.0),
+                        symbol=symbol, candidate=_g_cand)
+                    _g_sig = decision.setdefault("signal", {})
+                    _g_sig["stop_loss"] = _g_lv["stop_loss"]
+                    _g_sig["tp1"] = _g_lv["tp1"]
+                    _g_sig["tp2"] = _g_lv["tp2"]
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Golden dual level rebuild failed: %s", exc)
 
             # Phase E: even if legacy path 1 / path 2 found an entry, it must
             # still be inside or near the confirmed day map. This prevents small
@@ -4576,7 +4596,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             if golden_dual and golden_dual.get("action") == "GOLDEN_DUAL_ENTRY":
                 governance = {
                     "action": "ALLOW_NEW",
-                    "reason": "golden dual entry exception (0.618 close-confirm, pending inside 0.786 band)",
+                    "reason": "golden dual entry exception (0.618 close-confirm, pending at >= 0.70 fibo)",
                     "cancelled_ids": [],
                 }
             elif adaptive_action in {"PROMOTE_TO_MARKET", "REPLACE_WITH_CONTINUATION"}:
