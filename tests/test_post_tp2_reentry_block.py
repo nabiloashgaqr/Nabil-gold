@@ -179,14 +179,15 @@ def test_the_block_lapses_after_the_window() -> None:
 
 # ── the early override ──────────────────────────────────────────────────────
 
-def test_a_genuinely_new_poi_lifts_the_block() -> None:
+def test_a_genuinely_new_poi_no_longer_lifts_the_block() -> None:
+    """2026-08-07 option 1: the window is absolute; no early release."""
     fresh = {
         "state_key": "K2", "setup_type": "ORDER_BLOCK_PULLBACK",
         "poi_type": "order_block", "setup_state": "ENTRY_ARMED",
         "thesis_dominance_score": 70.0, "trigger_score": 62.0,
         "displacement_score": 55.0,
     }
-    assert _block(4031.77, _at(14, 11), setup=fresh) is None
+    assert _block(4031.77, _at(14, 11), setup=fresh) is not None
 
 
 def test_a_repackaged_same_thesis_does_not_lift_it() -> None:
@@ -253,9 +254,11 @@ def test_a_buy_well_below_its_tp2_is_allowed() -> None:
     assert _buy_block(4100.00, _at(14, 11)) is None
 
 
-def test_a_buy_beyond_its_own_tp2_is_not_a_repeat() -> None:
-    """Price already past the exhausted level is a different situation."""
-    assert _buy_block(4140.00, _at(14, 11)) is None
+def test_a_buy_beyond_its_own_tp2_is_blocked() -> None:
+    """2026-08-07 (daac4022): chasing BEYOND the exhausted TP2 is the worst
+    repeat -- the old far-side exemption let a BUY 172 pts above a hours-old
+    TP2 sail. Now absolute."""
+    assert _buy_block(4140.00, _at(14, 11)) is not None
 
 
 def test_the_buy_block_also_lapses_after_the_window() -> None:
@@ -271,14 +274,14 @@ def test_the_buy_block_also_lapses_after_the_window() -> None:
     assert _buy_block(4130.00, _at(16, 55)) is None       # 3.08h  lapsed under both
 
 
-def test_a_new_thesis_lifts_the_buy_block_too() -> None:
+def test_a_new_thesis_no_longer_lifts_the_buy_block() -> None:
     fresh = {
         "state_key": "K2", "setup_type": "ORDER_BLOCK_PULLBACK",
         "poi_type": "order_block", "setup_state": "ENTRY_ARMED",
         "thesis_dominance_score": 70.0, "trigger_score": 62.0,
         "displacement_score": 55.0,
     }
-    assert _buy_block(4130.00, _at(14, 11), setup=fresh) is None
+    assert _buy_block(4130.00, _at(14, 11), setup=fresh) is not None
 
 
 def test_a_sell_after_a_buy_tp2_is_never_blocked() -> None:
@@ -292,9 +295,19 @@ def test_a_sell_after_a_buy_tp2_is_never_blocked() -> None:
     ) is None
 
 
-def test_a_sell_entry_beyond_its_own_tp2_is_not_a_repeat() -> None:
-    """The SELL mirror of the far-side case."""
-    assert _block(4020.00, _at(14, 11)) is None
+def test_a_sell_entry_beyond_its_own_tp2_is_blocked() -> None:
+    """The SELL mirror of the 2026-08-07 absolute rule."""
+    assert _block(4020.00, _at(14, 11)) is not None
+
+
+def test_the_20260807_card_is_blocked() -> None:
+    """The live incident, reproduced: BUY TP2 at 4300.00 closed within the
+    window; a new BUY at 4317.26 (172 pts ABOVE the exhausted level) must be
+    refused under the absolute rule."""
+    closed = {**BUY_CLOSED_ON_TP2, "tp2": 4300.00}
+    assert _block(4317.26, _at(14, 11), direction="BUY", closed=[closed]) is not None
+    # and a BUY pulled back 250+ pts below (4274.99) is allowed
+    assert _block(4274.99, _at(14, 11), direction="BUY", closed=[closed]) is None
 
 
 def test_only_a_tp2_close_arms_the_rule() -> None:
