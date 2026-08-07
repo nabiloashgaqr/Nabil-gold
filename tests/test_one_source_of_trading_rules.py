@@ -170,3 +170,26 @@ def test_legacy_only_config_still_reads():
     assert tr.stop_rule(legacy)["max_stop_points"] == 450
     assert tr.post_tp2_rule(legacy)["window_hours"] == 1
     assert tr.trailing_params({"trade_management": {"trailing_distance_points": 120}})["distance_points"] == 120
+
+
+# ── phase 3: display wording comes from the loader ─────────────────────────
+
+def test_no_hardcoded_rule_wording_outside_the_loader():
+    for d in ("scripts", "agents", "services"):
+        for path in sorted((ROOT / d).glob("*.py")):
+            for lineno, code in _code_lines(path):
+                assert "ignore <200" not in code and "cap 400)" not in code, (
+                    f"{path.name}:{lineno} hardcodes the stop-rule wording; "
+                    f"use utils.trading_rules.stop_rule_note"
+                )
+
+
+def test_stop_rule_note_follows_the_config():
+    import copy
+    cfg = copy.deepcopy(CONFIG)
+    note = tr.stop_rule_note(cfg)
+    assert "ignore <200 pts" in note and "+70 safety" in note and "cap 400" in note
+    cfg["trading_rules"]["stop"]["max_stop_points"] = 350
+    assert "cap 350" in tr.stop_rule_note(cfg)
+    post = tr.post_tp2_note(cfg)
+    assert "250 pts" in post and "2.5h" in post
