@@ -130,6 +130,7 @@ jobs:
             tests/test_refused_plans_are_never_published.py \
             tests/test_stop_derived_rr_earns_nothing.py \
             tests/test_stop_liquidity_rule_200_70_400.py \
+            tests/test_one_source_of_trading_rules.py \
             tests/test_smc_projects_liquidity_pools.py \
             tests/test_sl_floor_measures_every_path.py \
             tests/test_dashboard_numbers_agree.py \
