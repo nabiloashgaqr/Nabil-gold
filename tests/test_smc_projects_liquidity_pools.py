@@ -289,9 +289,10 @@ def test_no_risk_setting_was_changed():
     risk = CONFIG["risk_settings"]
     assert float(risk["min_rr_ratio"]) == 1.5
     assert float(risk["min_sl_distance_points"]) == 400.0
-    floor = risk["dynamic_sl_floor"]
-    assert float(floor["min_points"]) == 70.0
-    assert float(floor["max_points"]) == 400.0
+    rule = risk["stop_from_liquidity"]
+    assert rule["min_liquidity_points"] == 200
+    assert rule["safety_buffer_points"] == 70
+    assert rule["max_stop_points"] == 400
 
 
 # ── the ladder must reach as far as the stop needs ──────────────────────────
@@ -310,7 +311,7 @@ def test_no_risk_setting_was_changed():
 def _required_reach_usd() -> float:
     """Widest permitted stop x min_rr, in USD. Derived, not chosen."""
     risk = CONFIG["risk_settings"]
-    widest = float((risk.get("dynamic_sl_floor") or {}).get("max_points")
+    widest = float((risk.get("stop_from_liquidity") or {}).get("max_stop_points")
                    or risk.get("min_sl_distance_points") or 400.0)
     return widest * float(risk.get("min_rr_ratio") or 1.5) * 0.10
 
@@ -367,7 +368,7 @@ def test_the_reach_follows_configuration_not_a_hard_coded_number():
     import copy as _copy
     from agents.smc_agent import SMCAgent as _Agent
     cfg = _copy.deepcopy(CONFIG)
-    cfg["risk_settings"]["dynamic_sl_floor"]["max_points"] = 200
+    cfg["risk_settings"]["stop_from_liquidity"]["max_stop_points"] = 200
     liq = _Agent(cfg).analyze(
         {"data": DOWNTREND, "symbol": "XAU/USD"}
     ).get("liquidity") or {}

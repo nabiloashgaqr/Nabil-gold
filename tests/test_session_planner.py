@@ -688,12 +688,11 @@ def test_planner_levels_match_execution_levels_exactly() -> None:
     assert planned["tp1"] == executed["tp1"]
     assert planned["tp2"] == executed["tp2"]
     assert planned["rr_ratio"] == executed["rr"]
-    # TP2 stays a real pool rather than a ratio-derived number. TP1 no longer
-    # takes the 4064.74 pool: at 0.69R against the floored stop it sits inside
-    # normal noise, and touching it arms the breakeven stop before the trade
-    # has travelled. It is skipped in favour of a target worth acting on.
-    assert planned["tp2"] == 4030.0
-    assert planned["tp1"] != 4064.74
+    # 2026-08-07b rule stop = 400 (no buy-side pools). Against it the 4030
+    # pool pays 1.13R (a valid TP1) and 3985.15 pays 2.25R (TP2); the 4064.74
+    # pool at 0.26R is noise and stays skipped. Both doors must agree.
+    assert planned["tp2"] == 3985.15
+    assert planned["tp1"] == 4030.0
     tp1_rr = abs(4075.15 - planned["tp1"]) / abs(planned["stop_loss"] - 4075.15)
     assert tp1_rr >= 0.8
 

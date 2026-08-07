@@ -202,10 +202,10 @@ def test_no_risk_setting_was_changed() -> None:
     assert float(risk["min_rr_ratio"]) == 1.5
     assert float(risk["max_rr_ratio"]) == 4.0
     assert float(risk["min_tp1_rr"]) == 0.8
-    floor = risk["dynamic_sl_floor"]
-    assert floor["enabled"] is True
-    assert float(floor["min_points"]) == 70.0
-    assert float(floor["max_points"]) == 400.0
+    rule = risk["stop_from_liquidity"]
+    assert rule["min_liquidity_points"] == 200
+    assert rule["safety_buffer_points"] == 70
+    assert rule["max_stop_points"] == 400
 
 
 def test_the_chain_never_moves_the_stop() -> None:

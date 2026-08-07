@@ -171,9 +171,10 @@ def test_no_risk_setting_was_changed():
     risk = CONFIG["risk_settings"]
     assert float(risk["min_rr_ratio"]) == 1.5
     assert float(risk["min_sl_distance_points"]) == 400.0
-    floor = risk["dynamic_sl_floor"]
-    assert float(floor["min_points"]) == 70.0
-    assert float(floor["max_points"]) == 400.0
+    rule = risk["stop_from_liquidity"]
+    assert rule["min_liquidity_points"] == 200
+    assert rule["safety_buffer_points"] == 70
+    assert rule["max_stop_points"] == 400
 
 
 def test_no_planner_threshold_was_changed():

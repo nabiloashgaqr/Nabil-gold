@@ -13,6 +13,8 @@ that no qualifying liquidity existed at all.
 
 from __future__ import annotations
 
+import pytest
+
 import json
 from pathlib import Path
 
@@ -94,16 +96,17 @@ def test_planner_rr_gate_still_applies_to_an_accepted_leg() -> None:
     service = _service(min_main_rr_for_ready=2.5)
     levels = service._execution_levels(
         direction="SELL", entry_price=4051.18, stop_loss=4066.18,
-        target_price=4021.18, symbol="XAU/USD",
-        candidate={"details": {"liquidity": {"sell_side": [4021.18]}}},
+        target_price=3991.18, symbol="XAU/USD",
+        candidate={"details": {"liquidity": {"sell_side": [4021.18, 3991.18],
+                                             "buy_side": [4081.18]}}},
     )
 
     assert not levels["reject_reason"]
-    assert levels["rr_ratio"] == 2.0
+    assert levels["rr_ratio"] == pytest.approx(1.62, abs=0.01)
 
     ok, reason, _ = _guard(service, levels, direction="SELL")
     assert ok is False
-    assert "RR 2.00 below 2.50" in reason
+    assert "RR 1.62 below 2.50" in reason
 
 
 def test_the_reason_names_the_real_cause() -> None:

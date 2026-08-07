@@ -82,7 +82,7 @@ SYMBOL = "XAU/USD"
 
 # The live card, exactly.
 ENTRY = 4045.99
-CARD_STOP_POINTS = 132.7
+CARD_STOP_POINTS = 400.0  # 2026-08-07b: first eligible pool 351.5 + 70 -> capped
 CARD_TP1 = 3996.24
 CARD_TP2 = 3956.44
 MAPPED = [4022.31, 4014.11, 3996.65, 3994.85]
@@ -136,28 +136,34 @@ def test_the_card_reproduces_its_structural_stop():
     """Precondition: this fixture really is the 16:11 setup."""
     out = _evaluate()
     metrics = out.get("risk_metrics") or {}
-    assert float(metrics["structural_sl_points"]) == pytest.approx(132.7, abs=1.0)
+    # 2026-08-07b: the rule stop IS the structural stop now. The first
+    # eligible pool (351.5 pts) + 70 = 421.5 -> capped at 400.
+    assert float(metrics["structural_sl_points"]) == pytest.approx(
+        CARD_STOP_POINTS, abs=1.0)
     assert float((out.get("stop_loss") or {})["distance_points"]) == pytest.approx(
         CARD_STOP_POINTS, abs=1.0
     )
 
 
-def test_targets_stay_on_the_map_when_the_floor_is_large():
+def test_targets_stay_on_the_map_when_the_map_pays():
     """The shipped targets must be levels, not multiples of the stop.
 
-    With atr 1.5 the structural stop (30 pts) is raised to the 70-pt floor,
-    which engages the widening branch and its liquidity chain.
+    2026-08-07b: the old MAPPED pools (all < 1R vs the 400-pt rule stop) no
+    longer pay, so ratios are the designed fallback there. To pin "targets
+    stay on the map" we use pools that DO pay the rule stop: 300 pts (TP1,
+    0.81R) and 600 pts (TP2, 1.62R) against the 370-pt stop they anchor.
     """
-    out = _evaluate(atr=1.5)
+    out = _evaluate(atr=1.5, levels=[4005.15, 3975.15])
     method = str((out.get("risk_metrics") or {}).get("target_method") or "")
 
     assert method.startswith("liquidity_chain"), (
         f"targets came from {method!r}; the floor vetoed the map again"
     )
-    assert _tp(out, "tp2") in MAPPED, (
+    fed = [4005.15, 3975.15]
+    assert _tp(out, "tp2") in fed, (
         f"TP2 {_tp(out, 'tp2')} is not a mapped level"
     )
-    assert _tp(out, "tp1") in MAPPED
+    assert _tp(out, "tp1") in fed
 
 
 def test_the_invented_levels_from_the_card_are_gone():
@@ -183,7 +189,10 @@ def test_the_ratio_signature_does_not_survive_where_the_map_can_pay(atr):
     path never runs while the map still has a qualifying level". That is the
     real defect from 16:11, and it is what this pins.
     """
-    out = _evaluate(atr=atr)
+    # 2026-08-07b: the old MAPPED pools never pay the rule stop, so ratios
+    # are the designed fallback for them; the guarantee is "no signature
+    # WHILE the map has a qualifying level", so we feed paying pools.
+    out = _evaluate(atr=atr, levels=[4005.15, 3975.15])
     tp = out.get("take_profit") or {}
     rr1 = float((tp.get("tp1") or {}).get("rr_ratio") or 0)
     rr2 = float((tp.get("tp2") or {}).get("rr_ratio") or 0)
@@ -206,13 +215,13 @@ def test_the_published_rr_is_measured_against_the_real_stop():
 
 def test_a_map_that_does_pay_is_still_traded():
     """The fix must not refuse setups that genuinely clear the bar."""
-    out = _evaluate(atr=1.5, levels=[4028.20, 4022.31, 4020.00, 4000.00])
+    out = _evaluate(atr=1.5, levels=[4005.15, 3975.15])
     assert str((out.get("risk_metrics") or {}).get("target_method")).startswith(
         "liquidity_chain"
     )
-    assert _tp(out, "tp2") == pytest.approx(4020.00, abs=0.05), (
-        "against the honest 70-pt floor, 4000.00 is 6.57R (> max_rr 4.0); "
-        "the furthest justifiable mapped level is 4020.00 (3.71R)"
+    assert _tp(out, "tp2") == pytest.approx(3975.15, abs=0.05), (
+        "the chain must reach the furthest pool the 370-pt rule stop "
+        "justifies (600 pts = 1.62R), not invent a ratio target"
     )
 
 
@@ -263,7 +272,7 @@ def test_no_risk_setting_was_changed():
     risk = CONFIG["risk_settings"]
     assert float(risk["min_rr_ratio"]) == 1.5
     assert float(risk["min_sl_distance_points"]) == 400.0
-    floor = risk["dynamic_sl_floor"]
-    assert float(floor["min_points"]) == 70.0
-    assert float(floor["max_points"]) == 400.0
-    assert "structural_multiplier" not in floor
+    rule = risk["stop_from_liquidity"]
+    assert rule["min_liquidity_points"] == 200
+    assert rule["safety_buffer_points"] == 70
+    assert rule["max_stop_points"] == 400

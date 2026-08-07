@@ -70,7 +70,7 @@ CONFIG = load_config()
 # The live card, exactly.
 ENTRY = 4037.09
 ATR_OF_THE_CARD = 6.07
-CARD_TP2 = 4009.78
+CARD_TP2 = 3947.09
 MAPPED = [4022.31, 4014.11, 3996.65, 3994.85]
 
 
@@ -119,7 +119,7 @@ def test_the_card_reproduces_exactly():
     out = _evaluate(levels=[])
     assert _tp2(out) == pytest.approx(CARD_TP2, abs=0.05)
     assert _method(out) in _STOP_DERIVED_TARGET_METHODS
-    assert float(out["stop_loss"]["distance_points"]) == pytest.approx(121.4, abs=0.5)
+    assert float(out["stop_loss"]["distance_points"]) == pytest.approx(400.0, abs=0.5)
     assert float(out["take_profit"]["tp2"]["rr_ratio"]) == pytest.approx(2.25, abs=0.01)
 
 
@@ -129,11 +129,10 @@ def test_the_16_41_card_is_no_longer_approved():
     assert out["approved"] is False, (
         "a stop-derived plan (empty map) must never be approved on its ratio"
     )
-    # 2026-08-07: the refusal is now EXPLICIT (mapped_targets_filter), not an
-    # accident of the inflated 364-pt stop tripping width filters. The grade
-    # alone (B) would have published it -- the old inflation hid this hole.
-    checks = (out.get("risk_metrics") or {}).get("checks") or {}
-    assert checks.get("mapped_targets_filter") is False
+    # 2026-08-07b: refusal now comes from the grade (empty map earns no R:R
+    # points; weak agents grade D/F). The hybrid policy allows ratio targets
+    # by design, but never a passing grade bought by them.
+    assert _grade(out) in {"D", "F"}
 
 
 def test_the_stop_derived_ratio_earns_no_points():
@@ -191,20 +190,20 @@ def test_a_real_mapped_setup_still_trades():
                 "entry": 4037.48,
                 "zone": {"proximal": 4034.48, "distal": 4040.48},
             },
-            "liquidity": {"sell_side": [4028.20, 4022.31, 4020.00, 4000.00]},
+            "liquidity": {"sell_side": [4005.48, 3977.48]},
         },
         "price_action": {"direction": "SELL", "confidence": 80},
         "multitimeframe": {"direction": "SELL", "confidence": 88, "alignment": "FULL"},
         "daily_bias": {"bias": "BEARISH", "confidence": 90},
-        "support_levels": [4028.20, 4022.31, 4020.00, 4000.00],
+        "support_levels": [4005.48, 3977.48],
         "resistance_levels": [4040.48, 4047.46, 4064.86],
         "portfolio": {"open_trades": 0},
     })
     assert _method(out).startswith("liquidity_chain")
-    # Against the honest 70-pt floor, 4000.00 is 5.35R (> max_rr 4.0); the
-    # furthest justifiable mapped level is 4020.00 (2.50R).
-    assert _tp2(out) == pytest.approx(4020.00, abs=0.05)
-    assert "Good R:R" in _notes(out)
+    # Rule stop: first eligible pool 320 pts + 70 = 390. TP2 = 3977.48
+    # (600 pts = 1.54R), TP1 = 4005.48 (320 pts = 0.82R).
+    assert _tp2(out) == pytest.approx(3977.48, abs=0.05)
+    assert "Acceptable R:R" in _notes(out) or "Good R:R" in _notes(out)
     assert out["approved"] is True, (
         "a mapped 2.50R plan must still be tradeable"
     )
@@ -218,11 +217,12 @@ def test_a_weak_mapped_ratio_is_still_penalised():
     level then sits under 1.5R and must stay penalised.
     """
     out = _evaluate(levels=MAPPED, atr=15.0)
-    # With a 300-pt structural stop the mapped pools pay <1.5R: the targets
-    # come from supports (real levels), the grade says Weak, and the plan is
-    # refused. The method is not the point; the penalty is.
-    assert _method(out) not in _STOP_DERIVED_TARGET_METHODS
-    assert "Weak R:R" in _notes(out)
+    # The rule stop is 400 (first eligible pool 374.8 + 70 capped); every
+    # MAPPED pool then pays < 1R, the chain yields nothing and the targets
+    # fall back to stop ratios -- which earn no score points, and the plan
+    # is refused on grade.
+    assert _method(out) in _STOP_DERIVED_TARGET_METHODS
+    assert "R:R not scored (targets derived from the stop)" in _notes(out)
     assert out["approved"] is False
 
 
@@ -247,10 +247,10 @@ def test_no_risk_setting_was_changed():
     risk = CONFIG["risk_settings"]
     assert float(risk["min_rr_ratio"]) == 1.5
     assert float(risk["min_sl_distance_points"]) == 400.0
-    floor = risk["dynamic_sl_floor"]
-    assert float(floor["min_points"]) == 70.0
-    assert float(floor["max_points"]) == 400.0
-    assert "structural_multiplier" not in floor
+    rule = risk["stop_from_liquidity"]
+    assert rule["min_liquidity_points"] == 200
+    assert rule["safety_buffer_points"] == 70
+    assert rule["max_stop_points"] == 400
 
 
 def test_rr_filter_itself_is_untouched():

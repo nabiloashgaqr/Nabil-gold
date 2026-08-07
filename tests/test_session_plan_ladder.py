@@ -412,7 +412,7 @@ def test_session_plan_ladder_blocked_without_admission_gate(tmp_path: Path) -> N
 # ─── Liquidity-based targets and the dynamic stop floor ────────────────────
 
 
-def _levels(stop_loss: float, target: float, liquidity=None, cfg_overrides=None):
+def _levels(stop_loss: float, target: float, liquidity=None, cfg_overrides=None, stop_levels=None):
     cfg = _config()
     cfg["risk_settings"] = {
         "min_sl_distance_points": 400,
@@ -423,7 +423,12 @@ def _levels(stop_loss: float, target: float, liquidity=None, cfg_overrides=None)
         "max_rr_ratio": 4.0,
         **(cfg_overrides or {}),
     }
-    candidate = {"details": {"liquidity": {"sell_side": liquidity}}} if liquidity else {}
+    liq = {}
+    if liquidity:
+        liq["sell_side"] = liquidity
+    if stop_levels:
+        liq["buy_side"] = stop_levels
+    candidate = {"details": {"liquidity": liq}} if liq else {}
     return ra._planner_trade_levels(
         cfg, direction="SELL", entry_price=4075.15, stop_loss=stop_loss,
         target_price=target, symbol="XAU/USD", candidate=candidate,
@@ -468,47 +473,46 @@ def test_targets_are_never_invented_when_no_further_liquidity_exists() -> None:
     assert "no usable liquidity" in levels["reject_reason"]
 
 
-def test_dynamic_floor_scales_risk_with_structure() -> None:
-    """A tight POI should not inherit the full fixed floor."""
+def test_liquidity_rule_stop_200_70_400() -> None:
+    """Operator directive 2026-08-07b: first eligible pool (>=200 pts) + 70
+    safety, capped at 400; noise pools (<200) are invisible to the stop."""
     inside = _levels(
-        4085.15, 4064.74, liquidity=[4064.74, 4030.00],
-        cfg_overrides={"dynamic_sl_floor": {"enabled": True,
-                                            "min_points": 70, "max_points": 400}},
-    )
-    assert round((inside["stop_loss"] - 4075.15) * 10) == 100, (
-        "a 100-pt structural stop must pass through untouched (no multiplier)"
-    )
-    raised = _levels(
         4079.0, 4064.74, liquidity=[4064.74, 4030.00],
-        cfg_overrides={"dynamic_sl_floor": {"enabled": True,
-                                            "min_points": 70, "max_points": 400}},
+        stop_levels=[4100.15],  # 250 pts above entry -> 250+70 = 320
+        cfg_overrides={"stop_from_liquidity": {"enabled": True,
+                                               "min_liquidity_points": 200,
+                                               "safety_buffer_points": 70,
+                                               "max_stop_points": 400}},
     )
-    risk = round((raised["stop_loss"] - 4075.15) * 10)
-    assert risk == 70, "structural 38 pts is raised to the 70 pt lower bound"
-
-
-def test_dynamic_floor_is_bounded_by_max_points() -> None:
-    wide = _levels(
-        4090.0, 4064.74, liquidity=[4064.74, 3985.15],
-        cfg_overrides={"dynamic_sl_floor": {"enabled": True,
-                                            "min_points": 70, "max_points": 400}},
-    )
-    risk = round((wide["stop_loss"] - 4075.15) * 10)
-    assert risk == 148, "a 148-pt structural stop stays 148 (inside the band)"
+    assert round((inside["stop_loss"] - 4075.15) * 10) == 320
     capped = _levels(
+        4079.0, 4064.74, liquidity=[4064.74, 4030.00],
+        stop_levels=[4110.15],  # 350 + 70 = 420 -> capped 400
+        cfg_overrides={"stop_from_liquidity": {"enabled": True,
+                                               "min_liquidity_points": 200,
+                                               "safety_buffer_points": 70,
+                                               "max_stop_points": 400}},
+    )
+    assert round((capped["stop_loss"] - 4075.15) * 10) == 400
+
+
+def test_liquidity_rule_noise_pools_ship_400() -> None:
+    """No eligible pool -> the 400 cap ships directly."""
+    out = _levels(
         4079.0, 4064.74, liquidity=[4064.74, 3985.15],
-        cfg_overrides={"dynamic_sl_floor": {"enabled": True,
-                                            "min_points": 70, "max_points": 100}},
+        stop_levels=[4080.15],  # 50 pts: noise, ignored
+        cfg_overrides={"stop_from_liquidity": {"enabled": True,
+                                               "min_liquidity_points": 200,
+                                               "safety_buffer_points": 70,
+                                               "max_stop_points": 400}},
     )
-    assert round((capped["stop_loss"] - 4075.15) * 10) == 70, (
-        "max_points caps the raise: max(70, min(38, 100)) = 70"
-    )
+    assert round((out["stop_loss"] - 4075.15) * 10) == 400
 
 
-def test_dynamic_floor_disabled_keeps_the_fixed_behaviour() -> None:
+def test_rule_disabled_keeps_the_fixed_behaviour() -> None:
     fixed = _levels(
         4079.0, 4064.74, liquidity=[4064.74, 3985.15],
-        cfg_overrides={"dynamic_sl_floor": {"enabled": False}},
+        cfg_overrides={"stop_from_liquidity": {"enabled": False}},
     )
     assert round((fixed["stop_loss"] - 4075.15) * 10) == 400
 

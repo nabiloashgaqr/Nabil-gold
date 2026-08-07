@@ -147,11 +147,12 @@ def _plan_and_candidate():
         "direction": "BUY",
         "entry_price": 4029.64,
         "stop_loss": 4019.64,
-        "target_price": 4051.00,
+        "target_price": 4089.64,
         "quality_grade": "A+",
         "quality_score": 97.0,
         "selection_role": "PRIMARY",
-        "details": {"liquidity": {"buy_side": [4048.00, 4051.00]}},
+        "details": {"liquidity": {"buy_side": [4069.64, 4089.64],
+                                 "sell_side": [4004.64]}},
     }
     return plan, candidate
 
@@ -184,9 +185,9 @@ def test_leg_above_market_with_an_unprotective_stop_is_refused() -> None:
     shape that lost 198 points on 2026-07-29. The replacement is a market fill
     at the better price: 4024.49 instead of 4029.64, five points cheaper.
 
-    The mapped stop of 4019.64 (100 pts, inside the honest [70, 400] band so
-    the 2026-08-07 clamp leaves it untouched) sits 4.85 below the 4024.49
-    fill, so the executed trade is properly protected. The refusal path exists for plans the floor
+    The 2026-08-07b liquidity rule anchors the stop at 250+70=320 pts
+    (sell_side pool 4004.64), i.e. 3989.64 -- 34.85 below the 4024.49 fill,
+    so the executed trade is properly protected. The refusal path exists for plans the floor
     cannot rescue; it is exercised in
     test_unprotective_stop_blocks_a_market_conversion below.
     """
