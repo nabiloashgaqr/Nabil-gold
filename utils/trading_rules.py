@@ -34,11 +34,18 @@ def _f(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _block(cfg: Dict[str, Any], name: str) -> Dict[str, Any]:
+    """Phase 2: the canonical `trading_rules.<name>` block wins; the legacy
+    sections (risk_settings / trade_management / trailing_stop /
+    post_tp2_reentry) remain read-compatible aliases."""
+    return ((cfg or {}).get("trading_rules") or {}).get(name) or {}
+
+
 # ── stops ───────────────────────────────────────────────────────────────────
 
 def stop_rule(cfg: Dict[str, Any]) -> Dict[str, float]:
     """The liquidity-rule stop parameters (200 / 70 / 400 on gold today)."""
-    raw = ((cfg or {}).get("risk_settings") or {}).get("stop_from_liquidity") or {}
+    raw = _block(cfg, "stop") or ((cfg or {}).get("risk_settings") or {}).get("stop_from_liquidity") or {}
     out = dict(DEFAULT_STOP_RULE)
     for key in out:
         if _f(raw.get(key), 0.0) > 0:
@@ -95,11 +102,16 @@ def target_ratios(cfg: Dict[str, Any], risk: Dict[str, Any] | None = None,
                   default_min_tp1_rr: float = DEFAULT_MIN_TP1_RR) -> Dict[str, float]:
     """default_min_tp1_rr=0.0 reproduces the old VALIDATOR semantics (skip the
     check when the key is absent); the target law itself enforces 0.8."""
+    canon = _block(cfg, "targets")
     risk = risk if risk is not None else ((cfg or {}).get("risk_settings") or {})
+    def _pick(canon_key: str, legacy_key: str, default: float) -> float:
+        if _f(canon.get(canon_key), 0.0) > 0:
+            return _f(canon.get(canon_key))
+        return _f(risk.get(legacy_key), default)
     return {
-        "min_tp1_rr": _f(risk.get("min_tp1_rr"), default_min_tp1_rr) or default_min_tp1_rr,
-        "tp2_multiple": _f(risk.get("min_tp2_multiple_of_tp1"), DEFAULT_TP2_MULTIPLE) or DEFAULT_TP2_MULTIPLE,
-        "max_beyond_points": _f(risk.get("max_tp2_beyond_tp1_points"), DEFAULT_MAX_TP2_BEYOND_POINTS),
+        "min_tp1_rr": _pick("min_tp1_rr", "min_tp1_rr", default_min_tp1_rr) or default_min_tp1_rr,
+        "tp2_multiple": _pick("tp2_multiple", "min_tp2_multiple_of_tp1", DEFAULT_TP2_MULTIPLE) or DEFAULT_TP2_MULTIPLE,
+        "max_beyond_points": _pick("max_beyond_points", "max_tp2_beyond_tp1_points", DEFAULT_MAX_TP2_BEYOND_POINTS),
     }
 
 
@@ -155,22 +167,25 @@ def targets_law(
 def trailing_params(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """Same priority as the manager always used: trade_management then the
     legacy trailing_stop section."""
+    canon = _block(cfg, "trailing")
     tm = (cfg or {}).get("trade_management") or {}
     ts = (cfg or {}).get("trailing_stop") or {}
     out = dict(DEFAULT_TRAILING)
-    out["enabled"] = bool(tm.get("trailing_stop_enabled", ts.get("enabled", out["enabled"])))
-    out["distance_points"] = _f(tm.get("trailing_distance_points", ts.get("trailing_distance")), out["distance_points"])
-    out["step_points"] = _f(tm.get("trailing_step_points", ts.get("trailing_step")), out["step_points"])
-    out["early_breakeven_points"] = _f(
-        tm.get("early_breakeven_points", ts.get("early_breakeven_points")), 200.0)
-    out["activation_at"] = str(tm.get("trailing_activation_at", "TP1"))
+    out["enabled"] = bool(canon.get("enabled", tm.get("trailing_stop_enabled", ts.get("enabled", out["enabled"]))))
+    out["distance_points"] = _f(canon.get("distance_points",
+        tm.get("trailing_distance_points", ts.get("trailing_distance"))), out["distance_points"])
+    out["step_points"] = _f(canon.get("step_points",
+        tm.get("trailing_step_points", ts.get("trailing_step"))), out["step_points"])
+    out["early_breakeven_points"] = _f(canon.get("early_breakeven_points",
+        tm.get("early_breakeven_points", ts.get("early_breakeven_points"))), 200.0)
+    out["activation_at"] = str(canon.get("activation_at", tm.get("trailing_activation_at", "TP1")))
     return out
 
 
 # ── post-TP2 re-entry ───────────────────────────────────────────────────────
 
 def post_tp2_rule(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    raw = (cfg or {}).get("post_tp2_reentry") or {}
+    raw = _block(cfg, "post_tp2") or (cfg or {}).get("post_tp2_reentry") or {}
     out = dict(DEFAULT_POST_TP2)
     if _f(raw.get("min_distance_points"), 0.0) > 0:
         out["min_distance_points"] = _f(raw.get("min_distance_points"))
