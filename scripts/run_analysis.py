@@ -523,6 +523,40 @@ def _resolve_reward_target(
     )
 
 
+def _stop_from_liquidity_points(
+    direction: str,
+    entry: float,
+    candidate: Dict[str, Any] | None,
+    rule_cfg: Dict[str, Any],
+    symbol: str,
+) -> float:
+    """Operator directive 2026-08-07b stop distance (points) from the
+    candidate's liquidity map. Mirrors
+    RiskManagementAgent._stop_from_liquidity_points -- keep them in lockstep
+    (test_consensus_stop_matches_planner_stop pins the equality)."""
+    min_liq = _safe_float(rule_cfg.get("min_liquidity_points"), 200.0)
+    buffer = _safe_float(rule_cfg.get("safety_buffer_points"), 70.0)
+    max_stop = _safe_float(rule_cfg.get("max_stop_points"), 400.0)
+    details = ((candidate or {}).get("details") or {}) if isinstance(candidate, dict) else {}
+    liquidity = details.get("liquidity") or {}
+    side = "sell_side" if direction == "BUY" else "buy_side"
+    distances = []
+    for raw in list(liquidity.get(side) or []):
+        level = _safe_float(raw, 0.0)
+        if level <= 0:
+            continue
+        on_side = (level < entry) if direction == "BUY" else (level > entry)
+        if on_side:
+            distances.append(abs(price_to_points(entry - level, symbol=symbol)))
+    eligible = sorted(d for d in distances if d >= min_liq)
+    if not eligible:
+        return max_stop
+    first = eligible[0]
+    if first > max_stop:
+        return max_stop
+    return min(first + buffer, max_stop)
+
+
 def _planner_trade_levels(
     config: Dict[str, Any],
     *,
@@ -552,22 +586,20 @@ def _planner_trade_levels(
     # Scale it instead. The structural stop already embeds an ATR buffer, so a
     # multiple of it tracks volatility, bounded so it can neither collapse to
     # the POI width nor exceed the configured ceiling.
-    # Operator directive (2026-08-07): "تحت السيولة، حد أدنى 70 نقطة".
-    # The structural stop already sits BEYOND the nearest opposing liquidity
-    # with an ATR buffer (_stop_loss), so the floor must NOT multiply or
-    # rewrite it -- it only clamps it between the absolute noise minimum and
-    # the configured ceiling. The earlier x3 era flattened tight structural
-    # stops (30-70 pts on session maps) into a constant, inflated R and made
-    # the liquidity map look illogical.
-    floor_cfg = (risk_cfg.get("dynamic_sl_floor") or {}) if isinstance(risk_cfg, dict) else {}
-    if bool(floor_cfg.get("enabled", False)) and structural_points > 0:
-        hard_min = _safe_float(floor_cfg.get("min_points"), 70.0)
-        hard_max = _safe_float(floor_cfg.get("max_points"), min_sl_points or 400.0)
-        scaled = max(hard_min, min(structural_points, hard_max))
-        min_sl_points = scaled
-        min_sl_distance = points_to_price(scaled, symbol=symbol)
+    # Operator directive (2026-08-07b) -- the liquidity rule for stops, same
+    # arithmetic as RiskManagementAgent._stop_from_liquidity_points (ONE rule,
+    # BOTH doors): ignore liquidity closer than 200 pts; stop = first eligible
+    # level + 70 safety; past 400 or none -> 400 directly. Band [270, 400].
+    rule_cfg = (risk_cfg.get("stop_from_liquidity") or {}) if isinstance(risk_cfg, dict) else {}
+    rule_active = bool(rule_cfg.get("enabled", False))
+    if rule_active:
+        structural_points = _stop_from_liquidity_points(
+            direction, entry_price, candidate, rule_cfg, symbol)
+        min_sl_distance = points_to_price(structural_points, symbol=symbol)
+        adjusted_stop = entry_price - min_sl_distance if direction == "BUY" else entry_price + min_sl_distance
+        floor_applied = True
 
-    if min_sl_distance > 0 and abs(entry_price - adjusted_stop) < min_sl_distance:
+    if not rule_active and min_sl_distance > 0 and abs(entry_price - adjusted_stop) < min_sl_distance:
         adjusted_stop = entry_price - min_sl_distance if direction == "BUY" else entry_price + min_sl_distance
         floor_applied = True
 
