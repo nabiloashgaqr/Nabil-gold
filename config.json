@@ -247,37 +247,41 @@
         "trailing_distance_points": 150,
         "trailing_step_points": 40,
         "partial_close_at_tp1": true,
-        "keep_protected_winners_open": true
+        "keep_protected_winners_open": true,
+        "description_trailing_unified": "توجيه 2026-08-07: تريلنج موحد 150/40 لكل البروفايلات — لا تفاوت بين الانعكاس/الاستمرار/المدى."
       },
       "reversal_profile": {
         "time_warning_hours": 3,
         "expire_after_hours": 18,
         "early_breakeven_points": 100,
-        "trailing_distance_points": 120,
-        "trailing_step_points": 30,
+        "trailing_distance_points": 150,
+        "trailing_step_points": 40,
         "partial_close_at_tp1": true,
         "keep_protected_winners_open": true,
-        "description": "Faster protection for liquidity reversals: BE sooner and tighter trailing after rejection setups."
+        "description": "Faster protection for liquidity reversals: BE sooner and tighter trailing after rejection setups.",
+        "description_trailing_unified": "توجيه 2026-08-07: تريلنج موحد 150/40 لكل البروفايلات — لا تفاوت بين الانعكاس/الاستمرار/المدى."
       },
       "continuation_profile": {
         "time_warning_hours": 5,
         "expire_after_hours": 30,
         "early_breakeven_points": 170,
-        "trailing_distance_points": 170,
-        "trailing_step_points": 45,
+        "trailing_distance_points": 150,
+        "trailing_step_points": 40,
         "partial_close_at_tp1": true,
         "keep_protected_winners_open": true,
-        "description": "Trend continuation profile: allow winners more room before breakeven/trailing."
+        "description": "Trend continuation profile: allow winners more room before breakeven/trailing.",
+        "description_trailing_unified": "توجيه 2026-08-07: تريلنج موحد 150/40 لكل البروفايلات — لا تفاوت بين الانعكاس/الاستمرار/المدى."
       },
       "range_profile": {
         "time_warning_hours": 3,
         "expire_after_hours": 12,
         "early_breakeven_points": 90,
-        "trailing_distance_points": 110,
-        "trailing_step_points": 25,
+        "trailing_distance_points": 150,
+        "trailing_step_points": 40,
         "partial_close_at_tp1": true,
         "keep_protected_winners_open": false,
-        "description": "Range fades are shorter-lived: protect quickly and expire sooner."
+        "description": "Range fades are shorter-lived: protect quickly and expire sooner.",
+        "description_trailing_unified": "توجيه 2026-08-07: تريلنج موحد 150/40 لكل البروفايلات — لا تفاوت بين الانعكاس/الاستمرار/المدى."
       }
     },
     "thesis_exit": {
