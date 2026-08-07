@@ -47,6 +47,7 @@ from services.setup_memory import SetupMemoryService
 from services.setup_performance import SetupPerformanceService
 from services.session_planner import SessionPlannerService
 from utils.helpers import load_config, setup_logging, get_agent_weights
+from utils import trading_rules as _tr
 from utils.instruments import enabled_instruments, config_for_instrument, normalize_symbol, price_to_points, points_to_price
 
 setup_logging()
@@ -478,34 +479,12 @@ def _resolve_reward_target(
     def _level(rr_r: float) -> float:
         return entry_price + risk * rr_r if direction == "BUY" else entry_price - risk * rr_r
 
-    # Operator directive 2026-08-07w: a pool only becomes a target if it is
-    # within max_tp2_beyond_tp1_points (200 pts) of the ratio rung it would
-    # replace or follow. 4500 on the 11:01 card (1559 pts beyond TP1) is not
-    # a target; it is a different trade.
+    # 2026-08-07 audit: the target law lives ONCE in utils.trading_rules.
     risk_cfg = risk_cfg or {}
-    max_beyond = points_to_price(
-        _safe_float(risk_cfg.get("max_tp2_beyond_tp1_points"), 200.0), symbol=symbol)
-    d_ratio = _dist(_level(min_tp1_rr))
-    tp1_pools = [lv for lv in ordered
-                 if d_ratio <= _dist(lv) <= d_ratio + max_beyond]
-    tp1 = min(tp1_pools, key=_dist) if tp1_pools else _level(min_tp1_rr)
-    # TP2 = TP1 + the same distance again (double), unless real liquidity
-    # sits beyond TP1 within the 200-pt band -- then the farthest such pool
-    # is the objective.
-    # TP2 = TP1 + the same distance again (the operator's forced default);
-    # liquidity AFTER that adjusted level, within max_tp2_beyond_tp1_points
-    # (200 pts), is a better objective and becomes TP2. Example: TP1 4344 ->
-    # default TP2 4371; a pool at 4380 (9 beyond) wins; 4500 (129 beyond the
-    # default? no -- 1290 pts) stays a different trade.
-    mult = tp2_multiple if tp2_multiple and tp2_multiple > 1 else 2.0
-    d1 = _dist(tp1)
-    d2_default = mult * d1
-    beyond = [lv for lv in ordered
-              if d2_default < _dist(lv) <= d2_default + max_beyond]
-    if beyond:
-        tp2 = max(beyond, key=_dist)
-    else:
-        tp2 = (entry_price + d2_default) if direction == "BUY" else (entry_price - d2_default)
+    tp1, tp2, _used = _tr.targets_law(
+        direction=direction, entry=entry_price,
+        risk_price=abs(entry_price - stop_loss),
+        levels=ordered, cfg={}, symbol=symbol, risk_cfg=risk_cfg)
     return round(tp1, 2), round(tp2, 2), None
 
 
@@ -516,31 +495,14 @@ def _stop_from_liquidity_points(
     rule_cfg: Dict[str, Any],
     symbol: str,
 ) -> float:
-    """Operator directive 2026-08-07b stop distance (points) from the
-    candidate's liquidity map. Mirrors
-    RiskManagementAgent._stop_from_liquidity_points -- keep them in lockstep
-    (test_consensus_stop_matches_planner_stop pins the equality)."""
-    min_liq = _safe_float(rule_cfg.get("min_liquidity_points"), 200.0)
-    buffer = _safe_float(rule_cfg.get("safety_buffer_points"), 70.0)
-    max_stop = _safe_float(rule_cfg.get("max_stop_points"), 400.0)
+    """Thin wrapper over the single source of truth
+    (utils.trading_rules.stop_from_liquidity_points). 2026-08-07 audit: the
+    formula lives ONCE in the loader; every door delegates."""
     details = ((candidate or {}).get("details") or {}) if isinstance(candidate, dict) else {}
     liquidity = details.get("liquidity") or {}
-    side = "sell_side" if direction == "BUY" else "buy_side"
-    distances = []
-    for raw in list(liquidity.get(side) or []):
-        level = _safe_float(raw, 0.0)
-        if level <= 0:
-            continue
-        on_side = (level < entry) if direction == "BUY" else (level > entry)
-        if on_side:
-            distances.append(abs(price_to_points(entry - level, symbol=symbol)))
-    eligible = sorted(d for d in distances if d >= min_liq)
-    if not eligible:
-        return max_stop
-    first = eligible[0]
-    if first > max_stop:
-        return max_stop
-    return min(first + buffer, max_stop)
+    return _tr.stop_from_liquidity_points(
+        direction=direction, entry=entry, liquidity_map=liquidity,
+        cfg={}, symbol=symbol, rule=rule_cfg)
 
 
 def _planner_trade_levels(
@@ -595,21 +557,11 @@ def _planner_trade_levels(
     # beyond a target that was only 40 pts away, and a 2.25R label on a trade
     # whose real reward-to-risk was 0.58.
     min_rr = _safe_float(risk_cfg.get("min_rr_ratio"), 1.5) or 1.5
-    # A first target must be far enough to survive normal noise, because
-    # reaching it arms the breakeven stop. See _resolve_reward_target.
-    min_tp1_rr = _safe_float(risk_cfg.get("min_tp1_rr"), 0.8)
-    # Operator directive (2026-08-04): far liquidity first, near as fallback.
-    prefer_far = bool(risk_cfg.get("prefer_far_liquidity", True))
-    # Operator directive (2026-08-06): TP2 must sit meaningfully beyond TP1.
-    min_tp2_beyond_rr = _safe_float(risk_cfg.get("min_tp2_beyond_tp1_rr"), 0.5)
+    # 2026-08-07 phase 1: ratios/multiples/bands are read ONLY inside
+    # utils.trading_rules; the doors pass the raw risk block and delegate.
     tp1, tp2, reject_reason = _resolve_reward_target(
         direction, entry_price, adjusted_stop, target_price, candidate, min_rr,
         symbol=symbol,
-        min_tp1_rr=min_tp1_rr,
-        prefer_far=prefer_far,
-        max_rr=max_rr,
-        min_tp2_beyond_rr=min_tp2_beyond_rr,
-        tp2_multiple=_safe_float(risk_cfg.get("min_tp2_multiple_of_tp1"), 2.0),
         risk_cfg=risk_cfg,
     )
     if reject_reason:
@@ -908,7 +860,7 @@ def validate_signal_before_send(
     # 2. Reward. Reaching TP1 arms the breakeven stop, so a token first target
     #    converts a correct call into a flat trade.
     risk_cfg = (config.get("risk_settings") or {}) if isinstance(config, dict) else {}
-    min_tp1_rr = _safe_float(risk_cfg.get("min_tp1_rr"), 0.0)
+    min_tp1_rr = _tr.target_ratios(config or {}, default_min_tp1_rr=0.0)["min_tp1_rr"]
     min_rr = _safe_float(risk_cfg.get("min_rr_ratio"), 0.0)
     tp1_rr = abs(price_to_points(tp1 - entry, symbol=symbol)) / risk_points if tp1 > 0 else 0.0
     tp2_rr = abs(price_to_points(tp2 - entry, symbol=symbol)) / risk_points if tp2 > 0 else 0.0
@@ -2304,13 +2256,14 @@ def _post_tp2_reentry_block(
     re-prices or re-stops one.
     """
     cfg = (config.get("post_tp2_reentry") or {}) if isinstance(config, dict) else {}
-    if cfg.get("enabled", True) is False:
+    if _tr.post_tp2_rule({"post_tp2_reentry": cfg})["enabled"] is False:
         return None
     if direction not in {"BUY", "SELL"}:
         return None
 
-    min_distance_points = float(cfg.get("min_distance_points", 250) or 250)
-    window_hours = float(cfg.get("window_hours", 2) or 2)
+    rule = _tr.post_tp2_rule({"post_tp2_reentry": cfg})
+    min_distance_points = rule["min_distance_points"]
+    window_hours = rule["window_hours"]
     if min_distance_points <= 0 or window_hours <= 0:
         return None
 
@@ -2419,10 +2372,7 @@ def _post_tp2_reentry_reason(
     # The window this rule cares about is TIME SINCE CLOSING, so ask for
     # enough history to cover it rather than trusting a fixed row count. The
     # filter below still discards anything outside the configured hours.
-    window_hours = float(
-        ((config.get("post_tp2_reentry") or {}) if isinstance(config, dict) else {})
-        .get("window_hours", 3) or 3
-    )
+    window_hours = _tr.post_tp2_rule(config or {})["window_hours"]
     # ~12 five-minute cycles an hour, and a cycle can write several rows.
     # Scaled to the window with a floor that keeps the old behaviour for
     # short windows, and a ceiling so a misconfiguration cannot pull the
