@@ -409,6 +409,7 @@ def _resolve_reward_target(
     prefer_far: bool = True,
     max_rr: float = 0.0,
     min_tp2_beyond_rr: float = 0.5,
+    tp2_multiple: float = 2.0,
 ) -> tuple[float, float, str | None]:
     """Pick TP1 and TP2 from the liquidity map.
 
@@ -482,8 +483,11 @@ def _resolve_reward_target(
             tp1 = ordered[0]
         if _dist(ordered[-1]) > _dist(tp2):
             tp2 = ordered[-1]
-    if _dist(tp2) <= _dist(tp1):
-        tp2 = (entry_price + _dist(tp1) + risk * 0.5) if direction == "BUY" else (entry_price - _dist(tp1) - risk * 0.5)
+    # Operator directive 2026-08-07d: TP2 must be at least DOUBLE the TP1
+    # distance; the multiple extends the 1.5R floor whenever 2xTP1 outruns it.
+    mult = tp2_multiple if tp2_multiple and tp2_multiple > 1 else 2.0
+    if _dist(tp2) < mult * _dist(tp1):
+        tp2 = (entry_price + mult * _dist(tp1)) if direction == "BUY" else (entry_price - mult * _dist(tp1))
     return round(tp1, 2), round(tp2, 2), None
 
 
@@ -586,6 +590,7 @@ def _planner_trade_levels(
         prefer_far=prefer_far,
         max_rr=max_rr,
         min_tp2_beyond_rr=min_tp2_beyond_rr,
+        tp2_multiple=_safe_float(risk_cfg.get("min_tp2_multiple_of_tp1"), 2.0),
     )
     if reject_reason:
         return {
