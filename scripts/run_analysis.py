@@ -492,13 +492,20 @@ def _resolve_reward_target(
     # TP2 = TP1 + the same distance again (double), unless real liquidity
     # sits beyond TP1 within the 200-pt band -- then the farthest such pool
     # is the objective.
+    # TP2 = TP1 + the same distance again (the operator's forced default);
+    # liquidity AFTER that adjusted level, within max_tp2_beyond_tp1_points
+    # (200 pts), is a better objective and becomes TP2. Example: TP1 4344 ->
+    # default TP2 4371; a pool at 4380 (9 beyond) wins; 4500 (129 beyond the
+    # default? no -- 1290 pts) stays a different trade.
+    mult = tp2_multiple if tp2_multiple and tp2_multiple > 1 else 2.0
     d1 = _dist(tp1)
-    beyond = [lv for lv in ordered if d1 < _dist(lv) <= d1 + max_beyond]
+    d2_default = mult * d1
+    beyond = [lv for lv in ordered
+              if d2_default < _dist(lv) <= d2_default + max_beyond]
     if beyond:
         tp2 = max(beyond, key=_dist)
     else:
-        mult = tp2_multiple if tp2_multiple and tp2_multiple > 1 else 2.0
-        tp2 = (entry_price + mult * d1) if direction == "BUY" else (entry_price - mult * d1)
+        tp2 = (entry_price + d2_default) if direction == "BUY" else (entry_price - d2_default)
     return round(tp1, 2), round(tp2, 2), None
 
 
