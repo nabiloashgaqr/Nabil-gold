@@ -126,14 +126,19 @@ class RiskManagementAgent(BaseAgent):
             # 400 and remains the ceiling (dynamic_sl_floor.max_points), and
             # min_rr_ratio is untouched. This only makes the second door read
             # the floor the first door already uses.
+            # Operator directive (2026-08-07): "تحت السيولة، حد أدنى 70 نقطة".
+            # The structural stop is already beyond the nearest opposing
+            # liquidity with an ATR buffer; the floor only clamps it between
+            # the absolute noise minimum and the ceiling. Never multiply it:
+            # the x3 era flattened tight structural stops into a constant and
+            # inflated the R ruler (see STOP_LIQUIDITY_DIAGNOSIS_AR.md).
             min_sl_points = self._f(self.settings.get("min_sl_distance_points"), 0.0)
             structural_points = abs(price_to_points(entry_price - stop_loss, self.symbol))
             floor_cfg = self.settings.get("dynamic_sl_floor") or {}
             if bool(floor_cfg.get("enabled", False)) and structural_points > 0:
-                multiplier = self._f(floor_cfg.get("structural_multiplier"), 3.0) or 3.0
-                hard_min = self._f(floor_cfg.get("min_points"), 150.0)
+                hard_min = self._f(floor_cfg.get("min_points"), 70.0)
                 hard_max = self._f(floor_cfg.get("max_points"), min_sl_points or 400.0)
-                min_sl_points = max(hard_min, min(structural_points * multiplier, hard_max))
+                min_sl_points = max(hard_min, min(structural_points, hard_max))
             min_sl_distance = points_to_price(min_sl_points, self.symbol)
             if min_sl_distance > 0 and abs(entry_price - stop_loss) < min_sl_distance:
                 sl_mult = self._f(self.settings.get("atr_multiplier_sl"), 2.0) or 2.0
@@ -235,6 +240,16 @@ class RiskManagementAgent(BaseAgent):
                 target_method=target_method,
             )
             checks["trade_grade_filter"] = risk_profile["grade"] not in {"D", "F"}
+            # Operator policy (16:41 incident; reaffirmed with the 2026-08-07
+            # floor change): a plan whose targets were invented from the stop
+            # -- no usable liquidity map -- must never be approved on its
+            # ratio. Under the old inflated floor this held BY ACCIDENT: the
+            # fake 364-pt stop tripped the width filters. With honest
+            # structural stops the rule must be explicit, or the 16:41 bug
+            # returns through the door the inflation used to block.
+            checks["mapped_targets_filter"] = (
+                target_method not in _STOP_DERIVED_TARGET_METHODS
+            )
             approved = all(checks.values())
             rejection_reason = None if approved else self._first_failed_reason(checks)
             # Grade sizes the setup; moment quality sizes the conditions it is
