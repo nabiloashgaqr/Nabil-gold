@@ -1067,8 +1067,10 @@ class RiskManagementAgent(BaseAgent):
             if _dist(ordered[-1]) > _dist(tp2):
                 tp2 = ordered[-1]
                 used_pool = True
-        if _dist(tp2) <= _dist(tp1):
-            tp2 = (tp1 + risk * 0.5) if direction == "BUY" else (tp1 - risk * 0.5)
+        # Operator directive 2026-08-07d: TP2 >= double the TP1 distance.
+        mult = self._f(self.settings.get("min_tp2_multiple_of_tp1"), 2.0) or 2.0
+        if _dist(tp2) < mult * _dist(tp1):
+            tp2 = (entry + mult * _dist(tp1)) if direction == "BUY" else (entry - mult * _dist(tp1))
         method = "liquidity_chain" if used_pool else "rr_from_floored_sl"
         return round(tp1, 2), round(tp2, 2), method
 
@@ -1132,161 +1134,6 @@ class RiskManagementAgent(BaseAgent):
         if widened:
             payload["widened_to_min_width"] = True
         return payload
-
-    def _liquidity_chain_targets(
-        self,
-        *,
-        direction: str,
-        entry: float,
-        stop_loss: float,
-        liquidity_map: Dict[str, Any] | None,
-        supports: List[float],
-        resistances: List[float],
-        atr: float,
-        structural_risk: float | None = None,
-    ) -> Tuple[float | None, float | None, str]:
-        """TP1 and TP2 from the levels price is actually drawn to.
-
-        The nearest pool is where price is heading next; the pool beyond it is
-        where the move ends. Taking both is what separates a 456-point trade
-        from the 677 the manual analyst booked on the same map: on 2026-07-30
-        his chart marked tp-1 at ~4093 and an extended target at 4132.389,
-        while the system shipped TP2 at 4093.31 and left 257 points behind.
-
-        Rules, in order:
-          * a target must be ahead of entry by at least one ATR, so TP1 is not
-            a level price is already sitting on;
-          * TP2 must clear ``min_rr_ratio`` against the ACTUAL stop, which is
-            what makes this safe to run after the floor has widened it;
-          * if the pools are exhausted, structure (support/resistance) is used
-            before giving up.
-
-        Returns ``(None, None, "")`` when the map cannot produce a qualifying
-        pair, so the caller keeps its existing fallback rather than inventing
-        a level. Targets are never fabricated here.
-        """
-        liquidity_map = liquidity_map or {}
-        risk = abs(entry - stop_loss)
-        if risk <= 0 or entry <= 0:
-            return None, None, ""
-
-        min_rr = self._f(self.settings.get("min_rr_ratio"), 1.5) or 1.5
-        min_distance = max(atr, 0.80)
-
-        side_key = "buy_side" if direction == "BUY" else "sell_side"
-        structure = resistances if direction == "BUY" else supports
-
-        def _ahead(level: float) -> bool:
-            return (level - entry) >= min_distance if direction == "BUY" else (entry - level) >= min_distance
-
-        levels: List[float] = []
-        for raw in list(liquidity_map.get(side_key) or []):
-            value = self._f(raw, 0.0)
-            if value > 0 and _ahead(value):
-                levels.append(value)
-        for raw in list(structure or []):
-            value = self._f(raw, 0.0)
-            if value > 0 and _ahead(value):
-                levels.append(value)
-
-        if not levels:
-            return None, None, ""
-
-        # Nearest first: the order price would meet them in.
-        ordered = sorted(set(levels), key=lambda lv: abs(lv - entry))
-
-        # TARGET POLICY (operator directive, 2026-08-04): look at FAR
-        # liquidity first, then near -- far liquidity is better. TP2 is the
-        # level the trade is held for, so aim it at the FURTHEST real pool
-        # whose reward the risk justifies (rr >= min_rr), never beyond
-        # max_rr_ratio when a cap is set, so the pick stays a level the map
-        # actually drew. This is exactly the docstring's old promise --
-        # "reaching for the furthest level the real risk can justify" --
-        # which the previous nearest-first pick did not keep: on 2026-07-30
-        # the manual analyst booked 257 points more than the shipped TP2 on
-        # the same map because his eye went to the far pool first.
-        max_rr = self._f(self.settings.get("max_rr_ratio"), 0.0)
-        prefer_far = bool(self.settings.get("prefer_far_liquidity", True))
-
-        def _pick(pool_risk: float) -> float | None:
-            if pool_risk <= 0:
-                return None
-            qualifying = [lv for lv in ordered if abs(lv - entry) / pool_risk >= min_rr]
-            if not qualifying:
-                return None
-            if not prefer_far:
-                return qualifying[0]
-            within_cap = [
-                lv for lv in qualifying
-                if max_rr <= 0 or abs(lv - entry) / pool_risk <= max_rr
-            ]
-            return within_cap[-1] if within_cap else qualifying[0]
-
-        tp2 = _pick(risk)
-        method = "liquidity_chain"
-
-        if tp2 is None and structural_risk and structural_risk > 0:
-            # THE FLOOR MUST NOT VETO THE MAP.
-            #
-            # `risk` here is the SHIPPED stop, which the noise floor has
-            # widened -- on XAU by up to 3x the structural distance. Asking
-            # "does this level pay for that padded risk?" is a different
-            # question from "is this level a real objective", and when the
-            # padding is large enough the answer is always no. The chain then
-            # returns nothing and the caller rebuilds targets from the floor
-            # itself: the -400/+500/+900 signature.
-            #
-            # Measured on the live 2026-08-03 16:11 card (d0c708d9, SELL
-            # 4045.99, structural stop 132.7 pts floored to 398):
-            #
-            #   vs 398 pts    4022.31=0.59R 4014.11=0.80R 3996.65=1.24R  none
-            #   vs 132.7 pts  4022.31=1.78R 4014.11=2.40R 3996.65=3.72R  all
-            #
-            # Same map, opposite verdict, decided only by which stop asked.
-            #
-            # So: try the shipped stop FIRST -- that keeps reaching for the
-            # furthest level the real risk can justify, which is what makes
-            # TP2 4000.00 rather than the nearest pool. Only when nothing
-            # qualifies do we re-ask against structure, so the map is still
-            # used instead of inventing a ratio target.
-            #
-            # This never loosens min_rr_ratio on the published plan: the
-            # caller recomputes rr_tp2 against the real, floored stop and
-            # `rr_filter` still refuses the trade if it does not pay. It only
-            # decides WHERE to aim, never whether to trade.
-            # A REAL LEVEL IS NOT REQUIRED TO BEAT AN INVENTED ONE.
-            #
-            # An earlier version of this branch only accepted the structural
-            # pick when it was further than the caller's ratio target
-            # (floored_risk x tp2_mult/sl_mult). That is backwards: the ratio
-            # target is the very fiction this is meant to replace -- on the
-            # 16:11 card it sat at 3956.44, which is 398 x 2.25 and not a
-            # level anyone drew. Requiring the map to out-reach it guarantees
-            # the fiction wins whenever the floor is large, which is exactly
-            # when it matters.
-            #
-            # The map wins on being real. Whether the trade is worth taking
-            # is a separate question, answered downstream by `rr_filter`
-            # against the shipped stop -- which is why the 16:11 setup is now
-            # refused outright instead of being published with invented
-            # targets.
-            tp2 = _pick(structural_risk)
-            if tp2 is not None:
-                method = "liquidity_chain_structural"
-
-        if tp2 is None:
-            return None, None, ""
-
-        # TP1 is the nearest pool short of TP2: it books the first half and
-        # arms the protection early, while the runner stays aimed at the far
-        # objective -- the manual-analyst pattern of a near TP1 with a far
-        # extension. When TP2 is itself the nearest level, split the distance
-        # rather than stacking both targets on one price -- a TP1 equal to TP2
-        # makes the partial close meaningless.
-        nearer = [lv for lv in ordered if abs(lv - entry) < abs(tp2 - entry)]
-        tp1 = nearer[0] if nearer else round((entry + tp2) / 2.0, 2)
-
-        return tp1, tp2, method
 
     def _run_filters(
         self,
