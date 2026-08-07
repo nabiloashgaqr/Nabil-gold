@@ -215,16 +215,10 @@ class RiskManagementAgent(BaseAgent):
                     target_method = "rr_from_floored_sl"
                     target_map.update({"tp1_basis": "rr_fallback", "tp2_basis": "rr_fallback"})
 
+            # 2026-08-07c: the max_rr cap is gone -- the operator's rule is
+            # "compare liquidity x ratio and ship the farther objective";
+            # capping would veto the far pools the rule exists to aim at.
             risk_distance = abs(entry_price - stop_loss)
-            max_rr = self._f(self.settings.get("max_rr_ratio"), 4.0)
-            if risk_distance > 0 and max_rr > 0:
-                max_tp2_distance = risk_distance * max_rr
-                if direction == "BUY" and tp2 - entry_price > max_tp2_distance:
-                    tp2 = entry_price + max_tp2_distance
-                    tp3 = max(tp3, tp2 + atr)
-                elif direction == "SELL" and entry_price - tp2 > max_tp2_distance:
-                    tp2 = entry_price - max_tp2_distance
-                    tp3 = min(tp3, tp2 - atr)
             tp1_distance = abs(tp1 - entry_price)
             tp2_distance = abs(tp2 - entry_price)
             rr_tp1 = tp1_distance / risk_distance if risk_distance else 0.0
@@ -954,6 +948,129 @@ class RiskManagementAgent(BaseAgent):
                 tp1, tp2 = atr_tp1, atr_tp2
             tp3 = min(entry - atr * tp3_mult, tp2 - atr)
         return tp1, tp2, tp3, method, target_map
+
+    def _entry_zone_with_floor(
+        self,
+        entry_zone: Dict[str, Any],
+        *,
+        entry_price: float,
+        atr: float,
+    ) -> Dict[str, Any]:
+        """Publish the entry area at no less than the configured floor.
+
+        Reads ``session_planner.min_entry_zone_width_points`` -- the same
+        setting SessionPlannerService enforces -- so both paths describe the
+        same map. Set it to 0 to disable widening entirely.
+
+        The area is widened symmetrically around the reference entry, which
+        keeps the mapped price where the analysis put it. ``proximal`` and
+        ``distal`` are carried with the edges they belong to, so the stop
+        (placed behind the distal edge) moves with the zone rather than
+        landing inside it.
+        """
+        default_half = max(0.20, atr * 0.07)
+        low = self._f(entry_zone.get("low", entry_price - default_half), entry_price - default_half)
+        high = self._f(entry_zone.get("high", entry_price + default_half), entry_price + default_half)
+        if high < low:
+            low, high = high, low
+        proximal = self._f(entry_zone.get("proximal", entry_price), entry_price)
+        distal = self._f(entry_zone.get("distal", entry_price), entry_price)
+
+        planner_cfg = (self.config.get("session_planner") or {}) if isinstance(self.config, dict) else {}
+        floor_points = self._f(planner_cfg.get("min_entry_zone_width_points"), 0.0)
+        widened = False
+        if floor_points > 0 and low > 0 and high > 0:
+            floor_price = points_to_price(floor_points, self.symbol)
+            width = high - low
+            if width < floor_price:
+                missing = floor_price - width
+                anchor = entry_price if low <= entry_price <= high else (low + high) / 2.0
+                upper_share = ((high - anchor) / width) if width > 0 else 0.5
+                upper_share = min(max(upper_share, 0.0), 1.0)
+                new_low = low - missing * (1.0 - upper_share)
+                new_high = high + missing * upper_share
+                # Keep proximal/distal on the edges they described.
+                if abs(proximal - low) < abs(proximal - high):
+                    proximal = new_low
+                    distal = new_high
+                else:
+                    proximal = new_high
+                    distal = new_low
+                low, high, widened = new_low, new_high, True
+
+        payload = {
+            "low": round(low, 2),
+            "high": round(high, 2),
+            "proximal": round(proximal, 2),
+            "distal": round(distal, 2),
+            "fill_at": entry_zone.get("fill_at", "mid"),
+            "source": entry_zone.get("source", "atr"),
+        }
+        if widened:
+            payload["widened_to_min_width"] = True
+        return payload
+
+    def _liquidity_chain_targets(
+        self,
+        *,
+        direction: str,
+        entry: float,
+        stop_loss: float,
+        liquidity_map: Dict[str, Any] | None,
+        supports: List[float],
+        resistances: List[float],
+        atr: float,
+        structural_risk: float | None = None,
+    ) -> Tuple[float | None, float | None, str]:
+        """Targets = the FARTHER of (stop ratio, liquidity), per target.
+
+        Operator directive 2026-08-07c: a plan the agents approved is never
+        refused on reward; the minimums are enforced BY CONSTRUCTION:
+            TP1 = farther(0.8R of the stop, nearest pool ahead)
+            TP2 = farther(1.5R of the stop, farthest pool ahead)
+        The operator's own example: stop 270 -> ratio TP1 ~216 pts; a pool
+        at 250 pts is farther, so TP1 = 250. With no pools the ratios ship,
+        labelled stop-derived so they earn no R:R score points.
+        """
+        risk = abs(entry - stop_loss)
+        if risk <= 0 or entry <= 0:
+            return None, None, ""
+        min_rr = self._f(self.settings.get("min_rr_ratio"), 1.5) or 1.5
+        min_tp1_rr = self._f(self.settings.get("min_tp1_rr"), 0.8) or 0.8
+        liquidity_map = liquidity_map or {}
+        side_key = "buy_side" if direction == "BUY" else "sell_side"
+        structure = resistances if direction == "BUY" else supports
+
+        def _ahead(level: float) -> bool:
+            return (level > entry) if direction == "BUY" else (level < entry)
+
+        def _dist(level: float) -> float:
+            return abs(level - entry)
+
+        levels: List[float] = []
+        for raw in list(liquidity_map.get(side_key) or []) + list(structure or []):
+            value = self._f(raw, 0.0)
+            if value > 0 and _ahead(value):
+                levels.append(value)
+        ordered = sorted(set(levels), key=_dist)
+
+        def _level(rr_r: float) -> float:
+            return entry + risk * rr_r if direction == "BUY" else entry - risk * rr_r
+
+        tp1 = _level(min_tp1_rr)
+        tp2 = _level(min_rr)
+        used_pool = False
+        if ordered:
+            if _dist(ordered[0]) > _dist(tp1):
+                tp1 = ordered[0]
+                used_pool = True
+            if _dist(ordered[-1]) > _dist(tp2):
+                tp2 = ordered[-1]
+                used_pool = True
+        if _dist(tp2) <= _dist(tp1):
+            tp2 = (tp1 + risk * 0.5) if direction == "BUY" else (tp1 - risk * 0.5)
+        method = "liquidity_chain" if used_pool else "rr_from_floored_sl"
+        return round(tp1, 2), round(tp2, 2), method
 
     def _entry_zone_with_floor(
         self,
