@@ -629,16 +629,10 @@ def _planner_trade_levels(
     if floor_applied and target_method == "mapped_target":
         target_method = "mapped_target_with_floored_sl"
 
+    # 2026-08-07 audit: the max_rr cap is removed here as well -- with the
+    # liquidity rule (stop >= 270 pts) it is mathematically inert, and as a
+    # directive the operator's band/double rule is the only target law.
     risk = abs(adjusted_stop - entry_price)
-    if max_rr > 0 and risk > 0:
-        max_tp2_distance = risk * max_rr
-        if direction == "BUY" and tp2 - entry_price > max_tp2_distance:
-            tp2 = entry_price + max_tp2_distance
-            target_method += "+max_rr_cap"
-        elif direction == "SELL" and entry_price - tp2 > max_tp2_distance:
-            tp2 = entry_price - max_tp2_distance
-            target_method += "+max_rr_cap"
-
     rr = abs(tp2 - entry_price) / risk if risk > 0 else 0.0
     return {
         "entry_price": round(entry_price, 2),
