@@ -97,35 +97,11 @@ class RiskManagementAgent(BaseAgent):
             # close SL may sit to entry. When the floor widens the stop,
             # TP1/TP2/TP3 are rescaled from the SAME R:R ratios implied by the
             # configured ATR multipliers (tp_mult/sl_mult) applied to the new,
-            # wider stop distance - otherwise R:R would shrink and min_rr_ratio
-            # would start rejecting trades purely because SL got floored.
-            #
-            # ONE FLOOR, BOTH DOORS.
-            #
-            # `dynamic_sl_floor` was added to stop the flat 400 from setting
-            # the risk on every gold plan, and `_planner_trade_levels` in
-            # scripts/run_analysis.py honours it. This agent did not: it read
-            # `min_sl_distance_points` raw, so the CONSENSUS/two-agent route
-            # -- the route that actually builds the shipped order at
-            # run_analysis.py:3894 -- kept flooring every stop to the full
-            # 400 while the map and the planner priced the same leg at 150.
-            #
-            # Measured on the real 2026-08-03 signal 2f72579f (SELL 4037.48,
-            # zone 4034.48-4040.48): structural stop 33-50 pts, this door
-            # shipped 400 pts, the other door returns 150 pts.
-            #
-            # The consequence is the whole liquidity map being unreachable.
-            # Against a 400-pt stop the analyst's own levels score
-            # 4028.20=0.23R, 4022.31=0.38R, 4020.00=0.44R, 4000.00=0.94R --
-            # every one below min_rr_ratio 1.5, so the mapped target is
-            # refused and the ratio fallback ships the -400/+500/+900
-            # signature. Against the scaled floor 4000.00 is 2.50R and the
-            # chain has something real to aim at.
-            #
-            # No risk setting is changed here: min_sl_distance_points stays
-            # 400 and remains the ceiling (dynamic_sl_floor.max_points), and
-            # min_rr_ratio is untouched. This only makes the second door read
-            # the floor the first door already uses.
+            # HISTORICAL (pre 2026-08-07): flat 400 floor, then x3 scaling,
+            # then a 70-pt clamp. ALL SUPERSEDED by the operator liquidity
+            # rule below (stop_from_liquidity: ignore <200 pts, +70 safety,
+            # cap 400) and the target law (0.8R rung, 200-pt band, double
+            # TP2). Keep this note so no future change revives a dead era.
             # Operator directive (2026-08-07b) — the liquidity rule for stops:
             # liquidity closer than min_liquidity_points (200) is swept noise:
             # ignore it and look farther. The stop sits safety_buffer_points
