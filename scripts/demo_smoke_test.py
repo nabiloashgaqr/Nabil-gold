@@ -42,8 +42,12 @@ def main() -> None:
           bool(info) and "real" not in str(getattr(info, "trade_mode", "")).lower(),
           "REFUSE real accounts in this phase")
 
-    # 3. symbol + candles + timezone offset
-    sym = "XAUUSD"
+    # 3. symbol + candles + timezone offset (broker symbol read from config:
+    #    XAU/USD -> XAUUSD.s on JustMarkets; never hard-coded here again)
+    from utils.helpers import load_config
+    _cfg = load_config()
+    sym = (((_cfg.get("execution") or {}).get("demo") or {})
+           .get("symbol_map") or {}).get("XAU/USD", "XAUUSD.s")
     info = mt5.symbol_info(sym)
     check(f"symbol {sym} exists", bool(info))
 
@@ -59,8 +63,8 @@ def main() -> None:
           float(info.volume_min) <= 0.05,
           "below this the TP1 half-close degrades to full-close")
     from services import mt5_feed
-    payload = mt5_feed.get_candles("XAU/USD", "5m", 100, {"XAU/USD": "XAUUSD"})
-    check("mt5 candles payload", bool(payload and len(payload["data"]) == 100))
+    payload = mt5_feed.get_candles("XAU/USD", "5m", 100, {"XAU/USD": sym})
+    check(f"mt5 candles payload ({sym})", bool(payload and len(payload["data"]) == 100))
 
     # 4. demo table reachable
     from services.database import DatabaseService

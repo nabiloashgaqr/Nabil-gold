@@ -115,7 +115,9 @@ class TickManager:
             try:
                 rows = self._magic_rows()
                 for row in rows:
-                    sym = str(row.get("symbol") or "XAU/USD").replace("/", "")
+                    # Route through the broker symbol map (XAU/USD -> XAUUSD.s);
+                    # a raw slash-strip goes blind on suffix brokers.
+                    sym = executor._sym(str(row.get("symbol") or "XAU/USD"))
                     tick = mt5.symbol_info_tick(sym)
                     if tick is None:
                         continue
