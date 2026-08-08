@@ -199,7 +199,21 @@ class MarketDataService:
             return cached["payload"]
 
         payload: Dict[str, Any] | None = None
-        if self.api_key and self.api_key != "YOUR_API_KEY":
+        # demo/mt5 branch (phase 1): MT5 as primary feed when configured;
+        # paper main keeps data_source.primary=twelvedata so nothing changes.
+        data_cfg_src = (self.config.get("data_source") or {})
+        if str(data_cfg_src.get("primary")) == "mt5":
+            try:
+                from services import mt5_feed
+                demo_map = (((self.config.get("execution") or {})
+                             .get("demo") or {}).get("symbol_map")) or None
+                payload = mt5_feed.get_candles(
+                    self.symbol, timeframe=timeframe, outputsize=outputsize,
+                    symbol_map=demo_map)
+            except Exception as exc:  # noqa: BLE001 - fall back silently
+                logger.warning("MT5 feed unavailable, falling back: %s", exc)
+                payload = None
+        if self.api_key and self.api_key != "YOUR_API_KEY" and payload is None:
             payload = self._fetch_data(timeframe, outputsize)
 
         if payload is None:

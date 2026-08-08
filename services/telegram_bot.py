@@ -50,6 +50,14 @@ class TelegramService:
         self.session = requests.Session()
 
     def send_message(self, text: str, urgent: bool = False, chat_id: str | None = None) -> bool:
+        # demo/mt5 branch (phase 1): route every card to the demo chat with a
+        # 🧪 prefix when EXECUTION_MODE=mt5_demo and a demo chat is configured.
+        demo_chat = os.environ.get("TELEGRAM_DEMO_CHAT_ID")
+        if (os.environ.get("EXECUTION_MODE") == "mt5_demo" and demo_chat
+                and not chat_id):
+            chat_id = demo_chat
+            if not text.startswith("🧪"):
+                text = "🧪 DEMO · " + text
         if not self.bot_token or not (chat_id or self.chat_id):
             return False
         url = self.API_BASE.format(token=self.bot_token, method="sendMessage")

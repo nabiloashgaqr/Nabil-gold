@@ -34,6 +34,8 @@ class DatabaseService:
     def __init__(self, config: Dict[str, Any] | None = None) -> None:
         self.config = config or load_config()
         self.logger = logging.getLogger(self.__class__.__name__)
+        # demo/mt5 branch: demo executions write to trades_demo via env.
+        self.trades_table = os.environ.get("TRADES_TABLE") or "trades"
         db_config = self.config.get("database", {})
         self.url = os.environ.get("SUPABASE_URL") or db_config.get("url")
         self.key = os.environ.get("SUPABASE_KEY") or db_config.get("key")
@@ -783,7 +785,7 @@ class DatabaseService:
         plus not-yet-filled PENDING limit/stop orders."""
         if self.use_supabase and self.client:
             try:
-                response = self.client.table("trades").select("*").in_("status", self.ACTIVE_STATUSES).execute()
+                response = self.client.table(self.trades_table).select("*").in_("status", self.ACTIVE_STATUSES).execute()
                 return list(response.data or [])
             except Exception as exc:  # noqa: BLE001
                 if self._strict_supabase():
@@ -850,7 +852,7 @@ class DatabaseService:
             trades = load_trades(self.local_path)
             if self.use_supabase and self.client:
                 try:
-                    response = self.client.table("trades").select("*").execute()
+                    response = self.client.table(self.trades_table).select("*").execute()
                     trades = list(response.data or [])
                 except Exception as exc:  # noqa: BLE001
                     self.logger.error("execute_query trades fallback after Supabase error: %s", exc)
@@ -939,7 +941,7 @@ class DatabaseService:
 
         if self.use_supabase and self.client:
             try:
-                query = self.client.table("trades").select("id,symbol,type,side,status").eq("status", "PENDING")
+                query = self.client.table(self.trades_table).select("id,symbol,type,side,status").eq("status", "PENDING")
                 if norm_symbol:
                     query = query.eq("symbol", norm_symbol)
                 if norm_direction:
@@ -1053,7 +1055,7 @@ class DatabaseService:
                 # Using an 'or' filter in Supabase: (created_at >= start AND created_at < end) OR (closed_at >= start AND closed_at < end)
                 filter_str = f"and(created_at.gte.{start_utc},created_at.lt.{end_utc}),and(closed_at.gte.{start_utc},closed_at.lt.{end_utc})"
                 response = (
-                    self.client.table("trades")
+                    self.client.table(self.trades_table)
                     .select("*")
                     .or_(filter_str)
                     .execute()
@@ -1081,12 +1083,12 @@ class DatabaseService:
         """Return recent trades ordered newest first, supporting legacy schemas."""
         if self.use_supabase and self.client:
             try:
-                response = self.client.table("trades").select("*").order("created_at", desc=True).limit(limit).execute()
+                response = self.client.table(self.trades_table).select("*").order("created_at", desc=True).limit(limit).execute()
                 return list(response.data or [])
             except Exception as exc:  # noqa: BLE001
                 if self._missing_column(exc, "created_at"):
                     try:
-                        response = self.client.table("trades").select("*").order("updated_at", desc=True).limit(limit).execute()
+                        response = self.client.table(self.trades_table).select("*").order("updated_at", desc=True).limit(limit).execute()
                         return list(response.data or [])
                     except Exception as fallback_exc:  # noqa: BLE001
                         if self._strict_supabase():
@@ -1123,7 +1125,7 @@ class DatabaseService:
             for order_column in ("closed_at", "close_time", "created_at"):
                 try:
                     response = (
-                        self.client.table("trades").select("*")
+                        self.client.table(self.trades_table).select("*")
                         .in_("status", statuses)
                         .order(order_column, desc=True)
                         .limit(limit)
@@ -1172,7 +1174,7 @@ class DatabaseService:
             for column in ("closed_at", "close_time"):
                 try:
                     query = (
-                        self.client.table("trades").select("*")
+                        self.client.table(self.trades_table).select("*")
                         .gte(column, since_iso)
                         .order(column, desc=True)
                         .limit(limit)
@@ -1266,12 +1268,12 @@ class DatabaseService:
         """
         assert self.client is not None
         try:
-            self.client.table("trades").insert(trade_data).execute()
+            self.client.table(self.trades_table).insert(trade_data).execute()
             return
         except Exception as exc:  # noqa: BLE001
             try:
                 _, dropped = self._drop_missing_columns_and_retry(
-                    lambda p: self.client.table("trades").insert(p).execute(), trade_data
+                    lambda p: self.client.table(self.trades_table).insert(p).execute(), trade_data
                 )
                 if dropped:
                     self.logger.warning(
@@ -1285,7 +1287,7 @@ class DatabaseService:
                 if legacy == trade_data:
                     raise
                 self.logger.warning("Full trade insert failed, trying legacy schema: %s", exc)
-                self.client.table("trades").insert(legacy).execute()
+                self.client.table(self.trades_table).insert(legacy).execute()
 
     def _update_trade_supabase(self, trade_id: str, updates: Dict[str, Any]) -> None:
         """Update full trade row.
@@ -1295,12 +1297,12 @@ class DatabaseService:
         """
         assert self.client is not None
         try:
-            self.client.table("trades").update(updates).eq("id", trade_id).execute()
+            self.client.table(self.trades_table).update(updates).eq("id", trade_id).execute()
             return
         except Exception as exc:  # noqa: BLE001
             try:
                 _, dropped = self._drop_missing_columns_and_retry(
-                    lambda p: self.client.table("trades").update(p).eq("id", trade_id).execute(), updates
+                    lambda p: self.client.table(self.trades_table).update(p).eq("id", trade_id).execute(), updates
                 )
                 if dropped:
                     self.logger.warning(
@@ -1314,7 +1316,7 @@ class DatabaseService:
                 if not legacy or legacy == updates:
                     raise
                 self.logger.warning("Full trade update failed, trying legacy schema: %s", exc)
-                self.client.table("trades").update(legacy).eq("id", trade_id).execute()
+                self.client.table(self.trades_table).update(legacy).eq("id", trade_id).execute()
 
     def _legacy_payload(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Keep only columns from the initial Supabase schema for compatibility."""
