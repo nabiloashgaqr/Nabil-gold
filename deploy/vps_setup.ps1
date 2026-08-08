@@ -30,6 +30,7 @@ if (-not (Test-Path .env)) { Copy-Item deploy\.env.example .env; Write-Host "EDI
 $here = (Get-Location).Path
 schtasks /Create /TN "SS_DemoLoop" /SC MINUTE /MO 5 /TR "cmd /c cd /d $here && python scripts\run_demo_loop.py >> demo_loop.log 2>&1" /F
 schtasks /Create /TN "SS_DemoWatchdog" /SC MINUTE /MO 1 /TR "cmd /c cd /d $here && python scripts\demo_watchdog.py" /F
+schtasks /Create /TN "SS_TickManager" /SC ONLOGON /TR "cmd /c cd /d $here && python scripts\run_tick_manager.py >> tick_manager.log 2>&1" /F
 
 # 5. Smoke test before first loop run
 python scripts\demo_smoke_test.py
