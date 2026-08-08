@@ -135,6 +135,7 @@ jobs:
             tests/test_golden_dual_entry.py \
             tests/test_mt5_phase1.py \
             tests/test_tick_manager_logic.py \
+            tests/test_vps_task_guards.py \
             tests/test_adaptive_execution.py \
             tests/test_smc_projects_liquidity_pools.py \
             tests/test_sl_floor_measures_every_path.py \
