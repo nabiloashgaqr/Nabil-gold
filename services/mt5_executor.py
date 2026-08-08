@@ -95,6 +95,16 @@ class Mt5DemoExecutor:
             return None
         return None
 
+    def _order_by_magic(self, magic: int):
+        """Outstanding PENDING order with this magic (not yet a position)."""
+        try:
+            for o in _mt5().orders_get() or []:
+                if getattr(o, "magic", None) == magic:
+                    return o
+        except Exception:  # noqa: BLE001
+            return None
+        return None
+
     def ensure_ticket(
         self,
         trade_id: str,
@@ -105,20 +115,32 @@ class Mt5DemoExecutor:
         tp: float,
         symbol: str,
     ) -> Optional[int]:
-        """Idempotent open. Returns ticket or None (refused/failed)."""
+        """Idempotent open. Returns ticket or None (refused/failed).
+
+        Idempotency covers BOTH states of an order's life: an open POSITION
+        and an outstanding PENDING order. Without the pending check, a
+        tick-level retry loop would stack duplicate limit orders.
+        """
+        self.last_error = ""
         if self.halted():
+            self.last_error = "executor halted (.demo_halt)"
             return None
         if self._orders_today >= self.max_per_day:
+            self.last_error = "daily order cap reached"
             logger.warning("Demo order refused: daily cap reached")
             return None
         magic = magic_for(trade_id)
         existing = self._position_by_magic(magic)
         if existing:
             return int(existing.ticket)
+        existing_order = self._order_by_magic(magic)
+        if existing_order:
+            return int(existing_order.ticket)
         mt5 = _mt5()
         sym = self._sym(symbol)
         tick = mt5.symbol_info_tick(sym)
         if tick is None:
+            self.last_error = f"no tick for {sym}"
             return None
         buy = str(side).upper() == "BUY"
         if str(order_kind or "").upper().endswith("MARKET"):
@@ -150,9 +172,13 @@ class Mt5DemoExecutor:
         try:
             res = mt5.order_send(request)
         except Exception as exc:  # noqa: BLE001
+            self.last_error = f"order_send crashed: {exc}"
             logger.error("order_send crashed: %s", exc)
             return None
         if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
+            self.last_error = (
+                f"retcode={getattr(res, 'retcode', '?')} "
+                f"{getattr(res, 'comment', '')}".strip())
             logger.error("order_send refused: %s", getattr(res, "comment", res))
             return None
         self._orders_today += 1
