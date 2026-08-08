@@ -20,13 +20,15 @@ TRADE_RETCODE_DONE = 10009
 
 
 class _Pos:
-    def __init__(self, ticket, magic, sl, tp, volume=0.10, ptype=ORDER_TYPE_BUY):
+    def __init__(self, ticket, magic, sl, tp, volume=0.10, ptype=ORDER_TYPE_BUY,
+                 price_open=0.0):
         self.ticket = ticket
         self.magic = magic
         self.sl = sl
         self.tp = tp
         self.volume = volume
         self.type = ptype
+        self.price_open = price_open
 
 
 DEAL_ENTRY_OUT = 1
@@ -41,11 +43,21 @@ class _Deal:
         self.entry = entry
 
 
+class _Order:
+    def __init__(self, ticket, magic, price):
+        self.ticket = ticket
+        self.magic = magic
+        self.price_open = price
+        self.volume = 0.10
+
+
 class FakeState:
     def __init__(self) -> None:
         self.server_time = 1_700_000_000
         self.epoch = 1_700_000_000
         self.positions: List[_Pos] = []
+        self.orders: List[_Order] = []
+        self.pending_mode = False  # True: pendings stay orders, don't fill
         self.requests: List[Dict[str, Any]] = []
         self.fail_partial = False
         self.rates: List[Dict[str, Any]] = []
@@ -72,6 +84,7 @@ def install(state: FakeState) -> types.ModuleType:
     mod.copy_rates_from_pos = lambda sym, tf, start, count: state.rates
     mod.symbol_info_tick = lambda sym: types.SimpleNamespace(bid=4300.0, ask=4300.2)
     mod.positions_get = lambda: list(state.positions)
+    mod.orders_get = lambda: list(state.orders)
     mod.DEAL_ENTRY_OUT = DEAL_ENTRY_OUT
     mod.symbol_info = lambda sym: types.SimpleNamespace(
         volume_min=state.volume_min, volume_step=state.volume_step,
@@ -87,10 +100,21 @@ def install(state: FakeState) -> types.ModuleType:
             return types.SimpleNamespace(retcode=TRADE_RETCODE_DONE, order=999)
         if request.get("action") in (TRADE_ACTION_DEAL, TRADE_ACTION_PENDING):
             magic = request.get("magic")
-            ticket = 1000 + len(state.positions) + 1
-            state.positions.append(_Pos(
-                ticket, magic, request.get("sl", 0), request.get("tp", 0),
-                request.get("volume", 0.10), request.get("type", ORDER_TYPE_BUY)))
+            ticket = 1000 + len(state.positions) + len(state.orders) + 1
+            if request.get("action") == TRADE_ACTION_PENDING:
+                state.orders.append(_Order(ticket, magic,
+                                           request.get("price", 0)))
+                if not state.pending_mode:
+                    state.positions.append(_Pos(
+                        ticket, magic, request.get("sl", 0),
+                        request.get("tp", 0), request.get("volume", 0.10),
+                        request.get("type", ORDER_TYPE_BUY)))
+            else:
+                state.positions.append(_Pos(
+                    ticket, magic, request.get("sl", 0), request.get("tp", 0),
+                    request.get("volume", 0.10),
+                    request.get("type", ORDER_TYPE_BUY),
+                    price_open=request.get("price", 0.0)))
             return types.SimpleNamespace(retcode=TRADE_RETCODE_DONE, order=ticket)
         return types.SimpleNamespace(retcode=TRADE_RETCODE_DONE, order=777)
 

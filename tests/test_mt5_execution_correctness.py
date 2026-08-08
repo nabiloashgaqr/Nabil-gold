@@ -142,6 +142,9 @@ class _StubExecutor:
     def last_exit(self, tid):
         return self.exit_info
 
+    def ensure_ticket(self, *a, **k):
+        return None
+
 
 def _row(**over):
     base = {"id": "T1", "type": "BUY", "status": "OPEN", "symbol": "XAU/USD",
@@ -221,6 +224,77 @@ def test_tp1_refusal_then_success_books_and_clears(monkeypatch):
     assert len([m for m in msgs if "REJECTED" in m]) == 1
 
 
+# ── order placement: signal → MetaTrader (the VPS-only path) ──────────────
+
+def test_ensure_ticket_idempotent_for_outstanding_pending(monkeypatch):
+    """A pending order that has NOT filled must not be sent twice."""
+    state = mt5_fake.FakeState()
+    state.pending_mode = True
+    ex = _executor(monkeypatch, state)
+    t1 = ex.ensure_ticket("T1", "BUY", "BUY_LIMIT", 4290.0, 4280.0, 4340.0,
+                          "XAU/USD")
+    t2 = ex.ensure_ticket("T1", "BUY", "BUY_LIMIT", 4290.0, 4280.0, 4340.0,
+                          "XAU/USD")
+    assert t1 and t1 == t2
+    assert len(state.orders) == 1            # ONE pending, not two
+
+
+def test_tick_manager_places_pending_once_and_books_ticket(monkeypatch):
+    state = mt5_fake.FakeState()
+    state.pending_mode = True
+    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5_fake.install(state))
+    db = _StubDB()
+    tm = _tm()
+    tm.database = db
+    ex = Mt5DemoExecutor({"execution": {"demo": {}}})
+    row = _row(status="PENDING", order_type="BUY_LIMIT", entry_price=4290.0,
+               tp1=4310.0, tp2=4340.0)
+    tick = types.SimpleNamespace(bid=4300.0, ask=4300.2)
+    tm._handle_row(row, tick, ex, None)
+    tm._handle_row(row, tick, ex, None)      # retry tick — must NOT duplicate
+    assert len(state.orders) == 1
+    assert any(u[1].get("mt5_ticket") for u in db.updates)
+
+
+def test_tick_manager_opens_market_for_new_signal(monkeypatch):
+    """OPEN row without ticket and without position → market order NOW,
+    ticket + actual fill price booked to the DB."""
+    state = mt5_fake.FakeState()
+    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5_fake.install(state))
+    db = _StubDB()
+    tm = _tm()
+    tm.database = db
+    ex = Mt5DemoExecutor({"execution": {"demo": {}}})
+    row = _row(status="OPEN")                # no mt5_ticket, no position
+    tick = types.SimpleNamespace(bid=4300.0, ask=4300.2)
+    tm._handle_row(row, tick, ex, None)
+    assert len(state.positions) == 1
+    assert state.positions[0].volume == 0.10          # the configured lot
+    ticket_updates = [u for u in db.updates if u[1].get("mt5_ticket")]
+    assert ticket_updates
+    entry_updates = [u for u in db.updates if u[1].get("entry_price")]
+    assert entry_updates and entry_updates[-1][1]["entry_price"] == 4300.2
+
+
+def test_pending_fill_books_actual_fill_price(monkeypatch):
+    state = mt5_fake.FakeState()
+    magic = magic_for("T1")
+    state.positions.append(mt5_fake._Pos(55, magic, 4280.0, 4340.0,
+                                         volume=0.10))
+    state.positions[-1].price_open = 4291.11          # slippage vs plan
+    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5_fake.install(state))
+    db = _StubDB()
+    tm = _tm()
+    tm.database = db
+    ex = Mt5DemoExecutor({"execution": {"demo": {}}})
+    row = _row(status="PENDING", order_type="BUY_LIMIT", entry_price=4290.0)
+    tick = types.SimpleNamespace(bid=4300.0, ask=4300.2)
+    tm._handle_row(row, tick, ex, None)
+    open_upd = [u for u in db.updates if u[1].get("status") == "OPEN"]
+    assert open_upd
+    assert open_upd[-1][1]["entry_price"] == 4291.11  # actual fill, not plan
+
+
 def test_broker_exit_uses_deal_price_and_labels_tp2(monkeypatch):
     monkeypatch.setitem(sys.modules, "MetaTrader5",
                         mt5_fake.install(mt5_fake.FakeState()))
@@ -230,7 +304,7 @@ def test_broker_exit_uses_deal_price_and_labels_tp2(monkeypatch):
     ex = _StubExecutor(position=False,
                        exit_info={"price": 4330.0, "profit": 300.0, "time": 1})
     tick = types.SimpleNamespace(bid=4329.0, ask=4329.2)
-    tm._handle_row(_row(), tick, ex, None)
+    tm._handle_row(_row(mt5_ticket=99), tick, ex, None)  # ticketed → exit path
     assert db.updates[-1][1]["status"] == "TP2_HIT"
     assert db.updates[-1][1]["close_price"] == 4330.0   # deal price, not tick
     assert db.updates[-1][1]["pnl_points"] == 300.0     # 0.1 lot: $30 → 300 pts
