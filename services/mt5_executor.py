@@ -29,26 +29,19 @@ def magic_for(trade_id: str) -> int:
     return 1000000 + (zlib.crc32(trade_id.encode()) % 8999999)
 
 
-def plan_partial_close(volume: float, fraction: float, step: float,
-                       min_vol: float):
-    """Snap a TP1 partial close to the broker's volume constraints.
+def plan_partial_close(volume: float, fraction: float, step: float):
+    """Snap the TP1 booked slice to the broker's volume_step.
 
-    Returns (part, remaining). remaining is None when a true partial is NOT
-    bookable (either slice would fall below the broker's minimum volume) —
-    the caller must then close the WHOLE position as the TP1 booking.
-    Pure + unit-tested (tests/test_mt5_execution_correctness.py).
+    Returns (part, remaining). This plan ONLY ever describes the fractional
+    slice — it never escalates to closing the whole position (operator
+    directive: close the half, nothing else). Pure + unit-tested.
     """
     if step <= 0:
         step = 0.01
-    if min_vol <= 0:
-        min_vol = step
     import math
     part = math.floor(volume * fraction / step + 1e-9) * step
     part = round(part, 8)
-    remaining = round(volume - part, 8)
-    if part < min_vol or remaining < min_vol:
-        return round(volume, 8), None
-    return part, remaining
+    return part, round(volume - part, 8)
 
 
 class Mt5DemoExecutor:
@@ -62,6 +55,7 @@ class Mt5DemoExecutor:
         self.symbol_map = demo.get("symbol_map") or {"XAU/USD": "XAUUSD"}
         self.telegram = telegram
         self._orders_today = 0
+        self.last_error = ""
 
     # -- lifecycle ---------------------------------------------------------
     def alive(self) -> bool:
@@ -185,38 +179,43 @@ class Mt5DemoExecutor:
             return False
 
     def partial_close_at_tp1(self, trade_id: str, fraction: float, symbol: str) -> bool:
-        """Partial close at TP1; on broker refusal fall back to full close +
-        reopen the remainder with the same SL/TP.
+        """Close ONLY the booked fraction at TP1 (operator directive).
 
-        Volume math is snapped to the broker's own volume_step/volume_min
-        (read live from symbol_info). If either the booked slice or the
-        remainder would fall below volume_min, a true partial is NOT
-        bookable and the WHOLE position is closed as the TP1 booking.
+        NEVER full-close + reopen. The volume is snapped to the broker's
+        volume_step; if the slice is below volume_min it cannot be booked at
+        all. On any refusal: return False and leave the reason in
+        self.last_error — the tick manager retries every tick and reports
+        the refusal to the operator once per trade.
         """
         mt5 = _mt5()
+        self.last_error = ""
         magic = magic_for(trade_id)
         pos = self._position_by_magic(magic)
         if not pos:
+            self.last_error = "position not found"
             return False
         sym = self._sym(symbol)
         info = mt5.symbol_info(sym)
         step = float(getattr(info, "volume_step", 0.01) or 0.01)
         min_vol = float(getattr(info, "volume_min", 0.01) or 0.01)
-        part, remaining = plan_partial_close(float(pos.volume), fraction,
-                                             step, min_vol)
-        if part <= 0:
+        part, _remaining = plan_partial_close(float(pos.volume), fraction, step)
+        if part < min_vol or part <= 0:
+            self.last_error = (
+                f"slice {part:.2f} below broker volume_min {min_vol:g} — "
+                f"cannot book the half")
+            logger.error("TP1 partial impossible for %s: %s", trade_id,
+                         self.last_error)
             return False
         tick = mt5.symbol_info_tick(sym)
         close_type = (mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY
                       else mt5.ORDER_TYPE_BUY)
-        price_close = tick.bid if close_type == mt5.ORDER_TYPE_SELL else tick.ask
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
             "symbol": sym,
             "volume": part,
             "type": close_type,
             "position": int(pos.ticket),
-            "price": price_close,
+            "price": tick.bid if close_type == mt5.ORDER_TYPE_SELL else tick.ask,
             "deviation": self.deviation,
             "magic": magic,
             "comment": "SS-demo-tp1",
@@ -226,50 +225,15 @@ class Mt5DemoExecutor:
             res = mt5.order_send(request)
             if res and res.retcode == mt5.TRADE_RETCODE_DONE:
                 return True
-        except Exception as exc:  # noqa: BLE001
-            logger.error("partial close crashed: %s", exc)
+            self.last_error = (
+                f"retcode={getattr(res, 'retcode', '?')} "
+                f"{getattr(res, 'comment', '')}".strip())
+            logger.warning("TP1 partial refused for %s: %s (will retry)",
+                           trade_id, self.last_error)
             return False
-        logger.warning("partial unsupported; full-close + reopen remainder")
-        sl, tp, otype = float(pos.sl), float(pos.tp), pos.type
-        close_all = {
-            "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": sym,
-            "volume": float(pos.volume),
-            "type": close_type,
-            "position": int(pos.ticket),
-            "price": price_close,
-            "magic": magic,
-            "type_filling": mt5.ORDER_FILLING_IOC,
-        }
-        # remaining is None when the leftover can't be booked -> stay flat.
-        if remaining is None:
-            try:
-                r1 = mt5.order_send(close_all)
-                return bool(r1 and r1.retcode == mt5.TRADE_RETCODE_DONE)
-            except Exception as exc:  # noqa: BLE001
-                logger.error("full-close crashed: %s", exc)
-                self._halt(f"full-close failed for {trade_id}: {exc}")
-                return False
-        reopen = {
-            "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": sym,
-            "volume": remaining,
-            "type": otype,
-            "price": tick.ask if otype == mt5.ORDER_TYPE_BUY else tick.bid,
-            "sl": sl,
-            "tp": tp,
-            "magic": magic,
-            "deviation": self.deviation,
-            "type_filling": mt5.ORDER_FILLING_IOC,
-        }
-        try:
-            r1 = mt5.order_send(close_all)
-            r2 = mt5.order_send(reopen)
-            return bool(r1 and r2 and r1.retcode == mt5.TRADE_RETCODE_DONE
-                        and r2.retcode == mt5.TRADE_RETCODE_DONE)
         except Exception as exc:  # noqa: BLE001
-            logger.error("full-close+reopen crashed: %s", exc)
-            self._halt(f"reopen failed for {trade_id}: {exc}")
+            self.last_error = f"order_send crashed: {exc}"
+            logger.error("partial close crashed: %s", exc)
             return False
 
     def last_exit(self, trade_id: str) -> Optional[Dict[str, Any]]:
