@@ -35,6 +35,8 @@ jobs:
         run: |
           python scripts/generate_dashboard.py
         env:
+          # Paper trading is STOPPED; the dashboard now reports the demo stream.
+          TRADES_TABLE: trades_demo
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
