@@ -29,6 +29,18 @@ class _Pos:
         self.type = ptype
 
 
+DEAL_ENTRY_OUT = 1
+
+
+class _Deal:
+    def __init__(self, magic, price, profit, time, entry=DEAL_ENTRY_OUT):
+        self.magic = magic
+        self.price = price
+        self.profit = profit
+        self.time = time
+        self.entry = entry
+
+
 class FakeState:
     def __init__(self) -> None:
         self.server_time = 1_700_000_000
@@ -37,6 +49,11 @@ class FakeState:
         self.requests: List[Dict[str, Any]] = []
         self.fail_partial = False
         self.rates: List[Dict[str, Any]] = []
+        self.volume_min = 0.01
+        self.volume_step = 0.01
+        self.contract_size = 100.0
+        self.digits = 2
+        self.deals: List[_Deal] = []
 
 
 def install(state: FakeState) -> types.ModuleType:
@@ -55,6 +72,12 @@ def install(state: FakeState) -> types.ModuleType:
     mod.copy_rates_from_pos = lambda sym, tf, start, count: state.rates
     mod.symbol_info_tick = lambda sym: types.SimpleNamespace(bid=4300.0, ask=4300.2)
     mod.positions_get = lambda: list(state.positions)
+    mod.DEAL_ENTRY_OUT = DEAL_ENTRY_OUT
+    mod.symbol_info = lambda sym: types.SimpleNamespace(
+        volume_min=state.volume_min, volume_step=state.volume_step,
+        trade_contract_size=state.contract_size, digits=state.digits,
+        trade_tick_size=0.01, trade_tick_value=1.0)
+    mod.history_deals_get = lambda frm, to: list(state.deals)
 
     def order_send(request):
         state.requests.append(request)
