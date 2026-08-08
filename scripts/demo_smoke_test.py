@@ -44,7 +44,20 @@ def main() -> None:
 
     # 3. symbol + candles + timezone offset
     sym = "XAUUSD"
-    check(f"symbol {sym} exists", bool(mt5.symbol_info(sym)))
+    info = mt5.symbol_info(sym)
+    check(f"symbol {sym} exists", bool(info))
+
+    # 3b. contract economics — the $/point math assumes 100 oz per 1.0 lot.
+    #     0.1 lot = 10 oz → 1 codebase point ($0.10 move) = exactly $1.00.
+    cs = float(getattr(info, "trade_contract_size", 0) or 0)
+    print(f"     contract_size={cs} oz/lot · volume_min={info.volume_min} · "
+          f"volume_step={info.volume_step} · digits={info.digits} · "
+          f"tick_value={info.trade_tick_value}")
+    check("contract size = 100 oz/lot (our $ math assumes this)", cs == 100.0,
+          "if your broker differs, the dollar math in cards must be rescaled")
+    check("volume_min <= 0.05 (TP1 books half of 0.1 lot)",
+          float(info.volume_min) <= 0.05,
+          "below this the TP1 half-close degrades to full-close")
     from services import mt5_feed
     payload = mt5_feed.get_candles("XAU/USD", "5m", 100, {"XAU/USD": "XAUUSD"})
     check("mt5 candles payload", bool(payload and len(payload["data"]) == 100))

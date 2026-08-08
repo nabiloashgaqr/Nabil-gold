@@ -25,6 +25,9 @@ from typing import Any, Dict, List, Optional
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.trading_rules import trailing_params  # noqa: E402
+# magic_for is needed inside _handle_row (module scope); mt5_executor keeps
+# its MetaTrader5 import lazy, so this top-level import is safe on any OS.
+from services.mt5_executor import magic_for  # noqa: E402
 
 logger = logging.getLogger("tick_manager")
 LOOP_SLEEP = float(os.environ.get("TICK_LOOP_SLEEP", 0.25))
@@ -65,6 +68,28 @@ def decide_tp1(side: str, tp1: float, candle_low: float, candle_high: float,
     if done or tp1 <= 0:
         return False
     return (candle_low <= tp1) if side == "BUY" else (candle_high >= tp1)
+
+
+def classify_broker_exit(side: str, deal_price: float, entry: float,
+                         stop: float, tp2: float) -> str:
+    """Map a broker-side exit price to our status labels.
+
+    The broker only closes on SL/TP, so an exit between stop and TP2 means
+    the (already moved) trailing/breakeven stop was the trigger. Pure +
+    unit-tested (tests/test_mt5_execution_correctness.py).
+    """
+    eps = 1e-9
+    if side == "BUY":
+        if tp2 and deal_price >= tp2 - eps:
+            return "TP2_HIT"
+        if deal_price <= (stop or entry) + eps:
+            return "SL_HIT"
+        return "TRAILING_SL_HIT"
+    if tp2 and deal_price <= tp2 + eps:
+        return "TP2_HIT"
+    if deal_price >= (stop or entry) - eps:
+        return "SL_HIT"
+    return "TRAILING_SL_HIT"
 
 
 # ── live loop ───────────────────────────────────────────────────────────────
@@ -111,26 +136,47 @@ class TickManager:
                 self.database.update_trade(tid, {"status": "OPEN"})
                 self._notify(f"🧪 DEMO: pending activated @ {pos.price_open:.2f}")
             return
-        if pos is None:  # broker closed it (SL/TP2)
-            close = tick.bid
-            self.database.update_trade(
-                tid, {"status": "SL_HIT", "close_price": round(close, 2)})
-            self._notify(f"🧪 DEMO: position closed by broker @ {close:.2f}")
+        if pos is None:  # broker closed it (SL / TP2 / trailing stop)
+            # Mirror the REAL broker exit: deal price + realized P&L, not
+            # the live tick at the moment we noticed the position was gone.
+            exit_info = executor.last_exit(tid)
+            entry = float(row.get("entry_price") or 0)
+            stop = float(row.get("stop_loss") or 0)
+            tp2 = float(row.get("tp2") or 0)
+            if exit_info and exit_info["price"] > 0:
+                close = exit_info["price"]
+                status = classify_broker_exit(side, close, entry, stop, tp2)
+                pnl_pts = (close - entry) * 10.0
+                if side == "SELL":
+                    pnl_pts = -pnl_pts
+                self.database.update_trade(
+                    tid, {"status": status, "close_price": round(close, 2),
+                          "pnl_points": round(pnl_pts, 1)})
+                self._notify(
+                    f"🧪 DEMO: closed by broker @ {close:.2f} ({status}) "
+                    f"{pnl_pts:+.0f} pts / {exit_info['profit']:+.2f}$")
+            else:
+                close = tick.bid
+                self.database.update_trade(
+                    tid, {"status": "SL_HIT", "close_price": round(close, 2)})
+                self._notify(
+                    f"🧪 DEMO: position closed by broker @ {close:.2f} "
+                    f"(no exit deal found — labelled SL_HIT, verify)")
             return
 
         entry = float(row.get("entry_price") or 0)
         stop = float(row.get("stop_loss") or 0)
         tp1 = float(row.get("tp1") or 0)
         risk = abs(entry - float(row.get("initial_stop_loss") or stop))
-        point_value = 0.01  # XAU/USD MT5 point; convert pts via *0.01*10? pts conv below
         pv = 0.10  # codebase point = $0.10 on gold
+        risk_points = risk / pv  # price delta -> codebase points
         price = tick.bid if side == "SELL" else tick.ask
         extreme = self._extremes.get(tid, price)
         extreme = min(extreme, price) if side == "BUY" else max(extreme, price)
         self._extremes[tid] = extreme
 
         # 1) breakeven
-        if decide_be(side, entry, price, risk / 10.0,
+        if decide_be(side, entry, price, risk_points,
                      self._trail["early_breakeven_points"], 0.5,
                      bool(row.get("sl_moved_to_entry"))):
             executor.apply_stop(tid, entry, float(row.get("tp2") or 0),
@@ -139,13 +185,15 @@ class TickManager:
                                              "stop_loss": entry})
             self._notify(f"🧪 DEMO: breakeven armed @ {entry:.2f}")
 
-        # 2) TP1 partial
+        # 2) TP1 partial — book ONLY when the broker actually executed it;
+        # on failure partial_close stays False and we retry on the next tick
+        # instead of lying in the DB that half was booked.
         if decide_tp1(side, tp1, tick.bid, tick.ask,
                       bool(row.get("partial_close"))):
-            executor.partial_close_at_tp1(tid, 0.5, row.get("symbol"))
-            self.database.update_trade(tid, {"partial_close": True,
-                                             "status": "TP1_HIT"})
-            self._notify(f"🧪 DEMO: TP1 partial booked @ {tp1:.2f}")
+            if executor.partial_close_at_tp1(tid, 0.5, row.get("symbol")):
+                self.database.update_trade(tid, {"partial_close": True,
+                                                 "status": "TP1_HIT"})
+                self._notify(f"🧪 DEMO: TP1 partial booked @ {tp1:.2f}")
 
         # 3) trailing ratchet
         new_stop = decide_trailing(side, entry, stop, extreme,
