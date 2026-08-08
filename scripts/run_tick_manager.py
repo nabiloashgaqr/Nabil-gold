@@ -136,10 +136,52 @@ class TickManager:
 
         if status == "PENDING":
             if pos is not None:  # broker filled the pending
-                self.database.update_trade(tid, {"status": "OPEN"})
-                self._notify(f"🧪 DEMO: pending activated @ {pos.price_open:.2f}")
+                # Book the ACTUAL fill price: PnL/BE/trailing must run on the
+                # broker's execution, not our planned level.
+                self.database.update_trade(
+                    tid, {"status": "OPEN",
+                          "entry_price": round(float(pos.price_open), 2)})
+                self._notify(
+                    f"🧪 DEMO: pending activated @ {pos.price_open:.2f} "
+                    f"(actual fill)")
+            elif not row.get("mt5_ticket"):
+                # The pending order has never been sent to MT5 — send it now.
+                # ensure_ticket is idempotent (position + outstanding order).
+                kind = str(row.get("order_type") or "").upper()
+                if not kind.endswith("LIMIT"):
+                    kind = "BUY_LIMIT" if side == "BUY" else "SELL_LIMIT"
+                ticket = executor.ensure_ticket(
+                    tid, side, kind, float(row.get("entry_price") or 0),
+                    float(row.get("stop_loss") or 0),
+                    float(row.get("tp2") or 0), row.get("symbol"))
+                if ticket:
+                    self.database.update_trade(tid, {"mt5_ticket": ticket})
+                    self._notify(
+                        f"🧪 DEMO: pending sent to MT5 @ "
+                        f"{float(row.get('entry_price') or 0):.2f} "
+                        f"(ticket {ticket})")
             return
-        if pos is None:  # broker closed it (SL / TP2 / trailing stop)
+        if pos is None:
+            if not row.get("mt5_ticket"):
+                # New signal that never reached MT5 — open it NOW (market).
+                ticket = executor.ensure_ticket(
+                    tid, side, "MARKET", 0.0,
+                    float(row.get("stop_loss") or 0),
+                    float(row.get("tp2") or 0), row.get("symbol"))
+                if ticket:
+                    pos2 = executor._position_by_magic(magic)
+                    upd: Dict[str, Any] = {"mt5_ticket": ticket}
+                    if pos2 is not None:
+                        upd["entry_price"] = round(float(pos2.price_open), 2)
+                    self.database.update_trade(tid, upd)
+                    if "entry_price" in upd:
+                        self._notify(
+                            f"🧪 DEMO: MARKET filled @ {upd['entry_price']:.2f} "
+                            f"(ticket {ticket})")
+                    else:
+                        self._notify(f"🧪 DEMO: MARKET sent (ticket {ticket})")
+                return
+            # broker closed it (SL / TP2 / trailing stop)
             # Mirror the REAL broker exit: deal price + realized P&L, not
             # the live tick at the moment we noticed the position was gone.
             exit_info = executor.last_exit(tid)
