@@ -262,6 +262,11 @@ def main() -> None:
             symbol = normalize_symbol(trade.get("symbol") or config.get("symbol", "XAU/USD"))
             grouped.setdefault(symbol, []).append(trade)
 
+        if (os.environ.get("EXECUTION_MODE") == "mt5_demo"
+                and os.environ.get("TICK_MANAGER", "true").lower() in {"1", "true", "yes"}):
+            logger.info("Tick manager owns MT5 execution; the 5m cycle keeps "
+                        "bookkeeping/reporting only.")
+            grouped = {}
         evaluations = []
         current_price = 0.0
         for symbol, symbol_trades in grouped.items():
