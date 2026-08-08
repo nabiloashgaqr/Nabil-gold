@@ -29,6 +29,28 @@ def magic_for(trade_id: str) -> int:
     return 1000000 + (zlib.crc32(trade_id.encode()) % 8999999)
 
 
+def plan_partial_close(volume: float, fraction: float, step: float,
+                       min_vol: float):
+    """Snap a TP1 partial close to the broker's volume constraints.
+
+    Returns (part, remaining). remaining is None when a true partial is NOT
+    bookable (either slice would fall below the broker's minimum volume) —
+    the caller must then close the WHOLE position as the TP1 booking.
+    Pure + unit-tested (tests/test_mt5_execution_correctness.py).
+    """
+    if step <= 0:
+        step = 0.01
+    if min_vol <= 0:
+        min_vol = step
+    import math
+    part = math.floor(volume * fraction / step + 1e-9) * step
+    part = round(part, 8)
+    remaining = round(volume - part, 8)
+    if part < min_vol or remaining < min_vol:
+        return round(volume, 8), None
+    return part, remaining
+
+
 class Mt5DemoExecutor:
     def __init__(self, config: Dict[str, Any], telegram=None):
         self.config = config or {}
@@ -163,27 +185,38 @@ class Mt5DemoExecutor:
             return False
 
     def partial_close_at_tp1(self, trade_id: str, fraction: float, symbol: str) -> bool:
-        """Partial close; on broker refusal fall back to full close + reopen
-        the remainder with the same SL/TP."""
+        """Partial close at TP1; on broker refusal fall back to full close +
+        reopen the remainder with the same SL/TP.
+
+        Volume math is snapped to the broker's own volume_step/volume_min
+        (read live from symbol_info). If either the booked slice or the
+        remainder would fall below volume_min, a true partial is NOT
+        bookable and the WHOLE position is closed as the TP1 booking.
+        """
         mt5 = _mt5()
         magic = magic_for(trade_id)
         pos = self._position_by_magic(magic)
         if not pos:
             return False
         sym = self._sym(symbol)
-        part = round(float(pos.volume) * fraction, 2)
+        info = mt5.symbol_info(sym)
+        step = float(getattr(info, "volume_step", 0.01) or 0.01)
+        min_vol = float(getattr(info, "volume_min", 0.01) or 0.01)
+        part, remaining = plan_partial_close(float(pos.volume), fraction,
+                                             step, min_vol)
         if part <= 0:
             return False
         tick = mt5.symbol_info_tick(sym)
         close_type = (mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY
                       else mt5.ORDER_TYPE_BUY)
+        price_close = tick.bid if close_type == mt5.ORDER_TYPE_SELL else tick.ask
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
             "symbol": sym,
             "volume": part,
             "type": close_type,
             "position": int(pos.ticket),
-            "price": tick.bid if close_type == mt5.ORDER_TYPE_SELL else tick.ask,
+            "price": price_close,
             "deviation": self.deviation,
             "magic": magic,
             "comment": "SS-demo-tp1",
@@ -197,7 +230,6 @@ class Mt5DemoExecutor:
             logger.error("partial close crashed: %s", exc)
             return False
         logger.warning("partial unsupported; full-close + reopen remainder")
-        remaining = round(float(pos.volume) - part, 2)
         sl, tp, otype = float(pos.sl), float(pos.tp), pos.type
         close_all = {
             "action": mt5.TRADE_ACTION_DEAL,
@@ -205,10 +237,19 @@ class Mt5DemoExecutor:
             "volume": float(pos.volume),
             "type": close_type,
             "position": int(pos.ticket),
-            "price": tick.bid if close_type == mt5.ORDER_TYPE_SELL else tick.ask,
+            "price": price_close,
             "magic": magic,
             "type_filling": mt5.ORDER_FILLING_IOC,
         }
+        # remaining is None when the leftover can't be booked -> stay flat.
+        if remaining is None:
+            try:
+                r1 = mt5.order_send(close_all)
+                return bool(r1 and r1.retcode == mt5.TRADE_RETCODE_DONE)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("full-close crashed: %s", exc)
+                self._halt(f"full-close failed for {trade_id}: {exc}")
+                return False
         reopen = {
             "action": mt5.TRADE_ACTION_DEAL,
             "symbol": sym,
@@ -230,6 +271,32 @@ class Mt5DemoExecutor:
             logger.error("full-close+reopen crashed: %s", exc)
             self._halt(f"reopen failed for {trade_id}: {exc}")
             return False
+
+    def last_exit(self, trade_id: str) -> Optional[Dict[str, Any]]:
+        """The broker's own record of how this trade's position exited.
+
+        Returns the newest OUT deal {price, profit, time} for the trade's
+        magic, or None if no exit deal exists yet. Used so the DB mirrors
+        the REAL broker exit price + realized P&L instead of the live tick
+        at the moment we happened to notice the position was gone.
+        """
+        mt5 = _mt5()
+        magic = magic_for(trade_id)
+        try:
+            now = int(time.time()) + 86400
+            deals = mt5.history_deals_get(0, now) or ()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("history_deals_get crashed: %s", exc)
+            return None
+        outs = [d for d in deals
+                if getattr(d, "magic", None) == magic
+                and getattr(d, "entry", None) == getattr(mt5, "DEAL_ENTRY_OUT", 1)]
+        if not outs:
+            return None
+        d = max(outs, key=lambda x: getattr(x, "time", 0))
+        return {"price": float(getattr(d, "price", 0.0)),
+                "profit": float(getattr(d, "profit", 0.0)),
+                "time": int(getattr(d, "time", 0))}
 
     # -- reconciliation ------------------------------------------------------
     def reconcile(self, open_rows: List[Dict[str, Any]]) -> List[str]:
