@@ -148,17 +148,23 @@ def _render_trades_table(trades: List[Dict[str, Any]]) -> str:
     return "\n".join(rows)
 
 
-def render_dashboard(trades: List[Dict[str, Any]]) -> str:
+def render_dashboard(trades: List[Dict[str, Any]], demo: bool = False) -> str:
     summary = summarize_trades(trades)
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     cards = _render_cards(summary)
     rows = _render_trades_table(sorted(trades, key=lambda t: str(t.get("created_at", "")), reverse=True))
+    # Label the surface with the stream it actually reads. The dashboard used
+    # to always say "Paper Trading"; after the demo-only migration it reads
+    # trades_demo, and a paper-labelled card over demo rows is a lie.
+    h1 = "🧪 DEMO · Gold AI Signals Dashboard" if demo else "🏆 Gold AI Signals Dashboard"
+    mode_label = "MT5 Demo Trading / XAU/USD" if demo else "Paper Trading / XAU/USD"
+    title = "Gold AI Signals Dashboard (DEMO)" if demo else "Gold AI Signals Dashboard"
     return f"""<!doctype html>
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Gold AI Signals Dashboard</title>
+<title>{html.escape(title)}</title>
 <style>
   :root {{ --bg:#0f172a; --panel:#111827; --card:#1f2937; --text:#f8fafc; --muted:#94a3b8; --gold:#facc15; --green:#22c55e; --red:#ef4444; --blue:#38bdf8; }}
   * {{ box-sizing: border-box; }}
@@ -187,8 +193,8 @@ def render_dashboard(trades: List[Dict[str, Any]]) -> str:
 <body>
   <div class="wrap">
     <div class="hero">
-      <h1>🏆 Gold AI Signals Dashboard</h1>
-      <div class="muted">Generated at {html.escape(generated)} · Paper Trading / XAU/USD</div>
+      <h1>{h1}</h1>
+      <div class="muted">Generated at {html.escape(generated)} · {mode_label}</div>
     </div>
     <div class="grid">{cards}</div>
     <div class="panel">
@@ -210,7 +216,7 @@ def save_dashboard(html_text: str, path: str | Path = "storage/dashboard.html") 
     return target
 
 
-def format_dashboard_telegram(summary: Dict[str, Any]) -> str:
+def format_dashboard_telegram(summary: Dict[str, Any], demo: bool = False) -> str:
     pf = summary.get("profit_factor", 0)
     if pf >= 99 or pf == 0 and summary.get("losses", 0) == 0 and summary.get("wins", 0) > 0:
         pf_display = "∞"
@@ -225,7 +231,9 @@ def format_dashboard_telegram(summary: Dict[str, Any]) -> str:
     sell_count = summary.get("sell_count", 0)
     avg_conf = summary.get("avg_confidence", 0)
     lines = [
-        "📊 <b>Dashboard Updated</b>",
+        # Name the stream: after the demo-only migration the card reports
+        # trades_demo rows; an unlabelled card would be misread as paper.
+        "🧪 DEMO · 📊 <b>Dashboard Updated</b>" if demo else "📊 <b>Dashboard Updated</b>",
         "━━━━━━━━━━━━━━━━━━━━",
         # The label says CLOSED because that is what every figure below is
         # computed over. The old card said "Trades: 80" while W + L was 43,
