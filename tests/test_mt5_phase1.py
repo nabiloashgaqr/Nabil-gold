@@ -53,7 +53,10 @@ def test_mt5_executor_idempotent_magic():
     assert len(state.positions) == 1
 
 
-def test_mt5_partial_close_fallback():
+def test_mt5_partial_close_refusal_retries_without_full_close():
+    """Operator directive (2026-08-08): on broker refusal do NOT fall back to
+    full-close + reopen. Only the half is ever attempted; refusal returns
+    False with a reason so the tick manager retries and alerts."""
     state = _install(fake.FakeState())
     state.fail_partial = True
     from services.mt5_executor import Mt5DemoExecutor
@@ -61,10 +64,11 @@ def test_mt5_partial_close_fallback():
     ticket = ex.ensure_ticket("T2", "BUY", "MARKET", 4300, 4280, 4340, "XAU/USD")
     assert ticket
     n_before = len(state.requests)
-    assert ex.partial_close_at_tp1("T2", 0.5, "XAU/USD") is True
+    assert ex.partial_close_at_tp1("T2", 0.5, "XAU/USD") is False
     kinds = [r.get("comment") for r in state.requests[n_before:]]
-    assert "SS-demo-tp1" in kinds          # refused partial attempted
-    assert len(state.requests[n_before:]) == 3  # partial + close-all + reopen
+    assert "SS-demo-tp1" in kinds          # the refused half was attempted
+    assert len(state.requests[n_before:]) == 1  # ONLY the half — no full close
+    assert ex.last_error                   # reason surfaced for the alert
 
 
 def test_reconcile_halt_on_sl_drift(tmp_path, monkeypatch):

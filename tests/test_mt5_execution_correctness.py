@@ -19,26 +19,23 @@ from services.mt5_executor import (  # noqa: E402
     Mt5DemoExecutor, magic_for, plan_partial_close)
 
 
-# ── plan_partial_close: broker volume constraints ──────────────────────────
+# ── plan_partial_close: ONLY ever the snapped fractional slice ─────────────
 
 def test_plan_partial_normal_half_of_01():
-    part, remaining = plan_partial_close(0.10, 0.5, step=0.01, min_vol=0.01)
+    part, remaining = plan_partial_close(0.10, 0.5, step=0.01)
     assert part == 0.05 and remaining == 0.05
 
 
-def test_plan_partial_min_vol_blocks_split_closes_all():
-    # broker minimum 0.1: half-slices of 0.05 are unbookable → close ALL
-    part, remaining = plan_partial_close(0.10, 0.5, step=0.01, min_vol=0.10)
-    assert part == 0.10 and remaining is None
-
-
-def test_plan_partial_remainder_below_min_closes_all():
-    part, remaining = plan_partial_close(0.15, 0.5, step=0.01, min_vol=0.10)
-    assert part == 0.15 and remaining is None  # 0.07 / 0.08 both < 0.10
+def test_plan_partial_never_escalates_to_whole():
+    """Operator directive: close the HALF. Even when the leftover would sit
+    below a broker minimum, the plan must still describe only the slice —
+    booking decisions live in the executor, never a silent full close."""
+    part, remaining = plan_partial_close(0.15, 0.5, step=0.01)
+    assert part == 0.07 and remaining == 0.08
 
 
 def test_plan_partial_snaps_down_to_step():
-    part, remaining = plan_partial_close(0.21, 0.5, step=0.01, min_vol=0.10)
+    part, remaining = plan_partial_close(0.21, 0.5, step=0.01)
     assert part == 0.10 and remaining == 0.11
 
 
@@ -73,26 +70,31 @@ def test_partial_close_books_exact_half(monkeypatch):
     assert len(tp1_reqs) == 1 and tp1_reqs[0]["volume"] == 0.05
 
 
-def test_partial_close_min_vol_01_closes_whole_without_reopen(monkeypatch):
+def test_partial_half_below_min_refuses_with_no_order(monkeypatch):
+    """If the half-slice is below broker volume_min we do NOT book anything —
+    no partial, and never a full close either. Return False + the reason."""
     state = mt5_fake.FakeState()
     state.volume_min = 0.10
     state.positions.append(mt5_fake._Pos(7, magic_for("T2"), 4293.0, 4330.0,
                                          volume=0.10))
     ex = _executor(monkeypatch, state)
-    assert ex.partial_close_at_tp1("T2", 0.5, "XAU/USD") is True
-    assert len(state.requests) == 1           # ONE close-all, no reopen
-    assert state.requests[0]["volume"] == 0.10
+    assert ex.partial_close_at_tp1("T2", 0.5, "XAU/USD") is False
+    assert state.requests == []               # nothing sent at all
+    assert "volume_min" in ex.last_error
 
 
-def test_partial_refusal_fallback_keeps_snapped_remainder(monkeypatch):
+def test_partial_refusal_never_full_closes_and_keeps_reason(monkeypatch):
+    """Broker refuses the half → exactly ONE request (the refused partial),
+    no full close, no reopen. Reason is surfaced for the retry/alert loop."""
     state = mt5_fake.FakeState()
     state.fail_partial = True
     state.positions.append(mt5_fake._Pos(7, magic_for("T3"), 4293.0, 4330.0,
                                          volume=0.10))
     ex = _executor(monkeypatch, state)
-    assert ex.partial_close_at_tp1("T3", 0.5, "XAU/USD") is True
-    volumes = [r["volume"] for r in state.requests]
-    assert volumes == [0.05, 0.10, 0.05]      # refused partial, close-all, reopen
+    assert ex.partial_close_at_tp1("T3", 0.5, "XAU/USD") is False
+    assert len(state.requests) == 1           # only the refused half
+    assert state.requests[0]["volume"] == 0.05
+    assert ex.last_error                       # reason surfaced
 
 
 def test_last_exit_reads_the_broker_deal(monkeypatch):
@@ -119,6 +121,8 @@ class _StubExecutor:
         self.partial_ok = partial_ok
         self.position = position
         self.exit_info = exit_info
+        self.last_error = "" if partial_ok else "retcode=10018 partial denied"
+        self.partial_calls = 0
 
     def _position_by_magic(self, magic):
         if not self.position:
@@ -127,6 +131,9 @@ class _StubExecutor:
                                      sl=4293.0, tp=4330.0, price_open=4300.0)
 
     def partial_close_at_tp1(self, tid, frac, sym):
+        self.partial_calls += 1
+        if not self.partial_ok:
+            self.last_error = "retcode=10018 partial denied"
         return self.partial_ok
 
     def apply_stop(self, *a, **k):
@@ -171,6 +178,47 @@ def test_tp1_success_is_booked(monkeypatch):
     tm._handle_row(_row(), tick, ex, None)
     assert any(u[1].get("partial_close") is True for u in db.updates)
     assert any(u[1].get("status") == "TP1_HIT" for u in db.updates)
+
+
+def test_tp1_refusal_alerts_once_and_retries_every_tick(monkeypatch):
+    """Directive: on refusal do NOT close the whole position — retry the half
+    every tick and tell the operator WHY, once per trade (no spam)."""
+    monkeypatch.setitem(sys.modules, "MetaTrader5",
+                        mt5_fake.install(mt5_fake.FakeState()))
+    db = _StubDB()
+    tm = _tm()
+    tm.database = db
+    msgs = []
+    tm._notify = msgs.append
+    ex = _StubExecutor(partial_ok=False)
+    tick = types.SimpleNamespace(bid=4309.5, ask=4309.7)
+    row = _row()
+    tm._handle_row(row, tick, ex, None)   # tick 1: refused -> alert
+    tm._handle_row(row, tick, ex, None)   # tick 2: refused -> silent retry
+    tm._handle_row(row, tick, ex, None)   # tick 3: refused -> silent retry
+    refusals = [m for m in msgs if "REJECTED" in m]
+    assert len(refusals) == 1
+    assert "retcode=10018" in refusals[0]       # the WHY is reported
+    assert ex.partial_calls == 3                # retried every tick
+    assert db.updates == []                     # never booked, never closed
+
+
+def test_tp1_refusal_then_success_books_and_clears(monkeypatch):
+    monkeypatch.setitem(sys.modules, "MetaTrader5",
+                        mt5_fake.install(mt5_fake.FakeState()))
+    db = _StubDB()
+    tm = _tm()
+    tm.database = db
+    msgs = []
+    tm._notify = msgs.append
+    ex = _StubExecutor(partial_ok=False)
+    tick = types.SimpleNamespace(bid=4309.5, ask=4309.7)
+    row = _row()
+    tm._handle_row(row, tick, ex, None)         # refused -> alert
+    ex.partial_ok = True
+    tm._handle_row(row, tick, ex, None)         # retry succeeds -> booked
+    assert any(u[1].get("partial_close") is True for u in db.updates)
+    assert len([m for m in msgs if "REJECTED" in m]) == 1
 
 
 def test_broker_exit_uses_deal_price_and_labels_tp2(monkeypatch):
