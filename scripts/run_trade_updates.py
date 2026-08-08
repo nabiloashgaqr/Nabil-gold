@@ -151,6 +151,60 @@ def _build_status_message(open_trades, evaluations, current_price: float) -> str
     return "\n".join(lines)
 
 
+
+
+def _sync_demo_execution(config, symbol_config, symbol, symbol_trades,
+                         symbol_evals, database, telegram) -> None:
+    """demo/mt5 branch (phase 1): transmit unified-law levels to MT5 demo.
+
+    Paper mode (default) returns immediately; the executor only TRANSMITS
+    levels already decided by the management engine and the unified loader.
+    """
+    mode = str(os.environ.get("EXECUTION_MODE")
+               or (config.get("execution") or {}).get("execution_mode") or "paper")
+    if mode != "mt5_demo":
+        return
+    try:
+        from services.mt5_executor import Mt5DemoExecutor
+        executor = Mt5DemoExecutor(symbol_config, telegram=telegram)
+        if not executor.alive() or executor.halted():
+            return
+        rows_by_id = {str(t.get("id")): t for t in symbol_trades}
+        for ev in symbol_evals or []:
+            tid = str(ev.get("trade_id") or "")
+            row = rows_by_id.get(tid) or {}
+            side = str(row.get("type") or row.get("side") or "")
+            events = set(ev.get("events") or [])
+            updates = ev.get("updates") or {}
+            ticket = row.get("mt5_ticket")
+            if not ticket and ev.get("new_status") in {"OPEN", "PENDING"}:
+                ticket = executor.ensure_ticket(
+                    tid, side, str(row.get("order_type") or "MARKET"),
+                    float(row.get("entry_price") or 0),
+                    float(updates.get("stop_loss") or row.get("stop_loss") or 0),
+                    float(row.get("tp2") or row.get("tp1") or 0), symbol)
+                if ticket and hasattr(database, "update_trade"):
+                    try:
+                        database.update_trade(tid, {"mt5_ticket": ticket})
+                    except Exception:  # noqa: BLE001
+                        pass
+            if not ticket:
+                continue
+            if "TP1_HIT" in events:
+                executor.partial_close_at_tp1(tid, 0.5, symbol)
+            new_sl = updates.get("stop_loss")
+            if new_sl:
+                executor.apply_stop(tid, float(new_sl),
+                                    float(row.get("tp2") or 0), symbol)
+        open_rows = [t for t in (database.get_open_trades() or [])
+                     if normalize_symbol(str(t.get("symbol") or "")) == normalize_symbol(symbol)]
+        mism = executor.reconcile(open_rows)
+        if mism:
+            logger.error("Demo reconciliation mismatches: %s", mism)
+    except Exception as exc:  # noqa: BLE001 - demo must never kill paper
+        logger.warning("Demo sync skipped: %s", exc)
+
+
 def main() -> None:
     """تحديث الصفقات المفتوحة."""
     logger.info("Starting trade updates: %s", datetime.now(timezone.utc).isoformat())
@@ -288,6 +342,7 @@ def main() -> None:
                     integrity.get("source_type") or "unknown",
                     integrity.get("reliability_grade") or "UNKNOWN",
                 )
+            _before_eval = len(evaluations)
             evaluations.extend(manager.update_trades(
                 open_trades=symbol_trades,
                 current_price=current_price,
@@ -302,6 +357,9 @@ def main() -> None:
                 market_data_source=str(price_payload.get("source") or ""),
                 candle_time=candle_time,
             ))
+            _sync_demo_execution(
+                config, symbol_config, symbol, symbol_trades,
+                evaluations[_before_eval:], database, telegram_for_events)
         total_events = 0
         for evaluation in evaluations:
             if evaluation.get("events"):
