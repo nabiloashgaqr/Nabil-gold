@@ -977,5 +977,19 @@
       "min_distance_points": 250,
       "window_hours": 2.5
     }
+  },
+  "execution": {
+    "execution_mode": "paper",
+    "description": "demo/mt5 branch: set EXECUTION_MODE=mt5_demo + TRADES_TABLE=trades_demo + DATA_SOURCE primary mt5 via env on the demo VPS; main stays paper.",
+    "demo": {
+      "symbol_map": {
+        "XAU/USD": "XAUUSD"
+      },
+      "lot_size": 0.1,
+      "max_open_demo_trades": 3,
+      "max_new_orders_per_day": 6,
+      "deviation_points_mt5": 30,
+      "reconcile_halt_on_mismatch": true
+    }
   }
 }
