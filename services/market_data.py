@@ -202,7 +202,8 @@ class MarketDataService:
         # demo/mt5 branch (phase 1): MT5 as primary feed when configured;
         # paper main keeps data_source.primary=twelvedata so nothing changes.
         data_cfg_src = (self.config.get("data_source") or {})
-        if str(data_cfg_src.get("primary")) == "mt5":
+        primary_src = os.environ.get("DATA_SOURCE_PRIMARY") or data_cfg_src.get("primary")
+        if str(primary_src) == "mt5":
             try:
                 from services import mt5_feed
                 demo_map = (((self.config.get("execution") or {})
