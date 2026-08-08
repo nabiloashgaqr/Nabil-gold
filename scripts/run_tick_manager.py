@@ -101,6 +101,7 @@ class TickManager:
         self.database = database
         self._extremes: Dict[str, float] = {}
         self._trail = trailing_params(config)
+        self._partial_alerted: set = set()  # refused-partial reported once/trade
 
     def _magic_rows(self) -> List[Dict[str, Any]]:
         rows = self.database.get_open_trades() or []
@@ -187,15 +188,22 @@ class TickManager:
                                              "stop_loss": entry})
             self._notify(f"🧪 DEMO: breakeven armed @ {entry:.2f}")
 
-        # 2) TP1 partial — book ONLY when the broker actually executed it;
-        # on failure partial_close stays False and we retry on the next tick
-        # instead of lying in the DB that half was booked.
+        # 2) TP1 partial — close ONLY the half (operator directive). Book it
+        # only when the broker actually executed it. On refusal: keep
+        # retrying every tick and report the broker's reason once per trade.
         if decide_tp1(side, tp1, tick.bid, tick.ask,
                       bool(row.get("partial_close"))):
             if executor.partial_close_at_tp1(tid, 0.5, row.get("symbol")):
+                self._partial_alerted.discard(tid)
                 self.database.update_trade(tid, {"partial_close": True,
                                                  "status": "TP1_HIT"})
                 self._notify(f"🧪 DEMO: TP1 partial booked @ {tp1:.2f}")
+            elif tid not in self._partial_alerted:
+                self._partial_alerted.add(tid)
+                self._notify(
+                    f"🧪 DEMO: TP1 partial REJECTED for {tid}: "
+                    f"{getattr(executor, 'last_error', 'unknown')} — "
+                    f"retrying every tick")
 
         # 3) trailing ratchet
         new_stop = decide_trailing(side, entry, stop, extreme,
