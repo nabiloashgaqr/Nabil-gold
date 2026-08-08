@@ -5,7 +5,18 @@ Set-Location $PSScriptRoot\..
 
 # 1. Python 3.11+
 $py = Get-Command python -ErrorAction SilentlyContinue
-if (-not $py) { winget install -e --id Python.Python.3.11 --accept-package-agreements --accept-source-agreements }
+if (-not $py) {
+    $wg = Get-Command winget -ErrorAction SilentlyContinue
+    if ($wg) {
+        winget install -e --id Python.Python.3.11 --accept-package-agreements --accept-source-agreements
+    } else {
+        Write-Host "NO WINGET (Windows Server): download Python 3.11 from https://www.python.org/downloads/ and install WITH 'Add python.exe to PATH' checked, then re-run this script." -ForegroundColor Yellow
+        Start-Process "https://www.python.org/downloads/release/python-3119/"
+        exit 1
+    }
+    $py = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $py) { Write-Host "After install, OPEN A NEW PowerShell window and re-run."; exit 1 }
+}
 
 # 2. Deps (MetaTrader5 package is Windows-only)
 python -m pip install --upgrade pip
