@@ -24,8 +24,17 @@
 - كل مهمة لها `.bat` في `deploy/tasks/` يضبط: EXECUTION_MODE=mt5_demo +
   TRADES_TABLE=trades_demo + DATA_SOURCE_PRIMARY=mt5، ثم يكتب لوجه في `logs\`.
 - `.env` واحد يحمل الأسرار فقط؛ كل سكريبت مجدول يقرؤه تلقائياً (`load_dotenv`).
-- مصدر البيانات = MT5 مباشرة؛ TwelveData احتياطي فقط إن فشل فيد MT5.
+- مصدر البيانات = **MT5 فقط**. لا حاجة لمفتاح TwelveData إطلاقاً: بدون مفتاح لا
+  يُستدعى TwelveData أبداً، ولو انقطع فيد MT5 تتوقف الدورة نظيفاً بدل أي بيانات
+  صناعية (حارس مُختبَر في tests/test_market_data_server_guard.py).
 - لا يعتمد على GitHub Actions إطلاقاً — GitHub للكود واللوحة فقط.
+
+## أين تصل الإشارات؟ قناة المشتركين — بنفس أسلوب الورقي
+- الباقة توجّه البطاقات إلى شات الديمو **فقط** إذا كان `TELEGRAM_DEMO_CHAT_ID`
+  معبأً في `.env`. لذلك: **اتركه فارغاً** → كل إشارة/تحديث يصل إلى
+  `TELEGRAM_CHAT_ID` (قناة المشتركين) بنفس تنسيق الورقي تماماً وبغير بادئة 🧪.
+- التسجيل في Supabase يتم في جدول `trades_demo` (وُجد عبر deploy/trades_demo.sql).
+- اللوحة في GitHub تقرأ `trades_demo` وتعرضها بعنوان 🧪 DEMO.
 
 ## ترتيب التشغيل
 1. انسخ فرع `demo/mt5` إلى `C:\Nabil-gold` وشغّل `deploy\vps_setup.ps1` كمسؤول.
