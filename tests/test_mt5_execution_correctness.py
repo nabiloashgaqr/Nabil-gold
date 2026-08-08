@@ -209,6 +209,59 @@ def test_be_wiring_respects_min_rr_gate(monkeypatch):
     assert not any(u[1].get("stop_loss") == 4327.57 for u in db.updates)
 
 
+# ── broker symbol suffix (JustMarkets: XAUUSD.s) ───────────────────────────
+
+def test_shipped_config_maps_to_broker_suffix():
+    """config.json is the single source; reverting to plain XAUUSD makes the
+    whole execution layer go blind on JustMarkets."""
+    import json
+    from pathlib import Path as _P
+    cfg = json.loads((_P(__file__).resolve().parents[1] / "config.json")
+                     .read_text(encoding="utf-8"))
+    smap = cfg["execution"]["demo"]["symbol_map"]
+    assert smap["XAU/USD"] == "XAUUSD.s"
+
+
+def test_executor_sym_uses_map_and_fallback():
+    ex = Mt5DemoExecutor({"execution": {"demo": {
+        "symbol_map": {"XAU/USD": "XAUUSD.s"}}}})
+    assert ex._sym("XAU/USD") == "XAUUSD.s"
+    assert ex._sym("XAU/USD2") == "XAUUSD2"  # unmapped: slash-strip fallback
+
+
+def test_tick_loop_symbol_lookup_uses_the_map(monkeypatch):
+    """The loop must ask MT5 for the MAPPED symbol; looking up the raw
+    XAU/USD-stripped name returns None on suffix brokers = loop sees nothing."""
+    state = mt5_fake.FakeState()
+    fake = mt5_fake.install(state)
+    seen = []
+    fake.symbol_info_tick = lambda s: (seen.append(s), None)[1]
+    monkeypatch.setitem(sys.modules, "MetaTrader5", fake)
+    import scripts.run_tick_manager as rtm
+    tm = rtm.TickManager({"execution": {"demo": {
+        "symbol_map": {"XAU/USD": "XAUUSD.s"}}}})
+    tm.database = _StubDB()
+    rows = [_row()]
+    tm._magic_rows = lambda: rows
+
+    import time as _time
+    calls = {"n": 0}
+    orig_sleep = _time.sleep
+
+    def _stop_after_first(*a, **k):
+        calls["n"] += 1
+        if calls["n"] >= 1:
+            raise KeyboardInterrupt
+        orig_sleep(0)
+
+    monkeypatch.setattr(rtm.time, "sleep", _stop_after_first)
+    try:
+        tm.run_forever()
+    except KeyboardInterrupt:
+        pass
+    assert seen and seen[0] == "XAUUSD.s"
+
+
 def test_be_wiring_arms_when_gate_passes(monkeypatch):
     """Same wide stop but +$20 favorable (200 pts ≥ 172.85) → BE arms at entry."""
     monkeypatch.setitem(sys.modules, "MetaTrader5",
