@@ -9,6 +9,13 @@ Pure decision helpers are unit-tested (tests/test_tick_manager_logic.py).
 """
 from __future__ import annotations
 
+# --- VPS: load .env if present (real env vars ALWAYS win over .env) ---
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv()  # override=False: task-wrapper vars take precedence
+except Exception:
+    pass
+
 import logging
 import os
 import sys
@@ -161,8 +168,12 @@ def main() -> None:  # pragma: no cover - VPS only
     from services.database import DatabaseService
     from services.telegram_bot import TelegramService
     from utils.helpers import load_config
+    from utils.single_instance import acquire_single_instance
 
     logging.basicConfig(level=logging.INFO)
+    if not acquire_single_instance("tick_manager.pid"):
+        logger.info("tick manager already running; exiting duplicate instance")
+        return
     cfg = load_config()
     if os.environ.get("EXECUTION_MODE") != "mt5_demo":
         logger.info("tick manager idle (EXECUTION_MODE != mt5_demo)")

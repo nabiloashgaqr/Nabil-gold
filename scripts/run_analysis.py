@@ -6,6 +6,13 @@ Runs every 5 minutes via cron-job.org/GitHub Actions. Fetches market data, runs 
 
 from __future__ import annotations
 
+# --- VPS: load .env if present (real env vars ALWAYS win over .env) ---
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv()  # override=False: task-wrapper vars take precedence
+except Exception:
+    pass
+
 import logging
 import os
 import sys

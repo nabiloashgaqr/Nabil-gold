@@ -9,6 +9,13 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# --- VPS: load .env if present (real env vars ALWAYS win over .env) ---
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv()  # override=False: task-wrapper vars take precedence
+except Exception:
+    pass
+
 
 def check(name, ok, hint=""):
     print(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f" -- {hint}" if hint and not ok else ""))

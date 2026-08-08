@@ -10,6 +10,13 @@
 
 from __future__ import annotations
 
+# --- VPS: load .env if present (real env vars ALWAYS win over .env) ---
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv()  # override=False: task-wrapper vars take precedence
+except Exception:
+    pass
+
 import json
 import logging
 import os
