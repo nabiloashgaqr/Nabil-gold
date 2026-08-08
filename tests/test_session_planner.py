@@ -676,7 +676,7 @@ def test_planner_levels_match_execution_levels_exactly() -> None:
     from pathlib import Path as _Path
     from scripts.run_analysis import _planner_trade_levels
 
-    config = _json.loads((_Path(__file__).resolve().parents[1] / "config.json").read_text())
+    config = _json.loads((_Path(__file__).resolve().parents[1] / "config.json").read_text(encoding="utf-8"))
     service = SessionPlannerService(config)
     candidate = {"details": {"liquidity": {"sell_side": [4064.74, 4030.0, 3985.15]}}}
     args = dict(direction="SELL", entry_price=4075.15, stop_loss=4090.15,
@@ -705,7 +705,7 @@ def test_planner_marks_a_leg_execution_would_reject() -> None:
     import json as _json
     from pathlib import Path as _Path
 
-    config = _json.loads((_Path(__file__).resolve().parents[1] / "config.json").read_text())
+    config = _json.loads((_Path(__file__).resolve().parents[1] / "config.json").read_text(encoding="utf-8"))
     service = SessionPlannerService(config)
     levels = service._execution_levels(
         direction="SELL", entry_price=4075.15, stop_loss=4079.0,
