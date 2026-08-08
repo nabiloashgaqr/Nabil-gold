@@ -32,13 +32,15 @@ def main() -> None:
     # reported 85. Identical maths over different samples cannot agree.
     limit = int(os.environ.get("DASHBOARD_TRADE_LIMIT", "150"))
     output = os.environ.get("DASHBOARD_OUTPUT", "storage/dashboard.html")
+    # The dashboard renders whatever TRADES_TABLE points at. Label it honestly.
+    demo = os.environ.get("TRADES_TABLE", "").strip() == "trades_demo"
 
     trades = db.get_recent_closed_trades(limit=limit)
     # Open positions are shown separately on the card and never folded into
     # the realised figures; see services/performance_stats.py.
     trades += [t for t in (db.get_open_trades() or [])
                if str(t.get("status") or "").upper() in performance_stats.OPEN_STATUSES]
-    html_text = render_dashboard(trades)
+    html_text = render_dashboard(trades, demo=demo)
     output_path = save_dashboard(html_text, output)
     summary = summarize_trades(trades)
 
@@ -47,7 +49,7 @@ def main() -> None:
     print(summary)
 
     if os.environ.get("SEND_TELEGRAM", "true").lower() in {"1", "true", "yes"}:
-        telegram.send_message(format_dashboard_telegram(summary))
+        telegram.send_message(format_dashboard_telegram(summary, demo=demo))
 
 if __name__ == "__main__":
     main()
