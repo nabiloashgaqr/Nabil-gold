@@ -212,7 +212,7 @@ class MarketDataService:
                     self.symbol, timeframe=timeframe, outputsize=outputsize,
                     symbol_map=demo_map)
             except Exception as exc:  # noqa: BLE001 - fall back silently
-                logger.warning("MT5 feed unavailable, falling back: %s", exc)
+                self.logger.warning("MT5 feed unavailable, falling back: %s", exc)
                 payload = None
         if self.api_key and self.api_key != "YOUR_API_KEY" and payload is None:
             payload = self._fetch_data(timeframe, outputsize)
@@ -220,14 +220,18 @@ class MarketDataService:
         if payload is None:
             # Production guard: synthetic data is NEVER acceptable for signal
             # analysis or trade management. It produced a catastrophic false SELL
-            # at 3366 (real gold ~4150) and a false TP2_HIT. If Twelve Data is
-            # down and no quote fallback worked, stop cleanly.
-            in_production = os.environ.get('GITHUB_ACTIONS', '') == 'true'
+            # at 3366 (real gold ~4150) and a false TP2_HIT. If there is no real
+            # feed (MT5 down and no/failing TwelveData), stop cleanly.
+            # The guard must also hold on the VPS: there the env says
+            # EXECUTION_MODE=paper|mt5_demo instead of GITHUB_ACTIONS, and the
+            # signals go straight to the subscribers channel.
+            in_production = (os.environ.get('GITHUB_ACTIONS', '') == 'true'
+                             or os.environ.get('EXECUTION_MODE', '') in ('paper', 'mt5_demo'))
             in_test = os.environ.get('PYTEST_RUNNING', '') == 'true' or os.environ.get('PYTEST_CURRENT_TEST', '') != ''
             if in_production and not in_test:
                 self.logger.error(
-                    'No real market data for %s %s — Twelve Data may be exhausted '
-                    'or API key invalid. Synthetic data is blocked in production. '
+                    'No real market data for %s %s — MT5 feed down and no usable '
+                    'TwelveData fallback. Synthetic data is blocked in production. '
                     'Stopping this cycle cleanly.',
                     self.symbol,
                     timeframe,
