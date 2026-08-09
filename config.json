@@ -20,7 +20,7 @@
     "resample_timeframes_from_base": true,
     "base_timeframe": "5m",
     "base_outputsize": 2500,
-    "description_resample_timeframes_from_base": "Fetch one 5m series per symbol then locally resample 15m/1H/4H to reduce API calls."
+    "description_resample_timeframes_from_base": "توضيح المشغل 2026-08-09: تُجلب شمعة 5m أساساً وتُشتق منها 15m/1H/4H — الشموع الأربع كلها متاحة للتحليل."
   },
   "telegram": {
     "bot_token": "ENV:TELEGRAM_BOT_TOKEN",
@@ -161,10 +161,10 @@
     "timezone": "Asia/Hebron",
     "sessions": [
       {
-        "name": "Main Trading Session",
-        "start_hour": 3,
+        "name": "Full-Day Session (24h, operator directive 2026-08-09)",
+        "start_hour": 0,
         "start_minute": 0,
-        "end_hour": 22,
+        "end_hour": 24,
         "end_minute": 0,
         "days": [
           0,
@@ -176,7 +176,7 @@
         "quality": "HIGH",
         "allow_signals": true,
         "allow_reports": true,
-        "description": "Signals allowed 3:00 AM - 10:00 PM on weekdays (Monday-Friday) in Asia/Hebron timezone. Weekends are blocked."
+        "description": "قرار المشغل 2026-08-09: تداول 24 ساعة يومياً الإثنين-الجمعة (ترميز days: 0=الإثنين). السبت والأحد مغلق تماماً."
       }
     ],
     "min_quality_required": "HIGH",
@@ -185,7 +185,7 @@
     "exclude_weekends": false,
     "enforce_friday_cutoff": false,
     "friday_cutoff_minute": 0,
-    "description": "توليد الإشارات مسموح 3:00-22:00 خلال أيام العمل فقط (الإثنين-الجمعة) بتوقيت Asia/Hebron. لا إشارات يومي السبت والأحد. متابعة الصفقات المفتوحة تبقى منفصلة وتعمل عند وجود صفقة لحماية SL/TP/Trailing."
+    "description": "قرار المشغل 2026-08-09: نافذة 24/5 (الإثنين-الجمعة كاملة) بتوقيت Asia/Hebron؛ السبت والأحد لا تحليل ولا تحديث صفقات. إدارة الصفقات المفتوحة داخل أيام العمل تعمل على مدار الساعة."
   },
   "signal_filters": {
     "require_trading_hours": true,
@@ -573,7 +573,7 @@
     "description": "وضع تجريبي: يتم حفظ ومتابعة الصفقات افتراضياً بدون تنفيذ حقيقي"
   },
   "daily_bias_filter": {
-    "enabled": true,
+    "enabled": false,
     "timeframe": "4H",
     "ema_fast": 20,
     "ema_slow": 50,

@@ -104,7 +104,7 @@ python -m pip install -r requirements.txt
 ```
 
 ### 2. متغيرات البيئة
-انسخ `.env.example` إلى `.env` واملأ:
+انسخ `deploy\.env.example` إلى `.env` (ملف واحد فقط في جذر المشروع) واملأ:
 ```env
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=...
