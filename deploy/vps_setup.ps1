@@ -1,8 +1,11 @@
-# ══════════════════════════════════════════════════════════════════════════
-# DEMO-ONLY VPS bootstrap (branch demo/mt5).
+# =============================================================================
+# FULL-VPS bootstrap: DEMO ONLY (branch demo/mt5).
 # GitHub keeps ONLY the Dashboard. Paper trading is STOPPED.
 # Run PowerShell AS ADMIN inside C:\Nabil-gold. Idempotent: re-runnable.
-# ══════════════════════════════════════════════════════════════════════════
+# NOTE: this file is ASCII-only ON PURPOSE. Windows PowerShell 5.1 reads
+# non-BOM .ps1 files as ANSI, and any smart-dash/box character corrupts the
+# parser ("Missing closing '}'"). Keep it ASCII.
+# =============================================================================
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot\..
 
@@ -41,20 +44,24 @@ python -m pip install MetaTrader5
 python -m pip install -r requirements.txt
 
 # 4. .env from template (EDIT VALUES BEFORE ANYTHING RUNS!)
-if (-not (Test-Path .env)) { Copy-Item deploy\.env.example .env; Write-Host "EDIT .env NOW — fill every key." -ForegroundColor Yellow }
+if (-not (Test-Path .env)) { Copy-Item deploy\.env.example .env; Write-Host "EDIT .env NOW - fill every key." -ForegroundColor Yellow }
 
 # 5. Logs dir
 New-Item -ItemType Directory -Force -Path logs | Out-Null
 
-# 6. Scheduled tasks — DEMO ONLY (wrappers in deploy\tasks set env + logging)
+# 6. Scheduled tasks - DEMO ONLY (wrappers in deploy\tasks set env + logging)
 $t = Join-Path (Get-Location).Path "deploy\tasks"
 schtasks /Create /TN "SS_DemoAnalysis" /SC MINUTE /MO 5  /TR "cmd /c $t\demo_analysis.bat" /F
 schtasks /Create /TN "SS_DemoWatchdog" /SC MINUTE /MO 1  /TR "cmd /c $t\demo_watchdog.bat" /F
 schtasks /Create /TN "SS_DemoLoop"     /SC ONLOGON       /TR "cmd /c $t\demo_loop.bat"     /F
 schtasks /Create /TN "SS_TickManager"  /SC ONLOGON       /TR "cmd /c $t\tick_manager.bat"  /F
 schtasks /Create /TN "SS_MT5Terminal"  /SC ONLOGON       /TR "`"C:\Program Files\MetaTrader 5\terminal64.exe`"" /F
+schtasks /Create /TN "SS_MarketStatus" /SC HOURLY /MO 1  /TR "cmd /c $t\market_status.bat" /F
+schtasks /Create /TN "SS_MacroContext" /SC HOURLY /MO 1  /TR "cmd /c $t\macro_demo.bat"    /F
+schtasks /Create /TN "SS_DailyReport"  /SC DAILY  /ST 23:00        /TR "cmd /c $t\daily_report_demo.bat"  /F
+schtasks /Create /TN "SS_WeeklyReport" /SC WEEKLY /D SAT /ST 07:00 /TR "cmd /c $t\weekly_report_demo.bat" /F
 
-# ── OPTIONAL (disabled by default): move the subscription bot here too.
+# -- OPTIONAL (disabled by default): move the subscription bot here too.
 #    If you enable these two lines, DISABLE "Subscription Bot Cron" on GitHub.
 # python -m pip install -r subscription_bot\requirements.txt
 # schtasks /Create /TN "SS_SubscriptionBot" /SC DAILY /ST 00:00 /TR "cmd /c $t\subscription_bot.bat" /F
