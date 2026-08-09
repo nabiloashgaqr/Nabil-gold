@@ -1,47 +1,50 @@
-"""The dashboard must label the stream it reads (demo vs paper).
+"""Dashboard continuity (operator directive 2026-08-09).
 
-Paper trading is stopped; the dashboard reads trades_demo. A dashboard that
-says "Paper Trading" while showing demo rows is a lie, and a Telegram card
-without the 🧪 DEMO marker would be misread as the old paper system.
-These tests must FAIL if the demo labelling is removed or unwired.
+The dashboard must read as ONE unbroken record — paper history + live
+execution — as if no cut or migration ever happened. Therefore:
+- rows from both books merge, deduped by id;
+- NO paper/demo split marker anywhere (no 🧪, no "DEMO" in titles/cards).
+These tests must fail if a split label or a lost history ever returns.
 """
-from services.dashboard import format_dashboard_telegram, render_dashboard, summarize_trades
+from services.dashboard import (
+    format_dashboard_telegram, merge_trade_rows, render_dashboard,
+    summarize_trades)
 
 
-def _sample():
-    return [{
-        "id": "t1", "symbol": "XAU/USD", "type": "BUY", "status": "TP1_HIT",
+def _row(tid, status="TP2_HIT", pnl=100.0):
+    return {
+        "id": tid, "symbol": "XAU/USD", "type": "BUY", "status": status,
         "entry_price": 4300.0, "current_price": 4310.0, "stop_loss": 4290.0,
-        "tp1": 4310.0, "tp2": 4330.0, "pnl_points": 100.0, "confidence": 70,
-        "created_at": "2026-08-08T10:00:00Z", "closed_at": "2026-08-08T11:00:00Z",
-        "close_reason": "TP1",
-    }]
+        "tp1": 4310.0, "tp2": 4330.0, "pnl_points": pnl, "confidence": 70,
+        "created_at": "2026-08-08T10:00:00Z",
+        "closed_at": "2026-08-08T11:00:00Z", "close_reason": "TP2",
+    }
 
 
-def test_demo_dashboard_says_demo_not_paper():
-    html_text = render_dashboard(_sample(), demo=True)
-    assert "DEMO" in html_text
-    assert "MT5 Demo Trading" in html_text
+def test_merge_keeps_both_books_and_dedupes():
+    paper = [_row("P1"), _row("P2")]
+    demo = [_row("D1"), _row("P2")]          # duplicate id across books
+    merged = merge_trade_rows(paper, demo)
+    ids = [r["id"] for r in merged]
+    assert ids.count("P2") == 1               # deduped
+    assert {"P1", "P2", "D1"} <= set(ids)     # nothing lost
+
+
+def test_merge_empty_books_safe():
+    assert merge_trade_rows([], None, [_row("X")]) == [_row("X")]
+
+
+def test_dashboard_has_no_split_markers():
+    html_text = render_dashboard([_row("P1"), _row("D1")])
+    assert "DEMO" not in html_text
+    assert "🧪" not in html_text
+    assert "Gold AI Signals Dashboard" in html_text
     assert "Paper Trading" not in html_text
 
 
-def test_paper_dashboard_still_says_paper():
-    html_text = render_dashboard(_sample(), demo=False)
-    assert "Paper Trading" in html_text
-    assert "MT5 Demo Trading" not in html_text
-
-
-def test_demo_telegram_card_is_marked():
-    text = format_dashboard_telegram(summarize_trades(_sample()), demo=True)
-    assert "DEMO" in text.splitlines()[0]
-
-
-def test_paper_telegram_card_has_no_demo_marker():
-    text = format_dashboard_telegram(summarize_trades(_sample()), demo=False)
+def test_telegram_card_has_no_split_markers():
+    text = format_dashboard_telegram(
+        summarize_trades([_row("P1"), _row("D1")]))
     assert "DEMO" not in text
-
-
-def test_default_is_paper_label():
-    """Unlabelled call = old behavior = paper. No silent mode flip."""
-    html_text = render_dashboard(_sample())
-    assert "Paper Trading" in html_text
+    assert "🧪" not in text
+    assert "Dashboard Updated" in text
