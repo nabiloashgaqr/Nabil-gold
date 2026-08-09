@@ -139,6 +139,7 @@ jobs:
             tests/test_dashboard_demo_mode.py \
             tests/test_market_data_server_guard.py \
             tests/test_mt5_execution_correctness.py \
+            tests/test_operator_directives_24h_15m_weekend.py \
             tests/test_adaptive_execution.py \
             tests/test_smc_projects_liquidity_pools.py \
             tests/test_sl_floor_measures_every_path.py \
