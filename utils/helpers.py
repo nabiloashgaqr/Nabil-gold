@@ -46,6 +46,19 @@ def setup_logging(level: int = logging.INFO) -> None:
     )
 
 
+def is_weekend_hebron(now=None) -> bool:
+    """Saturday/Sunday in Asia/Hebron (operator directive 2026-08-09:
+    no analysis, no trade updates on weekends)."""
+    from datetime import datetime
+    if now is None:
+        try:
+            from zoneinfo import ZoneInfo
+            now = datetime.now(ZoneInfo("Asia/Hebron"))
+        except Exception:
+            now = datetime.utcnow()
+    return now.weekday() >= 5  # 5=Sat, 6=Sun
+
+
 def load_config(path: str | Path | None = None) -> Dict[str, Any]:
     """Load config.json and resolve ENV: placeholders when useful."""
     config_path = Path(path) if path else DEFAULT_CONFIG_PATH
