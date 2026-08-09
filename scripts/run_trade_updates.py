@@ -214,6 +214,11 @@ def _sync_demo_execution(config, symbol_config, symbol, symbol_trades,
 
 def main() -> None:
     """تحديث الصفقات المفتوحة."""
+    # Weekend hard gate (operator directive 2026-08-09): Sat/Sun = no updates.
+    from utils.helpers import is_weekend_hebron
+    if is_weekend_hebron():
+        logger.info("Weekend (Sat/Sun Hebron) — trade updates skipped by operator directive.")
+        return
     logger.info("Starting trade updates: %s", datetime.now(timezone.utc).isoformat())
     config = load_config()
 

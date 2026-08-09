@@ -4,10 +4,16 @@ Runs as ONE persistent process (SS_DemoLoop, ONLOGON). The pidfile guard
 makes re-launches harmless instead of stacking duplicate loops.
 """
 import json
+import os
+import sys
 import time
 import traceback
 
 from datetime import datetime, timezone
+
+# The scheduled task launches this file from scripts\, so the repo root is
+# NOT on sys.path — add it, otherwise `utils`/`scripts` imports die on the VPS.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # --- VPS: load .env if present (real env vars ALWAYS win over .env) ---
 try:

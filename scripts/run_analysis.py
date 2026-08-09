@@ -4882,6 +4882,12 @@ async def run_analysis_async() -> None:
         await _run_analysis_for_config(config_for_instrument(base_config, instrument))
 
 def main() -> None:
+    # Weekend hard gate (operator directive 2026-08-09): Sat/Sun = no analysis.
+    from utils.helpers import is_weekend_hebron
+    if is_weekend_hebron():
+        logging.info("Weekend (Sat/Sun Hebron) — analysis skipped by operator directive.")
+        return
+
     import asyncio
     asyncio.run(run_analysis_async())
 
