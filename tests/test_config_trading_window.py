@@ -14,29 +14,15 @@ def _local(day: int, hour: int, minute: int = 0) -> datetime:
     return datetime(2026, 6, day, hour, minute, tzinfo=ZoneInfo("Asia/Hebron"))
 
 
-def test_config_trading_window_3am_to_10pm_on_weekdays() -> None:
+def test_config_trading_window_24h_on_weekdays() -> None:
+    """Operator directive 2026-08-09: FULL 24h on weekdays."""
     config = load_config()
     agent = TradingSessionAgent(config)
 
-    before_session = agent.check(now=_local(22, 2, 0))    # 2:00 AM - outside
-    session_start = agent.check(now=_local(22, 3, 0))     # 3:00 AM - start
-    midday = agent.check(now=_local(22, 12, 0))           # 12:00 PM - inside
-    session_end = agent.check(now=_local(22, 22, 0))      # 10:00 PM - end
-    after_session = agent.check(now=_local(22, 23, 0))    # 11:00 PM - outside
-
-    # Before 3:00 AM - blocked
-    assert before_session["trading_allowed"] is False
-
-    # 3:00 AM - 10:00 PM - allowed
-    assert session_start["trading_allowed"] is True
-    assert session_start["allow_signals"] is True
-    assert midday["trading_allowed"] is True
-    assert midday["allow_signals"] is True
-    assert session_end["trading_allowed"] is True
-    assert session_end["allow_signals"] is True
-
-    # After 10:00 PM - blocked
-    assert after_session["trading_allowed"] is False
+    for hour in (0, 2, 3, 12, 22, 23):
+        r = agent.check(now=_local(22, hour, 30))  # Monday
+        assert r["trading_allowed"] is True, hour
+        assert r["allow_signals"] is True, hour
 
 
 def test_config_trading_window_blocks_weekends() -> None:
