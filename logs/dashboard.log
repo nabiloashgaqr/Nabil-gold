@@ -1,0 +1,5 @@
+2026-08-10 08:05:20,964 | WARNING | DatabaseService | Supabase credentials missing, using local fallback JSON
+2026-08-10 08:05:20,970 | WARNING | DatabaseService | Supabase credentials missing, using local fallback JSON
+2026-08-10 08:05:20,982 | INFO | __main__ | Dashboard generated: storage\dashboard.html | trades=0
+Dashboard generated: storage\dashboard.html
+{'total': 0, 'open': 0, 'pending': 0, 'closed': 0, 'wins': 0, 'losses': 0, 'breakeven': 0, 'win_rate': 0.0, 'net_points': 0, 'profit_factor': 0.0, 'open_floating_points': 0, 'buy_count': 0, 'sell_count': 0, 'buy_net': 0, 'sell_net': 0, 'avg_confidence': 0.0}

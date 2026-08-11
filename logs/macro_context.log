@@ -1,0 +1,497 @@
+2026-08-10 01:07:21,376 | INFO | services.macro_data_provider | SPY: 1h data 54h old — retrying with 1d interval
+2026-08-10 01:07:21,469 | INFO | services.macro_data_provider | SPY: keeping stale 1h data (54h old) — likely market holiday
+2026-08-10 01:07:21,628 | INFO | services.macro_data_provider | ^TNX: 1h data 55h old — retrying with 1d interval
+2026-08-10 01:07:21,738 | INFO | services.macro_data_provider | ^TNX: keeping stale 1h data (55h old) — likely market holiday
+2026-08-10 01:07:21,863 | INFO | services.macro_data_provider | ^FVX: 1h data 55h old — retrying with 1d interval
+2026-08-10 01:07:21,925 | INFO | services.macro_data_provider | ^FVX: keeping stale 1h data (55h old) — likely market holiday
+2026-08-10 01:07:22,066 | INFO | services.macro_data_provider | ^VIX: 1h data 53h old — retrying with 1d interval
+2026-08-10 01:07:22,113 | INFO | services.macro_data_provider | ^VIX: keeping stale 1h data (53h old) — likely market holiday
+2026-08-10 01:07:22,598 | INFO | services.macro_data_provider | TIP: 1h data 54h old — retrying with 1d interval
+2026-08-10 01:07:22,708 | INFO | services.macro_data_provider | TIP: keeping stale 1h data (54h old) — likely market holiday
+2026-08-10 01:07:22,848 | INFO | services.macro_data_provider | STIP: 1h data 54h old — retrying with 1d interval
+2026-08-10 01:07:22,927 | INFO | services.macro_data_provider | STIP: keeping stale 1h data (54h old) — likely market holiday
+2026-08-10 01:07:23,036 | WARNING | services.macro_data_provider | Stale macro data: SPY: data 54h old (market closed or holiday); ^TNX: data 55h old (market closed or holiday); ^FVX: data 55h old (market closed or holiday); ^VIX: data 53h old (market closed or holiday); TIP: data 54h old (market closed or holiday); STIP: data 54h old (market closed or holiday)
+2026-08-10 01:07:23,271 | INFO | DatabaseService | Database connected: Supabase
+2026-08-10 01:07:23,818 | INFO | httpx | HTTP Request: POST https://trsmuzekxmpqtvxdkxwe.supabase.co/rest/v1/macro_context "HTTP/2 401 Unauthorized"
+2026-08-10 01:07:23,818 | WARNING | DatabaseService | Could not save macro_context snapshot: {'message': 'new row violates row-level security policy for table "macro_context"', 'code': '42501', 'hint': None, 'details': None}
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+2026-08-10 02:07:06,745 | INFO | services.macro_data_provider | SPY: 1h data 55h old — retrying with 1d interval
+2026-08-10 02:07:06,854 | INFO | services.macro_data_provider | SPY: keeping stale 1h data (55h old) — likely market holiday
+2026-08-10 02:07:06,979 | INFO | services.macro_data_provider | ^TNX: 1h data 56h old — retrying with 1d interval
+2026-08-10 02:07:07,042 | INFO | services.macro_data_provider | ^TNX: keeping stale 1h data (56h old) — likely market holiday
+2026-08-10 02:07:07,151 | INFO | services.macro_data_provider | ^FVX: 1h data 56h old — retrying with 1d interval
+2026-08-10 02:07:07,198 | INFO | services.macro_data_provider | ^FVX: keeping stale 1h data (56h old) — likely market holiday
+2026-08-10 02:07:07,276 | INFO | services.macro_data_provider | ^VIX: 1h data 54h old — retrying with 1d interval
+2026-08-10 02:07:07,339 | INFO | services.macro_data_provider | ^VIX: keeping stale 1h data (54h old) — likely market holiday
+2026-08-10 02:07:07,636 | INFO | services.macro_data_provider | TIP: 1h data 55h old — retrying with 1d interval
+2026-08-10 02:07:07,730 | INFO | services.macro_data_provider | TIP: keeping stale 1h data (55h old) — likely market holiday
+2026-08-10 02:07:07,808 | INFO | services.macro_data_provider | STIP: 1h data 55h old — retrying with 1d interval
+2026-08-10 02:07:07,887 | INFO | services.macro_data_provider | STIP: keeping stale 1h data (55h old) — likely market holiday
+2026-08-10 02:07:07,965 | WARNING | services.macro_data_provider | Stale macro data: SPY: data 55h old (market closed or holiday); ^TNX: data 56h old (market closed or holiday); ^FVX: data 56h old (market closed or holiday); ^VIX: data 54h old (market closed or holiday); TIP: data 55h old (market closed or holiday); STIP: data 55h old (market closed or holiday)
+2026-08-10 02:07:08,246 | INFO | DatabaseService | Database connected: Supabase
+2026-08-10 02:07:08,872 | INFO | httpx | HTTP Request: POST https://trsmuzekxmpqtvxdkxwe.supabase.co/rest/v1/macro_context "HTTP/2 401 Unauthorized"
+2026-08-10 02:07:08,872 | WARNING | DatabaseService | Could not save macro_context snapshot: {'message': 'new row violates row-level security policy for table "macro_context"', 'code': '42501', 'hint': None, 'details': None}
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+2026-08-10 03:07:06,411 | INFO | services.macro_data_provider | SPY: 1h data 56h old — retrying with 1d interval
+2026-08-10 03:07:06,536 | INFO | services.macro_data_provider | SPY: keeping stale 1h data (56h old) — likely market holiday
+2026-08-10 03:07:06,614 | INFO | services.macro_data_provider | ^TNX: 1h data 57h old — retrying with 1d interval
+2026-08-10 03:07:06,693 | INFO | services.macro_data_provider | ^TNX: keeping stale 1h data (57h old) — likely market holiday
+2026-08-10 03:07:06,771 | INFO | services.macro_data_provider | ^FVX: 1h data 57h old — retrying with 1d interval
+2026-08-10 03:07:06,849 | INFO | services.macro_data_provider | ^FVX: keeping stale 1h data (57h old) — likely market holiday
+2026-08-10 03:07:06,927 | INFO | services.macro_data_provider | ^VIX: 1h data 55h old — retrying with 1d interval
+2026-08-10 03:07:07,005 | INFO | services.macro_data_provider | ^VIX: keeping stale 1h data (55h old) — likely market holiday
+2026-08-10 03:07:07,272 | INFO | services.macro_data_provider | TIP: 1h data 56h old — retrying with 1d interval
+2026-08-10 03:07:07,380 | INFO | services.macro_data_provider | TIP: keeping stale 1h data (56h old) — likely market holiday
+2026-08-10 03:07:07,474 | INFO | services.macro_data_provider | STIP: 1h data 56h old — retrying with 1d interval
+2026-08-10 03:07:07,568 | INFO | services.macro_data_provider | STIP: keeping stale 1h data (56h old) — likely market holiday
+2026-08-10 03:07:07,635 | WARNING | services.macro_data_provider | Stale macro data: SPY: data 56h old (market closed or holiday); ^TNX: data 57h old (market closed or holiday); ^FVX: data 57h old (market closed or holiday); ^VIX: data 55h old (market closed or holiday); TIP: data 56h old (market closed or holiday); STIP: data 56h old (market closed or holiday)
+2026-08-10 03:07:07,896 | INFO | DatabaseService | Database connected: Supabase
+2026-08-10 03:07:08,929 | INFO | httpx | HTTP Request: POST https://trsmuzekxmpqtvxdkxwe.supabase.co/rest/v1/macro_context "HTTP/2 401 Unauthorized"
+2026-08-10 03:07:08,944 | WARNING | DatabaseService | Could not save macro_context snapshot: {'message': 'new row violates row-level security policy for table "macro_context"', 'code': '42501', 'hint': None, 'details': None}
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+2026-08-10 04:07:06,691 | INFO | services.macro_data_provider | SPY: 1h data 57h old — retrying with 1d interval
+2026-08-10 04:07:06,801 | INFO | services.macro_data_provider | SPY: keeping stale 1h data (57h old) — likely market holiday
+2026-08-10 04:07:06,895 | INFO | services.macro_data_provider | ^TNX: 1h data 58h old — retrying with 1d interval
+2026-08-10 04:07:06,957 | INFO | services.macro_data_provider | ^TNX: keeping stale 1h data (58h old) — likely market holiday
+2026-08-10 04:07:07,035 | INFO | services.macro_data_provider | ^FVX: 1h data 58h old — retrying with 1d interval
+2026-08-10 04:07:07,098 | INFO | services.macro_data_provider | ^FVX: keeping stale 1h data (58h old) — likely market holiday
+2026-08-10 04:07:07,192 | INFO | services.macro_data_provider | ^VIX: 1h data 56h old — retrying with 1d interval
+2026-08-10 04:07:07,270 | INFO | services.macro_data_provider | ^VIX: keeping stale 1h data (56h old) — likely market holiday
+2026-08-10 04:07:07,521 | INFO | services.macro_data_provider | TIP: 1h data 57h old — retrying with 1d interval
+2026-08-10 04:07:07,615 | INFO | services.macro_data_provider | TIP: keeping stale 1h data (57h old) — likely market holiday
+2026-08-10 04:07:07,693 | INFO | services.macro_data_provider | STIP: 1h data 57h old — retrying with 1d interval
+2026-08-10 04:07:07,787 | INFO | services.macro_data_provider | STIP: keeping stale 1h data (57h old) — likely market holiday
+2026-08-10 04:07:07,850 | WARNING | services.macro_data_provider | Stale macro data: SPY: data 57h old (market closed or holiday); ^TNX: data 58h old (market closed or holiday); ^FVX: data 58h old (market closed or holiday); ^VIX: data 56h old (market closed or holiday); TIP: data 57h old (market closed or holiday); STIP: data 57h old (market closed or holiday)
+2026-08-10 04:07:08,116 | INFO | DatabaseService | Database connected: Supabase
+2026-08-10 04:07:09,164 | INFO | httpx | HTTP Request: POST https://trsmuzekxmpqtvxdkxwe.supabase.co/rest/v1/macro_context "HTTP/2 401 Unauthorized"
+2026-08-10 04:07:09,164 | WARNING | DatabaseService | Could not save macro_context snapshot: {'message': 'new row violates row-level security policy for table "macro_context"', 'code': '42501', 'hint': None, 'details': None}
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+2026-08-10 05:07:05,764 | INFO | services.macro_data_provider | SPY: 1h data 58h old — retrying with 1d interval
+2026-08-10 05:07:05,849 | INFO | services.macro_data_provider | SPY: keeping stale 1h data (58h old) — likely market holiday
+2026-08-10 05:07:05,920 | INFO | services.macro_data_provider | ^TNX: 1h data 59h old — retrying with 1d interval
+2026-08-10 05:07:05,983 | INFO | services.macro_data_provider | ^TNX: keeping stale 1h data (59h old) — likely market holiday
+2026-08-10 05:07:06,045 | INFO | services.macro_data_provider | ^FVX: 1h data 59h old — retrying with 1d interval
+2026-08-10 05:07:06,108 | INFO | services.macro_data_provider | ^FVX: keeping stale 1h data (59h old) — likely market holiday
+2026-08-10 05:07:06,186 | INFO | services.macro_data_provider | ^VIX: 1h data 57h old — retrying with 1d interval
+2026-08-10 05:07:06,248 | INFO | services.macro_data_provider | ^VIX: keeping stale 1h data (57h old) — likely market holiday
+2026-08-10 05:07:06,484 | INFO | services.macro_data_provider | TIP: 1h data 58h old — retrying with 1d interval
+2026-08-10 05:07:06,562 | INFO | services.macro_data_provider | TIP: keeping stale 1h data (58h old) — likely market holiday
+2026-08-10 05:07:06,624 | INFO | services.macro_data_provider | STIP: 1h data 58h old — retrying with 1d interval
+2026-08-10 05:07:06,702 | INFO | services.macro_data_provider | STIP: keeping stale 1h data (58h old) — likely market holiday
+2026-08-10 05:07:06,749 | WARNING | services.macro_data_provider | Stale macro data: SPY: data 58h old (market closed or holiday); ^TNX: data 59h old (market closed or holiday); ^FVX: data 59h old (market closed or holiday); ^VIX: data 57h old (market closed or holiday); TIP: data 58h old (market closed or holiday); STIP: data 58h old (market closed or holiday)
+2026-08-10 05:07:06,984 | INFO | DatabaseService | Database connected: Supabase
+2026-08-10 05:07:07,557 | INFO | httpx | HTTP Request: POST https://trsmuzekxmpqtvxdkxwe.supabase.co/rest/v1/macro_context "HTTP/2 401 Unauthorized"
+2026-08-10 05:07:07,557 | WARNING | DatabaseService | Could not save macro_context snapshot: {'message': 'new row violates row-level security policy for table "macro_context"', 'code': '42501', 'hint': None, 'details': None}
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+2026-08-10 06:07:09,310 | INFO | services.macro_data_provider | SPY: 1h data 59h old — retrying with 1d interval
+2026-08-10 06:07:09,430 | INFO | services.macro_data_provider | SPY: keeping stale 1h data (59h old) — likely market holiday
+2026-08-10 06:07:09,515 | INFO | services.macro_data_provider | ^TNX: 1h data 60h old — retrying with 1d interval
+2026-08-10 06:07:09,636 | INFO | services.macro_data_provider | ^TNX: keeping stale 1h data (60h old) — likely market holiday
+2026-08-10 06:07:09,775 | INFO | services.macro_data_provider | ^FVX: 1h data 60h old — retrying with 1d interval
+2026-08-10 06:07:09,862 | INFO | services.macro_data_provider | ^FVX: keeping stale 1h data (60h old) — likely market holiday
+2026-08-10 06:07:09,945 | INFO | services.macro_data_provider | ^VIX: 1h data 58h old — retrying with 1d interval
+2026-08-10 06:07:10,009 | INFO | services.macro_data_provider | ^VIX: keeping stale 1h data (58h old) — likely market holiday
+2026-08-10 06:07:10,289 | INFO | services.macro_data_provider | TIP: 1h data 59h old — retrying with 1d interval
+2026-08-10 06:07:10,427 | INFO | services.macro_data_provider | TIP: keeping stale 1h data (59h old) — likely market holiday
+2026-08-10 06:07:10,551 | INFO | services.macro_data_provider | STIP: 1h data 59h old — retrying with 1d interval
+2026-08-10 06:07:10,658 | INFO | services.macro_data_provider | STIP: keeping stale 1h data (59h old) — likely market holiday
+2026-08-10 06:07:10,724 | WARNING | services.macro_data_provider | Stale macro data: SPY: data 59h old (market closed or holiday); ^TNX: data 60h old (market closed or holiday); ^FVX: data 60h old (market closed or holiday); ^VIX: data 58h old (market closed or holiday); TIP: data 59h old (market closed or holiday); STIP: data 59h old (market closed or holiday)
+2026-08-10 06:07:10,989 | INFO | DatabaseService | Database connected: Supabase
+2026-08-10 06:07:12,127 | INFO | httpx | HTTP Request: POST https://trsmuzekxmpqtvxdkxwe.supabase.co/rest/v1/macro_context "HTTP/2 401 Unauthorized"
+2026-08-10 06:07:12,128 | WARNING | DatabaseService | Could not save macro_context snapshot: {'message': 'new row violates row-level security policy for table "macro_context"', 'code': '42501', 'hint': None, 'details': None}
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+2026-08-10 07:07:08,692 | INFO | services.macro_data_provider | SPY: 1h data 60h old — retrying with 1d interval
+2026-08-10 07:07:08,804 | INFO | services.macro_data_provider | SPY: keeping stale 1h data (60h old) — likely market holiday
+2026-08-10 07:07:08,892 | INFO | services.macro_data_provider | ^TNX: 1h data 61h old — retrying with 1d interval
+2026-08-10 07:07:08,968 | INFO | services.macro_data_provider | ^TNX: keeping stale 1h data (61h old) — likely market holiday
+2026-08-10 07:07:09,040 | INFO | services.macro_data_provider | ^FVX: 1h data 61h old — retrying with 1d interval
+2026-08-10 07:07:09,120 | INFO | services.macro_data_provider | ^FVX: keeping stale 1h data (61h old) — likely market holiday
+2026-08-10 07:07:09,185 | INFO | services.macro_data_provider | ^VIX: 1h data 59h old — retrying with 1d interval
+2026-08-10 07:07:09,258 | INFO | services.macro_data_provider | ^VIX: keeping stale 1h data (59h old) — likely market holiday
+2026-08-10 07:07:09,556 | INFO | services.macro_data_provider | TIP: 1h data 60h old — retrying with 1d interval
+2026-08-10 07:07:09,671 | INFO | services.macro_data_provider | TIP: keeping stale 1h data (60h old) — likely market holiday
+2026-08-10 07:07:09,790 | INFO | services.macro_data_provider | STIP: 1h data 60h old — retrying with 1d interval
+2026-08-10 07:07:09,866 | INFO | services.macro_data_provider | STIP: keeping stale 1h data (60h old) — likely market holiday
+2026-08-10 07:07:09,932 | WARNING | services.macro_data_provider | Stale macro data: SPY: data 60h old (market closed or holiday); ^TNX: data 61h old (market closed or holiday); ^FVX: data 61h old (market closed or holiday); ^VIX: data 59h old (market closed or holiday); TIP: data 60h old (market closed or holiday); STIP: data 60h old (market closed or holiday)
+2026-08-10 07:07:10,215 | INFO | DatabaseService | Database connected: Supabase
+2026-08-10 07:07:11,432 | INFO | httpx | HTTP Request: POST https://trsmuzekxmpqtvxdkxwe.supabase.co/rest/v1/macro_context "HTTP/2 401 Unauthorized"
+2026-08-10 07:07:11,434 | WARNING | DatabaseService | Could not save macro_context snapshot: {'message': 'new row violates row-level security policy for table "macro_context"', 'code': '42501', 'hint': None, 'details': None}
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+2026-08-10 08:07:25,742 | INFO | services.macro_data_provider | SPY: 1h data 61h old — retrying with 1d interval
+2026-08-10 08:07:25,883 | INFO | services.macro_data_provider | SPY: keeping stale 1h data (61h old) — likely market holiday
+2026-08-10 08:07:25,977 | INFO | services.macro_data_provider | ^TNX: 1h data 62h old — retrying with 1d interval
+2026-08-10 08:07:26,122 | INFO | services.macro_data_provider | ^TNX: keeping stale 1h data (62h old) — likely market holiday
+2026-08-10 08:07:26,216 | INFO | services.macro_data_provider | ^FVX: 1h data 62h old — retrying with 1d interval
+2026-08-10 08:07:26,317 | INFO | services.macro_data_provider | ^FVX: keeping stale 1h data (62h old) — likely market holiday
+2026-08-10 08:07:26,737 | INFO | services.macro_data_provider | TIP: 1h data 61h old — retrying with 1d interval
+2026-08-10 08:07:26,836 | INFO | services.macro_data_provider | TIP: keeping stale 1h data (61h old) — likely market holiday
+2026-08-10 08:07:26,948 | INFO | services.macro_data_provider | STIP: 1h data 61h old — retrying with 1d interval
+2026-08-10 08:07:27,268 | INFO | services.macro_data_provider | STIP: keeping stale 1h data (61h old) — likely market holiday
+2026-08-10 08:07:27,487 | WARNING | services.macro_data_provider | Stale macro data: SPY: data 61h old (market closed or holiday); ^TNX: data 62h old (market closed or holiday); ^FVX: data 62h old (market closed or holiday); TIP: data 61h old (market closed or holiday); STIP: data 61h old (market closed or holiday)
+2026-08-10 08:07:28,073 | INFO | DatabaseService | Database connected: Supabase
+2026-08-10 08:07:28,725 | INFO | httpx | HTTP Request: POST https://trsmuzekxmpqtvxdkxwe.supabase.co/rest/v1/macro_context "HTTP/2 401 Unauthorized"
+2026-08-10 08:07:28,731 | WARNING | DatabaseService | Could not save macro_context snapshot: {'message': 'new row violates row-level security policy for table "macro_context"', 'code': '42501', 'hint': None, 'details': None}
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+2026-08-10 09:07:22,232 | INFO | services.macro_data_provider | SPY: 1h data 62h old — retrying with 1d interval
+2026-08-10 09:07:22,405 | INFO | services.macro_data_provider | SPY: keeping stale 1h data (62h old) — likely market holiday
+2026-08-10 09:07:22,496 | INFO | services.macro_data_provider | ^TNX: 1h data 63h old — retrying with 1d interval
+2026-08-10 09:07:22,569 | INFO | services.macro_data_provider | ^TNX: keeping stale 1h data (63h old) — likely market holiday
+2026-08-10 09:07:22,666 | INFO | services.macro_data_provider | ^FVX: 1h data 63h old — retrying with 1d interval
+2026-08-10 09:07:22,732 | INFO | services.macro_data_provider | ^FVX: keeping stale 1h data (63h old) — likely market holiday
+2026-08-10 09:07:23,162 | INFO | services.macro_data_provider | TIP: 1h data 62h old — retrying with 1d interval
+2026-08-10 09:07:23,290 | INFO | services.macro_data_provider | TIP: keeping stale 1h data (62h old) — likely market holiday
+2026-08-10 09:07:23,383 | INFO | services.macro_data_provider | STIP: 1h data 62h old — retrying with 1d interval
+2026-08-10 09:07:23,478 | INFO | services.macro_data_provider | STIP: keeping stale 1h data (62h old) — likely market holiday
+2026-08-10 09:07:23,612 | WARNING | services.macro_data_provider | Stale macro data: SPY: data 62h old (market closed or holiday); ^TNX: data 63h old (market closed or holiday); ^FVX: data 63h old (market closed or holiday); TIP: data 62h old (market closed or holiday); STIP: data 62h old (market closed or holiday)
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+2026-08-10 10:07:08,224 | INFO | services.macro_data_provider | SPY: 1h data 63h old — retrying with 1d interval
+2026-08-10 10:07:08,355 | INFO | services.macro_data_provider | SPY: keeping stale 1h data (63h old) — likely market holiday
+2026-08-10 10:07:08,596 | INFO | services.macro_data_provider | ^TNX: 1h data 64h old — retrying with 1d interval
+2026-08-10 10:07:08,784 | INFO | services.macro_data_provider | ^TNX: keeping stale 1h data (64h old) — likely market holiday
+2026-08-10 10:07:08,916 | INFO | services.macro_data_provider | ^FVX: 1h data 64h old — retrying with 1d interval
+2026-08-10 10:07:08,982 | INFO | services.macro_data_provider | ^FVX: keeping stale 1h data (64h old) — likely market holiday
+2026-08-10 10:07:09,515 | INFO | services.macro_data_provider | TIP: 1h data 63h old — retrying with 1d interval
+2026-08-10 10:07:09,613 | INFO | services.macro_data_provider | TIP: keeping stale 1h data (63h old) — likely market holiday
+2026-08-10 10:07:09,734 | INFO | services.macro_data_provider | STIP: 1h data 63h old — retrying with 1d interval
+2026-08-10 10:07:09,848 | INFO | services.macro_data_provider | STIP: keeping stale 1h data (63h old) — likely market holiday
+2026-08-10 10:07:09,940 | WARNING | services.macro_data_provider | Stale macro data: SPY: data 63h old (market closed or holiday); ^TNX: data 64h old (market closed or holiday); ^FVX: data 64h old (market closed or holiday); TIP: data 63h old (market closed or holiday); STIP: data 63h old (market closed or holiday)
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+2026-08-10 11:07:20,348 | INFO | services.macro_data_provider | SPY: 1h data 64h old — retrying with 1d interval
+2026-08-10 11:07:20,458 | INFO | services.macro_data_provider | SPY: keeping stale 1h data (64h old) — likely market holiday
+2026-08-10 11:07:20,583 | INFO | services.macro_data_provider | ^TNX: 1h data 65h old — retrying with 1d interval
+2026-08-10 11:07:20,661 | INFO | services.macro_data_provider | ^TNX: keeping stale 1h data (65h old) — likely market holiday
+2026-08-10 11:07:20,770 | INFO | services.macro_data_provider | ^FVX: 1h data 65h old — retrying with 1d interval
+2026-08-10 11:07:20,864 | INFO | services.macro_data_provider | ^FVX: keeping stale 1h data (65h old) — likely market holiday
+2026-08-10 11:07:21,366 | INFO | services.macro_data_provider | TIP: 1h data 64h old — retrying with 1d interval
+2026-08-10 11:07:21,538 | INFO | services.macro_data_provider | TIP: keeping stale 1h data (64h old) — likely market holiday
+2026-08-10 11:07:21,647 | INFO | services.macro_data_provider | STIP: 1h data 64h old — retrying with 1d interval
+2026-08-10 11:07:21,726 | INFO | services.macro_data_provider | STIP: keeping stale 1h data (64h old) — likely market holiday
+2026-08-10 11:07:21,804 | WARNING | services.macro_data_provider | Stale macro data: SPY: data 64h old (market closed or holiday); ^TNX: data 65h old (market closed or holiday); ^FVX: data 65h old (market closed or holiday); TIP: data 64h old (market closed or holiday); STIP: data 64h old (market closed or holiday)
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+2026-08-10 12:07:07,235 | INFO | services.macro_data_provider | SPY: 1h data 65h old — retrying with 1d interval
+2026-08-10 12:07:07,347 | INFO | services.macro_data_provider | SPY: keeping stale 1h data (65h old) — likely market holiday
+2026-08-10 12:07:07,439 | INFO | services.macro_data_provider | ^TNX: 1h data 66h old — retrying with 1d interval
+2026-08-10 12:07:07,535 | INFO | services.macro_data_provider | ^TNX: keeping stale 1h data (66h old) — likely market holiday
+2026-08-10 12:07:07,625 | INFO | services.macro_data_provider | ^FVX: 1h data 66h old — retrying with 1d interval
+2026-08-10 12:07:07,695 | INFO | services.macro_data_provider | ^FVX: keeping stale 1h data (66h old) — likely market holiday
+2026-08-10 12:07:08,138 | INFO | services.macro_data_provider | TIP: 1h data 65h old — retrying with 1d interval
+2026-08-10 12:07:08,294 | INFO | services.macro_data_provider | TIP: keeping stale 1h data (65h old) — likely market holiday
+2026-08-10 12:07:08,385 | INFO | services.macro_data_provider | STIP: 1h data 65h old — retrying with 1d interval
+2026-08-10 12:07:08,491 | INFO | services.macro_data_provider | STIP: keeping stale 1h data (65h old) — likely market holiday
+2026-08-10 12:07:08,558 | WARNING | services.macro_data_provider | Stale macro data: SPY: data 65h old (market closed or holiday); ^TNX: data 66h old (market closed or holiday); ^FVX: data 66h old (market closed or holiday); TIP: data 65h old (market closed or holiday); STIP: data 65h old (market closed or holiday)
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+2026-08-10 13:07:23,634 | INFO | services.macro_data_provider | SPY: 1h data 66h old — retrying with 1d interval
+2026-08-10 13:07:23,798 | INFO | services.macro_data_provider | SPY: keeping stale 1h data (66h old) — likely market holiday
+2026-08-10 13:07:24,656 | INFO | services.macro_data_provider | TIP: 1h data 66h old — retrying with 1d interval
+2026-08-10 13:07:24,834 | INFO | services.macro_data_provider | TIP: keeping stale 1h data (66h old) — likely market holiday
+2026-08-10 13:07:24,929 | INFO | services.macro_data_provider | STIP: 1h data 66h old — retrying with 1d interval
+2026-08-10 13:07:25,068 | INFO | services.macro_data_provider | STIP: keeping stale 1h data (66h old) — likely market holiday
+2026-08-10 13:07:25,218 | WARNING | services.macro_data_provider | Stale macro data: SPY: data 66h old (market closed or holiday); TIP: data 66h old (market closed or holiday); STIP: data 66h old (market closed or holiday)
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
+Traceback (most recent call last):
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 55, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Nabil-gold\scripts\update_macro_context.py", line 47, in main
+    print("\u2705 Macro context updated")
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>
