@@ -3844,14 +3844,27 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Could not build the exit agent book for %s: %s", symbol, exc)
                 exit_agent_details = None
+            # Demo mode (2026-08-10 single-owner + thesis handoff): the
+            # embedded manager may DECIDE (thesis exits/scale-outs/staleness)
+            # but never BOOK execution — DemoHandoffDB converts close intents
+            # into requested_* flags the tick manager executes at the broker
+            # first, and suppresses its cards (tick sends truthful ones).
+            _demo = os.environ.get("EXECUTION_MODE") == "mt5_demo"
+            if _demo:
+                from services.demo_handoff import DemoHandoffDB
+                _db = DemoHandoffDB(database)
+                _tg = None
+            else:
+                _db = database
+                _tg = telegram
             OpenTradesManager(config).update_trades(
                 open_trades=[t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol],
                 current_price=float(data.get("current_price", 0)),
                 candle_high=high,
                 candle_low=low,
                 recent_candles=recent_candles,
-                database=database,
-                telegram=telegram,
+                database=_db,
+                telegram=_tg,
                 now=datetime.now(timezone.utc),
                 news_blocked=news_blocked_pre,
                 news_context=news_pre,

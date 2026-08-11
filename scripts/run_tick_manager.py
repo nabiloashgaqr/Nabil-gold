@@ -16,6 +16,7 @@ try:
 except Exception:
     pass
 
+import json
 import logging
 import os
 import sys
@@ -31,6 +32,7 @@ from services.mt5_executor import magic_for  # noqa: E402
 
 logger = logging.getLogger("tick_manager")
 LOOP_SLEEP = float(os.environ.get("TICK_LOOP_SLEEP", 0.25))
+ROWS_REFRESH_SECONDS = float(os.environ.get("TICK_ROWS_REFRESH", 3.0))
 
 
 # ── pure decisions (unit-tested) ────────────────────────────────────────────
@@ -67,7 +69,29 @@ def decide_tp1(side: str, tp1: float, candle_low: float, candle_high: float,
                done: bool) -> bool:
     if done or tp1 <= 0:
         return False
-    return (candle_low <= tp1) if side == "BUY" else (candle_high >= tp1)
+    # BUY TP1 (above entry) is touched when the HIGH reaches it; SELL when
+    # the LOW does. The old inverted form booked halves AT A LOSS the moment
+    # price sat below an above-entry target (MT5 journal 2026-08-10 09:50).
+    return (candle_high >= tp1) if side == "BUY" else (candle_low <= tp1)
+
+
+
+def _row_fresh(row: Dict[str, Any], max_age_minutes: float = 60.0) -> bool:
+    """A row is placement-eligible only within max_age of created_at.
+    Live incident 2026-08-10: a finished TP1_HIT row with no ticket was
+    resurrected into fresh market orders every tick."""
+    from datetime import datetime, timezone
+    raw = str(row.get("created_at") or "")
+    if not raw:
+        return False
+    try:
+        created = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except Exception:  # noqa: BLE001
+        return False
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - created).total_seconds() / 60.0
+    return 0 <= age <= max_age_minutes
 
 
 def classify_broker_exit(side: str, deal_price: float, entry: float,
@@ -103,18 +127,102 @@ class TickManager:
         self._trail = trailing_params(config)
         self._partial_alerted: set = set()  # refused-partial reported once/trade
 
+
+    def _seed_extreme(self, executor, row: Dict[str, Any], pos, side: str) -> float:
+        """Restart-lossless extreme: seed from the broker's M1 candles since
+        the position opened (operator directive 2026-08-10: the trailing must
+        respect the highest price reached, including gaps while we were down).
+        """
+        from services.mt5_executor import _mt5_ready
+        mt5 = _mt5_ready()
+        sym = executor._sym(str(row.get("symbol") or "XAU/USD"))
+        seed = float(row.get("entry_price") or 0)
+        try:
+            open_time = int(getattr(pos, "time", 0) or 0)
+            if open_time > 0:
+                rates = mt5.copy_rates_range(
+                    sym, getattr(mt5, "TIMEFRAME_M1", 1),
+                    open_time, int(time.time()))
+                if rates is not None and len(rates):
+                    if side == "BUY":
+                        seed = max(float(r["high"]) for r in rates)
+                    else:
+                        seed = min(float(r["low"]) for r in rates)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("extreme seeding failed (%s); using entry", exc)
+        return seed
+
+    def _pending_stale(self, row: Dict[str, Any], tick) -> bool:
+        """Demo mirror of the paper pending_freshness rules (config-driven):
+        cancel when older than stale_after_hours, or when price ran away
+        stale_after_excursion_points without filling."""
+        pf = (self.config.get("pending_freshness") or {})
+        if not pf.get("enabled", True):
+            return False
+        from datetime import datetime, timezone
+        raw = str(row.get("created_at") or "")
+        try:
+            created = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            age_h = (datetime.now(timezone.utc) - created).total_seconds() / 3600.0
+        except Exception:  # noqa: BLE001
+            return False
+        if age_h >= float(pf.get("stale_after_hours", 6)):
+            return True
+        entry = float(row.get("entry_price") or 0)
+        if entry <= 0:
+            return False
+        side = str(row.get("type") or row.get("side") or "").upper()
+        price = float(tick.bid if side == "BUY" else tick.ask)
+        excursion = (price - entry) if side == "BUY" else (entry - price)
+        return excursion >= float(pf.get("stale_after_excursion_points", 250)) * 0.10
+
+
+    def _reconcile_pending(self, rows, executor) -> None:  # pragma: no cover
+        """Broker pending orders whose DB row is gone (cancelled/replaced)
+        must be cancelled at the broker too — otherwise ghost fills."""
+        active = {magic_for(str(r.get("id"))) for r in rows}
+        for o in executor.open_orders():
+            mg = getattr(o, "magic", None)
+            if mg is not None and mg not in active:
+                if executor.cancel_order(int(o.ticket)):
+                    self._notify(
+                        f"🧪 DEMO: stale pending #{int(o.ticket)} cancelled "
+                        f"at broker (row no longer active)")
+
     def _magic_rows(self) -> List[Dict[str, Any]]:
         rows = self.database.get_open_trades() or []
         return [r for r in rows if str(r.get("status") or "") in
                 {"PENDING", "OPEN", "TP1_HIT", "PARTIAL"}]
 
     def run_forever(self) -> None:  # pragma: no cover - VPS only
-        import MetaTrader5 as mt5
-        from services.mt5_executor import Mt5DemoExecutor, magic_for
+        from services.mt5_executor import Mt5DemoExecutor, magic_for, _mt5_ready
+        mt5 = _mt5_ready()  # initialize ONCE — the terminal must be attached
         executor = Mt5DemoExecutor(self.config, telegram=self.telegram)
+        # DB rows are throttled (Supabase free-tier protection — live incident:
+        # usage-limit badge): ticks stay 0.25s via symbol_info_tick, while the
+        # trade BOOK refreshes every ROWS_REFRESH_SECONDS. Row state changes
+        # (new signal / status flip) are rare; 3s staleness is invisible.
+        rows: List[Dict[str, Any]] = []
+        rows_at = 0.0
+        beat_at = 0.0
         while True:
             try:
-                rows = self._magic_rows()
+                now = time.time()
+                if now - rows_at >= ROWS_REFRESH_SECONDS:
+                    rows = self._magic_rows()
+                    rows_at = now
+                    self._reconcile_pending(rows, executor)
+                if now - beat_at >= 30:
+                    try:
+                        from datetime import datetime as _dt
+                        with open("tick_heartbeat.json", "w",
+                                  encoding="utf-8") as fh:
+                            json.dump({"ts": _dt.now(timezone.utc).isoformat()}, fh)
+                        beat_at = now
+                    except Exception:  # noqa: BLE001
+                        pass
                 for row in rows:
                     # Route through the broker symbol map (XAU/USD -> XAUUSD.s);
                     # a raw slash-strip goes blind on suffix brokers.
@@ -133,8 +241,29 @@ class TickManager:
         magic = magic_for(tid)
         pos = executor._position_by_magic(magic)
         status = str(row.get("status") or "")
+        if pos is None and row.get("close_price") is not None:
+            return  # exit already booked; never manage/resurrect a closed row
 
         if status == "PENDING":
+            if row.get("requested_exit"):
+                self.database.update_trade(
+                    tid, {"status": "CANCELLED", "result": "CANCELLED",
+                          "requested_exit": False,
+                          "reasons": ["thesis exit before activation"]})
+                return
+            if self._pending_stale(row, tick):
+                # Stale pending (age or runaway excursion): cancel in the DB;
+                # _reconcile_pending cancels the broker order and cards it.
+                # If it was never placed at the broker, card here instead.
+                had_ticket = bool(row.get("mt5_ticket"))
+                self.database.update_trade(
+                    tid, {"status": "CANCELLED", "result": "CANCELLED",
+                          "reasons": ["stale pending (freshness mirror)"]})
+                if not had_ticket:
+                    self._notify(
+                        f"🧪 DEMO: MT5 applied: stale pending cancelled "
+                        f"(age/excursion) — never placed")
+                return
             if pos is not None:  # broker filled the pending
                 # Book the ACTUAL fill price: PnL/BE/trailing must run on the
                 # broker's execution, not our planned level.
@@ -142,7 +271,8 @@ class TickManager:
                     tid, {"status": "OPEN",
                           "entry_price": round(float(pos.price_open), 2)})
                 self._notify(
-                    f"🧪 DEMO: pending activated @ {pos.price_open:.2f} "
+                    f"🧪 DEMO: MT5 applied: pending filled @ "
+                    f"{pos.price_open:.2f} · ticket {int(pos.ticket)} "
                     f"(actual fill)")
             elif not row.get("mt5_ticket"):
                 # The pending order has never been sent to MT5 — send it now.
@@ -156,14 +286,29 @@ class TickManager:
                     float(row.get("tp2") or 0), row.get("symbol"))
                 if ticket:
                     self.database.update_trade(tid, {"mt5_ticket": ticket})
+                    lo = executor.last_order
                     self._notify(
-                        f"🧪 DEMO: pending sent to MT5 @ "
-                        f"{float(row.get('entry_price') or 0):.2f} "
-                        f"(ticket {ticket})")
+                        f"🧪 DEMO: MT5 applied: {lo.get('kind', 'LIMIT')} "
+                        f"order placed · vol {lo.get('volume')} @ "
+                        f"{lo.get('price', float(row.get('entry_price') or 0)):.2f} "
+                        f"· ticket {ticket}")
             return
         if pos is None:
-            if not row.get("mt5_ticket"):
-                # New signal that never reached MT5 — open it NOW (market).
+            # Never-placed OPEN rows (no ticket, no close) are ALWAYS
+            # placement-eligible whatever their age — the card already went
+            # to Telegram; silently starving them (old 60-min gate) is the
+            # "card but no MT5 order" gap. Resurrection protection applies
+            # only to rows that already have a close/ticket history.
+            never_placed = (not row.get("mt5_ticket")) and \
+                row.get("close_price") is None
+            eligible = (status == "PENDING") or \
+                (status == "OPEN" and (never_placed or _row_fresh(row)))
+            if (not row.get("mt5_ticket")) and eligible:
+                # PENDING rows stay placement-eligible for their whole life
+                # (paper keeps pendings alive for hours; staleness cancella-
+                # tion happens in the DB and _reconcile_pending mirrors it at
+                # the broker). OPEN rows only while fresh — finished or stale
+                # rows must NEVER be resurrected into new orders.
                 ticket = executor.ensure_ticket(
                     tid, side, "MARKET", 0.0,
                     float(row.get("stop_loss") or 0),
@@ -176,10 +321,13 @@ class TickManager:
                     self.database.update_trade(tid, upd)
                     if "entry_price" in upd:
                         self._notify(
-                            f"🧪 DEMO: MARKET filled @ {upd['entry_price']:.2f} "
-                            f"(ticket {ticket})")
+                            f"🧪 DEMO: MT5 applied: MARKET filled · vol "
+                            f"{executor.lot} @ {upd['entry_price']:.2f} · "
+                            f"ticket {ticket}")
                     else:
-                        self._notify(f"🧪 DEMO: MARKET sent (ticket {ticket})")
+                        self._notify(
+                            f"🧪 DEMO: MT5 applied: MARKET order sent · "
+                            f"ticket {ticket}")
                 return
             # broker closed it (SL / TP2 / trailing stop)
             # Mirror the REAL broker exit: deal price + realized P&L, not
@@ -198,16 +346,48 @@ class TickManager:
                     tid, {"status": status, "close_price": round(close, 2),
                           "pnl_points": round(pnl_pts, 1)})
                 self._notify(
-                    f"🧪 DEMO: closed by broker @ {close:.2f} ({status}) "
+                    f"🧪 DEMO: MT5 applied: position closed @ {close:.2f} "
+                    f"({status}) · vol {exit_info.get('volume')} · "
+                    f"ticket {exit_info.get('position')} "
                     f"{pnl_pts:+.0f} pts / {exit_info['profit']:+.2f}$")
             else:
+                keep = status if status in {"TP1_HIT", "PARTIAL"} else "SL_HIT"
                 close = tick.bid
                 self.database.update_trade(
-                    tid, {"status": "SL_HIT", "close_price": round(close, 2)})
+                    tid, {"status": keep, "close_price": round(close, 2)})
                 self._notify(
                     f"🧪 DEMO: position closed by broker @ {close:.2f} "
-                    f"(no exit deal found — labelled SL_HIT, verify)")
+                    f"(no exit deal found — labelled {keep}, verify)")
             return
+
+        # thesis-exit handoff: analysis requested, broker executes first.
+        if row.get("requested_exit"):
+            if pos is None:
+                self.database.update_trade(tid, {"requested_exit": False})
+            elif executor.close_position(tid, row.get("symbol")):
+                lc = executor.last_close
+                pnl = (lc["price"] - float(row.get("entry_price") or 0)) * 10.0
+                if side == "SELL":
+                    pnl = -pnl
+                self.database.update_trade(
+                    tid, {"status": "THESIS_EXIT", "requested_exit": False,
+                          "close_price": lc["price"],
+                          "pnl_points": round(pnl, 1)})
+                self._notify(
+                    f"🧪 DEMO: MT5 applied: thesis exit closed @ "
+                    f"{lc['price']:.2f} · vol {lc['volume']} · "
+                    f"ticket {lc['ticket']} · {pnl:+.0f} pts")
+            return
+        if row.get("requested_partial") and pos is not None \
+                and not row.get("partial_close"):
+            if executor.partial_close_at_tp1(tid, 0.5, row.get("symbol")):
+                lp = executor.last_partial
+                self.database.update_trade(tid, {"requested_partial": False})
+                self._notify(
+                    f"🧪 DEMO: MT5 applied: thesis scale-out closed · vol "
+                    f"{lp.get('volume')} @ {lp.get('price', 0):.2f} · "
+                    f"remaining {lp.get('remaining')} · ticket "
+                    f"{lp.get('ticket')}")
 
         entry = float(row.get("entry_price") or 0)
         stop = float(row.get("stop_loss") or 0)
@@ -216,19 +396,41 @@ class TickManager:
         pv = 0.10  # codebase point = $0.10 on gold
         risk_points = risk / pv  # price delta -> codebase points
         price = tick.bid if side == "SELL" else tick.ask
-        extreme = self._extremes.get(tid, price)
-        extreme = min(extreme, price) if side == "BUY" else max(extreme, price)
+        if tid not in self._extremes:
+            # first sight (fresh start/restart): seed from broker history so
+            # peaks hit while we were down still ratchet the stop.
+            self._extremes[tid] = self._seed_extreme(executor, row, pos, side)
+        extreme = self._extremes[tid]
+        extreme = max(extreme, price) if side == "BUY" else min(extreme, price)
         self._extremes[tid] = extreme
+
+        # 0) SL drift guard: a manually/broker-moved stop that is WORSE than
+        # the book's level is restored every tick (operator directive).
+        broker_sl = float(getattr(pos, "sl", 0) or 0)
+        db_stop = float(row.get("stop_loss") or 0)
+        tp2 = float(row.get("tp2") or 0)
+        if broker_sl > 0 and db_stop > 0 and abs(broker_sl - db_stop) > 0.5:
+            worse = (broker_sl < db_stop) if side == "BUY" else \
+                (broker_sl > db_stop)
+            if worse and executor.apply_stop(tid, db_stop, tp2,
+                                             row.get("symbol")):
+                self._notify(
+                    f"🧪 DEMO: MT5 applied: SL drift corrected back to "
+                    f"{db_stop:.2f} (broker had {broker_sl:.2f})")
 
         # 1) breakeven
         if decide_be(side, entry, price, risk_points,
                      self._trail["early_breakeven_points"], 0.5,
                      bool(row.get("sl_moved_to_entry"))):
-            executor.apply_stop(tid, entry, float(row.get("tp2") or 0),
-                                row.get("symbol"))
-            self.database.update_trade(tid, {"sl_moved_to_entry": True,
-                                             "stop_loss": entry})
-            self._notify(f"🧪 DEMO: breakeven armed @ {entry:.2f}")
+            # Move FIRST at the broker; the card is sent ONLY when the
+            # broker confirms. On refusal nothing is booked, so the next
+            # tick retries (operator directive: truthful messages only).
+            if executor.apply_stop(tid, entry, float(row.get("tp2") or 0),
+                                   row.get("symbol")):
+                self.database.update_trade(tid, {"sl_moved_to_entry": True,
+                                                 "stop_loss": entry})
+                self._notify(f"🧪 DEMO: breakeven armed @ {entry:.2f} "
+                             f"(confirmed at broker)")
 
         # 2) TP1 partial — close ONLY the half (operator directive). Book it
         # only when the broker actually executed it. On refusal: keep
@@ -239,7 +441,12 @@ class TickManager:
                 self._partial_alerted.discard(tid)
                 self.database.update_trade(tid, {"partial_close": True,
                                                  "status": "TP1_HIT"})
-                self._notify(f"🧪 DEMO: TP1 partial booked @ {tp1:.2f}")
+                lp = executor.last_partial
+                self._notify(
+                    f"🧪 DEMO: MT5 applied: TP1 partial closed · vol "
+                    f"{lp.get('volume')} @ {lp.get('price', tp1):.2f} · "
+                    f"remaining {lp.get('remaining')} · ticket "
+                    f"{lp.get('ticket')}")
             elif tid not in self._partial_alerted:
                 self._partial_alerted.add(tid)
                 self._notify(
@@ -252,11 +459,15 @@ class TickManager:
                                    self._trail["distance_points"],
                                    self._trail["step_points"], pv)
         if new_stop:
-            executor.apply_stop(tid, new_stop, float(row.get("tp2") or 0),
-                                row.get("symbol"))
-            self.database.update_trade(tid, {"stop_loss": new_stop})
+            if executor.apply_stop(tid, new_stop, float(row.get("tp2") or 0),
+                                   row.get("symbol")):
+                self.database.update_trade(tid, {"stop_loss": new_stop})
+                self._notify(f"🧪 DEMO: trailing stop moved to {new_stop:.2f} "
+                             f"(confirmed at broker)")
+            # refusal: apply_stop logged the retcode; DB untouched -> retried
 
     def _notify(self, text: str) -> None:  # pragma: no cover
+        logger.info("[card] %s", text)  # visibility: cards hit the log too
         if self.telegram:
             try:
                 self.telegram.send_message(text)
