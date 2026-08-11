@@ -56,10 +56,11 @@ schtasks /Create /TN "SS_DemoWatchdog" /SC MINUTE /MO 1  /TR "cmd /c $t\demo_wat
 schtasks /Create /TN "SS_DemoLoop"     /SC ONLOGON       /TR "cmd /c $t\demo_loop.bat"     /F
 schtasks /Create /TN "SS_TickManager"  /SC ONLOGON       /TR "cmd /c $t\tick_manager.bat"  /F
 schtasks /Create /TN "SS_MT5Terminal"  /SC ONLOGON       /TR "`"C:\Program Files\MetaTrader 5\terminal64.exe`"" /F
-schtasks /Create /TN "SS_MarketStatus" /SC HOURLY /MO 1  /TR "cmd /c $t\market_status.bat" /F
-schtasks /Create /TN "SS_MacroContext" /SC HOURLY /MO 1  /TR "cmd /c $t\macro_demo.bat"    /F
-schtasks /Create /TN "SS_DailyReport"  /SC DAILY  /ST 23:00        /TR "cmd /c $t\daily_report_demo.bat"  /F
-schtasks /Create /TN "SS_WeeklyReport" /SC WEEKLY /D SAT /ST 07:00 /TR "cmd /c $t\weekly_report_demo.bat" /F
+schtasks /Create /TN "SS_MarketStatus" /SC HOURLY /MO 1 /ST 00:02 /TR "cmd /c $t\market_status.bat"      /F
+schtasks /Create /TN "SS_MacroContext" /SC HOURLY /MO 1 /ST 00:07 /TR "cmd /c $t\macro_demo.bat"         /F
+schtasks /Create /TN "SS_DailyReport"  /SC DAILY  /ST 22:00       /TR "cmd /c $t\daily_report_demo.bat"  /F
+schtasks /Create /TN "SS_Dashboard"    /SC DAILY  /ST 22:00       /TR "cmd /c $t\dashboard_demo.bat"     /F
+schtasks /Create /TN "SS_WeeklyReport" /SC WEEKLY /D SAT /ST 10:00 /TR "cmd /c $t\weekly_report_demo.bat" /F
 
 # -- OPTIONAL (disabled by default): move the subscription bot here too.
 #    If you enable these two lines, DISABLE "Subscription Bot Cron" on GitHub.
