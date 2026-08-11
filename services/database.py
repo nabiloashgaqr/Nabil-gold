@@ -22,7 +22,9 @@ except Exception:  # pragma: no cover - dependency may be absent in local Python
     Client = Any  # type: ignore[misc,assignment]
     create_client = None  # type: ignore[assignment]
 
-from utils.helpers import load_config, load_trades, save_trades
+from utils.helpers import (
+    load_config, load_trades, load_trades_checked, mutate_trades, save_trades,
+)
 from utils.instruments import price_decimals, price_to_points
 from utils.sessions import session_label_from_utc, SESSION_ORDER
 from services import performance_stats
@@ -170,6 +172,11 @@ class DatabaseService:
             "current_pnl_points": 0,
             "sl_moved_to_entry": False,
             "partial_close": False,
+            # In mt5_demo, analysis persists the execution intent first and the
+            # tick manager sends the rich signal card only AFTER MT5 accepts the
+            # order. Paper mode keeps its historical send-before-save flow.
+            "telegram_signal_sent": bool(decision.get("_telegram_signal_sent", True)),
+            "telegram_signal_sent_at": decision.get("_telegram_signal_sent_at"),
             "pending_cycles": 0,  # hybrid mode: how many cycles a PENDING order has survived
             "updates_sent": [],
             "result": None,
@@ -196,9 +203,7 @@ class DatabaseService:
                     raise RuntimeError(f"Failed to save trade in Supabase in production: {exc}") from exc
                 self.logger.error("Failed to save trade in Supabase, falling back local: %s", exc)
 
-        trades = load_trades(self.local_path)
-        trades.append(trade_data)
-        save_trades(trades, self.local_path)
+        mutate_trades(lambda trades: trades.append(trade_data), self.local_path)
         return trade_id
 
     def save_setup_candidate(self, candidate: Dict[str, Any]) -> str:
@@ -811,7 +816,10 @@ class DatabaseService:
                 if self._strict_supabase():
                     raise RuntimeError(f"Failed to fetch open trades from Supabase in production: {exc}") from exc
                 self.logger.error("Failed to fetch open trades from Supabase: %s", exc)
-        return [trade for trade in load_trades(self.local_path) if trade.get("status") in set(self.ACTIVE_STATUSES)]
+        # Execution path uses the strict read: corrupt/contended storage must
+        # fail closed, never masquerade as an empty book and cancel broker orders.
+        return [trade for trade in load_trades_checked(self.local_path)
+                if trade.get("status") in set(self.ACTIVE_STATUSES)]
 
     def save_macro_context(self, context: Dict[str, Any]) -> bool:
         """Persist latest hourly macro context in Supabase when schema exists.
@@ -917,18 +925,18 @@ class DatabaseService:
                     raise RuntimeError(f"Failed to update Supabase trade {trade_id} in production: {exc}") from exc
                 self.logger.error("Failed to update Supabase trade %s: %s", trade_id, exc)
 
-        trades = load_trades(self.local_path)
-        for trade in trades:
-            if str(trade.get("id")) == trade_id:
-                # Apply updates
-                trade.update(updates)
-                # Keep type/side in sync for backward compatibility
-                if "type" in updates and "side" not in updates:
-                    trade["side"] = updates.get("type")
-                if "side" in updates and "type" not in updates:
-                    trade["type"] = updates.get("side")
-                break
-        save_trades(trades, self.local_path)
+        def _update_local(trades: List[Dict[str, Any]]) -> None:
+            for trade in trades:
+                if str(trade.get("id")) == trade_id:
+                    trade.update(updates)
+                    # Keep type/side in sync for backward compatibility.
+                    if "type" in updates and "side" not in updates:
+                        trade["side"] = updates.get("type")
+                    if "side" in updates and "type" not in updates:
+                        trade["type"] = updates.get("side")
+                    break
+
+        mutate_trades(_update_local, self.local_path)
 
 
     def cancel_pending_orders(
@@ -984,20 +992,19 @@ class DatabaseService:
                     raise RuntimeError(f"Failed to cancel pending orders in production: {exc}") from exc
                 self.logger.error("Failed to cancel pending orders from Supabase: %s", exc)
 
-        trades = load_trades(self.local_path)
-        changed = False
-        for trade in trades:
-            if _matches(trade):
-                trade.update({
-                    "status": "CANCELLED", "result": "CANCELLED",
-                    "closed_at": now_iso, "close_time": now_iso,
-                    "reasons": [reason], "last_updated": now_iso,
-                })
-                cancelled += 1
-                changed = True
-        if changed:
-            save_trades(trades, self.local_path)
-        return cancelled
+        def _cancel_local(trades: List[Dict[str, Any]]) -> int:
+            count = 0
+            for trade in trades:
+                if _matches(trade):
+                    trade.update({
+                        "status": "CANCELLED", "result": "CANCELLED",
+                        "closed_at": now_iso, "close_time": now_iso,
+                        "reasons": [reason], "last_updated": now_iso,
+                    })
+                    count += 1
+            return count
+
+        return mutate_trades(_cancel_local, self.local_path)
 
     def _missing_column_name(self, exc: Exception) -> str | None:
         """Extract the missing column name from a Supabase/PostgREST error.

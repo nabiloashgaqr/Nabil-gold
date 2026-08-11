@@ -1,6 +1,8 @@
 @echo off
 REM Demo stream: 5-minute analysis writing to trades_demo (MT5 data source).
 cd /d "%~dp0..\.."
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
 if not exist logs mkdir logs
 set EXECUTION_MODE=mt5_demo
 set TRADES_TABLE=trades_demo

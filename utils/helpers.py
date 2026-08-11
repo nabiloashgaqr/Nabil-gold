@@ -5,9 +5,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
+import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, TypeVar
 
 from utils.instruments import point_size, price_decimals
 
@@ -170,32 +173,149 @@ def is_market_open(dt: datetime | None = None) -> bool:
     return True
 
 
-def load_trades(path: str | Path | None = None) -> List[Dict[str, Any]]:
-    """Load local trades fallback JSON."""
-    trades_path = Path(path) if path else DEFAULT_TRADES_PATH
-    if not trades_path.exists():
-        return []
+_T = TypeVar("_T")
+
+
+@contextmanager
+def _interprocess_file_lock(path: str | Path, timeout: float = 15.0):
+    """Serialize read/modify/write transactions across VPS processes.
+
+    Analysis and the tick manager are separate Windows processes.  A normal
+    ``threading.Lock`` therefore cannot protect ``storage/trades.json``.  This
+    lock uses one byte in a sibling ``.lock`` file (msvcrt on Windows, flock on
+    POSIX) and is intentionally kept outside the JSON file, which is atomically
+    replaced after every successful mutation.
+    """
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = Path(f"{target}.lock")
+    fh = lock_path.open("a+b")
+    acquired = False
+    deadline = time.monotonic() + max(float(timeout), 0.1)
     try:
-        with trades_path.open("r", encoding="utf-8") as file:
-            data = json.load(file)
-        return data if isinstance(data, list) else []
-    except json.JSONDecodeError:
+        fh.seek(0, os.SEEK_END)
+        if fh.tell() == 0:
+            fh.write(b"\0")
+            fh.flush()
+        while not acquired:
+            try:
+                fh.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+            except (OSError, BlockingIOError):
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"Timed out waiting for local storage lock: {lock_path}")
+                time.sleep(0.025)
+        yield
+    finally:
+        if acquired:
+            try:
+                fh.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+        fh.close()
+
+
+def _load_json_list_strict(path: Path) -> List[Dict[str, Any]]:
+    if not path.exists():
         return []
+    with path.open("r", encoding="utf-8") as file:
+        data = json.load(file)
+    if not isinstance(data, list):
+        raise ValueError(f"Local storage is not a JSON list: {path}")
+    return data
+
+
+def _atomic_write_json_list(path: Path, rows: List[Dict[str, Any]]) -> None:
+    """Write complete JSON then atomically swap it into place.
+
+    Readers see either the old complete book or the new complete book; they can
+    never observe the zero-byte/half-written window produced by open(..., 'w').
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_name = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as file:
+            tmp_name = file.name
+            json.dump(rows, file, ensure_ascii=False, indent=2)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(tmp_name, path)
+    finally:
+        if tmp_name and os.path.exists(tmp_name):
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+
+
+def load_trades(path: str | Path | None = None) -> List[Dict[str, Any]]:
+    """Load one complete local JSON snapshot.
+
+    Writes are atomic, so a JSON decode failure now means genuine corruption,
+    not a harmless in-progress write.  Keep the legacy safe return for report
+    readers; transactional writers use ``mutate_trades`` and fail closed.
+    """
+    trades_path = Path(path) if path else DEFAULT_TRADES_PATH
+    try:
+        with _interprocess_file_lock(trades_path):
+            return _load_json_list_strict(trades_path)
+    except TimeoutError:
+        # Never turn lock contention into an authoritative empty book: the tick
+        # reconciler would interpret that as "cancel every broker pending".
+        raise
+    except (json.JSONDecodeError, OSError, ValueError) as exc:
+        logging.getLogger(__name__).error("Invalid local JSON %s: %s", trades_path, exc)
+        return []
+
+
+def load_trades_checked(path: str | Path | None = None) -> List[Dict[str, Any]]:
+    """Strict locked read for execution paths; corruption fails closed."""
+    trades_path = Path(path) if path else DEFAULT_TRADES_PATH
+    with _interprocess_file_lock(trades_path):
+        return _load_json_list_strict(trades_path)
 
 
 def save_trades(trades: List[Dict[str, Any]], path: str | Path | None = None) -> None:
-    """Persist local trades fallback JSON."""
+    """Persist a complete list under an inter-process lock + atomic replace."""
     trades_path = Path(path) if path else DEFAULT_TRADES_PATH
-    trades_path.parent.mkdir(parents=True, exist_ok=True)
-    with trades_path.open("w", encoding="utf-8") as file:
-        json.dump(trades, file, ensure_ascii=False, indent=2)
+    with _interprocess_file_lock(trades_path):
+        _atomic_write_json_list(trades_path, trades)
+
+
+def mutate_trades(
+    mutator: Callable[[List[Dict[str, Any]]], _T],
+    path: str | Path | None = None,
+) -> _T:
+    """Run an indivisible local JSON read/modify/write transaction.
+
+    A corrupt source fails closed and is never replaced by an empty list.
+    """
+    trades_path = Path(path) if path else DEFAULT_TRADES_PATH
+    with _interprocess_file_lock(trades_path):
+        rows = _load_json_list_strict(trades_path)
+        result = mutator(rows)
+        _atomic_write_json_list(trades_path, rows)
+        return result
 
 
 def save_trade(trade: Dict[str, Any], path: str | Path | None = None) -> None:
-    """Append a trade to local fallback storage."""
-    trades = load_trades(path)
-    trades.append(trade)
-    save_trades(trades, path)
+    """Append a trade without losing a concurrent tick-manager update."""
+    mutate_trades(lambda trades: trades.append(trade), path)
 
 
 def get_today_trades(path: str | Path | None = None) -> List[Dict[str, Any]]:

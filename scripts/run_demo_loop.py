@@ -35,7 +35,7 @@ def _beat() -> None:
 
 def main() -> None:
     from utils.single_instance import acquire_single_instance
-    if not acquire_single_instance(PIDFILE):
+    if not acquire_single_instance(PIDFILE, "run_demo_loop.py"):
         print("demo loop already running; exiting duplicate instance.")
         return
     time.sleep(START_DELAY_SECONDS)

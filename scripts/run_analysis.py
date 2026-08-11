@@ -1870,6 +1870,8 @@ def _execute_session_plan_ladder(
     database: DatabaseService,
     telegram: TelegramService,
     config: Dict[str, Any],
+    *,
+    demo_execution: bool = False,
 ) -> int:
     # Clear first: a stale reason from a previous cycle would be worse than
     # no reason at all, because it would read as fact.
@@ -2042,21 +2044,30 @@ def _execute_session_plan_ladder(
             continue
         trade_id = database.new_trade_id()
         ladder_decision["trade_id"] = trade_id
-        delivered = False
-        try:
-            delivered = bool(telegram.send_signal(ladder_decision))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to send session-plan ladder signal (%s) for %s: %s", role, symbol, exc)
+        if demo_execution:
+            # Broker-first delivery: persist an unsent execution intent. The
+            # tick manager sends the rich card only after MT5 accepts it.
+            ladder_decision["_telegram_signal_sent"] = False
+            database.save_trade(ladder_decision)
+            delivered = True
+        else:
             delivered = False
-        if not delivered:
-            _ladder_stop(f"{role} telegram delivery failed; order not recorded")
-            if role in {"PRIMARY", "STARTER"}:
-                return created
-            continue
-        database.save_trade(ladder_decision)
+            try:
+                delivered = bool(telegram.send_signal(ladder_decision))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to send session-plan ladder signal (%s) for %s: %s", role, symbol, exc)
+                delivered = False
+            if not delivered:
+                _ladder_stop(f"{role} telegram delivery failed; order not recorded")
+                if role in {"PRIMARY", "STARTER"}:
+                    return created
+                continue
+            database.save_trade(ladder_decision)
         _record_decision_audit(
             database, ladder_decision, config,
-            stage="delivered", outcome="SENT", reason=f"planner ladder {role}",
+            stage="execution_queued" if demo_execution else "delivered",
+            outcome="QUEUED" if demo_execution else "SENT",
+            reason=f"planner ladder {role}",
         )
         staged_trades.append(
             {
@@ -2588,6 +2599,8 @@ async def _check_scale_in(
     open_trades: List[Dict[str, Any]],
     database: DatabaseService,
     telegram: TelegramService,
+    *,
+    demo_execution: bool = False,
 ) -> None:
     """Send and persist fixed-risk scale-in trades when price retests a level.
 
@@ -2815,15 +2828,20 @@ async def _check_scale_in(
             "━━━━━━━━━━━━━━━━━━━━━\n"
             f"<i>ID: {html.escape(trade_id)}</i>"
         )
-        delivered = False
-        try:
-            delivered = bool(telegram.send_message(message, urgent=True))
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Failed to send scale-in Telegram message for %s: %s", parent_id, exc)
-        if delivered:
+        if demo_execution:
+            decision["_telegram_signal_sent"] = False
+            decision["_telegram_pending_message"] = message
             database.save_trade(decision)
         else:
-            logger.error("Scale-in for %s was not saved because Telegram delivery failed", parent_id)
+            delivered = False
+            try:
+                delivered = bool(telegram.send_message(message, urgent=True))
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Failed to send scale-in Telegram message for %s: %s", parent_id, exc)
+            if delivered:
+                database.save_trade(decision)
+            else:
+                logger.error("Scale-in for %s was not saved because Telegram delivery failed", parent_id)
         return
 
 
@@ -3715,6 +3733,10 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
     status_delivery = _HourlyStatusDelivery(telegram, config)
     try:
         database = DatabaseService(config)
+        # Exactly one mode read in this entrypoint: every demo delivery path
+        # below persists first, then lets the tick manager announce only after
+        # MT5 accepts the order.
+        demo_execution = os.environ.get("EXECUTION_MODE") == "mt5_demo"
         symbol = str(config.get("symbol", "XAU/USD"))
         # Arm immediately, not 400 lines later at the decision. An agent that
         # raises, a market-data timeout, or a Supabase error all abort the
@@ -3849,8 +3871,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             # but never BOOK execution — DemoHandoffDB converts close intents
             # into requested_* flags the tick manager executes at the broker
             # first, and suppresses its cards (tick sends truthful ones).
-            _demo = os.environ.get("EXECUTION_MODE") == "mt5_demo"
-            if _demo:
+            if demo_execution:
                 from services.demo_handoff import DemoHandoffDB
                 _db = DemoHandoffDB(database)
                 _tg = None
@@ -4019,6 +4040,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 [t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol],
                 database,
                 telegram,
+                demo_execution=demo_execution,
             )
         all_results["dynamic_risk"] = DynamicRiskManager(config).evaluate(database)
         learning_service = None
@@ -4423,6 +4445,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             database,
             telegram,
             config,
+            demo_execution=demo_execution,
         )
         if session_plan_snapshot_id and planner_gate_preview:
             try:
@@ -4746,17 +4769,26 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 return
             trade_id = database.new_trade_id()
             decision["trade_id"] = trade_id
-            delivered = False
-            try:
-                delivered = bool(telegram.send_signal(decision))
-                if delivered:
-                    # The trade alert already carries this cycle's context.
-                    status_delivery.mark_sent()
-            except Exception as exc:  # noqa: BLE001
-                telegram.send_error_alert(f"Signal delivery failed: {exc}")
+            if demo_execution:
+                # Do not announce an order that the broker has not accepted.
+                # The tick manager retries MT5 and sends this snapshot only
+                # after a real position/pending ticket exists.
+                decision["_telegram_signal_sent"] = False
+                delivered = True  # accepted into the durable execution queue
+            else:
+                delivered = False
+                try:
+                    delivered = bool(telegram.send_signal(decision))
+                except Exception as exc:  # noqa: BLE001
+                    telegram.send_error_alert(f"Signal delivery failed: {exc}")
+                    return
+            if not delivered:
+                telegram.send_error_alert("Signal delivery failed: Telegram returned False; trade was not saved.")
                 return
-            if delivered and not decision.get("golden_dual_entry"):
-                cancelled_pending = 0
+
+            # Golden dual keeps its existing same-direction pending; every
+            # other accepted replacement cancels the older pending family.
+            if not decision.get("golden_dual_entry"):
                 try:
                     cancelled_pending = database.cancel_pending_orders(
                         reason=f"Replaced by newer {decision_type} signal",
@@ -4767,27 +4799,28 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                         logger.info("Cancelled %s stale pending %s order(s) for %s before saving new signal", cancelled_pending, decision_type, symbol)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Failed to cancel stale pending orders before saving new signal: %s", exc)
-                database.save_trade(decision)
-                # The delivered half of the trail. Without it the audit can
-                # count refusals but not the rate they represent.
-                _record_decision_audit(
-                    database, decision, config,
-                    stage="delivered", outcome="SENT",
-                    reason=decision.get("entry_mode"),
-                )
-                if decision.get("setup_id"):
-                    try:
-                        setup_memory.mark_entry_triggered(
-                            setup_id=str(decision.get("setup_id")),
-                            state_key=str((decision.get("setup_context") or {}).get("state_key") or ""),
-                            trade_id=trade_id,
-                            current_price=float(decision.get("current_price") or 0),
-                            symbol=symbol,
-                        )
-                    except Exception as exc:  # noqa: BLE001
-                        logger.warning("Failed to link setup candidate %s to trade %s: %s", decision.get("setup_id"), trade_id, exc)
-            else:
-                telegram.send_error_alert("Signal delivery failed: Telegram returned False; trade was not saved.")
+
+            # This also fixes the old golden-dual branch that sent its card but
+            # skipped save_trade entirely.
+            database.save_trade(decision)
+            status_delivery.mark_sent()
+            _record_decision_audit(
+                database, decision, config,
+                stage="execution_queued" if demo_execution else "delivered",
+                outcome="QUEUED" if demo_execution else "SENT",
+                reason=decision.get("entry_mode"),
+            )
+            if decision.get("setup_id"):
+                try:
+                    setup_memory.mark_entry_triggered(
+                        setup_id=str(decision.get("setup_id")),
+                        state_key=str((decision.get("setup_context") or {}).get("state_key") or ""),
+                        trade_id=trade_id,
+                        current_price=float(decision.get("current_price") or 0),
+                        symbol=symbol,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed to link setup candidate %s to trade %s: %s", decision.get("setup_id"), trade_id, exc)
         elif decision_type == "WAIT":
             if send_hourly_now:
                 status_delivery.arm(decision=decision, all_results=all_results, database=database)

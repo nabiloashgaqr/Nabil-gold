@@ -2,6 +2,8 @@
 REM Demo stream: TICK-LEVEL execution authority (single-instance guarded).
 REM 60s startup delay lets the MT5 terminal finish logging in after logon.
 cd /d "%~dp0..\.."
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
 if not exist logs mkdir logs
 timeout /t 60 /nobreak >nul
 set EXECUTION_MODE=mt5_demo

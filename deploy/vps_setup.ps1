@@ -55,7 +55,7 @@ schtasks /Create /TN "SS_DemoAnalysis" /SC MINUTE /MO 5  /TR "cmd /c $t\demo_ana
 schtasks /Create /TN "SS_DemoWatchdog" /SC MINUTE /MO 1  /TR "cmd /c $t\demo_watchdog.bat" /F
 schtasks /Create /TN "SS_DemoLoop"     /SC ONLOGON       /TR "cmd /c $t\demo_loop.bat"     /F
 schtasks /Create /TN "SS_TickManager"  /SC ONLOGON       /TR "cmd /c $t\tick_manager.bat"  /F
-schtasks /Create /TN "SS_MT5Terminal"  /SC ONLOGON       /TR "`"C:\Program Files\MetaTrader 5\terminal64.exe`"" /F
+schtasks /Create /TN "SS_MT5Terminal"  /SC ONLOGON       /TR "cmd /c $t\mt5_terminal.bat"  /F
 schtasks /Create /TN "SS_MarketStatus" /SC HOURLY /MO 1 /ST 00:02 /TR "cmd /c $t\market_status.bat"      /F
 schtasks /Create /TN "SS_MacroContext" /SC HOURLY /MO 1 /ST 00:07 /TR "cmd /c $t\macro_demo.bat"         /F
 schtasks /Create /TN "SS_DailyReport"  /SC DAILY  /ST 22:00       /TR "cmd /c $t\daily_report_demo.bat"  /F

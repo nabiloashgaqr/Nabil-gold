@@ -25,7 +25,7 @@ def check(name, ok, hint=""):
 
 def main() -> None:
     # 1. env
-    for var in ("SUPABASE_URL", "SUPABASE_KEY", "TELEGRAM_BOT_TOKEN",
+    for var in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
                 "TRADES_TABLE", "MT5_LOGIN", "MT5_SERVER"):
         check(f"env {var}", bool(os.environ.get(var)), "set it in .env")
 
@@ -39,7 +39,8 @@ def main() -> None:
     check("mt5.login(demo)", bool(ok), str(mt5.last_error()))
     info = mt5.account_info()
     check("account is demo (trade_mode != REAL)",
-          bool(info) and "real" not in str(getattr(info, "trade_mode", "")).lower(),
+          bool(info) and getattr(info, "trade_mode", None)
+          != getattr(mt5, "ACCOUNT_TRADE_MODE_REAL", 2),
           "REFUSE real accounts in this phase")
 
     # 3. symbol + candles + timezone offset (broker symbol read from config:
@@ -61,7 +62,7 @@ def main() -> None:
           "if your broker differs, the dollar math in cards must be rescaled")
     check("volume_min <= 0.05 (TP1 books half of 0.1 lot)",
           float(info.volume_min) <= 0.05,
-          "below this the TP1 half-close degrades to full-close")
+          "above this the requested 0.05 TP1 slice cannot be booked")
     from services import mt5_feed
     payload = mt5_feed.get_candles("XAU/USD", "5m", 100, {"XAU/USD": sym})
     check(f"mt5 candles payload ({sym})", bool(payload and len(payload["data"]) == 100))
@@ -74,11 +75,11 @@ def main() -> None:
     rows = db.get_open_trades()
     check("trades_demo readable", isinstance(rows, list))
 
-    # 5. telegram demo chat
-    if os.environ.get("TELEGRAM_DEMO_CHAT_ID"):
-        from services.telegram_bot import TelegramService
-        ok = TelegramService(load_config()).send_message("🧪 DEMO smoke test OK")
-        check("telegram demo chat", bool(ok))
+    # 5. Telegram: when TELEGRAM_DEMO_CHAT_ID is intentionally empty the
+    # subscriber destination (TELEGRAM_CHAT_ID) must still be tested.
+    from services.telegram_bot import TelegramService
+    ok = TelegramService(load_config()).send_message("🧪 DEMO smoke test OK")
+    check("telegram demo/subscriber destination", bool(ok))
     print("SMOKE OK — safe to schedule run_demo_loop")
 
 

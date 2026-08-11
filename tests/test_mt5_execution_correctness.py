@@ -972,7 +972,8 @@ def test_be_wiring_arms_when_gate_passes(monkeypatch):
     ex = _StubExecutor()
     row = _row(entry_price=4327.57, stop_loss=4293.0, initial_stop_loss=4293.0,
                tp1=4367.0, tp2=4425.0, sl_moved_to_entry=False)
-    tick = types.SimpleNamespace(bid=4347.0, ask=4347.57)  # +$20 favorable
+    # BUY protection is governed by executable Bid, not Ask/spread.
+    tick = types.SimpleNamespace(bid=4347.57, ask=4347.77)  # +$20 favorable
     tm._handle_row(row, tick, ex, None)
     assert any(u[1].get("sl_moved_to_entry") is True
                and u[1].get("stop_loss") == 4327.57 for u in db.updates)

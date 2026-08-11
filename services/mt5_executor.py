@@ -91,6 +91,23 @@ class Mt5DemoExecutor:
     def _sym(self, symbol: str) -> str:
         return self.symbol_map.get(symbol, symbol.replace("/", ""))
 
+    def _demo_safe(self, mt5) -> bool:
+        """Hard-refuse every broker mutation on a REAL account."""
+        if not hasattr(mt5, "account_info"):
+            return True  # lightweight unit-test fakes
+        try:
+            info = mt5.account_info()
+            real = getattr(mt5, "ACCOUNT_TRADE_MODE_REAL", 2)
+            if info is not None and getattr(info, "trade_mode", None) == real:
+                self.last_error = "REAL MT5 account refused by demo executor"
+                self._halt(self.last_error)
+                return False
+        except Exception as exc:  # noqa: BLE001
+            self.last_error = f"account mode check failed: {exc}"
+            logger.error(self.last_error)
+            return False
+        return True
+
     # -- halt --------------------------------------------------------------
     def halted(self) -> bool:
         return os.path.exists(HALT_FILE)
@@ -202,13 +219,27 @@ class Mt5DemoExecutor:
             logger.warning("Demo order refused: daily cap reached")
             return None
         magic = magic_for(trade_id)
+        mt5 = _mt5_ready()
+        if not self._demo_safe(mt5):
+            return None
         existing = self._position_by_magic(magic)
         if existing:
+            self.last_order = {
+                "ticket": int(existing.ticket), "existing": True,
+                "kind": "POSITION", "volume": float(existing.volume),
+                "price": round(float(existing.price_open), 2),
+            }
             return int(existing.ticket)
         existing_order = self._order_by_magic(magic)
         if existing_order:
+            self.last_order = {
+                "ticket": int(existing_order.ticket), "existing": True,
+                "kind": str(order_kind or ""),
+                "volume": float(getattr(existing_order, "volume_current",
+                                         getattr(existing_order, "volume_initial", self.lot))),
+                "price": round(float(getattr(existing_order, "price_open", entry_price) or entry_price), 2),
+            }
             return int(existing_order.ticket)
-        mt5 = _mt5_ready()
         sym = self._sym(symbol)
         tick = mt5.symbol_info_tick(sym)
         if tick is None:
@@ -245,11 +276,17 @@ class Mt5DemoExecutor:
         if res is None:
             return None
         self._orders_today += 1
+        # DEAL results carry the broker's actual execution price. For pending
+        # orders it normally equals the requested resting price. Persist this
+        # so a market position never keeps Telegram's planned quote merely
+        # because positions_get() needed one more terminal tick to materialize.
+        applied_price = float(getattr(res, "price", 0.0) or request.get("price") or 0.0)
         self.last_order = {
             "ticket": int(res.order),
             "kind": str(order_kind or ""),
             "volume": self.lot,
-            "price": round(float(request.get("price") or 0.0), 2),
+            "price": round(applied_price, 2),
+            "existing": False,
         }
         return int(res.order)
 
@@ -259,6 +296,8 @@ class Mt5DemoExecutor:
         if not pos:
             return False
         mt5 = _mt5_ready()
+        if not self._demo_safe(mt5):
+            return False
         request = {
             "action": mt5.TRADE_ACTION_SLTP,
             "symbol": self._sym(symbol),
@@ -279,6 +318,38 @@ class Mt5DemoExecutor:
         logger.warning("SLTP refused for %s: %s", trade_id, self.last_error)
         return False
 
+    def _prior_tp1_partial(self, trade_id: str) -> Optional[Dict[str, Any]]:
+        """Return a broker-confirmed TP1 slice already booked for this magic.
+
+        The local book is a mirror, not the authority. If a concurrent JSON
+        write ever loses ``partial_close=True``, broker history still prevents a
+        second half-close (the 2026-08-10 incident closed 0.05 then another
+        0.02 from the same 0.10 position).
+        """
+        mt5 = _mt5_ready()
+        magic = magic_for(trade_id)
+        try:
+            deals = mt5.history_deals_get(0, int(time.time()) + 86400) or ()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("TP1 history check crashed for %s: %s", trade_id, exc)
+            return None
+        hits = [
+            d for d in deals
+            if getattr(d, "magic", None) == magic
+            and str(getattr(d, "comment", "") or "").startswith("SS-demo-tp1")
+            and getattr(d, "entry", None) == getattr(mt5, "DEAL_ENTRY_OUT", 1)
+        ]
+        if not hits:
+            return None
+        latest = max(hits, key=lambda d: getattr(d, "time", 0))
+        return {
+            "volume": round(sum(float(getattr(d, "volume", 0.0) or 0.0) for d in hits), 8),
+            "price": round(float(getattr(latest, "price", 0.0) or 0.0), 2),
+            "ticket": int(getattr(latest, "position_id",
+                                  getattr(latest, "position", 0)) or 0),
+            "existing": True,
+        }
+
     def partial_close_at_tp1(self, trade_id: str, fraction: float, symbol: str) -> bool:
         """Close ONLY the booked fraction at TP1 (operator directive).
 
@@ -288,13 +359,20 @@ class Mt5DemoExecutor:
         self.last_error — the tick manager retries every tick and reports
         the refusal to the operator once per trade.
         """
-        mt5 = _mt5()
+        mt5 = _mt5_ready()
         self.last_error = ""
+        if not self._demo_safe(mt5):
+            return False
         magic = magic_for(trade_id)
         pos = self._position_by_magic(magic)
         if not pos:
             self.last_error = "position not found"
             return False
+        prior = self._prior_tp1_partial(trade_id)
+        if prior:
+            prior["remaining"] = round(float(pos.volume), 8)
+            self.last_partial = prior
+            return True
         sym = self._sym(symbol)
         info = mt5.symbol_info(sym)
         step = float(getattr(info, "volume_step", 0.01) or 0.01)
@@ -329,6 +407,7 @@ class Mt5DemoExecutor:
                 "price": round(float(request["price"]), 2),
                 "remaining": round(float(pos.volume) - part, 2),
                 "ticket": int(pos.ticket),
+                "existing": False,
             }
             return True
         logger.warning("TP1 partial refused for %s: %s (will retry)",
@@ -338,6 +417,8 @@ class Mt5DemoExecutor:
     def close_position(self, trade_id: str, symbol: str) -> bool:
         """Full market close of the trade's position (thesis exit handoff)."""
         mt5 = _mt5_ready()
+        if not self._demo_safe(mt5):
+            return False
         magic = magic_for(trade_id)
         pos = self._position_by_magic(magic)
         if not pos:
@@ -380,6 +461,8 @@ class Mt5DemoExecutor:
     def cancel_order(self, ticket: int) -> bool:
         """Cancel a broker pending order by ticket."""
         mt5 = _mt5_ready()
+        if not self._demo_safe(mt5):
+            return False
         try:
             res = mt5.order_send({
                 "action": mt5.TRADE_ACTION_REMOVE,
@@ -420,7 +503,10 @@ class Mt5DemoExecutor:
                 "profit": float(getattr(d, "profit", 0.0)),
                 "time": int(getattr(d, "time", 0)),
                 "volume": float(getattr(d, "volume", 0.0)),
-                "position": int(getattr(d, "position", 0))}
+                # MetaTrader5's Python namedtuple calls this position_id on
+                # current builds; older fakes/versions used position.
+                "position": int(getattr(d, "position_id",
+                                        getattr(d, "position", 0)) or 0)}
 
     # -- reconciliation ------------------------------------------------------
     def reconcile(self, open_rows: List[Dict[str, Any]]) -> List[str]:

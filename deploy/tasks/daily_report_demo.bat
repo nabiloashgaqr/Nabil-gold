@@ -1,6 +1,8 @@
 @echo off
 REM Daily report over DEMO book (23:00 UTC): updates(force,quiet) -> learning -> report.
 cd /d "%~dp0..\.."
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
 if not exist logs mkdir logs
 set EXECUTION_MODE=mt5_demo
 set TRADES_TABLE=trades_demo
