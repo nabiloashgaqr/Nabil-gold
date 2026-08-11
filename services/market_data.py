@@ -94,6 +94,21 @@ class MarketDataService:
                 "timeframe": tf,
                 "resampled_from": resampled or None,
             }
+        if src == "mt5":
+            # Broker candles (live feed). Freshness is stamped by mt5_feed
+            # itself; when the classifier is asked directly (no payload
+            # integrity present) assume HIGH — the production guard still
+            # blocks synthetic/absent data upstream.
+            return {
+                "source": src,
+                "source_type": "historical_ohlc",
+                "reliability_grade": "HIGH",
+                "supports_signal_generation": True,
+                "supports_pending_activation": True,
+                "supports_intrabar_levels": True,
+                "timeframe": tf,
+                "resampled_from": resampled or None,
+            }
         if src == "swissquote_spot_quote_fallback":
             return {
                 "source": src,
@@ -130,14 +145,29 @@ class MarketDataService:
     @classmethod
     def enrich_payload_integrity(cls, payload: Dict[str, Any]) -> Dict[str, Any]:
         enriched = dict(payload or {})
-        integrity = cls._source_integrity(
-            enriched.get("source"),
-            timeframe=str(enriched.get("timeframe") or ""),
-            resampled_from=str(enriched.get("resampled_from") or ""),
-        )
-        enriched["source_integrity"] = integrity
-        enriched["supports_signal_generation"] = bool(integrity.get("supports_signal_generation"))
-        enriched["supports_pending_activation"] = bool(integrity.get("supports_pending_activation"))
+        existing = enriched.get("source_integrity")
+        if enriched.get("source") == "mt5" and isinstance(existing, dict):
+            # The broker feed stamps its OWN freshness-aware integrity
+            # (stale candles => MEDIUM + signal_generation False). Never
+            # overwrite it with the static classifier — live incident
+            # 2026-08-10: overwriting made every mt5 cycle UNKNOWN and the
+            # analysis refused its own best data source.
+            integ = dict(existing)
+            integ.setdefault("source", "mt5")
+            integ.setdefault("source_type", "historical_ohlc")
+            if "grade" in integ and "reliability_grade" not in integ:
+                integ["reliability_grade"] = integ["grade"]
+            integ.setdefault("reliability_grade", "HIGH")
+            integ.setdefault("supports_intrabar_levels", True)
+        else:
+            integ = cls._source_integrity(
+                enriched.get("source"),
+                timeframe=str(enriched.get("timeframe") or ""),
+                resampled_from=str(enriched.get("resampled_from") or ""),
+            )
+        enriched["source_integrity"] = integ
+        enriched["supports_signal_generation"] = bool(integ.get("supports_signal_generation"))
+        enriched["supports_pending_activation"] = bool(integ.get("supports_pending_activation"))
         return enriched
 
     @classmethod
@@ -166,7 +196,12 @@ class MarketDataService:
         timeframes = self.config.get("timeframes", ["5m", "15m", "1H", "4H"])
         primary_tf = self.config.get("primary_timeframe", "15m")
         data_cfg = self.config.get("data_source", {}) or {}
-        if data_cfg.get("resample_timeframes_from_base", False):
+        # MT5 supplies every timeframe natively with deep history for free.
+        # Resampling 4H from a shallow 5m base (2500 candles = ~8 days) made
+        # daily_bias/multitimeframe votes systematically weaker than the
+        # paper system's native 4H — live divergence incident 2026-08-10.
+        primary_src = os.environ.get("DATA_SOURCE_PRIMARY") or data_cfg.get("primary")
+        if data_cfg.get("resample_timeframes_from_base", False) and str(primary_src) != "mt5":
             base_tf = str(data_cfg.get("base_timeframe", "5m"))
             base_outputsize = int(data_cfg.get("base_outputsize", max(outputsize, 2500)) or max(outputsize, 2500))
             base_payload = self.get_ohlcv(timeframe=base_tf, outputsize=base_outputsize)
@@ -209,7 +244,7 @@ class MarketDataService:
                 demo_map = (((self.config.get("execution") or {})
                              .get("demo") or {}).get("symbol_map")) or None
                 payload = mt5_feed.get_candles(
-                    self.symbol, timeframe=timeframe, outputsize=outputsize,
+                    self.symbol, timeframe=timeframe, count=outputsize,
                     symbol_map=demo_map)
             except Exception as exc:  # noqa: BLE001 - fall back silently
                 self.logger.warning("MT5 feed unavailable, falling back: %s", exc)

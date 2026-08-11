@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import html
+import logging
 import os
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 import requests
+
+logger = logging.getLogger("telegram_bot")
 
 from utils import trading_rules as _tr
 from utils.helpers import format_price, load_config
@@ -52,10 +55,13 @@ class TelegramService:
     def send_message(self, text: str, urgent: bool = False, chat_id: str | None = None) -> bool:
         # demo/mt5 branch (phase 1): route every card to the demo chat with a
         # 🧪 prefix when EXECUTION_MODE=mt5_demo and a demo chat is configured.
+        # Operator directive 2026-08-10: EVERY message sent by the demo
+        # server (signals, maps, status, reports, dashboard cards) carries a
+        # clear 🧪 DEMO marker so it is never mistaken for the paper bot.
         demo_chat = os.environ.get("TELEGRAM_DEMO_CHAT_ID")
-        if (os.environ.get("EXECUTION_MODE") == "mt5_demo" and demo_chat
-                and not chat_id):
-            chat_id = demo_chat
+        if os.environ.get("EXECUTION_MODE") == "mt5_demo" and not chat_id:
+            if demo_chat:
+                chat_id = demo_chat
             if not text.startswith("🧪"):
                 text = "🧪 DEMO · " + text
         if not self.bot_token or not (chat_id or self.chat_id):
@@ -69,9 +75,16 @@ class TelegramService:
         }
         try:
             resp = self.session.post(url, json=payload, timeout=20)
-            return resp.status_code == 200
+            ok = resp.status_code == 200
         except Exception:
+            logger.error("telegram send crashed for: %.60s", text)
             return False
+        if not ok:
+            logger.error("telegram send HTTP %s for: %.60s",
+                         resp.status_code, text)
+        else:
+            logger.info("telegram delivered: %.60s", text)
+        return ok
 
     @staticmethod
     def _money(value: Any, symbol: str = "XAU/USD") -> str:
@@ -1102,6 +1115,10 @@ class TelegramService:
         text = "\n".join(line for line in lines if str(line).strip())
         while "\n\n\n" in text:
             text = text.replace("\n\n\n", "\n\n")
+        # Operator directive: demo signal cards carry a visible 🧪 DEMO marker
+        # on Telegram (the dashboard stays seamless/unlabelled).
+        if os.environ.get("EXECUTION_MODE") == "mt5_demo" and not text.startswith("🧪"):
+            text = "🧪 DEMO · " + text
         return self.send_message(text)
 
     def _event_title(self, events: List[str]) -> str:

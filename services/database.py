@@ -28,6 +28,26 @@ from utils.sessions import session_label_from_utc, SESSION_ORDER
 from services import performance_stats
 
 
+def _iso_ts(value: Any) -> Any:
+    """Normalize epoch seconds (int or digit-string) to ISO-8601 UTC.
+
+    Supabase timestamptz columns reject raw epoch strings (SQLSTATE 22008
+    'date/time field value out of range' — live incident 2026-08-10: SMC
+    candidates carry candle-epoch created_at). ISO strings pass through.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) or (isinstance(value, str) and value.strip().isdigit()):
+        try:
+            return datetime.fromtimestamp(int(value), tz=timezone.utc).replace(
+                microsecond=0).isoformat()
+        except Exception:  # noqa: BLE001
+            return None
+    return value
+
+
 class DatabaseService:
     """Persist and retrieve trades from Supabase or local JSON fallback."""
 
@@ -217,9 +237,9 @@ class DatabaseService:
             "details": candidate.get("details") or {},
             "source": candidate.get("source") or "smc",
             "is_active": bool(candidate.get("is_active", True)),
-            "first_seen_at": candidate.get("first_seen_at") or candidate.get("created_at") or now_iso,
-            "last_seen_at": candidate.get("last_seen_at") or now_iso,
-            "last_transition_at": candidate.get("last_transition_at") or now_iso,
+            "first_seen_at": _iso_ts(candidate.get("first_seen_at") or candidate.get("created_at")) or now_iso,
+            "last_seen_at": _iso_ts(candidate.get("last_seen_at")) or now_iso,
+            "last_transition_at": _iso_ts(candidate.get("last_transition_at")) or now_iso,
             "transition_count": int(candidate.get("transition_count", 0) or 0),
             "missing_cycles": int(candidate.get("missing_cycles", 0) or 0),
             "last_trade_id": candidate.get("last_trade_id"),
@@ -300,7 +320,7 @@ class DatabaseService:
             "reason": event.get("reason") or "state_transition",
             "price": event.get("price"),
             "payload": event.get("payload") or {},
-            "created_at": event.get("created_at") or now_iso,
+            "created_at": _iso_ts(event.get("created_at")) or now_iso,
             "updated_at": now_iso,
         }
         path = self.setup_state_events_path

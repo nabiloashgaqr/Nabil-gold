@@ -127,8 +127,10 @@ def get_candles(
         "source_integrity": {
             "source": "mt5",
             "source_type": "historical_ohlc",
-            "grade": "HIGH" if (len(data) >= count and fresh) else "MEDIUM",
-            "signal_generation": fresh,
-            "pending_activation": fresh,
+            "reliability_grade": "HIGH" if (len(data) >= count and fresh) else "MEDIUM",
+            "supports_signal_generation": fresh,
+            "supports_pending_activation": fresh,
+            "supports_intrabar_levels": True,
+            "timeframe": timeframe,
         },
     }
