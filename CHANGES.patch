@@ -1,1178 +1,1921 @@
-diff --git a/scripts/run_tick_manager.py b/scripts/run_tick_manager.py
+diff --git a/.gitignore b/.gitignore
+index f2d05d8..e07f527 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -74,6 +74,13 @@ Thumbs.db
+ .ipynb_checkpoints/
+ *.ipynb
+ 
++# Runtime process state (never deploy stale ownership/heartbeat files)
++*.pid
++heartbeat.json
++tick_heartbeat.json
++.demo_halt
++diagnostics/
++
+ # Temporary
+ tmp/
+ temp/
+diff --git a/README_AR.md b/README_AR.md
+index 1dc9bdd..66810b5 100644
+--- a/README_AR.md
++++ b/README_AR.md
+@@ -1,20 +1,109 @@
+-# 🔗 سدّ فجوة «بطاقة بلا أمر»: ما أرسله الديمو ولماذا غاب عن MT5
++# جولة إصلاح تطابق Telegram مع MT5 — 2026-08-11
+ 
+-## فحص الكود الحي — ماذا أرسل الديمو؟
+-بطاقات الإشارة (ماركت/معلقة) تُرسل لحظة القرار في التحليل، ثم يُفترض أن
+-يلتقطها الـ tick manager ويضعها. وجدت ثلاث حالات انفصال:
++## النتيجة الجنائية من تقرير السيرفر
+ 
+-1) **ماركت قديمة >60 دقيقة عند أول رؤية** (مثلاً بعد ريستارت): بوابة
+-   منع-البعث كانت تتجاهلها صامتة للأبد ⇒ بطاقة وصلت ولا أمر قط. ← أُصلح:
+-   أي صف OPEN لم يُنفَّذ قط (بلا ticket وبلا close_price) يُوضع دائماً مهما
+-   عمره؛ الحماية تبقى فقط للصفوف المنتهية (لها close_price/ticket).
+-2) معلقة أُلغيت بعد فشل إعادة التفويض (قاعدة 3 وكلاء) ⇒ إلغاء مقصود
+-   (بطاقة الإلغاء الحالية نصها مضلل — عرضتُ تحسين نصها سابقاً).
+-3) منفّذ ميت ⇒ watchdog يحييه (موجود).
++عند الساعة 09:18 UTC كانت صورة MT5 **مطابقة للحالة الحالية**: قاعدة البيانات
++تحتوي `0` صفوف نشطة، وMT5 يحتوي `0` مراكز و`0` أوامر. لكن التقرير أثبت
++انفصالات خطيرة حدثت قبل ذلك:
++
++1. الأمر المعلق عند `4417.24` وُضع فعلاً على MT5 بالتذكرة `404345964`، ثم
++   أُرسلت بطاقة الوضع مرتين للتذكرة نفسها، وبعد أن خرج صفه من الكتاب ألغاه
++   مدير التكات. لذلك غيابه الآن ليس دليلاً أنه لم يوضع؛ الخلل كان تكرار البطاقة
++   وفقدان/تأخر مرآة الحالة.
++2. الصفقة `...63e1f591` أُعلنت بدخول `4353.03` لكن تعبئة الوسيط الحقيقية كانت
++   `4342.36`. ظل الكتاب يحمل السعر المخطط، فصار حساب الربح والرسائل غير مطابق.
++3. الصفقة نفسها أغلقت TP1 مرتين: `0.05` ثم `0.02`، وبقي `0.03`. السبب أن صف
++   الذاكرة المؤقتة لم يكن يُحدّث فور التنفيذ، ومع الكتاب المحلي غير المقفول أمكن
++   إعادة تنفيذ الإغلاق الجزئي.
++4. `tick_heartbeat.json` كان صفراً بايت بسبب استخدام `timezone` بلا استيراد.
++   والـ watchdog كان ينهار كل دقيقة بـ `JSONDecodeError`، فلا يحيي المنفذ.
++5. سجل tick manager وصل إلى نحو 40 MB بسبب إعادة رفض broker أربع مرات في
++   الثانية (`Unsupported filling mode`). آلية fallback الحالية نجحت لاحقاً في
++   وضع الأمر، لكن إعادة المحاولة بلا تهدئة كانت تملأ السجل.
++6. مهمة `SS_MT5Terminal` سجلت `0x80070002` بسبب اقتباس مسار Program Files.
++7. التخزين المحلي كان يكتب `trades.json` بطريقة truncate ثم write، بلا قفل بين
++   التحليل ومدير التكات؛ وهذا يسمح بفقدان تحديث أو قراءة كتاب فارغ مؤقتاً.
++
++## ما أصلحته هذه الجولة
++
++- **Broker-first Telegram في mt5_demo:** التحليل يحفظ نية التنفيذ ولا يرسل
++  بطاقة الصفقة. مدير التكات يرسل البطاقة الغنية فقط بعد وجود تذكرة MT5 حقيقية.
++  في MARKET يُعرض سعر التعبئة الفعلي. إذا تعطل Telegram يعيد البطاقة دون إعادة
++  الأمر. Paper mode لم يتغير.
++- تحديث صف الذاكرة فور كل انتقال (ticket/fill/BE/TP1/trailing/close/cancel)، لمنع
++  تكرار البطاقات أو تكرار نصف الإغلاق خلال مهلة تحديث الصفوف 3 ثوانٍ.
++- منع TP1 ثانٍ أيضاً من **سجل صفقات الوسيط** حتى لو فقد الكتاب المحلي العلم.
++- تصحيح سعر التنفيذ الحي: BUY يُدار على Bid وSELL على Ask، فلا يفعّل السبريد
++  TP1/BE/trailing قبل بلوغ سعر الإغلاق الحقيقي.
++- تثبيت actual fill والتذكرة من MT5، واستخدام `position_id` الصحيح في بطاقة
++  الإغلاق.
++- قفل بين العمليات + كتابة JSON ذرية + فشل مغلق عند فساد/ازدحام الكتاب.
++- إصلاح heartbeat والـ watchdog، وإضافة جذر المشروع إلى `sys.path`.
++- تهدئة إعادة وضع الأمر إلى مرة كل 5 ثوانٍ بدل 4 مرات/ثانية.
++- إصلاح Golden Dual الذي كان يرسل البطاقة ثم يتخطى `save_trade`.
++- منع صلب لأي تعديل وسيط إذا كان حساب MT5 من نوع REAL.
++- منع PID قديم معاد الاستخدام من حجب العملية الصحيحة، ومنع رفع PID/heartbeat
++  إلى المستودع مستقبلاً.
++- إصلاح مهمة تشغيل MT5 عبر `deploy/tasks/mt5_terminal.bat`.
++- فرض UTF-8 في جميع wrappers لإيقاف `UnicodeEncodeError` في المهام.
++- تحديث smoke test لواقع التخزين المحلي وفحص حساب DEMO فعلياً.
++
++**لم تتغير أي أرقام أو قوانين تداول:** stop/targets/150-40/الثقة/الجلسات كما هي.
+ 
+ ## الاختبارات
+-- صف منتهٍ (close_price) لا يُبعث أبداً حتى لو بقيت حالته OPEN.
+-- صف OPEN قديم لم يُنفَّذ قط ⇒ يُوضع MARKET رغم عمره.
+-✅ 1741.
+ 
+-فكّ فوق C:\Nabil-gold ثم Restart-Computer -Force.
++```text
++1752 collected
++1749 passed
++3 skipped
++1 warning قديم (datetime.utcnow)
++```
++
++أضيفت 8 براهين جديدة للتزامن، heartbeat، watchdog، actual fill، منع TP1 المكرر،
++منع REAL، ومنع ملفات runtime من الانتقال مع الكود.
++
++## النشر على VPS
++
++> لا تشغّل `run_tick_manager.py` يدوياً، ولا تستخدم `schtasks /Run` بالتوازي.
++
++1. فك الحزمة فوق `C:\Nabil-gold` مع الاستبدال.
++2. افتح PowerShell كمسؤول ونفّذ:
++
++```powershell
++Set-ExecutionPolicy -Scope Process Bypass -Force
++& "C:\Nabil-gold\deploy\apply_mt5_telegram_fix.ps1"
++```
++
++السكريبت:
++- ينسخ `storage\trades.json` إلى backup مستقل.
++- يفحص syntax للملفات الحرجة.
++- يعيد تسجيل `SS_MT5Terminal` بالـ wrapper الصحيح.
++- يحذف PID/heartbeat القديمة فقط.
++- ينفذ `Restart-Computer -Force`، وهي طريقة إعادة التشغيل المعتمدة.
++
++## التحقق بعد دقيقتين من عودة السيرفر
++
++```powershell
++cd C:\Nabil-gold
++Get-Content .\tick_heartbeat.json -Raw
++Get-Content .\heartbeat.json -Raw
++Get-ScheduledTask SS_TickManager,SS_DemoLoop,SS_DemoWatchdog,SS_MT5Terminal |
++  Select TaskName,State
++Get-ScheduledTaskInfo SS_DemoWatchdog | Select LastRunTime,LastTaskResult
++Get-Content .\logs\tick_manager.log -Tail 60
++```
++
++المطلوب:
++- ملفا heartbeat يحتويان JSON غير فارغ.
++- TickManager وDemoLoop في حالة Running.
++- آخر نتيجة Watchdog تساوي `0`.
++- لا يوجد سيل `Unsupported filling mode` أربع مرات في الثانية.
++- أي بطاقة صفقة جديدة لا تصل إلا بعد قبول MT5، وتحمل البطاقة التنفيذية التذكرة.
++
++بعدها شغّل smoke مرة واحدة (يرسل رسالة اختبار واحدة لقناة المشتركين):
++
++```powershell
++& "C:\Nabil-gold\deploy\tasks\demo_smoke.bat"
++```
++
++ثم أعد تشغيل ملف التشخيص السابق وارفع التقرير الجديد للمراجعة النهائية.
+diff --git a/demo_loop.pid b/demo_loop.pid
+deleted file mode 100644
+index c23af7f..0000000
+--- a/demo_loop.pid
++++ /dev/null
+@@ -1 +0,0 @@
+-5828
+\ No newline at end of file
+diff --git a/deploy/apply_mt5_telegram_fix.ps1 b/deploy/apply_mt5_telegram_fix.ps1
 new file mode 100644
-index 0000000..9e79028
+index 0000000..8a3c7c6
 --- /dev/null
-+++ b/scripts/run_tick_manager.py
-@@ -0,0 +1,295 @@
-+"""Tick-level manager (VPS, mt5_demo only).
++++ b/deploy/apply_mt5_telegram_fix.ps1
+@@ -0,0 +1,56 @@
++# Apply the 2026-08-11 Telegram/MT5 consistency round on the demo VPS.
++# Run as Administrator AFTER extracting the round over C:\Nabil-gold.
++# This script backs up the local trade book, validates Python syntax, repairs
++# the MT5 ONLOGON task, removes stale runtime ownership files, then reboots.
 +
-+Analysis stays on the 5-minute cycle; EXECUTION management runs EVERY TICK:
-+pending activation, breakeven, TP1 partial, trailing, and broker-side closes
-+are detected and applied tick-by-tick through MT5, with DB writes and cards
-+only on state changes. MT5 is the execution authority; the DB mirrors it.
++param([switch]$NoRestart)
 +
-+Pure decision helpers are unit-tested (tests/test_tick_manager_logic.py).
-+"""
-+from __future__ import annotations
++$ErrorActionPreference = "Stop"
++$root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
++Set-Location $root
 +
-+# --- VPS: load .env if present (real env vars ALWAYS win over .env) ---
-+try:
-+    from dotenv import load_dotenv as _load_dotenv
-+    _load_dotenv()  # override=False: task-wrapper vars take precedence
-+except Exception:
-+    pass
++$stamp = Get-Date -Format "yyyyMMdd_HHmmss"
++$backup = Join-Path $root "storage\backup_consistency_$stamp"
++New-Item -ItemType Directory -Force -Path $backup | Out-Null
++if (Test-Path "storage\trades.json") {
++    Copy-Item "storage\trades.json" (Join-Path $backup "trades.json") -Force
++}
++Write-Host "Trade-book backup: $backup" -ForegroundColor Green
 +
-+import logging
-+import os
++$env:PYTHONUTF8 = "1"
++$env:PYTHONIOENCODING = "utf-8"
++python -m py_compile `
++    scripts\run_analysis.py `
++    scripts\run_tick_manager.py `
++    scripts\run_demo_loop.py `
++    scripts\demo_watchdog.py `
++    services\database.py `
++    services\mt5_executor.py `
++    utils\helpers.py `
++    utils\single_instance.py
++if ($LASTEXITCODE -ne 0) { throw "Python syntax validation failed; NOT rebooting." }
++
++$mt5Wrapper = Join-Path $root "deploy\tasks\mt5_terminal.bat"
++if (-not (Test-Path $mt5Wrapper)) { throw "Missing $mt5Wrapper" }
++$taskCommand = "cmd /c $mt5Wrapper"
++& schtasks.exe /Create /TN "SS_MT5Terminal" /SC ONLOGON /TR $taskCommand /F | Out-Host
++if ($LASTEXITCODE -ne 0) { throw "Could not repair SS_MT5Terminal." }
++
++# Runtime files must be recreated by the new processes after reboot. They are
++# not configuration and must never be carried between snapshots/deployments.
++foreach ($file in @(
++    "tick_manager.pid", "demo_loop.pid",
++    "tick_heartbeat.json", "heartbeat.json",
++    "tick_heartbeat.json.tmp"
++)) {
++    Remove-Item $file -Force -ErrorAction SilentlyContinue
++}
++
++Write-Host "Validation OK. Runtime files cleaned; MT5 task repaired." -ForegroundColor Green
++if ($NoRestart) {
++    Write-Host "NoRestart selected. REQUIRED next command: Restart-Computer -Force" -ForegroundColor Yellow
++    exit 0
++}
++
++Write-Host "Rebooting now. ONLOGON tasks will restore the demo stack." -ForegroundColor Yellow
++Restart-Computer -Force
+diff --git a/deploy/tasks/daily_report_demo.bat b/deploy/tasks/daily_report_demo.bat
+index b5aed30..b5212d5 100644
+--- a/deploy/tasks/daily_report_demo.bat
++++ b/deploy/tasks/daily_report_demo.bat
+@@ -1,6 +1,8 @@
+ @echo off
+ REM Daily report over DEMO book (23:00 UTC): updates(force,quiet) -> learning -> report.
+ cd /d "%~dp0..\.."
++set PYTHONUTF8=1
++set PYTHONIOENCODING=utf-8
+ if not exist logs mkdir logs
+ set EXECUTION_MODE=mt5_demo
+ set TRADES_TABLE=trades_demo
+diff --git a/deploy/tasks/dashboard_demo.bat b/deploy/tasks/dashboard_demo.bat
+index 5f5d4f5..44cdcea 100644
+--- a/deploy/tasks/dashboard_demo.bat
++++ b/deploy/tasks/dashboard_demo.bat
+@@ -1,6 +1,8 @@
+ @echo off
+ REM Dashboard generation over the continuous book (paper history + demo), 22:00 daily.
+ cd /d "%~dp0..\.."
++set PYTHONUTF8=1
++set PYTHONIOENCODING=utf-8
+ if not exist logs mkdir logs
+ set TRADES_TABLE=trades_demo
+ python scripts\generate_dashboard.py >> logs\dashboard.log 2>&1
+diff --git a/deploy/tasks/demo_analysis.bat b/deploy/tasks/demo_analysis.bat
+index a4066df..da36136 100644
+--- a/deploy/tasks/demo_analysis.bat
++++ b/deploy/tasks/demo_analysis.bat
+@@ -1,6 +1,8 @@
+ @echo off
+ REM Demo stream: 5-minute analysis writing to trades_demo (MT5 data source).
+ cd /d "%~dp0..\.."
++set PYTHONUTF8=1
++set PYTHONIOENCODING=utf-8
+ if not exist logs mkdir logs
+ set EXECUTION_MODE=mt5_demo
+ set TRADES_TABLE=trades_demo
+diff --git a/deploy/tasks/demo_loop.bat b/deploy/tasks/demo_loop.bat
+index 3e3e6ff..c579eb7 100644
+--- a/deploy/tasks/demo_loop.bat
++++ b/deploy/tasks/demo_loop.bat
+@@ -1,6 +1,8 @@
+ @echo off
+ REM Demo stream: persistent 5-min bookkeeping loop (single-instance guarded).
+ cd /d "%~dp0..\.."
++set PYTHONUTF8=1
++set PYTHONIOENCODING=utf-8
+ if not exist logs mkdir logs
+ set EXECUTION_MODE=mt5_demo
+ set TRADES_TABLE=trades_demo
+diff --git a/deploy/tasks/demo_smoke.bat b/deploy/tasks/demo_smoke.bat
+index 3cbfcbf..ca92df5 100644
+--- a/deploy/tasks/demo_smoke.bat
++++ b/deploy/tasks/demo_smoke.bat
+@@ -1,6 +1,8 @@
+ @echo off
+ REM Manual: full environment smoke test (run BEFORE enabling the scheduled tasks).
+ cd /d "%~dp0..\.."
++set PYTHONUTF8=1
++set PYTHONIOENCODING=utf-8
+ set EXECUTION_MODE=mt5_demo
+ set TRADES_TABLE=trades_demo
+ set DATA_SOURCE_PRIMARY=mt5
+diff --git a/deploy/tasks/demo_watchdog.bat b/deploy/tasks/demo_watchdog.bat
+index 9a9152b..ce88f77 100644
+--- a/deploy/tasks/demo_watchdog.bat
++++ b/deploy/tasks/demo_watchdog.bat
+@@ -1,6 +1,8 @@
+ @echo off
+ REM Demo stream: heartbeat watchdog every 1 minute.
+ cd /d "%~dp0..\.."
++set PYTHONUTF8=1
++set PYTHONIOENCODING=utf-8
+ if not exist logs mkdir logs
+ set EXECUTION_MODE=mt5_demo
+ set TRADES_TABLE=trades_demo
+diff --git a/deploy/tasks/macro_demo.bat b/deploy/tasks/macro_demo.bat
+index ea36cce..c16665a 100644
+--- a/deploy/tasks/macro_demo.bat
++++ b/deploy/tasks/macro_demo.bat
+@@ -1,6 +1,8 @@
+ @echo off
+ REM Hourly macro context (was cron-job.org on GitHub).
+ cd /d "%~dp0..\.."
++set PYTHONUTF8=1
++set PYTHONIOENCODING=utf-8
+ if not exist logs mkdir logs
+ set EXECUTION_MODE=mt5_demo
+ set TRADES_TABLE=trades_demo
+diff --git a/deploy/tasks/market_status.bat b/deploy/tasks/market_status.bat
+index 1d68fbd..ab5e236 100644
+--- a/deploy/tasks/market_status.bat
++++ b/deploy/tasks/market_status.bat
+@@ -1,6 +1,8 @@
+ @echo off
+ REM Hourly Market Status card (was the cron-job.org status job on GitHub).
+ cd /d "%~dp0..\.."
++set PYTHONUTF8=1
++set PYTHONIOENCODING=utf-8
+ if not exist logs mkdir logs
+ set EXECUTION_MODE=mt5_demo
+ set TRADES_TABLE=trades_demo
+diff --git a/deploy/tasks/mt5_terminal.bat b/deploy/tasks/mt5_terminal.bat
+new file mode 100644
+index 0000000..6f5dac2
+--- /dev/null
++++ b/deploy/tasks/mt5_terminal.bat
+@@ -0,0 +1,4 @@
++@echo off
++REM Keep MT5 attached to the interactive ONLOGON session; wrapper avoids
++REM schtasks quoting failures for Program Files paths (0x80070002).
++start "" /wait "C:\Program Files\MetaTrader 5\terminal64.exe"
+diff --git a/deploy/tasks/subscription_bot.bat b/deploy/tasks/subscription_bot.bat
+index e923b2d..3c04553 100644
+--- a/deploy/tasks/subscription_bot.bat
++++ b/deploy/tasks/subscription_bot.bat
+@@ -1,5 +1,7 @@
+ @echo off
+ REM Subscription bot daily maintenance (was subscription_cron.yml at 00:00).
+ cd /d "%~dp0..\.."
++set PYTHONUTF8=1
++set PYTHONIOENCODING=utf-8
+ if not exist logs mkdir logs
+ python subscription_bot\cron_maintenance.py >> logs\subscription_bot.log 2>&1
+diff --git a/deploy/tasks/tick_manager.bat b/deploy/tasks/tick_manager.bat
+index dc328f4..bd0c075 100644
+--- a/deploy/tasks/tick_manager.bat
++++ b/deploy/tasks/tick_manager.bat
+@@ -2,6 +2,8 @@
+ REM Demo stream: TICK-LEVEL execution authority (single-instance guarded).
+ REM 60s startup delay lets the MT5 terminal finish logging in after logon.
+ cd /d "%~dp0..\.."
++set PYTHONUTF8=1
++set PYTHONIOENCODING=utf-8
+ if not exist logs mkdir logs
+ timeout /t 60 /nobreak >nul
+ set EXECUTION_MODE=mt5_demo
+diff --git a/deploy/tasks/weekly_report_demo.bat b/deploy/tasks/weekly_report_demo.bat
+index 4101346..c7d89e5 100644
+--- a/deploy/tasks/weekly_report_demo.bat
++++ b/deploy/tasks/weekly_report_demo.bat
+@@ -1,6 +1,8 @@
+ @echo off
+ REM Weekly report over DEMO book (Saturday 07:00 UTC ~ 10:00 Hebron).
+ cd /d "%~dp0..\.."
++set PYTHONUTF8=1
++set PYTHONIOENCODING=utf-8
+ if not exist logs mkdir logs
+ set EXECUTION_MODE=mt5_demo
+ set TRADES_TABLE=trades_demo
+diff --git a/deploy/vps_setup.ps1 b/deploy/vps_setup.ps1
+index 2d46feb..12398ed 100644
+--- a/deploy/vps_setup.ps1
++++ b/deploy/vps_setup.ps1
+@@ -55,7 +55,7 @@ schtasks /Create /TN "SS_DemoAnalysis" /SC MINUTE /MO 5  /TR "cmd /c $t\demo_ana
+ schtasks /Create /TN "SS_DemoWatchdog" /SC MINUTE /MO 1  /TR "cmd /c $t\demo_watchdog.bat" /F
+ schtasks /Create /TN "SS_DemoLoop"     /SC ONLOGON       /TR "cmd /c $t\demo_loop.bat"     /F
+ schtasks /Create /TN "SS_TickManager"  /SC ONLOGON       /TR "cmd /c $t\tick_manager.bat"  /F
+-schtasks /Create /TN "SS_MT5Terminal"  /SC ONLOGON       /TR "`"C:\Program Files\MetaTrader 5\terminal64.exe`"" /F
++schtasks /Create /TN "SS_MT5Terminal"  /SC ONLOGON       /TR "cmd /c $t\mt5_terminal.bat"  /F
+ schtasks /Create /TN "SS_MarketStatus" /SC HOURLY /MO 1 /ST 00:02 /TR "cmd /c $t\market_status.bat"      /F
+ schtasks /Create /TN "SS_MacroContext" /SC HOURLY /MO 1 /ST 00:07 /TR "cmd /c $t\macro_demo.bat"         /F
+ schtasks /Create /TN "SS_DailyReport"  /SC DAILY  /ST 22:00       /TR "cmd /c $t\daily_report_demo.bat"  /F
+diff --git a/heartbeat.json b/heartbeat.json
+deleted file mode 100644
+index d7f7887..0000000
+--- a/heartbeat.json
++++ /dev/null
+@@ -1 +0,0 @@
+-{"ts": "2026-08-11T08:53:39.146527+00:00"}
+\ No newline at end of file
+diff --git a/scripts/demo_smoke_test.py b/scripts/demo_smoke_test.py
+index 5cfd813..4a8c860 100644
+--- a/scripts/demo_smoke_test.py
++++ b/scripts/demo_smoke_test.py
+@@ -25,7 +25,7 @@ def check(name, ok, hint=""):
+ 
+ def main() -> None:
+     # 1. env
+-    for var in ("SUPABASE_URL", "SUPABASE_KEY", "TELEGRAM_BOT_TOKEN",
++    for var in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+                 "TRADES_TABLE", "MT5_LOGIN", "MT5_SERVER"):
+         check(f"env {var}", bool(os.environ.get(var)), "set it in .env")
+ 
+@@ -39,7 +39,8 @@ def main() -> None:
+     check("mt5.login(demo)", bool(ok), str(mt5.last_error()))
+     info = mt5.account_info()
+     check("account is demo (trade_mode != REAL)",
+-          bool(info) and "real" not in str(getattr(info, "trade_mode", "")).lower(),
++          bool(info) and getattr(info, "trade_mode", None)
++          != getattr(mt5, "ACCOUNT_TRADE_MODE_REAL", 2),
+           "REFUSE real accounts in this phase")
+ 
+     # 3. symbol + candles + timezone offset (broker symbol read from config:
+@@ -61,7 +62,7 @@ def main() -> None:
+           "if your broker differs, the dollar math in cards must be rescaled")
+     check("volume_min <= 0.05 (TP1 books half of 0.1 lot)",
+           float(info.volume_min) <= 0.05,
+-          "below this the TP1 half-close degrades to full-close")
++          "above this the requested 0.05 TP1 slice cannot be booked")
+     from services import mt5_feed
+     payload = mt5_feed.get_candles("XAU/USD", "5m", 100, {"XAU/USD": sym})
+     check(f"mt5 candles payload ({sym})", bool(payload and len(payload["data"]) == 100))
+@@ -74,11 +75,11 @@ def main() -> None:
+     rows = db.get_open_trades()
+     check("trades_demo readable", isinstance(rows, list))
+ 
+-    # 5. telegram demo chat
+-    if os.environ.get("TELEGRAM_DEMO_CHAT_ID"):
+-        from services.telegram_bot import TelegramService
+-        ok = TelegramService(load_config()).send_message("🧪 DEMO smoke test OK")
+-        check("telegram demo chat", bool(ok))
++    # 5. Telegram: when TELEGRAM_DEMO_CHAT_ID is intentionally empty the
++    # subscriber destination (TELEGRAM_CHAT_ID) must still be tested.
++    from services.telegram_bot import TelegramService
++    ok = TelegramService(load_config()).send_message("🧪 DEMO smoke test OK")
++    check("telegram demo/subscriber destination", bool(ok))
+     print("SMOKE OK — safe to schedule run_demo_loop")
+ 
+ 
+diff --git a/scripts/demo_watchdog.py b/scripts/demo_watchdog.py
+index 0c2fdbf..c4960a1 100644
+--- a/scripts/demo_watchdog.py
++++ b/scripts/demo_watchdog.py
+@@ -1,4 +1,4 @@
+-"""Watchdog: alert + restart hint when the demo loop heartbeat goes stale."""
++"""Watchdog: alert + revive long-running demo processes on stale heartbeats."""
+ # --- VPS: load .env if present (real env vars ALWAYS win over .env) ---
+ try:
+     from dotenv import load_dotenv as _load_dotenv
+@@ -8,9 +8,14 @@ except Exception:
+ 
+ import json
+ import os
 +import sys
-+import time
-+from typing import Any, Dict, List, Optional
-+
+ 
+ from datetime import datetime, timezone
+ 
++# `python scripts\demo_watchdog.py` otherwise exposes scripts\, not the repo
++# root, and the first stale alert crashes with ModuleNotFoundError: services.
 +sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 +
-+from utils.trading_rules import trailing_params  # noqa: E402
-+# magic_for is needed inside _handle_row (module scope); mt5_executor keeps
-+# its MetaTrader5 import lazy, so this top-level import is safe on any OS.
-+from services.mt5_executor import magic_for  # noqa: E402
-+
-+logger = logging.getLogger("tick_manager")
-+LOOP_SLEEP = float(os.environ.get("TICK_LOOP_SLEEP", 0.25))
-+ROWS_REFRESH_SECONDS = float(os.environ.get("TICK_ROWS_REFRESH", 3.0))
-+
-+
-+# ── pure decisions (unit-tested) ────────────────────────────────────────────
-+
-+def decide_be(
-+    side: str, entry: float, current: float, risk_points: float,
-+    be_points: float, min_be_rr: float, already: bool, point_value: float = 0.10,
-+) -> bool:
-+    """Arm breakeven once price travelled >= be_points AND >= min_be_rr
-+    (both in codebase points; fav converted from price)."""
-+    if already or entry <= 0 or risk_points <= 0:
-+        return False
-+    fav_points = ((entry - current) if side == "SELL" else (current - entry)) / point_value
-+    return fav_points >= be_points and fav_points >= min_be_rr * risk_points
-+
-+
-+def decide_trailing(
-+    side: str, entry: float, current_stop: float, favorable_extreme: float,
-+    gap_points: float, step_points: float, point_value: float,
-+) -> Optional[float]:
-+    """Ratchet the stop behind the favorable extreme (gap), in steps."""
-+    if side == "BUY":
-+        candidate = favorable_extreme - gap_points * point_value
-+        if candidate > entry and candidate >= current_stop + step_points * point_value:
-+            return round(candidate, 2)
-+    else:
-+        candidate = favorable_extreme + gap_points * point_value
-+        if candidate < entry and candidate <= current_stop - step_points * point_value:
-+            return round(candidate, 2)
-+    return None
-+
-+
-+def decide_tp1(side: str, tp1: float, candle_low: float, candle_high: float,
-+               done: bool) -> bool:
-+    if done or tp1 <= 0:
-+        return False
-+    return (candle_low <= tp1) if side == "BUY" else (candle_high >= tp1)
+ MAX_AGE_SECONDS = 420
+ TICK_MAX_AGE_SECONDS = 120
+ 
+@@ -18,10 +23,15 @@ TICK_MAX_AGE_SECONDS = 120
+ def _revive(task: str) -> None:
+     import subprocess
+     try:
+-        subprocess.run(["schtasks", "/Run", "/TN", task],
+-                       capture_output=True, timeout=30)
+-    except Exception:  # noqa: BLE001
+-        pass
++        result = subprocess.run(
++            ["schtasks", "/Run", "/TN", task],
++            capture_output=True, text=True, timeout=30,
++        )
++        if result.returncode:
++            print(f"watchdog revive {task} failed rc={result.returncode}: "
++                  f"{(result.stderr or result.stdout or '').strip()}")
++    except Exception as exc:  # noqa: BLE001
++        print(f"watchdog revive {task} crashed: {exc}")
+ 
+ 
+ def _alert(msg: str) -> None:
+@@ -30,21 +40,40 @@ def _alert(msg: str) -> None:
+     TelegramService(load_config()).send_error_alert(msg)
+ 
+ 
++def _heartbeat_age(path: str) -> tuple[float | None, str | None]:
++    """Return (age_seconds, error); malformed/missing files never crash."""
++    if not os.path.exists(path):
++        return None, "missing"
++    try:
++        with open(path, encoding="utf-8") as fh:
++            payload = json.load(fh)
++        ts = datetime.fromisoformat(str(payload["ts"]).replace("Z", "+00:00"))
++        if ts.tzinfo is None:
++            ts = ts.replace(tzinfo=timezone.utc)
++        return (datetime.now(timezone.utc) - ts.astimezone(timezone.utc)).total_seconds(), None
++    except Exception as exc:  # noqa: BLE001
++        return None, f"invalid ({type(exc).__name__}: {exc})"
 +
 +
-+def classify_broker_exit(side: str, deal_price: float, entry: float,
-+                         stop: float, tp2: float) -> str:
-+    """Map a broker-side exit price to our status labels.
-+
-+    The broker only closes on SL/TP, so an exit between stop and TP2 means
-+    the (already moved) trailing/breakeven stop was the trigger. Pure +
-+    unit-tested (tests/test_mt5_execution_correctness.py).
-+    """
-+    eps = 1e-9
-+    if side == "BUY":
-+        if tp2 and deal_price >= tp2 - eps:
-+            return "TP2_HIT"
-+        if deal_price <= (stop or entry) + eps:
-+            return "SL_HIT"
-+        return "TRAILING_SL_HIT"
-+    if tp2 and deal_price <= tp2 + eps:
-+        return "TP2_HIT"
-+    if deal_price >= (stop or entry) - eps:
-+        return "SL_HIT"
-+    return "TRAILING_SL_HIT"
++def _check(path: str, max_age: float, task: str, label: str) -> None:
++    age, error = _heartbeat_age(path)
++    if error:
++        msg = f"🧪 DEMO watchdog: {label} heartbeat {error} — reviving."
++        print(msg)
++        _alert(msg)
++        _revive(task)
++        return
++    if age is not None and age > max_age:
++        msg = f"🧪 DEMO watchdog: {label} stale ({age:.0f}s) — reviving."
++        print(msg)
++        _alert(msg)
++        _revive(task)
 +
 +
-+# ── live loop ───────────────────────────────────────────────────────────────
-+
-+class TickManager:
-+    def __init__(self, config: Dict[str, Any], telegram=None, database=None):
-+        self.config = config
-+        self.telegram = telegram
-+        self.database = database
-+        self._extremes: Dict[str, float] = {}
-+        self._trail = trailing_params(config)
-+        self._partial_alerted: set = set()  # refused-partial reported once/trade
-+
-+    def _magic_rows(self) -> List[Dict[str, Any]]:
-+        rows = self.database.get_open_trades() or []
-+        return [r for r in rows if str(r.get("status") or "") in
-+                {"PENDING", "OPEN", "TP1_HIT", "PARTIAL"}]
-+
-+    def run_forever(self) -> None:  # pragma: no cover - VPS only
-+        from services.mt5_executor import Mt5DemoExecutor, magic_for, _mt5_ready
-+        mt5 = _mt5_ready()  # initialize ONCE — the terminal must be attached
-+        executor = Mt5DemoExecutor(self.config, telegram=self.telegram)
-+        # DB rows are throttled (Supabase free-tier protection — live incident:
-+        # usage-limit badge): ticks stay 0.25s via symbol_info_tick, while the
-+        # trade BOOK refreshes every ROWS_REFRESH_SECONDS. Row state changes
-+        # (new signal / status flip) are rare; 3s staleness is invisible.
-+        rows: List[Dict[str, Any]] = []
-+        rows_at = 0.0
-+        while True:
+ def main() -> None:
+-    if os.path.exists("heartbeat.json"):
+-        with open("heartbeat.json", encoding="utf-8") as fh:
+-            ts = datetime.fromisoformat(json.load(fh)["ts"])
+-        age = (datetime.now(timezone.utc) - ts).total_seconds()
+-        if age > MAX_AGE_SECONDS:
+-            _alert(f"🧪 DEMO watchdog: demo loop stale ({age:.0f}s) — reviving.")
+-            _revive("SS_DemoLoop")
+-    if os.path.exists("tick_heartbeat.json"):
+-        with open("tick_heartbeat.json", encoding="utf-8") as fh:
+-            ts = datetime.fromisoformat(json.load(fh)["ts"])
+-        age = (datetime.now(timezone.utc) - ts).total_seconds()
+-        if age > TICK_MAX_AGE_SECONDS:
+-            _alert(f"🧪 DEMO watchdog: tick manager stale ({age:.0f}s) — reviving.")
+-            _revive("SS_TickManager")
++    _check("heartbeat.json", MAX_AGE_SECONDS, "SS_DemoLoop", "demo loop")
++    _check("tick_heartbeat.json", TICK_MAX_AGE_SECONDS,
++           "SS_TickManager", "tick manager")
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/scripts/run_analysis.py b/scripts/run_analysis.py
+index 4bb79c1..53da995 100644
+--- a/scripts/run_analysis.py
++++ b/scripts/run_analysis.py
+@@ -1870,6 +1870,8 @@ def _execute_session_plan_ladder(
+     database: DatabaseService,
+     telegram: TelegramService,
+     config: Dict[str, Any],
++    *,
++    demo_execution: bool = False,
+ ) -> int:
+     # Clear first: a stale reason from a previous cycle would be worse than
+     # no reason at all, because it would read as fact.
+@@ -2042,21 +2044,30 @@ def _execute_session_plan_ladder(
+             continue
+         trade_id = database.new_trade_id()
+         ladder_decision["trade_id"] = trade_id
+-        delivered = False
+-        try:
+-            delivered = bool(telegram.send_signal(ladder_decision))
+-        except Exception as exc:  # noqa: BLE001
+-            logger.warning("Failed to send session-plan ladder signal (%s) for %s: %s", role, symbol, exc)
++        if demo_execution:
++            # Broker-first delivery: persist an unsent execution intent. The
++            # tick manager sends the rich card only after MT5 accepts it.
++            ladder_decision["_telegram_signal_sent"] = False
++            database.save_trade(ladder_decision)
++            delivered = True
++        else:
+             delivered = False
+-        if not delivered:
+-            _ladder_stop(f"{role} telegram delivery failed; order not recorded")
+-            if role in {"PRIMARY", "STARTER"}:
+-                return created
+-            continue
+-        database.save_trade(ladder_decision)
 +            try:
-+                now = time.time()
-+                if now - rows_at >= ROWS_REFRESH_SECONDS:
-+                    rows = self._magic_rows()
-+                    rows_at = now
-+                for row in rows:
-+                    # Route through the broker symbol map (XAU/USD -> XAUUSD.s);
-+                    # a raw slash-strip goes blind on suffix brokers.
-+                    sym = executor._sym(str(row.get("symbol") or "XAU/USD"))
-+                    tick = mt5.symbol_info_tick(sym)
-+                    if tick is None:
-+                        continue
-+                    self._handle_row(row, tick, executor, mt5)
-+            except Exception as exc:  # noqa: BLE001 - loop must survive
-+                logger.warning("tick cycle error: %s", exc)
-+            time.sleep(LOOP_SLEEP)
-+
-+    def _handle_row(self, row, tick, executor, mt5) -> None:  # pragma: no cover
-+        tid = str(row.get("id"))
-+        side = str(row.get("type") or row.get("side") or "").upper()
-+        magic = magic_for(tid)
-+        pos = executor._position_by_magic(magic)
-+        status = str(row.get("status") or "")
-+
-+        if status == "PENDING":
-+            if pos is not None:  # broker filled the pending
-+                # Book the ACTUAL fill price: PnL/BE/trailing must run on the
-+                # broker's execution, not our planned level.
-+                self.database.update_trade(
-+                    tid, {"status": "OPEN",
-+                          "entry_price": round(float(pos.price_open), 2)})
-+                self._notify(
-+                    f"🧪 DEMO: pending activated @ {pos.price_open:.2f} "
-+                    f"(actual fill)")
-+            elif not row.get("mt5_ticket"):
-+                # The pending order has never been sent to MT5 — send it now.
-+                # ensure_ticket is idempotent (position + outstanding order).
-+                kind = str(row.get("order_type") or "").upper()
-+                if not kind.endswith("LIMIT"):
-+                    kind = "BUY_LIMIT" if side == "BUY" else "SELL_LIMIT"
-+                ticket = executor.ensure_ticket(
-+                    tid, side, kind, float(row.get("entry_price") or 0),
-+                    float(row.get("stop_loss") or 0),
-+                    float(row.get("tp2") or 0), row.get("symbol"))
-+                if ticket:
-+                    self.database.update_trade(tid, {"mt5_ticket": ticket})
-+                    self._notify(
-+                        f"🧪 DEMO: pending sent to MT5 @ "
-+                        f"{float(row.get('entry_price') or 0):.2f} "
-+                        f"(ticket {ticket})")
-+            return
-+        if pos is None:
-+            if not row.get("mt5_ticket"):
-+                # New signal that never reached MT5 — open it NOW (market).
-+                ticket = executor.ensure_ticket(
-+                    tid, side, "MARKET", 0.0,
-+                    float(row.get("stop_loss") or 0),
-+                    float(row.get("tp2") or 0), row.get("symbol"))
-+                if ticket:
-+                    pos2 = executor._position_by_magic(magic)
-+                    upd: Dict[str, Any] = {"mt5_ticket": ticket}
-+                    if pos2 is not None:
-+                        upd["entry_price"] = round(float(pos2.price_open), 2)
-+                    self.database.update_trade(tid, upd)
-+                    if "entry_price" in upd:
-+                        self._notify(
-+                            f"🧪 DEMO: MARKET filled @ {upd['entry_price']:.2f} "
-+                            f"(ticket {ticket})")
-+                    else:
-+                        self._notify(f"🧪 DEMO: MARKET sent (ticket {ticket})")
-+                return
-+            # broker closed it (SL / TP2 / trailing stop)
-+            # Mirror the REAL broker exit: deal price + realized P&L, not
-+            # the live tick at the moment we noticed the position was gone.
-+            exit_info = executor.last_exit(tid)
-+            entry = float(row.get("entry_price") or 0)
-+            stop = float(row.get("stop_loss") or 0)
-+            tp2 = float(row.get("tp2") or 0)
-+            if exit_info and exit_info["price"] > 0:
-+                close = exit_info["price"]
-+                status = classify_broker_exit(side, close, entry, stop, tp2)
-+                pnl_pts = (close - entry) * 10.0
-+                if side == "SELL":
-+                    pnl_pts = -pnl_pts
-+                self.database.update_trade(
-+                    tid, {"status": status, "close_price": round(close, 2),
-+                          "pnl_points": round(pnl_pts, 1)})
-+                self._notify(
-+                    f"🧪 DEMO: closed by broker @ {close:.2f} ({status}) "
-+                    f"{pnl_pts:+.0f} pts / {exit_info['profit']:+.2f}$")
++                delivered = bool(telegram.send_signal(ladder_decision))
++            except Exception as exc:  # noqa: BLE001
++                logger.warning("Failed to send session-plan ladder signal (%s) for %s: %s", role, symbol, exc)
++                delivered = False
++            if not delivered:
++                _ladder_stop(f"{role} telegram delivery failed; order not recorded")
++                if role in {"PRIMARY", "STARTER"}:
++                    return created
++                continue
++            database.save_trade(ladder_decision)
+         _record_decision_audit(
+             database, ladder_decision, config,
+-            stage="delivered", outcome="SENT", reason=f"planner ladder {role}",
++            stage="execution_queued" if demo_execution else "delivered",
++            outcome="QUEUED" if demo_execution else "SENT",
++            reason=f"planner ladder {role}",
+         )
+         staged_trades.append(
+             {
+@@ -2588,6 +2599,8 @@ async def _check_scale_in(
+     open_trades: List[Dict[str, Any]],
+     database: DatabaseService,
+     telegram: TelegramService,
++    *,
++    demo_execution: bool = False,
+ ) -> None:
+     """Send and persist fixed-risk scale-in trades when price retests a level.
+ 
+@@ -2815,15 +2828,20 @@ async def _check_scale_in(
+             "━━━━━━━━━━━━━━━━━━━━━\n"
+             f"<i>ID: {html.escape(trade_id)}</i>"
+         )
+-        delivered = False
+-        try:
+-            delivered = bool(telegram.send_message(message, urgent=True))
+-        except Exception as exc:  # noqa: BLE001
+-            logger.exception("Failed to send scale-in Telegram message for %s: %s", parent_id, exc)
+-        if delivered:
++        if demo_execution:
++            decision["_telegram_signal_sent"] = False
++            decision["_telegram_pending_message"] = message
+             database.save_trade(decision)
+         else:
+-            logger.error("Scale-in for %s was not saved because Telegram delivery failed", parent_id)
++            delivered = False
++            try:
++                delivered = bool(telegram.send_message(message, urgent=True))
++            except Exception as exc:  # noqa: BLE001
++                logger.exception("Failed to send scale-in Telegram message for %s: %s", parent_id, exc)
++            if delivered:
++                database.save_trade(decision)
 +            else:
-+                close = tick.bid
-+                self.database.update_trade(
-+                    tid, {"status": "SL_HIT", "close_price": round(close, 2)})
-+                self._notify(
-+                    f"🧪 DEMO: position closed by broker @ {close:.2f} "
-+                    f"(no exit deal found — labelled SL_HIT, verify)")
++                logger.error("Scale-in for %s was not saved because Telegram delivery failed", parent_id)
+         return
+ 
+ 
+@@ -3715,6 +3733,10 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
+     status_delivery = _HourlyStatusDelivery(telegram, config)
+     try:
+         database = DatabaseService(config)
++        # Exactly one mode read in this entrypoint: every demo delivery path
++        # below persists first, then lets the tick manager announce only after
++        # MT5 accepts the order.
++        demo_execution = os.environ.get("EXECUTION_MODE") == "mt5_demo"
+         symbol = str(config.get("symbol", "XAU/USD"))
+         # Arm immediately, not 400 lines later at the decision. An agent that
+         # raises, a market-data timeout, or a Supabase error all abort the
+@@ -3849,8 +3871,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
+             # but never BOOK execution — DemoHandoffDB converts close intents
+             # into requested_* flags the tick manager executes at the broker
+             # first, and suppresses its cards (tick sends truthful ones).
+-            _demo = os.environ.get("EXECUTION_MODE") == "mt5_demo"
+-            if _demo:
++            if demo_execution:
+                 from services.demo_handoff import DemoHandoffDB
+                 _db = DemoHandoffDB(database)
+                 _tg = None
+@@ -4019,6 +4040,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
+                 [t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol],
+                 database,
+                 telegram,
++                demo_execution=demo_execution,
+             )
+         all_results["dynamic_risk"] = DynamicRiskManager(config).evaluate(database)
+         learning_service = None
+@@ -4423,6 +4445,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
+             database,
+             telegram,
+             config,
++            demo_execution=demo_execution,
+         )
+         if session_plan_snapshot_id and planner_gate_preview:
+             try:
+@@ -4746,17 +4769,26 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
+                 return
+             trade_id = database.new_trade_id()
+             decision["trade_id"] = trade_id
+-            delivered = False
+-            try:
+-                delivered = bool(telegram.send_signal(decision))
+-                if delivered:
+-                    # The trade alert already carries this cycle's context.
+-                    status_delivery.mark_sent()
+-            except Exception as exc:  # noqa: BLE001
+-                telegram.send_error_alert(f"Signal delivery failed: {exc}")
++            if demo_execution:
++                # Do not announce an order that the broker has not accepted.
++                # The tick manager retries MT5 and sends this snapshot only
++                # after a real position/pending ticket exists.
++                decision["_telegram_signal_sent"] = False
++                delivered = True  # accepted into the durable execution queue
++            else:
++                delivered = False
++                try:
++                    delivered = bool(telegram.send_signal(decision))
++                except Exception as exc:  # noqa: BLE001
++                    telegram.send_error_alert(f"Signal delivery failed: {exc}")
++                    return
++            if not delivered:
++                telegram.send_error_alert("Signal delivery failed: Telegram returned False; trade was not saved.")
+                 return
+-            if delivered and not decision.get("golden_dual_entry"):
+-                cancelled_pending = 0
++
++            # Golden dual keeps its existing same-direction pending; every
++            # other accepted replacement cancels the older pending family.
++            if not decision.get("golden_dual_entry"):
+                 try:
+                     cancelled_pending = database.cancel_pending_orders(
+                         reason=f"Replaced by newer {decision_type} signal",
+@@ -4767,27 +4799,28 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
+                         logger.info("Cancelled %s stale pending %s order(s) for %s before saving new signal", cancelled_pending, decision_type, symbol)
+                 except Exception as exc:  # noqa: BLE001
+                     logger.warning("Failed to cancel stale pending orders before saving new signal: %s", exc)
+-                database.save_trade(decision)
+-                # The delivered half of the trail. Without it the audit can
+-                # count refusals but not the rate they represent.
+-                _record_decision_audit(
+-                    database, decision, config,
+-                    stage="delivered", outcome="SENT",
+-                    reason=decision.get("entry_mode"),
+-                )
+-                if decision.get("setup_id"):
+-                    try:
+-                        setup_memory.mark_entry_triggered(
+-                            setup_id=str(decision.get("setup_id")),
+-                            state_key=str((decision.get("setup_context") or {}).get("state_key") or ""),
+-                            trade_id=trade_id,
+-                            current_price=float(decision.get("current_price") or 0),
+-                            symbol=symbol,
+-                        )
+-                    except Exception as exc:  # noqa: BLE001
+-                        logger.warning("Failed to link setup candidate %s to trade %s: %s", decision.get("setup_id"), trade_id, exc)
+-            else:
+-                telegram.send_error_alert("Signal delivery failed: Telegram returned False; trade was not saved.")
++
++            # This also fixes the old golden-dual branch that sent its card but
++            # skipped save_trade entirely.
++            database.save_trade(decision)
++            status_delivery.mark_sent()
++            _record_decision_audit(
++                database, decision, config,
++                stage="execution_queued" if demo_execution else "delivered",
++                outcome="QUEUED" if demo_execution else "SENT",
++                reason=decision.get("entry_mode"),
++            )
++            if decision.get("setup_id"):
++                try:
++                    setup_memory.mark_entry_triggered(
++                        setup_id=str(decision.get("setup_id")),
++                        state_key=str((decision.get("setup_context") or {}).get("state_key") or ""),
++                        trade_id=trade_id,
++                        current_price=float(decision.get("current_price") or 0),
++                        symbol=symbol,
++                    )
++                except Exception as exc:  # noqa: BLE001
++                    logger.warning("Failed to link setup candidate %s to trade %s: %s", decision.get("setup_id"), trade_id, exc)
+         elif decision_type == "WAIT":
+             if send_hourly_now:
+                 status_delivery.arm(decision=decision, all_results=all_results, database=database)
+diff --git a/scripts/run_demo_loop.py b/scripts/run_demo_loop.py
+index 59ecd45..8dab5f8 100644
+--- a/scripts/run_demo_loop.py
++++ b/scripts/run_demo_loop.py
+@@ -35,7 +35,7 @@ def _beat() -> None:
+ 
+ def main() -> None:
+     from utils.single_instance import acquire_single_instance
+-    if not acquire_single_instance(PIDFILE):
++    if not acquire_single_instance(PIDFILE, "run_demo_loop.py"):
+         print("demo loop already running; exiting duplicate instance.")
+         return
+     time.sleep(START_DELAY_SECONDS)
+diff --git a/scripts/run_tick_manager.py b/scripts/run_tick_manager.py
+index 02468be..f90a7b3 100644
+--- a/scripts/run_tick_manager.py
++++ b/scripts/run_tick_manager.py
+@@ -21,6 +21,8 @@ import logging
+ import os
+ import sys
+ import time
++from copy import deepcopy
++from datetime import datetime, timezone
+ from typing import Any, Dict, List, Optional
+ 
+ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+@@ -126,7 +128,63 @@ class TickManager:
+         self._extremes: Dict[str, float] = {}
+         self._trail = trailing_params(config)
+         self._partial_alerted: set = set()  # refused-partial reported once/trade
++        self._placement_retry_at: Dict[str, float] = {}  # stop 4x/sec refusal/log floods
++
++    @staticmethod
++    def _write_heartbeat(path: str = "tick_heartbeat.json") -> None:
++        """Atomically publish a valid heartbeat; never expose an empty file."""
++        tmp = f"{path}.tmp"
++        with open(tmp, "w", encoding="utf-8") as fh:
++            json.dump({"ts": datetime.now(timezone.utc).isoformat()}, fh)
++            fh.flush()
++            os.fsync(fh.fileno())
++        os.replace(tmp, path)
++
++    def _placement_due(self, trade_id: str) -> bool:
++        """Retry broker refusals every 5s, not four times per second."""
++        now = time.monotonic()
++        if now < self._placement_retry_at.get(trade_id, 0.0):
++            return False
++        self._placement_retry_at[trade_id] = now + 5.0
++        return True
++
++    def _send_execution_signal(
++        self, row: Dict[str, Any], *, actual_entry: float | None = None,
++    ) -> None:  # pragma: no cover - VPS/Telegram integration
++        """Deliver the rich signal only after an MT5 position/order exists.
+ 
++        New demo rows carry ``telegram_signal_sent=False``. Old rows omit the
++        field and are deliberately not re-announced during deployment.
++        """
++        if row.get("telegram_signal_sent") is not False or not self.telegram:
 +            return
++        decision = deepcopy(row.get("signal_snapshot") or {})
++        if not isinstance(decision, dict) or not decision:
++            logger.error("cannot send execution signal for %s: no snapshot", row.get("id"))
++            return
++        decision["trade_id"] = str(row.get("id") or decision.get("trade_id") or "")
++        if actual_entry and actual_entry > 0:
++            signal = decision.setdefault("signal", {})
++            entry = signal.setdefault("entry", {})
++            entry["price"] = round(float(actual_entry), 2)
++            decision["current_price"] = round(float(actual_entry), 2)
++        custom = decision.get("_telegram_pending_message")
++        try:
++            sent = bool(
++                self.telegram.send_message(str(custom), urgent=True)
++                if custom else self.telegram.send_signal(decision)
++            )
++        except Exception as exc:  # noqa: BLE001
++            logger.warning("execution signal delivery crashed for %s: %s", row.get("id"), exc)
++            return
++        if not sent:
++            logger.warning("execution signal delivery returned False for %s; retrying", row.get("id"))
++            return
++        sent_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
++        updates = {"telegram_signal_sent": True,
++                   "telegram_signal_sent_at": sent_at}
++        self.database.update_trade(str(row.get("id")), updates)
++        row.update(updates)  # cached row must not resend before the 3s refresh
+ 
+     def _seed_extreme(self, executor, row: Dict[str, Any], pos, side: str) -> float:
+         """Restart-lossless extreme: seed from the broker's M1 candles since
+@@ -216,13 +274,12 @@ class TickManager:
+                     self._reconcile_pending(rows, executor)
+                 if now - beat_at >= 30:
+                     try:
+-                        from datetime import datetime as _dt
+-                        with open("tick_heartbeat.json", "w",
+-                                  encoding="utf-8") as fh:
+-                            json.dump({"ts": _dt.now(timezone.utc).isoformat()}, fh)
++                        self._write_heartbeat()
++                    except Exception as exc:  # noqa: BLE001
++                        logger.warning("tick heartbeat write failed: %s", exc)
++                    finally:
++                        # Do not hammer the disk four times/second on failure.
+                         beat_at = now
+-                    except Exception:  # noqa: BLE001
+-                        pass
+                 for row in rows:
+                     # Route through the broker symbol map (XAU/USD -> XAUUSD.s);
+                     # a raw slash-strip goes blind on suffix brokers.
+@@ -241,24 +298,28 @@ class TickManager:
+         magic = magic_for(tid)
+         pos = executor._position_by_magic(magic)
+         status = str(row.get("status") or "")
++        if status not in {"PENDING", "OPEN", "TP1_HIT", "PARTIAL"}:
++            return  # cached row was closed/cancelled before the next DB refresh
+         if pos is None and row.get("close_price") is not None:
+             return  # exit already booked; never manage/resurrect a closed row
+ 
+         if status == "PENDING":
+             if row.get("requested_exit"):
+-                self.database.update_trade(
+-                    tid, {"status": "CANCELLED", "result": "CANCELLED",
+-                          "requested_exit": False,
+-                          "reasons": ["thesis exit before activation"]})
++                cancel_updates = {"status": "CANCELLED", "result": "CANCELLED",
++                                  "requested_exit": False,
++                                  "reasons": ["thesis exit before activation"]}
++                self.database.update_trade(tid, cancel_updates)
++                row.update(cancel_updates)
+                 return
+             if self._pending_stale(row, tick):
+                 # Stale pending (age or runaway excursion): cancel in the DB;
+                 # _reconcile_pending cancels the broker order and cards it.
+                 # If it was never placed at the broker, card here instead.
+                 had_ticket = bool(row.get("mt5_ticket"))
+-                self.database.update_trade(
+-                    tid, {"status": "CANCELLED", "result": "CANCELLED",
+-                          "reasons": ["stale pending (freshness mirror)"]})
++                stale_updates = {"status": "CANCELLED", "result": "CANCELLED",
++                                 "reasons": ["stale pending (freshness mirror)"]}
++                self.database.update_trade(tid, stale_updates)
++                row.update(stale_updates)
+                 if not had_ticket:
+                     self._notify(
+                         f"🧪 DEMO: MT5 applied: stale pending cancelled "
+@@ -267,9 +328,12 @@ class TickManager:
+             if pos is not None:  # broker filled the pending
+                 # Book the ACTUAL fill price: PnL/BE/trailing must run on the
+                 # broker's execution, not our planned level.
+-                self.database.update_trade(
+-                    tid, {"status": "OPEN",
+-                          "entry_price": round(float(pos.price_open), 2)})
++                fill_updates = {"status": "OPEN",
++                                "entry_price": round(float(pos.price_open), 2),
++                                "mt5_ticket": int(pos.ticket)}
++                self.database.update_trade(tid, fill_updates)
++                row.update(fill_updates)
++                self._send_execution_signal(row, actual_entry=float(pos.price_open))
+                 self._notify(
+                     f"🧪 DEMO: MT5 applied: pending filled @ "
+                     f"{pos.price_open:.2f} · ticket {int(pos.ticket)} "
+@@ -277,6 +341,8 @@ class TickManager:
+             elif not row.get("mt5_ticket"):
+                 # The pending order has never been sent to MT5 — send it now.
+                 # ensure_ticket is idempotent (position + outstanding order).
++                if not self._placement_due(tid):
++                    return
+                 kind = str(row.get("order_type") or "").upper()
+                 if not kind.endswith("LIMIT"):
+                     kind = "BUY_LIMIT" if side == "BUY" else "SELL_LIMIT"
+@@ -285,13 +351,25 @@ class TickManager:
+                     float(row.get("stop_loss") or 0),
+                     float(row.get("tp2") or 0), row.get("symbol"))
+                 if ticket:
+-                    self.database.update_trade(tid, {"mt5_ticket": ticket})
++                    self._placement_retry_at.pop(tid, None)
++                    updates = {"mt5_ticket": ticket}
++                    self.database.update_trade(tid, updates)
++                    row.update(updates)
+                     lo = executor.last_order
+-                    self._notify(
+-                        f"🧪 DEMO: MT5 applied: {lo.get('kind', 'LIMIT')} "
+-                        f"order placed · vol {lo.get('volume')} @ "
+-                        f"{lo.get('price', float(row.get('entry_price') or 0)):.2f} "
+-                        f"· ticket {ticket}")
++                    self._send_execution_signal(row)
++                    if not lo.get("existing"):
++                        self._notify(
++                            f"🧪 DEMO: MT5 applied: {lo.get('kind', 'LIMIT')} "
++                            f"order placed · vol {lo.get('volume')} @ "
++                            f"{lo.get('price', float(row.get('entry_price') or 0)):.2f} "
++                            f"· ticket {ticket}")
++                    else:
++                        logger.info("repaired missing DB ticket for existing pending %s -> %s",
++                                    tid, ticket)
++            # If Telegram was unavailable after broker placement, retry the
++            # rich card on later ticks without touching the existing order.
++            if row.get("mt5_ticket"):
++                self._send_execution_signal(row)
+             return
+         if pos is None:
+             # Never-placed OPEN rows (no ticket, no close) are ALWAYS
+@@ -309,25 +387,38 @@ class TickManager:
+                 # tion happens in the DB and _reconcile_pending mirrors it at
+                 # the broker). OPEN rows only while fresh — finished or stale
+                 # rows must NEVER be resurrected into new orders.
++                if not self._placement_due(tid):
++                    return
+                 ticket = executor.ensure_ticket(
+                     tid, side, "MARKET", 0.0,
+                     float(row.get("stop_loss") or 0),
+                     float(row.get("tp2") or 0), row.get("symbol"))
+                 if ticket:
++                    self._placement_retry_at.pop(tid, None)
+                     pos2 = executor._position_by_magic(magic)
+                     upd: Dict[str, Any] = {"mt5_ticket": ticket}
+                     if pos2 is not None:
+                         upd["entry_price"] = round(float(pos2.price_open), 2)
++                        upd["mt5_ticket"] = int(pos2.ticket)
++                    elif float((executor.last_order or {}).get("price") or 0) > 0:
++                        upd["entry_price"] = round(float(executor.last_order["price"]), 2)
+                     self.database.update_trade(tid, upd)
+-                    if "entry_price" in upd:
+-                        self._notify(
+-                            f"🧪 DEMO: MT5 applied: MARKET filled · vol "
+-                            f"{executor.lot} @ {upd['entry_price']:.2f} · "
+-                            f"ticket {ticket}")
++                    row.update(upd)
++                    actual_entry = float(upd.get("entry_price") or 0)
++                    self._send_execution_signal(row, actual_entry=actual_entry or None)
++                    if not (executor.last_order or {}).get("existing"):
++                        if actual_entry:
++                            self._notify(
++                                f"🧪 DEMO: MT5 applied: MARKET filled · vol "
++                                f"{executor.lot} @ {actual_entry:.2f} · "
++                                f"ticket {upd['mt5_ticket']}")
++                        else:
++                            self._notify(
++                                f"🧪 DEMO: MT5 applied: MARKET order sent · "
++                                f"ticket {ticket}")
+                     else:
+-                        self._notify(
+-                            f"🧪 DEMO: MT5 applied: MARKET order sent · "
+-                            f"ticket {ticket}")
++                        logger.info("repaired missing DB ticket for existing position %s -> %s",
++                                    tid, upd["mt5_ticket"])
+                 return
+             # broker closed it (SL / TP2 / trailing stop)
+             # Mirror the REAL broker exit: deal price + realized P&L, not
+@@ -342,9 +433,10 @@ class TickManager:
+                 pnl_pts = (close - entry) * 10.0
+                 if side == "SELL":
+                     pnl_pts = -pnl_pts
+-                self.database.update_trade(
+-                    tid, {"status": status, "close_price": round(close, 2),
+-                          "pnl_points": round(pnl_pts, 1)})
++                close_updates = {"status": status, "close_price": round(close, 2),
++                                 "pnl_points": round(pnl_pts, 1)}
++                self.database.update_trade(tid, close_updates)
++                row.update(close_updates)
+                 self._notify(
+                     f"🧪 DEMO: MT5 applied: position closed @ {close:.2f} "
+                     f"({status}) · vol {exit_info.get('volume')} · "
+@@ -352,14 +444,37 @@ class TickManager:
+                     f"{pnl_pts:+.0f} pts / {exit_info['profit']:+.2f}$")
+             else:
+                 keep = status if status in {"TP1_HIT", "PARTIAL"} else "SL_HIT"
+-                close = tick.bid
+-                self.database.update_trade(
+-                    tid, {"status": keep, "close_price": round(close, 2)})
++                close = tick.bid if side == "BUY" else tick.ask
++                fallback_updates = {"status": keep, "close_price": round(close, 2)}
++                self.database.update_trade(tid, fallback_updates)
++                row.update(fallback_updates)
+                 self._notify(
+                     f"🧪 DEMO: position closed by broker @ {close:.2f} "
+                     f"(no exit deal found — labelled {keep}, verify)")
+             return
+ 
++        # A market DEAL can be accepted one terminal tick before positions_get
++        # exposes it. Reconcile the broker's actual fill on every sight instead
++        # of leaving the planned Telegram quote in the book forever.
++        actual_entry = round(float(getattr(pos, "price_open", 0.0) or 0.0), 2)
++        actual_ticket = int(getattr(pos, "ticket", 0) or 0)
++        mirror_updates: Dict[str, Any] = {}
++        may_reconcile_entry = bool(row.get("mt5_ticket")) or \
++            row.get("telegram_signal_sent") is False
++        if (may_reconcile_entry and actual_entry > 0
++                and abs(actual_entry - float(row.get("entry_price") or 0)) > 0.01):
++            mirror_updates["entry_price"] = actual_entry
++        may_reconcile_ticket = bool(row.get("mt5_ticket")) or \
++            row.get("telegram_signal_sent") is False
++        if (may_reconcile_ticket and actual_ticket
++                and int(row.get("mt5_ticket") or 0) != actual_ticket):
++            mirror_updates["mt5_ticket"] = actual_ticket
++        if mirror_updates:
++            self.database.update_trade(tid, mirror_updates)
++            row.update(mirror_updates)
++            logger.info("reconciled broker fill for %s: %s", tid, mirror_updates)
++        self._send_execution_signal(row, actual_entry=actual_entry or None)
 +
-+        entry = float(row.get("entry_price") or 0)
-+        stop = float(row.get("stop_loss") or 0)
-+        tp1 = float(row.get("tp1") or 0)
-+        risk = abs(entry - float(row.get("initial_stop_loss") or stop))
-+        pv = 0.10  # codebase point = $0.10 on gold
-+        risk_points = risk / pv  # price delta -> codebase points
-+        price = tick.bid if side == "SELL" else tick.ask
-+        extreme = self._extremes.get(tid, price)
-+        extreme = min(extreme, price) if side == "BUY" else max(extreme, price)
-+        self._extremes[tid] = extreme
+         # thesis-exit handoff: analysis requested, broker executes first.
+         if row.get("requested_exit"):
+             if pos is None:
+@@ -369,10 +484,11 @@ class TickManager:
+                 pnl = (lc["price"] - float(row.get("entry_price") or 0)) * 10.0
+                 if side == "SELL":
+                     pnl = -pnl
+-                self.database.update_trade(
+-                    tid, {"status": "THESIS_EXIT", "requested_exit": False,
+-                          "close_price": lc["price"],
+-                          "pnl_points": round(pnl, 1)})
++                thesis_updates = {"status": "THESIS_EXIT", "requested_exit": False,
++                                  "close_price": lc["price"],
++                                  "pnl_points": round(pnl, 1)}
++                self.database.update_trade(tid, thesis_updates)
++                row.update(thesis_updates)
+                 self._notify(
+                     f"🧪 DEMO: MT5 applied: thesis exit closed @ "
+                     f"{lc['price']:.2f} · vol {lc['volume']} · "
+@@ -382,12 +498,16 @@ class TickManager:
+                 and not row.get("partial_close"):
+             if executor.partial_close_at_tp1(tid, 0.5, row.get("symbol")):
+                 lp = executor.last_partial
+-                self.database.update_trade(tid, {"requested_partial": False})
+-                self._notify(
+-                    f"🧪 DEMO: MT5 applied: thesis scale-out closed · vol "
+-                    f"{lp.get('volume')} @ {lp.get('price', 0):.2f} · "
+-                    f"remaining {lp.get('remaining')} · ticket "
+-                    f"{lp.get('ticket')}")
++                scale_updates = {"requested_partial": False,
++                                 "partial_close": True, "status": "PARTIAL"}
++                self.database.update_trade(tid, scale_updates)
++                row.update(scale_updates)
++                if not lp.get("existing"):
++                    self._notify(
++                        f"🧪 DEMO: MT5 applied: thesis scale-out closed · vol "
++                        f"{lp.get('volume')} @ {lp.get('price', 0):.2f} · "
++                        f"remaining {lp.get('remaining')} · ticket "
++                        f"{lp.get('ticket')}")
+ 
+         entry = float(row.get("entry_price") or 0)
+         stop = float(row.get("stop_loss") or 0)
+@@ -395,7 +515,10 @@ class TickManager:
+         risk = abs(entry - float(row.get("initial_stop_loss") or stop))
+         pv = 0.10  # codebase point = $0.10 on gold
+         risk_points = risk / pv  # price delta -> codebase points
+-        price = tick.bid if side == "SELL" else tick.ask
++        # Use the price at which the position can actually be closed:
++        # BUY closes on Bid; SELL closes on Ask. This keeps BE/TP1/trailing
++        # aligned with MT5 rather than triggering one spread too early.
++        price = tick.bid if side == "BUY" else tick.ask
+         if tid not in self._extremes:
+             # first sight (fresh start/restart): seed from broker history so
+             # peaks hit while we were down still ratchet the stop.
+@@ -427,26 +550,35 @@ class TickManager:
+             # tick retries (operator directive: truthful messages only).
+             if executor.apply_stop(tid, entry, float(row.get("tp2") or 0),
+                                    row.get("symbol")):
+-                self.database.update_trade(tid, {"sl_moved_to_entry": True,
+-                                                 "stop_loss": entry})
++                be_updates = {"sl_moved_to_entry": True, "stop_loss": entry}
++                self.database.update_trade(tid, be_updates)
++                row.update(be_updates)
++                stop = entry
+                 self._notify(f"🧪 DEMO: breakeven armed @ {entry:.2f} "
+                              f"(confirmed at broker)")
+ 
+         # 2) TP1 partial — close ONLY the half (operator directive). Book it
+         # only when the broker actually executed it. On refusal: keep
+         # retrying every tick and report the broker's reason once per trade.
+-        if decide_tp1(side, tp1, tick.bid, tick.ask,
++        # decide_tp1 expects candle low/high. On a live tick the executable
++        # BUY high is Bid and the executable SELL low is Ask.
++        if decide_tp1(side, tp1, tick.ask, tick.bid,
+                       bool(row.get("partial_close"))):
+             if executor.partial_close_at_tp1(tid, 0.5, row.get("symbol")):
+                 self._partial_alerted.discard(tid)
+-                self.database.update_trade(tid, {"partial_close": True,
+-                                                 "status": "TP1_HIT"})
++                partial_updates = {"partial_close": True,
++                                   "status": "TP1_HIT"}
++                self.database.update_trade(tid, partial_updates)
++                row.update(partial_updates)
+                 lp = executor.last_partial
+-                self._notify(
+-                    f"🧪 DEMO: MT5 applied: TP1 partial closed · vol "
+-                    f"{lp.get('volume')} @ {lp.get('price', tp1):.2f} · "
+-                    f"remaining {lp.get('remaining')} · ticket "
+-                    f"{lp.get('ticket')}")
++                if not lp.get("existing"):
++                    self._notify(
++                        f"🧪 DEMO: MT5 applied: TP1 partial closed · vol "
++                        f"{lp.get('volume')} @ {lp.get('price', tp1):.2f} · "
++                        f"remaining {lp.get('remaining')} · ticket "
++                        f"{lp.get('ticket')}")
++                else:
++                    logger.info("restored TP1 mirror from broker history for %s", tid)
+             elif tid not in self._partial_alerted:
+                 self._partial_alerted.add(tid)
+                 self._notify(
+@@ -462,6 +594,7 @@ class TickManager:
+             if executor.apply_stop(tid, new_stop, float(row.get("tp2") or 0),
+                                    row.get("symbol")):
+                 self.database.update_trade(tid, {"stop_loss": new_stop})
++                row["stop_loss"] = new_stop
+                 self._notify(f"🧪 DEMO: trailing stop moved to {new_stop:.2f} "
+                              f"(confirmed at broker)")
+             # refusal: apply_stop logged the retcode; DB untouched -> retried
+@@ -482,7 +615,7 @@ def main() -> None:  # pragma: no cover - VPS only
+     from utils.single_instance import acquire_single_instance
+ 
+     logging.basicConfig(level=logging.INFO)
+-    if not acquire_single_instance("tick_manager.pid"):
++    if not acquire_single_instance("tick_manager.pid", "run_tick_manager.py"):
+         logger.info("tick manager already running; exiting duplicate instance")
+         return
+     cfg = load_config()
+diff --git a/services/database.py b/services/database.py
+index d6262fa..f57e57c 100644
+--- a/services/database.py
++++ b/services/database.py
+@@ -22,7 +22,9 @@ except Exception:  # pragma: no cover - dependency may be absent in local Python
+     Client = Any  # type: ignore[misc,assignment]
+     create_client = None  # type: ignore[assignment]
+ 
+-from utils.helpers import load_config, load_trades, save_trades
++from utils.helpers import (
++    load_config, load_trades, load_trades_checked, mutate_trades, save_trades,
++)
+ from utils.instruments import price_decimals, price_to_points
+ from utils.sessions import session_label_from_utc, SESSION_ORDER
+ from services import performance_stats
+@@ -170,6 +172,11 @@ class DatabaseService:
+             "current_pnl_points": 0,
+             "sl_moved_to_entry": False,
+             "partial_close": False,
++            # In mt5_demo, analysis persists the execution intent first and the
++            # tick manager sends the rich signal card only AFTER MT5 accepts the
++            # order. Paper mode keeps its historical send-before-save flow.
++            "telegram_signal_sent": bool(decision.get("_telegram_signal_sent", True)),
++            "telegram_signal_sent_at": decision.get("_telegram_signal_sent_at"),
+             "pending_cycles": 0,  # hybrid mode: how many cycles a PENDING order has survived
+             "updates_sent": [],
+             "result": None,
+@@ -196,9 +203,7 @@ class DatabaseService:
+                     raise RuntimeError(f"Failed to save trade in Supabase in production: {exc}") from exc
+                 self.logger.error("Failed to save trade in Supabase, falling back local: %s", exc)
+ 
+-        trades = load_trades(self.local_path)
+-        trades.append(trade_data)
+-        save_trades(trades, self.local_path)
++        mutate_trades(lambda trades: trades.append(trade_data), self.local_path)
+         return trade_id
+ 
+     def save_setup_candidate(self, candidate: Dict[str, Any]) -> str:
+@@ -811,7 +816,10 @@ class DatabaseService:
+                 if self._strict_supabase():
+                     raise RuntimeError(f"Failed to fetch open trades from Supabase in production: {exc}") from exc
+                 self.logger.error("Failed to fetch open trades from Supabase: %s", exc)
+-        return [trade for trade in load_trades(self.local_path) if trade.get("status") in set(self.ACTIVE_STATUSES)]
++        # Execution path uses the strict read: corrupt/contended storage must
++        # fail closed, never masquerade as an empty book and cancel broker orders.
++        return [trade for trade in load_trades_checked(self.local_path)
++                if trade.get("status") in set(self.ACTIVE_STATUSES)]
+ 
+     def save_macro_context(self, context: Dict[str, Any]) -> bool:
+         """Persist latest hourly macro context in Supabase when schema exists.
+@@ -917,18 +925,18 @@ class DatabaseService:
+                     raise RuntimeError(f"Failed to update Supabase trade {trade_id} in production: {exc}") from exc
+                 self.logger.error("Failed to update Supabase trade %s: %s", trade_id, exc)
+ 
+-        trades = load_trades(self.local_path)
+-        for trade in trades:
+-            if str(trade.get("id")) == trade_id:
+-                # Apply updates
+-                trade.update(updates)
+-                # Keep type/side in sync for backward compatibility
+-                if "type" in updates and "side" not in updates:
+-                    trade["side"] = updates.get("type")
+-                if "side" in updates and "type" not in updates:
+-                    trade["type"] = updates.get("side")
+-                break
+-        save_trades(trades, self.local_path)
++        def _update_local(trades: List[Dict[str, Any]]) -> None:
++            for trade in trades:
++                if str(trade.get("id")) == trade_id:
++                    trade.update(updates)
++                    # Keep type/side in sync for backward compatibility.
++                    if "type" in updates and "side" not in updates:
++                        trade["side"] = updates.get("type")
++                    if "side" in updates and "type" not in updates:
++                        trade["type"] = updates.get("side")
++                    break
 +
-+        # 1) breakeven
-+        if decide_be(side, entry, price, risk_points,
-+                     self._trail["early_breakeven_points"], 0.5,
-+                     bool(row.get("sl_moved_to_entry"))):
-+            executor.apply_stop(tid, entry, float(row.get("tp2") or 0),
-+                                row.get("symbol"))
-+            self.database.update_trade(tid, {"sl_moved_to_entry": True,
-+                                             "stop_loss": entry})
-+            self._notify(f"🧪 DEMO: breakeven armed @ {entry:.2f}")
++        mutate_trades(_update_local, self.local_path)
+ 
+ 
+     def cancel_pending_orders(
+@@ -984,20 +992,19 @@ class DatabaseService:
+                     raise RuntimeError(f"Failed to cancel pending orders in production: {exc}") from exc
+                 self.logger.error("Failed to cancel pending orders from Supabase: %s", exc)
+ 
+-        trades = load_trades(self.local_path)
+-        changed = False
+-        for trade in trades:
+-            if _matches(trade):
+-                trade.update({
+-                    "status": "CANCELLED", "result": "CANCELLED",
+-                    "closed_at": now_iso, "close_time": now_iso,
+-                    "reasons": [reason], "last_updated": now_iso,
+-                })
+-                cancelled += 1
+-                changed = True
+-        if changed:
+-            save_trades(trades, self.local_path)
+-        return cancelled
++        def _cancel_local(trades: List[Dict[str, Any]]) -> int:
++            count = 0
++            for trade in trades:
++                if _matches(trade):
++                    trade.update({
++                        "status": "CANCELLED", "result": "CANCELLED",
++                        "closed_at": now_iso, "close_time": now_iso,
++                        "reasons": [reason], "last_updated": now_iso,
++                    })
++                    count += 1
++            return count
 +
-+        # 2) TP1 partial — close ONLY the half (operator directive). Book it
-+        # only when the broker actually executed it. On refusal: keep
-+        # retrying every tick and report the broker's reason once per trade.
-+        if decide_tp1(side, tp1, tick.bid, tick.ask,
-+                      bool(row.get("partial_close"))):
-+            if executor.partial_close_at_tp1(tid, 0.5, row.get("symbol")):
-+                self._partial_alerted.discard(tid)
-+                self.database.update_trade(tid, {"partial_close": True,
-+                                                 "status": "TP1_HIT"})
-+                self._notify(f"🧪 DEMO: TP1 partial booked @ {tp1:.2f}")
-+            elif tid not in self._partial_alerted:
-+                self._partial_alerted.add(tid)
-+                self._notify(
-+                    f"🧪 DEMO: TP1 partial REJECTED for {tid}: "
-+                    f"{getattr(executor, 'last_error', 'unknown')} — "
-+                    f"retrying every tick")
-+
-+        # 3) trailing ratchet
-+        new_stop = decide_trailing(side, entry, stop, extreme,
-+                                   self._trail["distance_points"],
-+                                   self._trail["step_points"], pv)
-+        if new_stop:
-+            executor.apply_stop(tid, new_stop, float(row.get("tp2") or 0),
-+                                row.get("symbol"))
-+            self.database.update_trade(tid, {"stop_loss": new_stop})
-+
-+    def _notify(self, text: str) -> None:  # pragma: no cover
-+        if self.telegram:
-+            try:
-+                self.telegram.send_message(text)
-+            except Exception:  # noqa: BLE001
-+                pass
-+
-+
-+def main() -> None:  # pragma: no cover - VPS only
-+    from services.database import DatabaseService
-+    from services.telegram_bot import TelegramService
-+    from utils.helpers import load_config
-+    from utils.single_instance import acquire_single_instance
-+
-+    logging.basicConfig(level=logging.INFO)
-+    if not acquire_single_instance("tick_manager.pid"):
-+        logger.info("tick manager already running; exiting duplicate instance")
-+        return
-+    cfg = load_config()
-+    if os.environ.get("EXECUTION_MODE") != "mt5_demo":
-+        logger.info("tick manager idle (EXECUTION_MODE != mt5_demo)")
-+        return
-+    TickManager(cfg, TelegramService(cfg), DatabaseService(cfg)).run_forever()
-+
-+
-+if __name__ == "__main__":
-+    main()
++        return mutate_trades(_cancel_local, self.local_path)
+ 
+     def _missing_column_name(self, exc: Exception) -> str | None:
+         """Extract the missing column name from a Supabase/PostgREST error.
 diff --git a/services/mt5_executor.py b/services/mt5_executor.py
-new file mode 100644
-index 0000000..7718bc6
---- /dev/null
+index b752982..88324c9 100644
+--- a/services/mt5_executor.py
 +++ b/services/mt5_executor.py
-@@ -0,0 +1,333 @@
-+"""MT5 demo executor (demo branch, phase 1).
+@@ -91,6 +91,23 @@ class Mt5DemoExecutor:
+     def _sym(self, symbol: str) -> str:
+         return self.symbol_map.get(symbol, symbol.replace("/", ""))
+ 
++    def _demo_safe(self, mt5) -> bool:
++        """Hard-refuse every broker mutation on a REAL account."""
++        if not hasattr(mt5, "account_info"):
++            return True  # lightweight unit-test fakes
++        try:
++            info = mt5.account_info()
++            real = getattr(mt5, "ACCOUNT_TRADE_MODE_REAL", 2)
++            if info is not None and getattr(info, "trade_mode", None) == real:
++                self.last_error = "REAL MT5 account refused by demo executor"
++                self._halt(self.last_error)
++                return False
++        except Exception as exc:  # noqa: BLE001
++            self.last_error = f"account mode check failed: {exc}"
++            logger.error(self.last_error)
++            return False
++        return True
 +
-+Transmits the unified-law levels (utils/trading_rules) to a MetaTrader 5
-+DEMO account. Never decides risk itself. Idempotent per trade via magic
-+number. Hard halt on reconciliation mismatch. All failures are logged and
-+reported; the executor must never crash the cycle.
-+"""
+     # -- halt --------------------------------------------------------------
+     def halted(self) -> bool:
+         return os.path.exists(HALT_FILE)
+@@ -202,13 +219,27 @@ class Mt5DemoExecutor:
+             logger.warning("Demo order refused: daily cap reached")
+             return None
+         magic = magic_for(trade_id)
++        mt5 = _mt5_ready()
++        if not self._demo_safe(mt5):
++            return None
+         existing = self._position_by_magic(magic)
+         if existing:
++            self.last_order = {
++                "ticket": int(existing.ticket), "existing": True,
++                "kind": "POSITION", "volume": float(existing.volume),
++                "price": round(float(existing.price_open), 2),
++            }
+             return int(existing.ticket)
+         existing_order = self._order_by_magic(magic)
+         if existing_order:
++            self.last_order = {
++                "ticket": int(existing_order.ticket), "existing": True,
++                "kind": str(order_kind or ""),
++                "volume": float(getattr(existing_order, "volume_current",
++                                         getattr(existing_order, "volume_initial", self.lot))),
++                "price": round(float(getattr(existing_order, "price_open", entry_price) or entry_price), 2),
++            }
+             return int(existing_order.ticket)
+-        mt5 = _mt5_ready()
+         sym = self._sym(symbol)
+         tick = mt5.symbol_info_tick(sym)
+         if tick is None:
+@@ -245,11 +276,17 @@ class Mt5DemoExecutor:
+         if res is None:
+             return None
+         self._orders_today += 1
++        # DEAL results carry the broker's actual execution price. For pending
++        # orders it normally equals the requested resting price. Persist this
++        # so a market position never keeps Telegram's planned quote merely
++        # because positions_get() needed one more terminal tick to materialize.
++        applied_price = float(getattr(res, "price", 0.0) or request.get("price") or 0.0)
+         self.last_order = {
+             "ticket": int(res.order),
+             "kind": str(order_kind or ""),
+             "volume": self.lot,
+-            "price": round(float(request.get("price") or 0.0), 2),
++            "price": round(applied_price, 2),
++            "existing": False,
+         }
+         return int(res.order)
+ 
+@@ -259,6 +296,8 @@ class Mt5DemoExecutor:
+         if not pos:
+             return False
+         mt5 = _mt5_ready()
++        if not self._demo_safe(mt5):
++            return False
+         request = {
+             "action": mt5.TRADE_ACTION_SLTP,
+             "symbol": self._sym(symbol),
+@@ -279,6 +318,38 @@ class Mt5DemoExecutor:
+         logger.warning("SLTP refused for %s: %s", trade_id, self.last_error)
+         return False
+ 
++    def _prior_tp1_partial(self, trade_id: str) -> Optional[Dict[str, Any]]:
++        """Return a broker-confirmed TP1 slice already booked for this magic.
 +
++        The local book is a mirror, not the authority. If a concurrent JSON
++        write ever loses ``partial_close=True``, broker history still prevents a
++        second half-close (the 2026-08-10 incident closed 0.05 then another
++        0.02 from the same 0.10 position).
++        """
++        mt5 = _mt5_ready()
++        magic = magic_for(trade_id)
++        try:
++            deals = mt5.history_deals_get(0, int(time.time()) + 86400) or ()
++        except Exception as exc:  # noqa: BLE001
++            logger.warning("TP1 history check crashed for %s: %s", trade_id, exc)
++            return None
++        hits = [
++            d for d in deals
++            if getattr(d, "magic", None) == magic
++            and str(getattr(d, "comment", "") or "").startswith("SS-demo-tp1")
++            and getattr(d, "entry", None) == getattr(mt5, "DEAL_ENTRY_OUT", 1)
++        ]
++        if not hits:
++            return None
++        latest = max(hits, key=lambda d: getattr(d, "time", 0))
++        return {
++            "volume": round(sum(float(getattr(d, "volume", 0.0) or 0.0) for d in hits), 8),
++            "price": round(float(getattr(latest, "price", 0.0) or 0.0), 2),
++            "ticket": int(getattr(latest, "position_id",
++                                  getattr(latest, "position", 0)) or 0),
++            "existing": True,
++        }
++
+     def partial_close_at_tp1(self, trade_id: str, fraction: float, symbol: str) -> bool:
+         """Close ONLY the booked fraction at TP1 (operator directive).
+ 
+@@ -288,13 +359,20 @@ class Mt5DemoExecutor:
+         self.last_error — the tick manager retries every tick and reports
+         the refusal to the operator once per trade.
+         """
+-        mt5 = _mt5()
++        mt5 = _mt5_ready()
+         self.last_error = ""
++        if not self._demo_safe(mt5):
++            return False
+         magic = magic_for(trade_id)
+         pos = self._position_by_magic(magic)
+         if not pos:
+             self.last_error = "position not found"
+             return False
++        prior = self._prior_tp1_partial(trade_id)
++        if prior:
++            prior["remaining"] = round(float(pos.volume), 8)
++            self.last_partial = prior
++            return True
+         sym = self._sym(symbol)
+         info = mt5.symbol_info(sym)
+         step = float(getattr(info, "volume_step", 0.01) or 0.01)
+@@ -329,6 +407,7 @@ class Mt5DemoExecutor:
+                 "price": round(float(request["price"]), 2),
+                 "remaining": round(float(pos.volume) - part, 2),
+                 "ticket": int(pos.ticket),
++                "existing": False,
+             }
+             return True
+         logger.warning("TP1 partial refused for %s: %s (will retry)",
+@@ -338,6 +417,8 @@ class Mt5DemoExecutor:
+     def close_position(self, trade_id: str, symbol: str) -> bool:
+         """Full market close of the trade's position (thesis exit handoff)."""
+         mt5 = _mt5_ready()
++        if not self._demo_safe(mt5):
++            return False
+         magic = magic_for(trade_id)
+         pos = self._position_by_magic(magic)
+         if not pos:
+@@ -380,6 +461,8 @@ class Mt5DemoExecutor:
+     def cancel_order(self, ticket: int) -> bool:
+         """Cancel a broker pending order by ticket."""
+         mt5 = _mt5_ready()
++        if not self._demo_safe(mt5):
++            return False
+         try:
+             res = mt5.order_send({
+                 "action": mt5.TRADE_ACTION_REMOVE,
+@@ -420,7 +503,10 @@ class Mt5DemoExecutor:
+                 "profit": float(getattr(d, "profit", 0.0)),
+                 "time": int(getattr(d, "time", 0)),
+                 "volume": float(getattr(d, "volume", 0.0)),
+-                "position": int(getattr(d, "position", 0))}
++                # MetaTrader5's Python namedtuple calls this position_id on
++                # current builds; older fakes/versions used position.
++                "position": int(getattr(d, "position_id",
++                                        getattr(d, "position", 0)) or 0)}
+ 
+     # -- reconciliation ------------------------------------------------------
+     def reconcile(self, open_rows: List[Dict[str, Any]]) -> List[str]:
+diff --git a/tests/test_mt5_execution_correctness.py b/tests/test_mt5_execution_correctness.py
+index 03c63eb..c8bcc77 100644
+--- a/tests/test_mt5_execution_correctness.py
++++ b/tests/test_mt5_execution_correctness.py
+@@ -972,7 +972,8 @@ def test_be_wiring_arms_when_gate_passes(monkeypatch):
+     ex = _StubExecutor()
+     row = _row(entry_price=4327.57, stop_loss=4293.0, initial_stop_loss=4293.0,
+                tp1=4367.0, tp2=4425.0, sl_moved_to_entry=False)
+-    tick = types.SimpleNamespace(bid=4347.0, ask=4347.57)  # +$20 favorable
++    # BUY protection is governed by executable Bid, not Ask/spread.
++    tick = types.SimpleNamespace(bid=4347.57, ask=4347.77)  # +$20 favorable
+     tm._handle_row(row, tick, ex, None)
+     assert any(u[1].get("sl_moved_to_entry") is True
+                and u[1].get("stop_loss") == 4327.57 for u in db.updates)
+diff --git a/tests/test_mt5_telegram_consistency_fixes.py b/tests/test_mt5_telegram_consistency_fixes.py
+new file mode 100644
+index 0000000..6811288
+--- /dev/null
++++ b/tests/test_mt5_telegram_consistency_fixes.py
+@@ -0,0 +1,177 @@
++"""Regression proofs for the live Telegram/MT5 divergence found 2026-08-11."""
 +from __future__ import annotations
 +
 +import json
-+import logging
++import multiprocessing as mp
 +import os
-+import time
-+import zlib
-+from typing import Any, Dict, List, Optional
-+
-+logger = logging.getLogger(__name__)
-+
-+HALT_FILE = ".demo_halt"
-+
-+
-+def _mt5():
-+    import MetaTrader5 as mt5  # noqa: lazy on purpose
-+    return mt5
-+
-+
-+_MT5_READY = {"ok": False}
-+
-+
-+def _mt5_ready():
-+    """Lazy import + initialize ONCE (live incident 2026-08-10: the executor
-+    and tick manager queried the terminal without ever initializing it —
-+    every symbol_info_tick silently returned None and no order was ever
-+    sent)."""
-+    mt5 = _mt5()
-+    if not _MT5_READY["ok"]:
-+        try:
-+            path = os.environ.get("MT5_PATH") or None
-+            if mt5.initialize(path=path) if path else mt5.initialize():
-+                _MT5_READY["ok"] = True
-+            else:
-+                logger.warning("MT5 initialize failed: %s", mt5.last_error())
-+        except Exception as exc:  # noqa: BLE001
-+            logger.warning("MT5 initialize crashed: %s", exc)
-+    return mt5
-+
-+
-+def magic_for(trade_id: str) -> int:
-+    return 1000000 + (zlib.crc32(trade_id.encode()) % 8999999)
-+
-+
-+def plan_partial_close(volume: float, fraction: float, step: float):
-+    """Snap the TP1 booked slice to the broker's volume_step.
-+
-+    Returns (part, remaining). This plan ONLY ever describes the fractional
-+    slice — it never escalates to closing the whole position (operator
-+    directive: close the half, nothing else). Pure + unit-tested.
-+    """
-+    if step <= 0:
-+        step = 0.01
-+    import math
-+    part = math.floor(volume * fraction / step + 1e-9) * step
-+    part = round(part, 8)
-+    return part, round(volume - part, 8)
-+
-+
-+class Mt5DemoExecutor:
-+    def __init__(self, config: Dict[str, Any], telegram=None):
-+        self.config = config or {}
-+        demo = (self.config.get("execution") or {}).get("demo") or {}
-+        self.lot = float(demo.get("lot_size", 0.10))
-+        self.deviation = int(demo.get("deviation_points_mt5", 30))
-+        self.max_per_day = int(demo.get("max_new_orders_per_day", 6))
-+        self.halt_on_mismatch = bool(demo.get("reconcile_halt_on_mismatch", True))
-+        self.symbol_map = demo.get("symbol_map") or {"XAU/USD": "XAUUSD"}
-+        self.telegram = telegram
-+        self._orders_today = 0
-+        self.last_error = ""
-+
-+    # -- lifecycle ---------------------------------------------------------
-+    def alive(self) -> bool:
-+        try:
-+            return _mt5().terminal_info() is not None
-+        except Exception:  # noqa: BLE001
-+            return False
-+
-+    def _sym(self, symbol: str) -> str:
-+        return self.symbol_map.get(symbol, symbol.replace("/", ""))
-+
-+    # -- halt --------------------------------------------------------------
-+    def halted(self) -> bool:
-+        return os.path.exists(HALT_FILE)
-+
-+    def _halt(self, why: str) -> None:
-+        if self.halt_on_mismatch:
-+            try:
-+                with open(HALT_FILE, "w", encoding="utf-8") as fh:
-+                    fh.write(why)
-+            except OSError:
-+                pass
-+        logger.error("DEMO HALT: %s", why)
-+        if self.telegram:
-+            try:
-+                self.telegram.send_error_alert(f"🧪 DEMO HALT: {why}")
-+            except Exception:  # noqa: BLE001
-+                pass
-+
-+    # -- orders ------------------------------------------------------------
-+    def _position_by_magic(self, magic: int):
-+        try:
-+            for pos in _mt5_ready().positions_get() or []:
-+                if pos.magic == magic:
-+                    return pos
-+        except Exception:  # noqa: BLE001
-+            return None
-+        return None
-+
-+    def _order_by_magic(self, magic: int):
-+        """Outstanding PENDING order with this magic (not yet a position)."""
-+        try:
-+            for o in _mt5_ready().orders_get() or []:
-+                if getattr(o, "magic", None) == magic:
-+                    return o
-+        except Exception:  # noqa: BLE001
-+            return None
-+        return None
-+
-+    def ensure_ticket(
-+        self,
-+        trade_id: str,
-+        side: str,
-+        order_kind: str,
-+        entry_price: float,
-+        sl: float,
-+        tp: float,
-+        symbol: str,
-+    ) -> Optional[int]:
-+        """Idempotent open. Returns ticket or None (refused/failed).
-+
-+        Idempotency covers BOTH states of an order's life: an open POSITION
-+        and an outstanding PENDING order. Without the pending check, a
-+        tick-level retry loop would stack duplicate limit orders.
-+        """
-+        self.last_error = ""
-+        if self.halted():
-+            self.last_error = "executor halted (.demo_halt)"
-+            return None
-+        if self._orders_today >= self.max_per_day:
-+            self.last_error = "daily order cap reached"
-+            logger.warning("Demo order refused: daily cap reached")
-+            return None
-+        magic = magic_for(trade_id)
-+        existing = self._position_by_magic(magic)
-+        if existing:
-+            return int(existing.ticket)
-+        existing_order = self._order_by_magic(magic)
-+        if existing_order:
-+            return int(existing_order.ticket)
-+        mt5 = _mt5_ready()
-+        sym = self._sym(symbol)
-+        tick = mt5.symbol_info_tick(sym)
-+        if tick is None:
-+            self.last_error = f"no tick for {sym}"
-+            return None
-+        buy = str(side).upper() == "BUY"
-+        if str(order_kind or "").upper().endswith("MARKET"):
-+            request = {
-+                "action": mt5.TRADE_ACTION_DEAL,
-+                "symbol": sym,
-+                "volume": self.lot,
-+                "type": mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL,
-+                "price": tick.ask if buy else tick.bid,
-+                "sl": float(sl),
-+                "tp": float(tp),
-+                "deviation": self.deviation,
-+                "magic": magic,
-+                "comment": "SS-demo",
-+                "type_filling": mt5.ORDER_FILLING_IOC,
-+            }
-+        else:
-+            request = {
-+                "action": mt5.TRADE_ACTION_PENDING,
-+                "symbol": sym,
-+                "volume": self.lot,
-+                "type": mt5.ORDER_TYPE_BUY_LIMIT if buy else mt5.ORDER_TYPE_SELL_LIMIT,
-+                "price": float(entry_price),
-+                "sl": float(sl),
-+                "tp": float(tp),
-+                "magic": magic,
-+                "comment": "SS-demo",
-+            }
-+        try:
-+            res = mt5.order_send(request)
-+        except Exception as exc:  # noqa: BLE001
-+            self.last_error = f"order_send crashed: {exc}"
-+            logger.error("order_send crashed: %s", exc)
-+            return None
-+        if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
-+            self.last_error = (
-+                f"retcode={getattr(res, 'retcode', '?')} "
-+                f"{getattr(res, 'comment', '')}".strip())
-+            logger.error("order_send refused: %s", getattr(res, "comment", res))
-+            return None
-+        self._orders_today += 1
-+        return int(res.order)
-+
-+    def apply_stop(self, trade_id: str, new_sl: float, tp: float, symbol: str) -> bool:
-+        magic = magic_for(trade_id)
-+        pos = self._position_by_magic(magic)
-+        if not pos:
-+            return False
-+        mt5 = _mt5_ready()
-+        request = {
-+            "action": mt5.TRADE_ACTION_SLTP,
-+            "symbol": self._sym(symbol),
-+            "position": int(pos.ticket),
-+            "sl": float(new_sl),
-+            "tp": float(tp),
-+        }
-+        try:
-+            res = mt5.order_send(request)
-+            return bool(res and res.retcode == mt5.TRADE_RETCODE_DONE)
-+        except Exception as exc:  # noqa: BLE001
-+            logger.error("SLTP modify crashed: %s", exc)
-+            return False
-+
-+    def partial_close_at_tp1(self, trade_id: str, fraction: float, symbol: str) -> bool:
-+        """Close ONLY the booked fraction at TP1 (operator directive).
-+
-+        NEVER full-close + reopen. The volume is snapped to the broker's
-+        volume_step; if the slice is below volume_min it cannot be booked at
-+        all. On any refusal: return False and leave the reason in
-+        self.last_error — the tick manager retries every tick and reports
-+        the refusal to the operator once per trade.
-+        """
-+        mt5 = _mt5()
-+        self.last_error = ""
-+        magic = magic_for(trade_id)
-+        pos = self._position_by_magic(magic)
-+        if not pos:
-+            self.last_error = "position not found"
-+            return False
-+        sym = self._sym(symbol)
-+        info = mt5.symbol_info(sym)
-+        step = float(getattr(info, "volume_step", 0.01) or 0.01)
-+        min_vol = float(getattr(info, "volume_min", 0.01) or 0.01)
-+        part, _remaining = plan_partial_close(float(pos.volume), fraction, step)
-+        if part < min_vol or part <= 0:
-+            self.last_error = (
-+                f"slice {part:.2f} below broker volume_min {min_vol:g} — "
-+                f"cannot book the half")
-+            logger.error("TP1 partial impossible for %s: %s", trade_id,
-+                         self.last_error)
-+            return False
-+        tick = mt5.symbol_info_tick(sym)
-+        close_type = (mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY
-+                      else mt5.ORDER_TYPE_BUY)
-+        request = {
-+            "action": mt5.TRADE_ACTION_DEAL,
-+            "symbol": sym,
-+            "volume": part,
-+            "type": close_type,
-+            "position": int(pos.ticket),
-+            "price": tick.bid if close_type == mt5.ORDER_TYPE_SELL else tick.ask,
-+            "deviation": self.deviation,
-+            "magic": magic,
-+            "comment": "SS-demo-tp1",
-+            "type_filling": mt5.ORDER_FILLING_IOC,
-+        }
-+        try:
-+            res = mt5.order_send(request)
-+            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-+                return True
-+            self.last_error = (
-+                f"retcode={getattr(res, 'retcode', '?')} "
-+                f"{getattr(res, 'comment', '')}".strip())
-+            logger.warning("TP1 partial refused for %s: %s (will retry)",
-+                           trade_id, self.last_error)
-+            return False
-+        except Exception as exc:  # noqa: BLE001
-+            self.last_error = f"order_send crashed: {exc}"
-+            logger.error("partial close crashed: %s", exc)
-+            return False
-+
-+    def last_exit(self, trade_id: str) -> Optional[Dict[str, Any]]:
-+        """The broker's own record of how this trade's position exited.
-+
-+        Returns the newest OUT deal {price, profit, time} for the trade's
-+        magic, or None if no exit deal exists yet. Used so the DB mirrors
-+        the REAL broker exit price + realized P&L instead of the live tick
-+        at the moment we happened to notice the position was gone.
-+        """
-+        mt5 = _mt5()
-+        magic = magic_for(trade_id)
-+        try:
-+            now = int(time.time()) + 86400
-+            deals = mt5.history_deals_get(0, now) or ()
-+        except Exception as exc:  # noqa: BLE001
-+            logger.error("history_deals_get crashed: %s", exc)
-+            return None
-+        outs = [d for d in deals
-+                if getattr(d, "magic", None) == magic
-+                and getattr(d, "entry", None) == getattr(mt5, "DEAL_ENTRY_OUT", 1)]
-+        if not outs:
-+            return None
-+        d = max(outs, key=lambda x: getattr(x, "time", 0))
-+        return {"price": float(getattr(d, "price", 0.0)),
-+                "profit": float(getattr(d, "profit", 0.0)),
-+                "time": int(getattr(d, "time", 0))}
-+
-+    # -- reconciliation ------------------------------------------------------
-+    def reconcile(self, open_rows: List[Dict[str, Any]]) -> List[str]:
-+        mismatches: List[str] = []
-+        for row in open_rows:
-+            ticket = row.get("mt5_ticket")
-+            if not ticket:
-+                continue
-+            pos = self._position_by_magic(magic_for(str(row.get("id"))))
-+            if pos is None:
-+                mismatches.append(f"{row.get('id')}: no MT5 position for ticket {ticket}")
-+                continue
-+            db_sl = float(row.get("stop_loss") or 0)
-+            if db_sl and abs(pos.sl - db_sl) > 0.05:
-+                mismatches.append(
-+                    f"{row.get('id')}: SL drift mt5={pos.sl:.2f} db={db_sl:.2f}")
-+            side_db = str(row.get("type") or row.get("side") or "").upper()
-+            pos_buy = pos.type == _mt5().ORDER_TYPE_BUY
-+            if (side_db == "BUY") != pos_buy:
-+                mismatches.append(f"{row.get('id')}: side mismatch")
-+        if mismatches and self.halt_on_mismatch:
-+            self._halt("; ".join(mismatches))
-+        return mismatches
-diff --git a/tests/test_mt5_execution_correctness.py b/tests/test_mt5_execution_correctness.py
-new file mode 100644
-index 0000000..7160fa8
---- /dev/null
-+++ b/tests/test_mt5_execution_correctness.py
-@@ -0,0 +1,532 @@
-+"""Execution-correctness tests for the MT5 demo layer (lot / partial / exits).
-+
-+Operator directive: lot 0.1, TP1 books HALF, $/point math and XAUUSD symbol
-+must all be verified. These tests are fault-injection: re-introducing the
-+old bugs (unsnap volumes, TP1 booked on failure, SL_HIT-everything exits,
-+risk/10 wiring) makes them fail.
-+"""
 +import sys
 +import types
 +from pathlib import Path
 +
-+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-+
-+from tests import mt5_fake  # noqa: E402
-+
-+from scripts.run_tick_manager import (  # noqa: E402
-+    TickManager, classify_broker_exit)
-+from services.mt5_executor import (  # noqa: E402
-+    Mt5DemoExecutor, magic_for, plan_partial_close)
++from scripts.demo_watchdog import _heartbeat_age
++from scripts.run_tick_manager import TickManager
++from services.mt5_executor import Mt5DemoExecutor, magic_for
++from tests import mt5_fake
++from utils.helpers import mutate_trades
 +
 +
-+# ── plan_partial_close: ONLY ever the snapped fractional slice ─────────────
-+
-+def test_plan_partial_normal_half_of_01():
-+    part, remaining = plan_partial_close(0.10, 0.5, step=0.01)
-+    assert part == 0.05 and remaining == 0.05
++def _append_worker(path: str, prefix: str, count: int) -> None:
++    for i in range(count):
++        mutate_trades(lambda rows, i=i: rows.append({"id": f"{prefix}-{i}"}), path)
 +
 +
-+def test_plan_partial_never_escalates_to_whole():
-+    """Operator directive: close the HALF. Even when the leftover would sit
-+    below a broker minimum, the plan must still describe only the slice —
-+    booking decisions live in the executor, never a silent full close."""
-+    part, remaining = plan_partial_close(0.15, 0.5, step=0.01)
-+    assert part == 0.07 and remaining == 0.08
++def test_local_trade_transactions_do_not_lose_concurrent_writes(tmp_path) -> None:
++    """Analysis + tick manager may append/update from separate processes."""
++    path = tmp_path / "trades.json"
++    path.write_text("[]", encoding="utf-8")
++    workers = [
++        mp.Process(target=_append_worker, args=(str(path), "analysis", 30)),
++        mp.Process(target=_append_worker, args=(str(path), "tick", 30)),
++    ]
++    for worker in workers:
++        worker.start()
++    for worker in workers:
++        worker.join(15)
++        assert worker.exitcode == 0
++    rows = json.loads(path.read_text(encoding="utf-8"))
++    assert len(rows) == 60
++    assert len({row["id"] for row in rows}) == 60
 +
 +
-+def test_plan_partial_snaps_down_to_step():
-+    part, remaining = plan_partial_close(0.21, 0.5, step=0.01)
-+    assert part == 0.10 and remaining == 0.11
++def test_tick_heartbeat_is_always_valid_json(tmp_path, monkeypatch) -> None:
++    monkeypatch.chdir(tmp_path)
++    TickManager._write_heartbeat()
++    payload = json.loads((tmp_path / "tick_heartbeat.json").read_text(encoding="utf-8"))
++    assert payload["ts"].endswith("+00:00")
++    assert not (tmp_path / "tick_heartbeat.json.tmp").exists()
 +
 +
-+# ── classify_broker_exit ───────────────────────────────────────────────────
-+
-+def test_classify_buy_exits():
-+    assert classify_broker_exit("BUY", 4330.0, 4300.0, 4320.0, 4330.0) == "TP2_HIT"
-+    assert classify_broker_exit("BUY", 4293.0, 4300.0, 4293.0, 4330.0) == "SL_HIT"
-+    assert classify_broker_exit("BUY", 4318.0, 4300.0, 4315.0, 4330.0) == "TRAILING_SL_HIT"
-+
-+
-+def test_classify_sell_exits():
-+    assert classify_broker_exit("SELL", 4270.0, 4300.0, 4280.0, 4270.0) == "TP2_HIT"
-+    assert classify_broker_exit("SELL", 4307.0, 4300.0, 4307.0, 4270.0) == "SL_HIT"
-+    assert classify_broker_exit("SELL", 4285.0, 4300.0, 4288.0, 4270.0) == "TRAILING_SL_HIT"
++def test_watchdog_reports_invalid_heartbeat_instead_of_crashing(tmp_path) -> None:
++    path = tmp_path / "empty.json"
++    path.write_text("", encoding="utf-8")
++    age, error = _heartbeat_age(str(path))
++    assert age is None
++    assert error and "JSONDecodeError" in error
 +
 +
-+# ── executor against the fake terminal ─────────────────────────────────────
-+
-+def _executor(monkeypatch, state):
-+    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5_fake.install(state))
-+    return Mt5DemoExecutor({"execution": {"demo": {}}})
-+
-+
-+def test_partial_close_books_exact_half(monkeypatch):
-+    state = mt5_fake.FakeState()
-+    state.positions.append(mt5_fake._Pos(7, magic_for("T1"), 4293.0, 4330.0,
-+                                         volume=0.10))
-+    ex = _executor(monkeypatch, state)
-+    assert ex.partial_close_at_tp1("T1", 0.5, "XAU/USD") is True
-+    tp1_reqs = [r for r in state.requests if r.get("comment") == "SS-demo-tp1"]
-+    assert len(tp1_reqs) == 1 and tp1_reqs[0]["volume"] == 0.05
-+
-+
-+def test_partial_half_below_min_refuses_with_no_order(monkeypatch):
-+    """If the half-slice is below broker volume_min we do NOT book anything —
-+    no partial, and never a full close either. Return False + the reason."""
-+    state = mt5_fake.FakeState()
-+    state.volume_min = 0.10
-+    state.positions.append(mt5_fake._Pos(7, magic_for("T2"), 4293.0, 4330.0,
-+                                         volume=0.10))
-+    ex = _executor(monkeypatch, state)
-+    assert ex.partial_close_at_tp1("T2", 0.5, "XAU/USD") is False
-+    assert state.requests == []               # nothing sent at all
-+    assert "volume_min" in ex.last_error
-+
-+
-+def test_partial_refusal_never_full_closes_and_keeps_reason(monkeypatch):
-+    """Broker refuses the half → exactly ONE request (the refused partial),
-+    no full close, no reopen. Reason is surfaced for the retry/alert loop."""
-+    state = mt5_fake.FakeState()
-+    state.fail_partial = True
-+    state.positions.append(mt5_fake._Pos(7, magic_for("T3"), 4293.0, 4330.0,
-+                                         volume=0.10))
-+    ex = _executor(monkeypatch, state)
-+    assert ex.partial_close_at_tp1("T3", 0.5, "XAU/USD") is False
-+    assert len(state.requests) == 1           # only the refused half
-+    assert state.requests[0]["volume"] == 0.05
-+    assert ex.last_error                       # reason surfaced
-+
-+
-+def test_last_exit_reads_the_broker_deal(monkeypatch):
-+    state = mt5_fake.FakeState()
-+    state.deals.append(mt5_fake._Deal(magic_for("T9"), 4330.0, 300.0, 123))
-+    ex = _executor(monkeypatch, state)
-+    out = ex.last_exit("T9")
-+    assert out == {"price": 4330.0, "profit": 300.0, "time": 123}
-+    assert ex.last_exit("UNKNOWN") is None
-+
-+
-+# ── tick manager wiring ────────────────────────────────────────────────────
-+
-+class _StubDB:
++class _DB:
 +    def __init__(self):
 +        self.updates = []
 +
-+    def update_trade(self, tid, fields):
-+        self.updates.append((tid, dict(fields)))
++    def update_trade(self, tid, updates):
++        self.updates.append((tid, dict(updates)))
 +
 +
-+class _StubExecutor:
-+    def __init__(self, partial_ok=True, position=True, exit_info=None):
-+        self.partial_ok = partial_ok
-+        self.position = position
-+        self.exit_info = exit_info
-+        self.last_error = "" if partial_ok else "retcode=10018 partial denied"
-+        self.partial_calls = 0
++class _Telegram:
++    def __init__(self):
++        self.signals = []
 +
-+    def _position_by_magic(self, magic):
-+        if not self.position:
-+            return None
-+        return types.SimpleNamespace(ticket=1, volume=0.10, type=0,
-+                                     sl=4293.0, tp=4330.0, price_open=4300.0)
-+
-+    def partial_close_at_tp1(self, tid, frac, sym):
-+        self.partial_calls += 1
-+        if not self.partial_ok:
-+            self.last_error = "retcode=10018 partial denied"
-+        return self.partial_ok
-+
-+    def apply_stop(self, *a, **k):
++    def send_signal(self, decision):
++        self.signals.append(decision)
 +        return True
 +
-+    def last_exit(self, tid):
-+        return self.exit_info
 +
-+    def ensure_ticket(self, *a, **k):
-+        return None
++def test_execution_signal_is_sent_once_and_uses_actual_fill() -> None:
++    db = _DB()
++    telegram = _Telegram()
++    tm = TickManager({}, telegram=telegram, database=db)
++    row = {
++        "id": "T-ACTUAL", "telegram_signal_sent": False,
++        "signal_snapshot": {
++            "trade_id": "T-ACTUAL", "decision": "BUY", "current_price": 4300.0,
++            "signal": {"entry": {"price": 4300.0}, "stop_loss": 4260.0,
++                       "tp1": 4332.0, "tp2": 4364.0},
++        },
++    }
++    tm._send_execution_signal(row, actual_entry=4301.25)
++    tm._send_execution_signal(row, actual_entry=4301.25)
++    assert len(telegram.signals) == 1
++    assert telegram.signals[0]["signal"]["entry"]["price"] == 4301.25
++    assert row["telegram_signal_sent"] is True
++    assert db.updates[-1][1]["telegram_signal_sent"] is True
 +
 +
-+def _row(**over):
-+    base = {"id": "T1", "type": "BUY", "status": "OPEN", "symbol": "XAU/USD",
-+            "entry_price": 4300.0, "stop_loss": 4293.0,
-+            "initial_stop_loss": 4293.0, "tp1": 4310.0, "tp2": 4330.0}
-+    base.update(over)
-+    return base
-+
-+
-+def _tm():
-+    return TickManager({})
-+
-+
-+def test_tp1_failure_is_not_booked(monkeypatch):
++def test_cached_row_prevents_second_tp1_partial(monkeypatch) -> None:
 +    monkeypatch.setitem(sys.modules, "MetaTrader5",
 +                        mt5_fake.install(mt5_fake.FakeState()))
-+    db = _StubDB()
-+    tm = _tm()
-+    tm.database = db
-+    ex = _StubExecutor(partial_ok=False)
-+    tick = types.SimpleNamespace(bid=4309.5, ask=4309.7)
-+    tm._handle_row(_row(), tick, ex, None)
-+    assert db.updates == []  # nothing claimed; retry next tick
++
++    class Executor:
++        lot = 0.1
++        last_partial = {"volume": 0.05, "price": 4310.0,
++                        "remaining": 0.05, "ticket": 9, "existing": False}
++
++        def __init__(self):
++            self.calls = 0
++
++        def _sym(self, symbol):
++            return symbol
++
++        def _position_by_magic(self, magic):
++            return types.SimpleNamespace(ticket=9, volume=0.1, type=0,
++                                         sl=4290.0, tp=4340.0, price_open=4300.0)
++
++        def partial_close_at_tp1(self, *args):
++            self.calls += 1
++            return True
++
++        def apply_stop(self, *args):
++            return False
++
++    row = {
++        "id": "T1", "type": "BUY", "status": "OPEN", "symbol": "XAU/USD",
++        "entry_price": 4300.0, "stop_loss": 4290.0, "initial_stop_loss": 4290.0,
++        "tp1": 4310.0, "tp2": 4340.0, "partial_close": False,
++        "mt5_ticket": 9,
++    }
++    db = _DB()
++    tm = TickManager({}, database=db)
++    tm._notify = lambda text: None
++    ex = Executor()
++    tick = types.SimpleNamespace(bid=4310.1, ask=4310.3)
++    tm._handle_row(row, tick, ex, None)
++    tm._handle_row(row, tick, ex, None)
++    assert ex.calls == 1
++    assert row["partial_close"] is True
 +
 +
-+def test_tp1_success_is_booked(monkeypatch):
-+    monkeypatch.setitem(sys.modules, "MetaTrader5",
-+                        mt5_fake.install(mt5_fake.FakeState()))
-+    db = _StubDB()
-+    tm = _tm()
-+    tm.database = db
-+    ex = _StubExecutor(partial_ok=True)
-+    tick = types.SimpleNamespace(bid=4309.5, ask=4309.7)
-+    tm._handle_row(_row(), tick, ex, None)
-+    assert any(u[1].get("partial_close") is True for u in db.updates)
-+    assert any(u[1].get("status") == "TP1_HIT" for u in db.updates)
-+
-+
-+def test_tp1_refusal_alerts_once_and_retries_every_tick(monkeypatch):
-+    """Directive: on refusal do NOT close the whole position — retry the half
-+    every tick and tell the operator WHY, once per trade (no spam)."""
-+    monkeypatch.setitem(sys.modules, "MetaTrader5",
-+                        mt5_fake.install(mt5_fake.FakeState()))
-+    db = _StubDB()
-+    tm = _tm()
-+    tm.database = db
-+    msgs = []
-+    tm._notify = msgs.append
-+    ex = _StubExecutor(partial_ok=False)
-+    tick = types.SimpleNamespace(bid=4309.5, ask=4309.7)
-+    row = _row()
-+    tm._handle_row(row, tick, ex, None)   # tick 1: refused -> alert
-+    tm._handle_row(row, tick, ex, None)   # tick 2: refused -> silent retry
-+    tm._handle_row(row, tick, ex, None)   # tick 3: refused -> silent retry
-+    refusals = [m for m in msgs if "REJECTED" in m]
-+    assert len(refusals) == 1
-+    assert "retcode=10018" in refusals[0]       # the WHY is reported
-+    assert ex.partial_calls == 3                # retried every tick
-+    assert db.updates == []                     # never booked, never closed
-+
-+
-+def test_tp1_refusal_then_success_books_and_clears(monkeypatch):
-+    monkeypatch.setitem(sys.modules, "MetaTrader5",
-+                        mt5_fake.install(mt5_fake.FakeState()))
-+    db = _StubDB()
-+    tm = _tm()
-+    tm.database = db
-+    msgs = []
-+    tm._notify = msgs.append
-+    ex = _StubExecutor(partial_ok=False)
-+    tick = types.SimpleNamespace(bid=4309.5, ask=4309.7)
-+    row = _row()
-+    tm._handle_row(row, tick, ex, None)         # refused -> alert
-+    ex.partial_ok = True
-+    tm._handle_row(row, tick, ex, None)         # retry succeeds -> booked
-+    assert any(u[1].get("partial_close") is True for u in db.updates)
-+    assert len([m for m in msgs if "REJECTED" in m]) == 1
-+
-+
-+# ── order placement: signal → MetaTrader (the VPS-only path) ──────────────
-+
-+def test_ensure_ticket_idempotent_for_outstanding_pending(monkeypatch):
-+    """A pending order that has NOT filled must not be sent twice."""
++def test_broker_history_blocks_a_second_tp1_slice(tmp_path, monkeypatch) -> None:
++    monkeypatch.chdir(tmp_path)
 +    state = mt5_fake.FakeState()
-+    state.pending_mode = True
-+    ex = _executor(monkeypatch, state)
-+    t1 = ex.ensure_ticket("T1", "BUY", "BUY_LIMIT", 4290.0, 4280.0, 4340.0,
-+                          "XAU/USD")
-+    t2 = ex.ensure_ticket("T1", "BUY", "BUY_LIMIT", 4290.0, 4280.0, 4340.0,
-+                          "XAU/USD")
-+    assert t1 and t1 == t2
-+    assert len(state.orders) == 1            # ONE pending, not two
-+
-+
-+def test_tick_manager_places_pending_once_and_books_ticket(monkeypatch):
-+    state = mt5_fake.FakeState()
-+    state.pending_mode = True
++    tid = "T-HISTORY"
++    magic = magic_for(tid)
++    state.positions = [mt5_fake._Pos(77, magic, 4290.0, 4340.0,
++                                    volume=0.05, price_open=4300.0)]
++    state.deals = [types.SimpleNamespace(
++        magic=magic, comment="SS-demo-tp1", entry=mt5_fake.DEAL_ENTRY_OUT,
++        volume=0.05, price=4310.0, time=10, position_id=77,
++    )]
 +    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5_fake.install(state))
-+    db = _StubDB()
-+    tm = _tm()
-+    tm.database = db
 +    ex = Mt5DemoExecutor({"execution": {"demo": {}}})
-+    row = _row(status="PENDING", order_type="BUY_LIMIT", entry_price=4290.0,
-+               tp1=4310.0, tp2=4340.0)
-+    tick = types.SimpleNamespace(bid=4300.0, ask=4300.2)
-+    tm._handle_row(row, tick, ex, None)
-+    tm._handle_row(row, tick, ex, None)      # retry tick — must NOT duplicate
-+    assert len(state.orders) == 1
-+    assert any(u[1].get("mt5_ticket") for u in db.updates)
++    assert ex.partial_close_at_tp1(tid, 0.5, "XAU/USD") is True
++    assert ex.last_partial["existing"] is True
++    assert state.requests == []  # no second broker DEAL
 +
 +
-+def test_tick_manager_opens_market_for_new_signal(monkeypatch):
-+    """OPEN row without ticket and without position → market order NOW,
-+    ticket + actual fill price booked to the DB."""
++def test_real_account_is_hard_refused(tmp_path, monkeypatch) -> None:
++    monkeypatch.chdir(tmp_path)
 +    state = mt5_fake.FakeState()
-+    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5_fake.install(state))
-+    db = _StubDB()
-+    tm = _tm()
-+    tm.database = db
++    mt5 = mt5_fake.install(state)
++    mt5.ACCOUNT_TRADE_MODE_REAL = 2
++    mt5.account_info = lambda: types.SimpleNamespace(trade_mode=2)
++    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5)
 +    ex = Mt5DemoExecutor({"execution": {"demo": {}}})
-+    row = _row(status="OPEN")                # no mt5_ticket, no position
-+    tick = types.SimpleNamespace(bid=4300.0, ask=4300.2)
-+    tm._handle_row(row, tick, ex, None)
-+    assert len(state.positions) == 1
-+    assert state.positions[0].volume == 0.10          # the configured lot
-+    ticket_updates = [u for u in db.updates if u[1].get("mt5_ticket")]
-+    assert ticket_updates
-+    entry_updates = [u for u in db.updates if u[1].get("entry_price")]
-+    assert entry_updates and entry_updates[-1][1]["entry_price"] == 4300.2
++    ticket = ex.ensure_ticket("T-REAL", "BUY", "BUY_MARKET",
++                              4300.0, 4260.0, 4380.0, "XAU/USD")
++    assert ticket is None
++    assert "REAL" in ex.last_error
++    assert state.requests == []
++    assert (tmp_path / ".demo_halt").exists()
 +
 +
-+def test_pending_fill_books_actual_fill_price(monkeypatch):
-+    state = mt5_fake.FakeState()
-+    magic = magic_for("T1")
-+    state.positions.append(mt5_fake._Pos(55, magic, 4280.0, 4340.0,
-+                                         volume=0.10))
-+    state.positions[-1].price_open = 4291.11          # slippage vs plan
-+    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5_fake.install(state))
-+    db = _StubDB()
-+    tm = _tm()
-+    tm.database = db
-+    ex = Mt5DemoExecutor({"execution": {"demo": {}}})
-+    row = _row(status="PENDING", order_type="BUY_LIMIT", entry_price=4290.0)
-+    tick = types.SimpleNamespace(bid=4300.0, ask=4300.2)
-+    tm._handle_row(row, tick, ex, None)
-+    open_upd = [u for u in db.updates if u[1].get("status") == "OPEN"]
-+    assert open_upd
-+    assert open_upd[-1][1]["entry_price"] == 4291.11  # actual fill, not plan
++def test_runtime_pid_and_heartbeat_files_are_ignored_and_not_tracked() -> None:
++    root = Path(__file__).resolve().parents[1]
++    ignore = (root / ".gitignore").read_text(encoding="utf-8")
++    assert "*.pid" in ignore
++    assert "tick_heartbeat.json" in ignore
++    # Runtime files may legitimately exist while a VPS/test loop is alive; the
++    # invariant is that future snapshots ignore them rather than redeploy them.
+diff --git a/tick_heartbeat.json b/tick_heartbeat.json
+deleted file mode 100644
+index e69de29..0000000
+diff --git a/tick_manager.pid b/tick_manager.pid
+deleted file mode 100644
+index 0856adc..0000000
+--- a/tick_manager.pid
++++ /dev/null
+@@ -1 +0,0 @@
+-4700
+\ No newline at end of file
+diff --git a/utils/helpers.py b/utils/helpers.py
+index c7bdfa3..7c30ffd 100644
+--- a/utils/helpers.py
++++ b/utils/helpers.py
+@@ -5,9 +5,12 @@ from __future__ import annotations
+ import json
+ import logging
+ import os
++import tempfile
++import time
++from contextlib import contextmanager
+ from datetime import datetime, timezone
+ from pathlib import Path
+-from typing import Any, Dict, List
++from typing import Any, Callable, Dict, List, TypeVar
+ 
+ from utils.instruments import point_size, price_decimals
+ 
+@@ -170,32 +173,149 @@ def is_market_open(dt: datetime | None = None) -> bool:
+     return True
+ 
+ 
++_T = TypeVar("_T")
 +
 +
-+def test_broker_exit_uses_deal_price_and_labels_tp2(monkeypatch):
-+    monkeypatch.setitem(sys.modules, "MetaTrader5",
-+                        mt5_fake.install(mt5_fake.FakeState()))
-+    db = _StubDB()
-+    tm = _tm()
-+    tm.database = db
-+    ex = _StubExecutor(position=False,
-+                       exit_info={"price": 4330.0, "profit": 300.0, "time": 1})
-+    tick = types.SimpleNamespace(bid=4329.0, ask=4329.2)
-+    tm._handle_row(_row(mt5_ticket=99), tick, ex, None)  # ticketed → exit path
-+    assert db.updates[-1][1]["status"] == "TP2_HIT"
-+    assert db.updates[-1][1]["close_price"] == 4330.0   # deal price, not tick
-+    assert db.updates[-1][1]["pnl_points"] == 300.0     # 0.1 lot: $30 → 300 pts
++@contextmanager
++def _interprocess_file_lock(path: str | Path, timeout: float = 15.0):
++    """Serialize read/modify/write transactions across VPS processes.
 +
-+
-+def test_be_wiring_respects_min_rr_gate(monkeypatch):
-+    """$34.57 risk = 345.7 pts; 160 pts favorable must NOT arm BE
-+    (0.5 × 345.7 = 172.85 needed). The old risk/10 wiring armed it here.
-+
-+    NOTE: the unified 150/40 trailing may still ratchet the stop (that is
-+    rule-correct and separate from the discrete BE move); we assert only
-+    that no sl_moved_to_entry booking happened."""
-+    monkeypatch.setitem(sys.modules, "MetaTrader5",
-+                        mt5_fake.install(mt5_fake.FakeState()))
-+    db = _StubDB()
-+    tm = _tm()
-+    tm.database = db
-+    ex = _StubExecutor()
-+    row = _row(entry_price=4327.57, stop_loss=4293.0, initial_stop_loss=4293.0,
-+               tp1=4367.0, tp2=4425.0, sl_moved_to_entry=False)
-+    tick = types.SimpleNamespace(bid=4343.0, ask=4343.57)  # +$16 favorable
-+    tm._handle_row(row, tick, ex, None)
-+    assert not any(u[1].get("sl_moved_to_entry") for u in db.updates)
-+    assert not any(u[1].get("stop_loss") == 4327.57 for u in db.updates)
-+
-+
-+# ── broker symbol suffix (JustMarkets: XAUUSD.s) ───────────────────────────
-+
-+def test_shipped_config_maps_to_broker_suffix():
-+    """config.json is the single source; reverting to plain XAUUSD makes the
-+    whole execution layer go blind on JustMarkets."""
-+    import json
-+    from pathlib import Path as _P
-+    cfg = json.loads((_P(__file__).resolve().parents[1] / "config.json")
-+                     .read_text(encoding="utf-8"))
-+    smap = cfg["execution"]["demo"]["symbol_map"]
-+    assert smap["XAU/USD"] == "XAUUSD.s"
-+
-+
-+def test_executor_sym_uses_map_and_fallback():
-+    ex = Mt5DemoExecutor({"execution": {"demo": {
-+        "symbol_map": {"XAU/USD": "XAUUSD.s"}}}})
-+    assert ex._sym("XAU/USD") == "XAUUSD.s"
-+    assert ex._sym("XAU/USD2") == "XAUUSD2"  # unmapped: slash-strip fallback
-+
-+
-+def test_tick_loop_symbol_lookup_uses_the_map(monkeypatch):
-+    """The loop must ask MT5 for the MAPPED symbol; looking up the raw
-+    XAU/USD-stripped name returns None on suffix brokers = loop sees nothing."""
-+    state = mt5_fake.FakeState()
-+    fake = mt5_fake.install(state)
-+    seen = []
-+    fake.symbol_info_tick = lambda s: (seen.append(s), None)[1]
-+    monkeypatch.setitem(sys.modules, "MetaTrader5", fake)
-+    import scripts.run_tick_manager as rtm
-+    tm = rtm.TickManager({"execution": {"demo": {
-+        "symbol_map": {"XAU/USD": "XAUUSD.s"}}}})
-+    tm.database = _StubDB()
-+    rows = [_row()]
-+    tm._magic_rows = lambda: rows
-+
-+    import time as _time
-+    calls = {"n": 0}
-+    orig_sleep = _time.sleep
-+
-+    def _stop_after_first(*a, **k):
-+        calls["n"] += 1
-+        if calls["n"] >= 1:
-+            raise KeyboardInterrupt
-+        orig_sleep(0)
-+
-+    monkeypatch.setattr(rtm.time, "sleep", _stop_after_first)
++    Analysis and the tick manager are separate Windows processes.  A normal
++    ``threading.Lock`` therefore cannot protect ``storage/trades.json``.  This
++    lock uses one byte in a sibling ``.lock`` file (msvcrt on Windows, flock on
++    POSIX) and is intentionally kept outside the JSON file, which is atomically
++    replaced after every successful mutation.
++    """
++    target = Path(path)
++    target.parent.mkdir(parents=True, exist_ok=True)
++    lock_path = Path(f"{target}.lock")
++    fh = lock_path.open("a+b")
++    acquired = False
++    deadline = time.monotonic() + max(float(timeout), 0.1)
 +    try:
-+        tm.run_forever()
-+    except KeyboardInterrupt:
-+        pass
-+    assert seen and seen[0] == "XAUUSD.s"
++        fh.seek(0, os.SEEK_END)
++        if fh.tell() == 0:
++            fh.write(b"\0")
++            fh.flush()
++        while not acquired:
++            try:
++                fh.seek(0)
++                if os.name == "nt":
++                    import msvcrt
++                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
++                else:
++                    import fcntl
++                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
++                acquired = True
++            except (OSError, BlockingIOError):
++                if time.monotonic() >= deadline:
++                    raise TimeoutError(f"Timed out waiting for local storage lock: {lock_path}")
++                time.sleep(0.025)
++        yield
++    finally:
++        if acquired:
++            try:
++                fh.seek(0)
++                if os.name == "nt":
++                    import msvcrt
++                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
++                else:
++                    import fcntl
++                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
++            except OSError:
++                pass
++        fh.close()
 +
 +
-+# ── market_data → mt5_feed keyword contract ────────────────────────────────
-+
-+def test_market_data_passes_valid_kwargs_to_mt5_feed(monkeypatch):
-+    """Regression (live incident 2026-08-10): market_data called
-+    get_candles(outputsize=...) while the feed's parameter is `count` —
-+    every VPS analysis cycle died with TypeError and the production guard
-+    stopped it. The REAL feed function must accept exactly what
-+    market_data passes; any future rename makes this test explode."""
-+    state = mt5_fake.FakeState()
-+    state.rates = [
-+        {"time": 1_700_000_000 + i * 300, "open": 4300.0, "high": 4301.0,
-+         "low": 4299.0, "close": 4300.5}
-+        for i in range(220)
-+    ]
-+    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5_fake.install(state))
-+    monkeypatch.setenv("DATA_SOURCE_PRIMARY", "mt5")
-+    from services.market_data import MarketDataService
-+    svc = MarketDataService({
-+        "symbol": "XAU/USD",
-+        "data_source": {"api_keys": {}},
-+        "execution": {"demo": {"symbol_map": {"XAU/USD": "XAUUSD.s"}}},
-+    })
-+    payload = svc.get_ohlcv("5m", outputsize=100)
-+    assert payload is not None
-+    assert payload["source"] == "mt5"
-+    assert len(payload["data"]) == 220
++def _load_json_list_strict(path: Path) -> List[Dict[str, Any]]:
++    if not path.exists():
++        return []
++    with path.open("r", encoding="utf-8") as file:
++        data = json.load(file)
++    if not isinstance(data, list):
++        raise ValueError(f"Local storage is not a JSON list: {path}")
++    return data
 +
 +
-+def test_mt5_fresh_candles_support_signal_generation(monkeypatch):
-+    """Live incident 2026-08-10: enrich overwrote the mt5 feed's integrity
-+    with an UNKNOWN default and the analysis refused its own broker data.
-+    Fresh broker candles must pass the signal gate."""
-+    import time as _t
-+    from services import mt5_feed as _feed
-+    _feed._offset_cache.clear()
-+    state = mt5_fake.FakeState()
-+    state.server_time = int(_t.time())  # offset ~0 so candle times stay real
-+    base = int(_t.time())
-+    state.rates = [
-+        {"time": base - (219 - i) * 300, "open": 4300.0, "high": 4301.0,
-+         "low": 4299.0, "close": 4300.5}
-+        for i in range(220)
-+    ]
-+    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5_fake.install(state))
-+    monkeypatch.setenv("DATA_SOURCE_PRIMARY", "mt5")
-+    from services.market_data import MarketDataService
-+    svc = MarketDataService({"symbol": "XAU/USD", "data_source": {"api_keys": {}}})
-+    payload = svc.get_ohlcv("5m", outputsize=220)
-+    integ = payload["source_integrity"]
-+    assert integ["source"] == "mt5"
-+    assert integ["reliability_grade"] == "HIGH"
-+    assert integ["supports_signal_generation"] is True
-+    assert payload["supports_signal_generation"] is True
++def _atomic_write_json_list(path: Path, rows: List[Dict[str, Any]]) -> None:
++    """Write complete JSON then atomically swap it into place.
++
++    Readers see either the old complete book or the new complete book; they can
++    never observe the zero-byte/half-written window produced by open(..., 'w').
++    """
++    path.parent.mkdir(parents=True, exist_ok=True)
++    tmp_name = ""
++    try:
++        with tempfile.NamedTemporaryFile(
++            mode="w", encoding="utf-8", dir=path.parent,
++            prefix=f".{path.name}.", suffix=".tmp", delete=False,
++        ) as file:
++            tmp_name = file.name
++            json.dump(rows, file, ensure_ascii=False, indent=2)
++            file.flush()
++            os.fsync(file.fileno())
++        os.replace(tmp_name, path)
++    finally:
++        if tmp_name and os.path.exists(tmp_name):
++            try:
++                os.unlink(tmp_name)
++            except OSError:
++                pass
 +
 +
-+def test_mt5_stale_candles_still_refused(monkeypatch):
-+    """Staleness protection must survive the fix: old candles stay MEDIUM
-+    and cannot generate signals."""
-+    import time as _t
-+    from services import mt5_feed as _feed
-+    _feed._offset_cache.clear()
-+    state = mt5_fake.FakeState()
-+    state.server_time = int(_t.time())  # offset ~0 so old candles stay old
-+    state.rates = [
-+        {"time": 1_700_000_000 + i * 300, "open": 4300.0, "high": 4301.0,
-+         "low": 4299.0, "close": 4300.5}
-+        for i in range(220)
-+    ]
-+    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5_fake.install(state))
-+    monkeypatch.setenv("DATA_SOURCE_PRIMARY", "mt5")
-+    from services.market_data import MarketDataService
-+    svc = MarketDataService({"symbol": "XAU/USD", "data_source": {"api_keys": {}}})
-+    payload = svc.get_ohlcv("5m", outputsize=220)
-+    assert payload["source_integrity"]["reliability_grade"] == "MEDIUM"
-+    assert payload["supports_signal_generation"] is False
-+    _feed._offset_cache.clear()
+ def load_trades(path: str | Path | None = None) -> List[Dict[str, Any]]:
+-    """Load local trades fallback JSON."""
++    """Load one complete local JSON snapshot.
++
++    Writes are atomic, so a JSON decode failure now means genuine corruption,
++    not a harmless in-progress write.  Keep the legacy safe return for report
++    readers; transactional writers use ``mutate_trades`` and fail closed.
++    """
+     trades_path = Path(path) if path else DEFAULT_TRADES_PATH
+-    if not trades_path.exists():
+-        return []
+     try:
+-        with trades_path.open("r", encoding="utf-8") as file:
+-            data = json.load(file)
+-        return data if isinstance(data, list) else []
+-    except json.JSONDecodeError:
++        with _interprocess_file_lock(trades_path):
++            return _load_json_list_strict(trades_path)
++    except TimeoutError:
++        # Never turn lock contention into an authoritative empty book: the tick
++        # reconciler would interpret that as "cancel every broker pending".
++        raise
++    except (json.JSONDecodeError, OSError, ValueError) as exc:
++        logging.getLogger(__name__).error("Invalid local JSON %s: %s", trades_path, exc)
+         return []
+ 
+ 
++def load_trades_checked(path: str | Path | None = None) -> List[Dict[str, Any]]:
++    """Strict locked read for execution paths; corruption fails closed."""
++    trades_path = Path(path) if path else DEFAULT_TRADES_PATH
++    with _interprocess_file_lock(trades_path):
++        return _load_json_list_strict(trades_path)
 +
 +
-+def test_mt5_fetches_timeframes_natively_not_resampled(monkeypatch):
-+    """Live divergence incident 2026-08-10: with MT5 primary the analysis
-+    must fetch each timeframe natively (deep 4H like paper), NOT resample
-+    from a shallow 5m base."""
-+    import time as _t
-+    from services import mt5_feed as _feed
-+    _feed._offset_cache.clear()
-+    state = mt5_fake.FakeState()
-+    state.server_time = int(_t.time())
-+    base = int(_t.time())
-+    state.rates = [
-+        {"time": base - (219 - i) * 300, "open": 4300.0, "high": 4301.0,
-+         "low": 4299.0, "close": 4300.5}
-+        for i in range(220)
-+    ]
-+    seen = []
-+    real = _feed.get_candles
-+    def spy(*a, **k):
-+        seen.append(k.get("timeframe") or (a[1] if len(a) > 1 else None))
-+        return real(*a, **k)
-+    monkeypatch.setattr(_feed, "get_candles", spy)
-+    fake = mt5_fake.install(state)
-+    fake.get_candles = spy
-+    monkeypatch.setitem(sys.modules, "MetaTrader5", fake)
-+    monkeypatch.setenv("DATA_SOURCE_PRIMARY", "mt5")
-+    from services.market_data import MarketDataService
-+    cfg = {"symbol": "XAU/USD", "data_source": {"api_keys": {},
-+           "primary": "mt5", "resample_timeframes_from_base": True,
-+           "base_timeframe": "5m"},
-+           "timeframes": ["5m", "15m", "1H", "4H"],
-+           "primary_timeframe": "15m"}
-+    svc = MarketDataService(cfg)
-+    data = svc.get_gold_data()
-+    assert data is not None
-+    assert set(seen) == {"5m", "15m", "1H", "4H"}  # native, no base-only resample
-+    _feed._offset_cache.clear()
+ def save_trades(trades: List[Dict[str, Any]], path: str | Path | None = None) -> None:
+-    """Persist local trades fallback JSON."""
++    """Persist a complete list under an inter-process lock + atomic replace."""
++    trades_path = Path(path) if path else DEFAULT_TRADES_PATH
++    with _interprocess_file_lock(trades_path):
++        _atomic_write_json_list(trades_path, trades)
 +
 +
-+def test_ensure_ticket_auto_initializes_terminal(monkeypatch):
-+    """Live incident 2026-08-10: the executor queried the terminal without
-+    ever calling initialize() -> 'no tick for XAUUSD.s' -> no order was ever
-+    sent. ensure_ticket must self-initialize."""
-+    from services import mt5_executor as ex_mod
-+    ex_mod._MT5_READY["ok"] = False
-+    state = mt5_fake.FakeState()
-+    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5_fake.install(state))
-+    ex = ex_mod.Mt5DemoExecutor({"execution": {"demo": {}}})
-+    t = ex.ensure_ticket("T-AUTO", "BUY", "BUY_MARKET", 4350.0, 4320.0,
-+                         4420.0, "XAU/USD")
-+    assert t is not None
-+    assert ex_mod._MT5_READY["ok"] is True
-+    ex_mod._MT5_READY["ok"] = False
++def mutate_trades(
++    mutator: Callable[[List[Dict[str, Any]]], _T],
++    path: str | Path | None = None,
++) -> _T:
++    """Run an indivisible local JSON read/modify/write transaction.
++
++    A corrupt source fails closed and is never replaced by an empty list.
++    """
+     trades_path = Path(path) if path else DEFAULT_TRADES_PATH
+-    trades_path.parent.mkdir(parents=True, exist_ok=True)
+-    with trades_path.open("w", encoding="utf-8") as file:
+-        json.dump(trades, file, ensure_ascii=False, indent=2)
++    with _interprocess_file_lock(trades_path):
++        rows = _load_json_list_strict(trades_path)
++        result = mutator(rows)
++        _atomic_write_json_list(trades_path, rows)
++        return result
+ 
+ 
+ def save_trade(trade: Dict[str, Any], path: str | Path | None = None) -> None:
+-    """Append a trade to local fallback storage."""
+-    trades = load_trades(path)
+-    trades.append(trade)
+-    save_trades(trades, path)
++    """Append a trade without losing a concurrent tick-manager update."""
++    mutate_trades(lambda trades: trades.append(trade), path)
+ 
+ 
+ def get_today_trades(path: str | Path | None = None) -> List[Dict[str, Any]]:
+diff --git a/utils/single_instance.py b/utils/single_instance.py
+index c5854b4..7adf054 100644
+--- a/utils/single_instance.py
++++ b/utils/single_instance.py
+@@ -38,18 +38,48 @@ def pid_alive(pid: int) -> bool:
+     return True
+ 
+ 
+-def acquire_single_instance(pidfile: str) -> bool:
++def pid_matches_command(pid: int, marker: str) -> bool:
++    """True only when PID's command line contains the expected script marker.
++
++    Runtime pidfiles were accidentally uploaded with the VPS snapshot. Windows
++    may later reuse that number for an unrelated process; PID existence alone
++    would then permanently suppress the real tick manager.
++    """
++    if not marker:
++        return True
++    try:
++        if os.name == "nt":
++            cmd = (
++                f"$p=Get-CimInstance Win32_Process -Filter 'ProcessId={int(pid)}';"
++                f"if($p){{$p.CommandLine}}"
++            )
++            out = subprocess.run(
++                ["powershell", "-NoProfile", "-Command", cmd],
++                capture_output=True, text=True, timeout=15,
++            ).stdout or ""
++        else:
++            with open(f"/proc/{int(pid)}/cmdline", "rb") as fh:
++                out = fh.read().replace(b"\0", b" ").decode(errors="replace")
++        return str(marker).lower() in out.lower()
++    except Exception:
++        # If process identity cannot be inspected, be conservative and keep the
++        # live owner rather than risk two executors.
++        return True
 +
 +
-+def test_be_wiring_arms_when_gate_passes(monkeypatch):
-+    """Same wide stop but +$20 favorable (200 pts ≥ 172.85) → BE arms at entry."""
-+    monkeypatch.setitem(sys.modules, "MetaTrader5",
-+                        mt5_fake.install(mt5_fake.FakeState()))
-+    db = _StubDB()
-+    tm = _tm()
-+    tm.database = db
-+    ex = _StubExecutor()
-+    row = _row(entry_price=4327.57, stop_loss=4293.0, initial_stop_loss=4293.0,
-+               tp1=4367.0, tp2=4425.0, sl_moved_to_entry=False)
-+    tick = types.SimpleNamespace(bid=4347.0, ask=4347.57)  # +$20 favorable
-+    tm._handle_row(row, tick, ex, None)
-+    assert any(u[1].get("sl_moved_to_entry") is True
-+               and u[1].get("stop_loss") == 4327.57 for u in db.updates)
++def acquire_single_instance(pidfile: str, process_marker: str | None = None) -> bool:
+     """Claim `pidfile` for THIS process.
+ 
+     Returns True when this process may run (no live owner, or the pidfile is
+-    stale/corrupt — we take over). Returns False when another LIVE instance
+-    already owns the loop.
++    stale/corrupt/reused by a different command). Returns False only when
++    another LIVE instance with the expected command owns the loop.
+     """
+     try:
+         if os.path.exists(pidfile):
+             with open(pidfile, "r", encoding="utf-8") as fh:
+                 old = int((fh.read() or "0").strip() or "0")
+-            if old and old != os.getpid() and pid_alive(old):
++            if (old and old != os.getpid() and pid_alive(old)
++                    and pid_matches_command(old, process_marker or "")):
+                 return False
+     except Exception:
+         pass  # unreadable/corrupt pidfile -> take over
