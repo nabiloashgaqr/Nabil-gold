@@ -47,16 +47,21 @@ def setup_logging(level: int = logging.INFO) -> None:
 
 
 def is_weekend_hebron(now=None) -> bool:
-    """Saturday/Sunday in Asia/Hebron (operator directive 2026-08-09:
-    no analysis, no trade updates on weekends)."""
+    """Weekend gate (operator directives 2026-08-09/10).
+
+    Saturday: fully closed. Sunday: closed UNTIL the weekly market open
+    (~21:00 UTC broker open), open afterwards — the operator wants the
+    Sunday-night open captured while weekend daytime stays silent.
+    VPS clock runs UTC."""
     from datetime import datetime
     if now is None:
-        try:
-            from zoneinfo import ZoneInfo
-            now = datetime.now(ZoneInfo("Asia/Hebron"))
-        except Exception:
-            now = datetime.utcnow()
-    return now.weekday() >= 5  # 5=Sat, 6=Sun
+        now = datetime.utcnow()
+    wd = now.weekday()  # 5=Sat, 6=Sun
+    if wd == 5:
+        return True
+    if wd == 6:
+        return now.hour < 21
+    return False
 
 
 def load_config(path: str | Path | None = None) -> Dict[str, Any]:

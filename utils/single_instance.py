@@ -21,10 +21,10 @@ def pid_alive(pid: int) -> bool:
     if os.name == "nt":
         try:
             out = subprocess.run(
-                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                ["tasklist", "/FI", f"PID eq {pid}", "/NH", "/FO", "CSV"],
                 capture_output=True, text=True, timeout=15,
             ).stdout or ""
-            return str(pid) in out
+            return f'"{pid}",' in out  # exact PID column, no substring ghosts
         except Exception:
             return False
     try:
