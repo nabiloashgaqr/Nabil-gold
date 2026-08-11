@@ -26,10 +26,10 @@ def test_be_sell_mirror():
 
 
 def test_tp1_touch_per_side():
-    assert decide_tp1("BUY", 4340.0, 4339.0, 4345.0, False)
-    assert decide_tp1("SELL", 4260.0, 4255.0, 4261.0, False)
-    assert not decide_tp1("BUY", 4340.0, 4341.0, 4345.0, False)
-    assert not decide_tp1("BUY", 4340.0, 4339.0, 4345.0, True)
+    assert decide_tp1("BUY", 4340.0, 4339.0, 4345.0, False)   # high reaches
+    assert decide_tp1("SELL", 4260.0, 4255.0, 4261.0, False)  # low reaches
+    assert not decide_tp1("BUY", 4340.0, 4330.0, 4339.0, False)  # high below
+    assert not decide_tp1("BUY", 4340.0, 4341.0, 4345.0, True)   # done
 
 
 def test_trailing_ratchets_in_steps_buy():
