@@ -1,0 +1,1178 @@
+diff --git a/scripts/run_tick_manager.py b/scripts/run_tick_manager.py
+new file mode 100644
+index 0000000..9e79028
+--- /dev/null
++++ b/scripts/run_tick_manager.py
+@@ -0,0 +1,295 @@
++"""Tick-level manager (VPS, mt5_demo only).
++
++Analysis stays on the 5-minute cycle; EXECUTION management runs EVERY TICK:
++pending activation, breakeven, TP1 partial, trailing, and broker-side closes
++are detected and applied tick-by-tick through MT5, with DB writes and cards
++only on state changes. MT5 is the execution authority; the DB mirrors it.
++
++Pure decision helpers are unit-tested (tests/test_tick_manager_logic.py).
++"""
++from __future__ import annotations
++
++# --- VPS: load .env if present (real env vars ALWAYS win over .env) ---
++try:
++    from dotenv import load_dotenv as _load_dotenv
++    _load_dotenv()  # override=False: task-wrapper vars take precedence
++except Exception:
++    pass
++
++import logging
++import os
++import sys
++import time
++from typing import Any, Dict, List, Optional
++
++sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
++
++from utils.trading_rules import trailing_params  # noqa: E402
++# magic_for is needed inside _handle_row (module scope); mt5_executor keeps
++# its MetaTrader5 import lazy, so this top-level import is safe on any OS.
++from services.mt5_executor import magic_for  # noqa: E402
++
++logger = logging.getLogger("tick_manager")
++LOOP_SLEEP = float(os.environ.get("TICK_LOOP_SLEEP", 0.25))
++ROWS_REFRESH_SECONDS = float(os.environ.get("TICK_ROWS_REFRESH", 3.0))
++
++
++# ── pure decisions (unit-tested) ────────────────────────────────────────────
++
++def decide_be(
++    side: str, entry: float, current: float, risk_points: float,
++    be_points: float, min_be_rr: float, already: bool, point_value: float = 0.10,
++) -> bool:
++    """Arm breakeven once price travelled >= be_points AND >= min_be_rr
++    (both in codebase points; fav converted from price)."""
++    if already or entry <= 0 or risk_points <= 0:
++        return False
++    fav_points = ((entry - current) if side == "SELL" else (current - entry)) / point_value
++    return fav_points >= be_points and fav_points >= min_be_rr * risk_points
++
++
++def decide_trailing(
++    side: str, entry: float, current_stop: float, favorable_extreme: float,
++    gap_points: float, step_points: float, point_value: float,
++) -> Optional[float]:
++    """Ratchet the stop behind the favorable extreme (gap), in steps."""
++    if side == "BUY":
++        candidate = favorable_extreme - gap_points * point_value
++        if candidate > entry and candidate >= current_stop + step_points * point_value:
++            return round(candidate, 2)
++    else:
++        candidate = favorable_extreme + gap_points * point_value
++        if candidate < entry and candidate <= current_stop - step_points * point_value:
++            return round(candidate, 2)
++    return None
++
++
++def decide_tp1(side: str, tp1: float, candle_low: float, candle_high: float,
++               done: bool) -> bool:
++    if done or tp1 <= 0:
++        return False
++    return (candle_low <= tp1) if side == "BUY" else (candle_high >= tp1)
++
++
++def classify_broker_exit(side: str, deal_price: float, entry: float,
++                         stop: float, tp2: float) -> str:
++    """Map a broker-side exit price to our status labels.
++
++    The broker only closes on SL/TP, so an exit between stop and TP2 means
++    the (already moved) trailing/breakeven stop was the trigger. Pure +
++    unit-tested (tests/test_mt5_execution_correctness.py).
++    """
++    eps = 1e-9
++    if side == "BUY":
++        if tp2 and deal_price >= tp2 - eps:
++            return "TP2_HIT"
++        if deal_price <= (stop or entry) + eps:
++            return "SL_HIT"
++        return "TRAILING_SL_HIT"
++    if tp2 and deal_price <= tp2 + eps:
++        return "TP2_HIT"
++    if deal_price >= (stop or entry) - eps:
++        return "SL_HIT"
++    return "TRAILING_SL_HIT"
++
++
++# ── live loop ───────────────────────────────────────────────────────────────
++
++class TickManager:
++    def __init__(self, config: Dict[str, Any], telegram=None, database=None):
++        self.config = config
++        self.telegram = telegram
++        self.database = database
++        self._extremes: Dict[str, float] = {}
++        self._trail = trailing_params(config)
++        self._partial_alerted: set = set()  # refused-partial reported once/trade
++
++    def _magic_rows(self) -> List[Dict[str, Any]]:
++        rows = self.database.get_open_trades() or []
++        return [r for r in rows if str(r.get("status") or "") in
++                {"PENDING", "OPEN", "TP1_HIT", "PARTIAL"}]
++
++    def run_forever(self) -> None:  # pragma: no cover - VPS only
++        from services.mt5_executor import Mt5DemoExecutor, magic_for, _mt5_ready
++        mt5 = _mt5_ready()  # initialize ONCE — the terminal must be attached
++        executor = Mt5DemoExecutor(self.config, telegram=self.telegram)
++        # DB rows are throttled (Supabase free-tier protection — live incident:
++        # usage-limit badge): ticks stay 0.25s via symbol_info_tick, while the
++        # trade BOOK refreshes every ROWS_REFRESH_SECONDS. Row state changes
++        # (new signal / status flip) are rare; 3s staleness is invisible.
++        rows: List[Dict[str, Any]] = []
++        rows_at = 0.0
++        while True:
++            try:
++                now = time.time()
++                if now - rows_at >= ROWS_REFRESH_SECONDS:
++                    rows = self._magic_rows()
++                    rows_at = now
++                for row in rows:
++                    # Route through the broker symbol map (XAU/USD -> XAUUSD.s);
++                    # a raw slash-strip goes blind on suffix brokers.
++                    sym = executor._sym(str(row.get("symbol") or "XAU/USD"))
++                    tick = mt5.symbol_info_tick(sym)
++                    if tick is None:
++                        continue
++                    self._handle_row(row, tick, executor, mt5)
++            except Exception as exc:  # noqa: BLE001 - loop must survive
++                logger.warning("tick cycle error: %s", exc)
++            time.sleep(LOOP_SLEEP)
++
++    def _handle_row(self, row, tick, executor, mt5) -> None:  # pragma: no cover
++        tid = str(row.get("id"))
++        side = str(row.get("type") or row.get("side") or "").upper()
++        magic = magic_for(tid)
++        pos = executor._position_by_magic(magic)
++        status = str(row.get("status") or "")
++
++        if status == "PENDING":
++            if pos is not None:  # broker filled the pending
++                # Book the ACTUAL fill price: PnL/BE/trailing must run on the
++                # broker's execution, not our planned level.
++                self.database.update_trade(
++                    tid, {"status": "OPEN",
++                          "entry_price": round(float(pos.price_open), 2)})
++                self._notify(
++                    f"🧪 DEMO: pending activated @ {pos.price_open:.2f} "
++                    f"(actual fill)")
++            elif not row.get("mt5_ticket"):
++                # The pending order has never been sent to MT5 — send it now.
++                # ensure_ticket is idempotent (position + outstanding order).
++                kind = str(row.get("order_type") or "").upper()
++                if not kind.endswith("LIMIT"):
++                    kind = "BUY_LIMIT" if side == "BUY" else "SELL_LIMIT"
++                ticket = executor.ensure_ticket(
++                    tid, side, kind, float(row.get("entry_price") or 0),
++                    float(row.get("stop_loss") or 0),
++                    float(row.get("tp2") or 0), row.get("symbol"))
++                if ticket:
++                    self.database.update_trade(tid, {"mt5_ticket": ticket})
++                    self._notify(
++                        f"🧪 DEMO: pending sent to MT5 @ "
++                        f"{float(row.get('entry_price') or 0):.2f} "
++                        f"(ticket {ticket})")
++            return
++        if pos is None:
++            if not row.get("mt5_ticket"):
++                # New signal that never reached MT5 — open it NOW (market).
++                ticket = executor.ensure_ticket(
++                    tid, side, "MARKET", 0.0,
++                    float(row.get("stop_loss") or 0),
++                    float(row.get("tp2") or 0), row.get("symbol"))
++                if ticket:
++                    pos2 = executor._position_by_magic(magic)
++                    upd: Dict[str, Any] = {"mt5_ticket": ticket}
++                    if pos2 is not None:
++                        upd["entry_price"] = round(float(pos2.price_open), 2)
++                    self.database.update_trade(tid, upd)
++                    if "entry_price" in upd:
++                        self._notify(
++                            f"🧪 DEMO: MARKET filled @ {upd['entry_price']:.2f} "
++                            f"(ticket {ticket})")
++                    else:
++                        self._notify(f"🧪 DEMO: MARKET sent (ticket {ticket})")
++                return
++            # broker closed it (SL / TP2 / trailing stop)
++            # Mirror the REAL broker exit: deal price + realized P&L, not
++            # the live tick at the moment we noticed the position was gone.
++            exit_info = executor.last_exit(tid)
++            entry = float(row.get("entry_price") or 0)
++            stop = float(row.get("stop_loss") or 0)
++            tp2 = float(row.get("tp2") or 0)
++            if exit_info and exit_info["price"] > 0:
++                close = exit_info["price"]
++                status = classify_broker_exit(side, close, entry, stop, tp2)
++                pnl_pts = (close - entry) * 10.0
++                if side == "SELL":
++                    pnl_pts = -pnl_pts
++                self.database.update_trade(
++                    tid, {"status": status, "close_price": round(close, 2),
++                          "pnl_points": round(pnl_pts, 1)})
++                self._notify(
++                    f"🧪 DEMO: closed by broker @ {close:.2f} ({status}) "
++                    f"{pnl_pts:+.0f} pts / {exit_info['profit']:+.2f}$")
++            else:
++                close = tick.bid
++                self.database.update_trade(
++                    tid, {"status": "SL_HIT", "close_price": round(close, 2)})
++                self._notify(
++                    f"🧪 DEMO: position closed by broker @ {close:.2f} "
++                    f"(no exit deal found — labelled SL_HIT, verify)")
++            return
++
++        entry = float(row.get("entry_price") or 0)
++        stop = float(row.get("stop_loss") or 0)
++        tp1 = float(row.get("tp1") or 0)
++        risk = abs(entry - float(row.get("initial_stop_loss") or stop))
++        pv = 0.10  # codebase point = $0.10 on gold
++        risk_points = risk / pv  # price delta -> codebase points
++        price = tick.bid if side == "SELL" else tick.ask
++        extreme = self._extremes.get(tid, price)
++        extreme = min(extreme, price) if side == "BUY" else max(extreme, price)
++        self._extremes[tid] = extreme
++
++        # 1) breakeven
++        if decide_be(side, entry, price, risk_points,
++                     self._trail["early_breakeven_points"], 0.5,
++                     bool(row.get("sl_moved_to_entry"))):
++            executor.apply_stop(tid, entry, float(row.get("tp2") or 0),
++                                row.get("symbol"))
++            self.database.update_trade(tid, {"sl_moved_to_entry": True,
++                                             "stop_loss": entry})
++            self._notify(f"🧪 DEMO: breakeven armed @ {entry:.2f}")
++
++        # 2) TP1 partial — close ONLY the half (operator directive). Book it
++        # only when the broker actually executed it. On refusal: keep
++        # retrying every tick and report the broker's reason once per trade.
++        if decide_tp1(side, tp1, tick.bid, tick.ask,
++                      bool(row.get("partial_close"))):
++            if executor.partial_close_at_tp1(tid, 0.5, row.get("symbol")):
++                self._partial_alerted.discard(tid)
++                self.database.update_trade(tid, {"partial_close": True,
++                                                 "status": "TP1_HIT"})
++                self._notify(f"🧪 DEMO: TP1 partial booked @ {tp1:.2f}")
++            elif tid not in self._partial_alerted:
++                self._partial_alerted.add(tid)
++                self._notify(
++                    f"🧪 DEMO: TP1 partial REJECTED for {tid}: "
++                    f"{getattr(executor, 'last_error', 'unknown')} — "
++                    f"retrying every tick")
++
++        # 3) trailing ratchet
++        new_stop = decide_trailing(side, entry, stop, extreme,
++                                   self._trail["distance_points"],
++                                   self._trail["step_points"], pv)
++        if new_stop:
++            executor.apply_stop(tid, new_stop, float(row.get("tp2") or 0),
++                                row.get("symbol"))
++            self.database.update_trade(tid, {"stop_loss": new_stop})
++
++    def _notify(self, text: str) -> None:  # pragma: no cover
++        if self.telegram:
++            try:
++                self.telegram.send_message(text)
++            except Exception:  # noqa: BLE001
++                pass
++
++
++def main() -> None:  # pragma: no cover - VPS only
++    from services.database import DatabaseService
++    from services.telegram_bot import TelegramService
++    from utils.helpers import load_config
++    from utils.single_instance import acquire_single_instance
++
++    logging.basicConfig(level=logging.INFO)
++    if not acquire_single_instance("tick_manager.pid"):
++        logger.info("tick manager already running; exiting duplicate instance")
++        return
++    cfg = load_config()
++    if os.environ.get("EXECUTION_MODE") != "mt5_demo":
++        logger.info("tick manager idle (EXECUTION_MODE != mt5_demo)")
++        return
++    TickManager(cfg, TelegramService(cfg), DatabaseService(cfg)).run_forever()
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/services/mt5_executor.py b/services/mt5_executor.py
+new file mode 100644
+index 0000000..7718bc6
+--- /dev/null
++++ b/services/mt5_executor.py
+@@ -0,0 +1,333 @@
++"""MT5 demo executor (demo branch, phase 1).
++
++Transmits the unified-law levels (utils/trading_rules) to a MetaTrader 5
++DEMO account. Never decides risk itself. Idempotent per trade via magic
++number. Hard halt on reconciliation mismatch. All failures are logged and
++reported; the executor must never crash the cycle.
++"""
++
++from __future__ import annotations
++
++import json
++import logging
++import os
++import time
++import zlib
++from typing import Any, Dict, List, Optional
++
++logger = logging.getLogger(__name__)
++
++HALT_FILE = ".demo_halt"
++
++
++def _mt5():
++    import MetaTrader5 as mt5  # noqa: lazy on purpose
++    return mt5
++
++
++_MT5_READY = {"ok": False}
++
++
++def _mt5_ready():
++    """Lazy import + initialize ONCE (live incident 2026-08-10: the executor
++    and tick manager queried the terminal without ever initializing it —
++    every symbol_info_tick silently returned None and no order was ever
++    sent)."""
++    mt5 = _mt5()
++    if not _MT5_READY["ok"]:
++        try:
++            path = os.environ.get("MT5_PATH") or None
++            if mt5.initialize(path=path) if path else mt5.initialize():
++                _MT5_READY["ok"] = True
++            else:
++                logger.warning("MT5 initialize failed: %s", mt5.last_error())
++        except Exception as exc:  # noqa: BLE001
++            logger.warning("MT5 initialize crashed: %s", exc)
++    return mt5
++
++
++def magic_for(trade_id: str) -> int:
++    return 1000000 + (zlib.crc32(trade_id.encode()) % 8999999)
++
++
++def plan_partial_close(volume: float, fraction: float, step: float):
++    """Snap the TP1 booked slice to the broker's volume_step.
++
++    Returns (part, remaining). This plan ONLY ever describes the fractional
++    slice — it never escalates to closing the whole position (operator
++    directive: close the half, nothing else). Pure + unit-tested.
++    """
++    if step <= 0:
++        step = 0.01
++    import math
++    part = math.floor(volume * fraction / step + 1e-9) * step
++    part = round(part, 8)
++    return part, round(volume - part, 8)
++
++
++class Mt5DemoExecutor:
++    def __init__(self, config: Dict[str, Any], telegram=None):
++        self.config = config or {}
++        demo = (self.config.get("execution") or {}).get("demo") or {}
++        self.lot = float(demo.get("lot_size", 0.10))
++        self.deviation = int(demo.get("deviation_points_mt5", 30))
++        self.max_per_day = int(demo.get("max_new_orders_per_day", 6))
++        self.halt_on_mismatch = bool(demo.get("reconcile_halt_on_mismatch", True))
++        self.symbol_map = demo.get("symbol_map") or {"XAU/USD": "XAUUSD"}
++        self.telegram = telegram
++        self._orders_today = 0
++        self.last_error = ""
++
++    # -- lifecycle ---------------------------------------------------------
++    def alive(self) -> bool:
++        try:
++            return _mt5().terminal_info() is not None
++        except Exception:  # noqa: BLE001
++            return False
++
++    def _sym(self, symbol: str) -> str:
++        return self.symbol_map.get(symbol, symbol.replace("/", ""))
++
++    # -- halt --------------------------------------------------------------
++    def halted(self) -> bool:
++        return os.path.exists(HALT_FILE)
++
++    def _halt(self, why: str) -> None:
++        if self.halt_on_mismatch:
++            try:
++                with open(HALT_FILE, "w", encoding="utf-8") as fh:
++                    fh.write(why)
++            except OSError:
++                pass
++        logger.error("DEMO HALT: %s", why)
++        if self.telegram:
++            try:
++                self.telegram.send_error_alert(f"🧪 DEMO HALT: {why}")
++            except Exception:  # noqa: BLE001
++                pass
++
++    # -- orders ------------------------------------------------------------
++    def _position_by_magic(self, magic: int):
++        try:
++            for pos in _mt5_ready().positions_get() or []:
++                if pos.magic == magic:
++                    return pos
++        except Exception:  # noqa: BLE001
++            return None
++        return None
++
++    def _order_by_magic(self, magic: int):
++        """Outstanding PENDING order with this magic (not yet a position)."""
++        try:
++            for o in _mt5_ready().orders_get() or []:
++                if getattr(o, "magic", None) == magic:
++                    return o
++        except Exception:  # noqa: BLE001
++            return None
++        return None
++
++    def ensure_ticket(
++        self,
++        trade_id: str,
++        side: str,
++        order_kind: str,
++        entry_price: float,
++        sl: float,
++        tp: float,
++        symbol: str,
++    ) -> Optional[int]:
++        """Idempotent open. Returns ticket or None (refused/failed).
++
++        Idempotency covers BOTH states of an order's life: an open POSITION
++        and an outstanding PENDING order. Without the pending check, a
++        tick-level retry loop would stack duplicate limit orders.
++        """
++        self.last_error = ""
++        if self.halted():
++            self.last_error = "executor halted (.demo_halt)"
++            return None
++        if self._orders_today >= self.max_per_day:
++            self.last_error = "daily order cap reached"
++            logger.warning("Demo order refused: daily cap reached")
++            return None
++        magic = magic_for(trade_id)
++        existing = self._position_by_magic(magic)
++        if existing:
++            return int(existing.ticket)
++        existing_order = self._order_by_magic(magic)
++        if existing_order:
++            return int(existing_order.ticket)
++        mt5 = _mt5_ready()
++        sym = self._sym(symbol)
++        tick = mt5.symbol_info_tick(sym)
++        if tick is None:
++            self.last_error = f"no tick for {sym}"
++            return None
++        buy = str(side).upper() == "BUY"
++        if str(order_kind or "").upper().endswith("MARKET"):
++            request = {
++                "action": mt5.TRADE_ACTION_DEAL,
++                "symbol": sym,
++                "volume": self.lot,
++                "type": mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL,
++                "price": tick.ask if buy else tick.bid,
++                "sl": float(sl),
++                "tp": float(tp),
++                "deviation": self.deviation,
++                "magic": magic,
++                "comment": "SS-demo",
++                "type_filling": mt5.ORDER_FILLING_IOC,
++            }
++        else:
++            request = {
++                "action": mt5.TRADE_ACTION_PENDING,
++                "symbol": sym,
++                "volume": self.lot,
++                "type": mt5.ORDER_TYPE_BUY_LIMIT if buy else mt5.ORDER_TYPE_SELL_LIMIT,
++                "price": float(entry_price),
++                "sl": float(sl),
++                "tp": float(tp),
++                "magic": magic,
++                "comment": "SS-demo",
++            }
++        try:
++            res = mt5.order_send(request)
++        except Exception as exc:  # noqa: BLE001
++            self.last_error = f"order_send crashed: {exc}"
++            logger.error("order_send crashed: %s", exc)
++            return None
++        if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
++            self.last_error = (
++                f"retcode={getattr(res, 'retcode', '?')} "
++                f"{getattr(res, 'comment', '')}".strip())
++            logger.error("order_send refused: %s", getattr(res, "comment", res))
++            return None
++        self._orders_today += 1
++        return int(res.order)
++
++    def apply_stop(self, trade_id: str, new_sl: float, tp: float, symbol: str) -> bool:
++        magic = magic_for(trade_id)
++        pos = self._position_by_magic(magic)
++        if not pos:
++            return False
++        mt5 = _mt5_ready()
++        request = {
++            "action": mt5.TRADE_ACTION_SLTP,
++            "symbol": self._sym(symbol),
++            "position": int(pos.ticket),
++            "sl": float(new_sl),
++            "tp": float(tp),
++        }
++        try:
++            res = mt5.order_send(request)
++            return bool(res and res.retcode == mt5.TRADE_RETCODE_DONE)
++        except Exception as exc:  # noqa: BLE001
++            logger.error("SLTP modify crashed: %s", exc)
++            return False
++
++    def partial_close_at_tp1(self, trade_id: str, fraction: float, symbol: str) -> bool:
++        """Close ONLY the booked fraction at TP1 (operator directive).
++
++        NEVER full-close + reopen. The volume is snapped to the broker's
++        volume_step; if the slice is below volume_min it cannot be booked at
++        all. On any refusal: return False and leave the reason in
++        self.last_error — the tick manager retries every tick and reports
++        the refusal to the operator once per trade.
++        """
++        mt5 = _mt5()
++        self.last_error = ""
++        magic = magic_for(trade_id)
++        pos = self._position_by_magic(magic)
++        if not pos:
++            self.last_error = "position not found"
++            return False
++        sym = self._sym(symbol)
++        info = mt5.symbol_info(sym)
++        step = float(getattr(info, "volume_step", 0.01) or 0.01)
++        min_vol = float(getattr(info, "volume_min", 0.01) or 0.01)
++        part, _remaining = plan_partial_close(float(pos.volume), fraction, step)
++        if part < min_vol or part <= 0:
++            self.last_error = (
++                f"slice {part:.2f} below broker volume_min {min_vol:g} — "
++                f"cannot book the half")
++            logger.error("TP1 partial impossible for %s: %s", trade_id,
++                         self.last_error)
++            return False
++        tick = mt5.symbol_info_tick(sym)
++        close_type = (mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY
++                      else mt5.ORDER_TYPE_BUY)
++        request = {
++            "action": mt5.TRADE_ACTION_DEAL,
++            "symbol": sym,
++            "volume": part,
++            "type": close_type,
++            "position": int(pos.ticket),
++            "price": tick.bid if close_type == mt5.ORDER_TYPE_SELL else tick.ask,
++            "deviation": self.deviation,
++            "magic": magic,
++            "comment": "SS-demo-tp1",
++            "type_filling": mt5.ORDER_FILLING_IOC,
++        }
++        try:
++            res = mt5.order_send(request)
++            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
++                return True
++            self.last_error = (
++                f"retcode={getattr(res, 'retcode', '?')} "
++                f"{getattr(res, 'comment', '')}".strip())
++            logger.warning("TP1 partial refused for %s: %s (will retry)",
++                           trade_id, self.last_error)
++            return False
++        except Exception as exc:  # noqa: BLE001
++            self.last_error = f"order_send crashed: {exc}"
++            logger.error("partial close crashed: %s", exc)
++            return False
++
++    def last_exit(self, trade_id: str) -> Optional[Dict[str, Any]]:
++        """The broker's own record of how this trade's position exited.
++
++        Returns the newest OUT deal {price, profit, time} for the trade's
++        magic, or None if no exit deal exists yet. Used so the DB mirrors
++        the REAL broker exit price + realized P&L instead of the live tick
++        at the moment we happened to notice the position was gone.
++        """
++        mt5 = _mt5()
++        magic = magic_for(trade_id)
++        try:
++            now = int(time.time()) + 86400
++            deals = mt5.history_deals_get(0, now) or ()
++        except Exception as exc:  # noqa: BLE001
++            logger.error("history_deals_get crashed: %s", exc)
++            return None
++        outs = [d for d in deals
++                if getattr(d, "magic", None) == magic
++                and getattr(d, "entry", None) == getattr(mt5, "DEAL_ENTRY_OUT", 1)]
++        if not outs:
++            return None
++        d = max(outs, key=lambda x: getattr(x, "time", 0))
++        return {"price": float(getattr(d, "price", 0.0)),
++                "profit": float(getattr(d, "profit", 0.0)),
++                "time": int(getattr(d, "time", 0))}
++
++    # -- reconciliation ------------------------------------------------------
++    def reconcile(self, open_rows: List[Dict[str, Any]]) -> List[str]:
++        mismatches: List[str] = []
++        for row in open_rows:
++            ticket = row.get("mt5_ticket")
++            if not ticket:
++                continue
++            pos = self._position_by_magic(magic_for(str(row.get("id"))))
++            if pos is None:
++                mismatches.append(f"{row.get('id')}: no MT5 position for ticket {ticket}")
++                continue
++            db_sl = float(row.get("stop_loss") or 0)
++            if db_sl and abs(pos.sl - db_sl) > 0.05:
++                mismatches.append(
++                    f"{row.get('id')}: SL drift mt5={pos.sl:.2f} db={db_sl:.2f}")
++            side_db = str(row.get("type") or row.get("side") or "").upper()
++            pos_buy = pos.type == _mt5().ORDER_TYPE_BUY
++            if (side_db == "BUY") != pos_buy:
++                mismatches.append(f"{row.get('id')}: side mismatch")
++        if mismatches and self.halt_on_mismatch:
++            self._halt("; ".join(mismatches))
++        return mismatches
+diff --git a/tests/test_mt5_execution_correctness.py b/tests/test_mt5_execution_correctness.py
+new file mode 100644
+index 0000000..7160fa8
+--- /dev/null
++++ b/tests/test_mt5_execution_correctness.py
+@@ -0,0 +1,532 @@
++"""Execution-correctness tests for the MT5 demo layer (lot / partial / exits).
++
++Operator directive: lot 0.1, TP1 books HALF, $/point math and XAUUSD symbol
++must all be verified. These tests are fault-injection: re-introducing the
++old bugs (unsnap volumes, TP1 booked on failure, SL_HIT-everything exits,
++risk/10 wiring) makes them fail.
++"""
++import sys
++import types
++from pathlib import Path
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
++
++from tests import mt5_fake  # noqa: E402
++
++from scripts.run_tick_manager import (  # noqa: E402
++    TickManager, classify_broker_exit)
++from services.mt5_executor import (  # noqa: E402
++    Mt5DemoExecutor, magic_for, plan_partial_close)
++
++
++# ── plan_partial_close: ONLY ever the snapped fractional slice ─────────────
++
++def test_plan_partial_normal_half_of_01():
++    part, remaining = plan_partial_close(0.10, 0.5, step=0.01)
++    assert part == 0.05 and remaining == 0.05
++
++
++def test_plan_partial_never_escalates_to_whole():
++    """Operator directive: close the HALF. Even when the leftover would sit
++    below a broker minimum, the plan must still describe only the slice —
++    booking decisions live in the executor, never a silent full close."""
++    part, remaining = plan_partial_close(0.15, 0.5, step=0.01)
++    assert part == 0.07 and remaining == 0.08
++
++
++def test_plan_partial_snaps_down_to_step():
++    part, remaining = plan_partial_close(0.21, 0.5, step=0.01)
++    assert part == 0.10 and remaining == 0.11
++
++
++# ── classify_broker_exit ───────────────────────────────────────────────────
++
++def test_classify_buy_exits():
++    assert classify_broker_exit("BUY", 4330.0, 4300.0, 4320.0, 4330.0) == "TP2_HIT"
++    assert classify_broker_exit("BUY", 4293.0, 4300.0, 4293.0, 4330.0) == "SL_HIT"
++    assert classify_broker_exit("BUY", 4318.0, 4300.0, 4315.0, 4330.0) == "TRAILING_SL_HIT"
++
++
++def test_classify_sell_exits():
++    assert classify_broker_exit("SELL", 4270.0, 4300.0, 4280.0, 4270.0) == "TP2_HIT"
++    assert classify_broker_exit("SELL", 4307.0, 4300.0, 4307.0, 4270.0) == "SL_HIT"
++    assert classify_broker_exit("SELL", 4285.0, 4300.0, 4288.0, 4270.0) == "TRAILING_SL_HIT"
++
++
++# ── executor against the fake terminal ─────────────────────────────────────
++
++def _executor(monkeypatch, state):
++    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5_fake.install(state))
++    return Mt5DemoExecutor({"execution": {"demo": {}}})
++
++
++def test_partial_close_books_exact_half(monkeypatch):
++    state = mt5_fake.FakeState()
++    state.positions.append(mt5_fake._Pos(7, magic_for("T1"), 4293.0, 4330.0,
++                                         volume=0.10))
++    ex = _executor(monkeypatch, state)
++    assert ex.partial_close_at_tp1("T1", 0.5, "XAU/USD") is True
++    tp1_reqs = [r for r in state.requests if r.get("comment") == "SS-demo-tp1"]
++    assert len(tp1_reqs) == 1 and tp1_reqs[0]["volume"] == 0.05
++
++
++def test_partial_half_below_min_refuses_with_no_order(monkeypatch):
++    """If the half-slice is below broker volume_min we do NOT book anything —
++    no partial, and never a full close either. Return False + the reason."""
++    state = mt5_fake.FakeState()
++    state.volume_min = 0.10
++    state.positions.append(mt5_fake._Pos(7, magic_for("T2"), 4293.0, 4330.0,
++                                         volume=0.10))
++    ex = _executor(monkeypatch, state)
++    assert ex.partial_close_at_tp1("T2", 0.5, "XAU/USD") is False
++    assert state.requests == []               # nothing sent at all
++    assert "volume_min" in ex.last_error
++
++
++def test_partial_refusal_never_full_closes_and_keeps_reason(monkeypatch):
++    """Broker refuses the half → exactly ONE request (the refused partial),
++    no full close, no reopen. Reason is surfaced for the retry/alert loop."""
++    state = mt5_fake.FakeState()
++    state.fail_partial = True
++    state.positions.append(mt5_fake._Pos(7, magic_for("T3"), 4293.0, 4330.0,
++                                         volume=0.10))
++    ex = _executor(monkeypatch, state)
++    assert ex.partial_close_at_tp1("T3", 0.5, "XAU/USD") is False
++    assert len(state.requests) == 1           # only the refused half
++    assert state.requests[0]["volume"] == 0.05
++    assert ex.last_error                       # reason surfaced
++
++
++def test_last_exit_reads_the_broker_deal(monkeypatch):
++    state = mt5_fake.FakeState()
++    state.deals.append(mt5_fake._Deal(magic_for("T9"), 4330.0, 300.0, 123))
++    ex = _executor(monkeypatch, state)
++    out = ex.last_exit("T9")
++    assert out == {"price": 4330.0, "profit": 300.0, "time": 123}
++    assert ex.last_exit("UNKNOWN") is None
++
++
++# ── tick manager wiring ────────────────────────────────────────────────────
++
++class _StubDB:
++    def __init__(self):
++        self.updates = []
++
++    def update_trade(self, tid, fields):
++        self.updates.append((tid, dict(fields)))
++
++
++class _StubExecutor:
++    def __init__(self, partial_ok=True, position=True, exit_info=None):
++        self.partial_ok = partial_ok
++        self.position = position
++        self.exit_info = exit_info
++        self.last_error = "" if partial_ok else "retcode=10018 partial denied"
++        self.partial_calls = 0
++
++    def _position_by_magic(self, magic):
++        if not self.position:
++            return None
++        return types.SimpleNamespace(ticket=1, volume=0.10, type=0,
++                                     sl=4293.0, tp=4330.0, price_open=4300.0)
++
++    def partial_close_at_tp1(self, tid, frac, sym):
++        self.partial_calls += 1
++        if not self.partial_ok:
++            self.last_error = "retcode=10018 partial denied"
++        return self.partial_ok
++
++    def apply_stop(self, *a, **k):
++        return True
++
++    def last_exit(self, tid):
++        return self.exit_info
++
++    def ensure_ticket(self, *a, **k):
++        return None
++
++
++def _row(**over):
++    base = {"id": "T1", "type": "BUY", "status": "OPEN", "symbol": "XAU/USD",
++            "entry_price": 4300.0, "stop_loss": 4293.0,
++            "initial_stop_loss": 4293.0, "tp1": 4310.0, "tp2": 4330.0}
++    base.update(over)
++    return base
++
++
++def _tm():
++    return TickManager({})
++
++
++def test_tp1_failure_is_not_booked(monkeypatch):
++    monkeypatch.setitem(sys.modules, "MetaTrader5",
++                        mt5_fake.install(mt5_fake.FakeState()))
++    db = _StubDB()
++    tm = _tm()
++    tm.database = db
++    ex = _StubExecutor(partial_ok=False)
++    tick = types.SimpleNamespace(bid=4309.5, ask=4309.7)
++    tm._handle_row(_row(), tick, ex, None)
++    assert db.updates == []  # nothing claimed; retry next tick
++
++
++def test_tp1_success_is_booked(monkeypatch):
++    monkeypatch.setitem(sys.modules, "MetaTrader5",
++                        mt5_fake.install(mt5_fake.FakeState()))
++    db = _StubDB()
++    tm = _tm()
++    tm.database = db
++    ex = _StubExecutor(partial_ok=True)
++    tick = types.SimpleNamespace(bid=4309.5, ask=4309.7)
++    tm._handle_row(_row(), tick, ex, None)
++    assert any(u[1].get("partial_close") is True for u in db.updates)
++    assert any(u[1].get("status") == "TP1_HIT" for u in db.updates)
++
++
++def test_tp1_refusal_alerts_once_and_retries_every_tick(monkeypatch):
++    """Directive: on refusal do NOT close the whole position — retry the half
++    every tick and tell the operator WHY, once per trade (no spam)."""
++    monkeypatch.setitem(sys.modules, "MetaTrader5",
++                        mt5_fake.install(mt5_fake.FakeState()))
++    db = _StubDB()
++    tm = _tm()
++    tm.database = db
++    msgs = []
++    tm._notify = msgs.append
++    ex = _StubExecutor(partial_ok=False)
++    tick = types.SimpleNamespace(bid=4309.5, ask=4309.7)
++    row = _row()
++    tm._handle_row(row, tick, ex, None)   # tick 1: refused -> alert
++    tm._handle_row(row, tick, ex, None)   # tick 2: refused -> silent retry
++    tm._handle_row(row, tick, ex, None)   # tick 3: refused -> silent retry
++    refusals = [m for m in msgs if "REJECTED" in m]
++    assert len(refusals) == 1
++    assert "retcode=10018" in refusals[0]       # the WHY is reported
++    assert ex.partial_calls == 3                # retried every tick
++    assert db.updates == []                     # never booked, never closed
++
++
++def test_tp1_refusal_then_success_books_and_clears(monkeypatch):
++    monkeypatch.setitem(sys.modules, "MetaTrader5",
++                        mt5_fake.install(mt5_fake.FakeState()))
++    db = _StubDB()
++    tm = _tm()
++    tm.database = db
++    msgs = []
++    tm._notify = msgs.append
++    ex = _StubExecutor(partial_ok=False)
++    tick = types.SimpleNamespace(bid=4309.5, ask=4309.7)
++    row = _row()
++    tm._handle_row(row, tick, ex, None)         # refused -> alert
++    ex.partial_ok = True
++    tm._handle_row(row, tick, ex, None)         # retry succeeds -> booked
++    assert any(u[1].get("partial_close") is True for u in db.updates)
++    assert len([m for m in msgs if "REJECTED" in m]) == 1
++
++
++# ── order placement: signal → MetaTrader (the VPS-only path) ──────────────
++
++def test_ensure_ticket_idempotent_for_outstanding_pending(monkeypatch):
++    """A pending order that has NOT filled must not be sent twice."""
++    state = mt5_fake.FakeState()
++    state.pending_mode = True
++    ex = _executor(monkeypatch, state)
++    t1 = ex.ensure_ticket("T1", "BUY", "BUY_LIMIT", 4290.0, 4280.0, 4340.0,
++                          "XAU/USD")
++    t2 = ex.ensure_ticket("T1", "BUY", "BUY_LIMIT", 4290.0, 4280.0, 4340.0,
++                          "XAU/USD")
++    assert t1 and t1 == t2
++    assert len(state.orders) == 1            # ONE pending, not two
++
++
++def test_tick_manager_places_pending_once_and_books_ticket(monkeypatch):
++    state = mt5_fake.FakeState()
++    state.pending_mode = True
++    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5_fake.install(state))
++    db = _StubDB()
++    tm = _tm()
++    tm.database = db
++    ex = Mt5DemoExecutor({"execution": {"demo": {}}})
++    row = _row(status="PENDING", order_type="BUY_LIMIT", entry_price=4290.0,
++               tp1=4310.0, tp2=4340.0)
++    tick = types.SimpleNamespace(bid=4300.0, ask=4300.2)
++    tm._handle_row(row, tick, ex, None)
++    tm._handle_row(row, tick, ex, None)      # retry tick — must NOT duplicate
++    assert len(state.orders) == 1
++    assert any(u[1].get("mt5_ticket") for u in db.updates)
++
++
++def test_tick_manager_opens_market_for_new_signal(monkeypatch):
++    """OPEN row without ticket and without position → market order NOW,
++    ticket + actual fill price booked to the DB."""
++    state = mt5_fake.FakeState()
++    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5_fake.install(state))
++    db = _StubDB()
++    tm = _tm()
++    tm.database = db
++    ex = Mt5DemoExecutor({"execution": {"demo": {}}})
++    row = _row(status="OPEN")                # no mt5_ticket, no position
++    tick = types.SimpleNamespace(bid=4300.0, ask=4300.2)
++    tm._handle_row(row, tick, ex, None)
++    assert len(state.positions) == 1
++    assert state.positions[0].volume == 0.10          # the configured lot
++    ticket_updates = [u for u in db.updates if u[1].get("mt5_ticket")]
++    assert ticket_updates
++    entry_updates = [u for u in db.updates if u[1].get("entry_price")]
++    assert entry_updates and entry_updates[-1][1]["entry_price"] == 4300.2
++
++
++def test_pending_fill_books_actual_fill_price(monkeypatch):
++    state = mt5_fake.FakeState()
++    magic = magic_for("T1")
++    state.positions.append(mt5_fake._Pos(55, magic, 4280.0, 4340.0,
++                                         volume=0.10))
++    state.positions[-1].price_open = 4291.11          # slippage vs plan
++    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5_fake.install(state))
++    db = _StubDB()
++    tm = _tm()
++    tm.database = db
++    ex = Mt5DemoExecutor({"execution": {"demo": {}}})
++    row = _row(status="PENDING", order_type="BUY_LIMIT", entry_price=4290.0)
++    tick = types.SimpleNamespace(bid=4300.0, ask=4300.2)
++    tm._handle_row(row, tick, ex, None)
++    open_upd = [u for u in db.updates if u[1].get("status") == "OPEN"]
++    assert open_upd
++    assert open_upd[-1][1]["entry_price"] == 4291.11  # actual fill, not plan
++
++
++def test_broker_exit_uses_deal_price_and_labels_tp2(monkeypatch):
++    monkeypatch.setitem(sys.modules, "MetaTrader5",
++                        mt5_fake.install(mt5_fake.FakeState()))
++    db = _StubDB()
++    tm = _tm()
++    tm.database = db
++    ex = _StubExecutor(position=False,
++                       exit_info={"price": 4330.0, "profit": 300.0, "time": 1})
++    tick = types.SimpleNamespace(bid=4329.0, ask=4329.2)
++    tm._handle_row(_row(mt5_ticket=99), tick, ex, None)  # ticketed → exit path
++    assert db.updates[-1][1]["status"] == "TP2_HIT"
++    assert db.updates[-1][1]["close_price"] == 4330.0   # deal price, not tick
++    assert db.updates[-1][1]["pnl_points"] == 300.0     # 0.1 lot: $30 → 300 pts
++
++
++def test_be_wiring_respects_min_rr_gate(monkeypatch):
++    """$34.57 risk = 345.7 pts; 160 pts favorable must NOT arm BE
++    (0.5 × 345.7 = 172.85 needed). The old risk/10 wiring armed it here.
++
++    NOTE: the unified 150/40 trailing may still ratchet the stop (that is
++    rule-correct and separate from the discrete BE move); we assert only
++    that no sl_moved_to_entry booking happened."""
++    monkeypatch.setitem(sys.modules, "MetaTrader5",
++                        mt5_fake.install(mt5_fake.FakeState()))
++    db = _StubDB()
++    tm = _tm()
++    tm.database = db
++    ex = _StubExecutor()
++    row = _row(entry_price=4327.57, stop_loss=4293.0, initial_stop_loss=4293.0,
++               tp1=4367.0, tp2=4425.0, sl_moved_to_entry=False)
++    tick = types.SimpleNamespace(bid=4343.0, ask=4343.57)  # +$16 favorable
++    tm._handle_row(row, tick, ex, None)
++    assert not any(u[1].get("sl_moved_to_entry") for u in db.updates)
++    assert not any(u[1].get("stop_loss") == 4327.57 for u in db.updates)
++
++
++# ── broker symbol suffix (JustMarkets: XAUUSD.s) ───────────────────────────
++
++def test_shipped_config_maps_to_broker_suffix():
++    """config.json is the single source; reverting to plain XAUUSD makes the
++    whole execution layer go blind on JustMarkets."""
++    import json
++    from pathlib import Path as _P
++    cfg = json.loads((_P(__file__).resolve().parents[1] / "config.json")
++                     .read_text(encoding="utf-8"))
++    smap = cfg["execution"]["demo"]["symbol_map"]
++    assert smap["XAU/USD"] == "XAUUSD.s"
++
++
++def test_executor_sym_uses_map_and_fallback():
++    ex = Mt5DemoExecutor({"execution": {"demo": {
++        "symbol_map": {"XAU/USD": "XAUUSD.s"}}}})
++    assert ex._sym("XAU/USD") == "XAUUSD.s"
++    assert ex._sym("XAU/USD2") == "XAUUSD2"  # unmapped: slash-strip fallback
++
++
++def test_tick_loop_symbol_lookup_uses_the_map(monkeypatch):
++    """The loop must ask MT5 for the MAPPED symbol; looking up the raw
++    XAU/USD-stripped name returns None on suffix brokers = loop sees nothing."""
++    state = mt5_fake.FakeState()
++    fake = mt5_fake.install(state)
++    seen = []
++    fake.symbol_info_tick = lambda s: (seen.append(s), None)[1]
++    monkeypatch.setitem(sys.modules, "MetaTrader5", fake)
++    import scripts.run_tick_manager as rtm
++    tm = rtm.TickManager({"execution": {"demo": {
++        "symbol_map": {"XAU/USD": "XAUUSD.s"}}}})
++    tm.database = _StubDB()
++    rows = [_row()]
++    tm._magic_rows = lambda: rows
++
++    import time as _time
++    calls = {"n": 0}
++    orig_sleep = _time.sleep
++
++    def _stop_after_first(*a, **k):
++        calls["n"] += 1
++        if calls["n"] >= 1:
++            raise KeyboardInterrupt
++        orig_sleep(0)
++
++    monkeypatch.setattr(rtm.time, "sleep", _stop_after_first)
++    try:
++        tm.run_forever()
++    except KeyboardInterrupt:
++        pass
++    assert seen and seen[0] == "XAUUSD.s"
++
++
++# ── market_data → mt5_feed keyword contract ────────────────────────────────
++
++def test_market_data_passes_valid_kwargs_to_mt5_feed(monkeypatch):
++    """Regression (live incident 2026-08-10): market_data called
++    get_candles(outputsize=...) while the feed's parameter is `count` —
++    every VPS analysis cycle died with TypeError and the production guard
++    stopped it. The REAL feed function must accept exactly what
++    market_data passes; any future rename makes this test explode."""
++    state = mt5_fake.FakeState()
++    state.rates = [
++        {"time": 1_700_000_000 + i * 300, "open": 4300.0, "high": 4301.0,
++         "low": 4299.0, "close": 4300.5}
++        for i in range(220)
++    ]
++    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5_fake.install(state))
++    monkeypatch.setenv("DATA_SOURCE_PRIMARY", "mt5")
++    from services.market_data import MarketDataService
++    svc = MarketDataService({
++        "symbol": "XAU/USD",
++        "data_source": {"api_keys": {}},
++        "execution": {"demo": {"symbol_map": {"XAU/USD": "XAUUSD.s"}}},
++    })
++    payload = svc.get_ohlcv("5m", outputsize=100)
++    assert payload is not None
++    assert payload["source"] == "mt5"
++    assert len(payload["data"]) == 220
++
++
++def test_mt5_fresh_candles_support_signal_generation(monkeypatch):
++    """Live incident 2026-08-10: enrich overwrote the mt5 feed's integrity
++    with an UNKNOWN default and the analysis refused its own broker data.
++    Fresh broker candles must pass the signal gate."""
++    import time as _t
++    from services import mt5_feed as _feed
++    _feed._offset_cache.clear()
++    state = mt5_fake.FakeState()
++    state.server_time = int(_t.time())  # offset ~0 so candle times stay real
++    base = int(_t.time())
++    state.rates = [
++        {"time": base - (219 - i) * 300, "open": 4300.0, "high": 4301.0,
++         "low": 4299.0, "close": 4300.5}
++        for i in range(220)
++    ]
++    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5_fake.install(state))
++    monkeypatch.setenv("DATA_SOURCE_PRIMARY", "mt5")
++    from services.market_data import MarketDataService
++    svc = MarketDataService({"symbol": "XAU/USD", "data_source": {"api_keys": {}}})
++    payload = svc.get_ohlcv("5m", outputsize=220)
++    integ = payload["source_integrity"]
++    assert integ["source"] == "mt5"
++    assert integ["reliability_grade"] == "HIGH"
++    assert integ["supports_signal_generation"] is True
++    assert payload["supports_signal_generation"] is True
++
++
++def test_mt5_stale_candles_still_refused(monkeypatch):
++    """Staleness protection must survive the fix: old candles stay MEDIUM
++    and cannot generate signals."""
++    import time as _t
++    from services import mt5_feed as _feed
++    _feed._offset_cache.clear()
++    state = mt5_fake.FakeState()
++    state.server_time = int(_t.time())  # offset ~0 so old candles stay old
++    state.rates = [
++        {"time": 1_700_000_000 + i * 300, "open": 4300.0, "high": 4301.0,
++         "low": 4299.0, "close": 4300.5}
++        for i in range(220)
++    ]
++    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5_fake.install(state))
++    monkeypatch.setenv("DATA_SOURCE_PRIMARY", "mt5")
++    from services.market_data import MarketDataService
++    svc = MarketDataService({"symbol": "XAU/USD", "data_source": {"api_keys": {}}})
++    payload = svc.get_ohlcv("5m", outputsize=220)
++    assert payload["source_integrity"]["reliability_grade"] == "MEDIUM"
++    assert payload["supports_signal_generation"] is False
++    _feed._offset_cache.clear()
++
++
++def test_mt5_fetches_timeframes_natively_not_resampled(monkeypatch):
++    """Live divergence incident 2026-08-10: with MT5 primary the analysis
++    must fetch each timeframe natively (deep 4H like paper), NOT resample
++    from a shallow 5m base."""
++    import time as _t
++    from services import mt5_feed as _feed
++    _feed._offset_cache.clear()
++    state = mt5_fake.FakeState()
++    state.server_time = int(_t.time())
++    base = int(_t.time())
++    state.rates = [
++        {"time": base - (219 - i) * 300, "open": 4300.0, "high": 4301.0,
++         "low": 4299.0, "close": 4300.5}
++        for i in range(220)
++    ]
++    seen = []
++    real = _feed.get_candles
++    def spy(*a, **k):
++        seen.append(k.get("timeframe") or (a[1] if len(a) > 1 else None))
++        return real(*a, **k)
++    monkeypatch.setattr(_feed, "get_candles", spy)
++    fake = mt5_fake.install(state)
++    fake.get_candles = spy
++    monkeypatch.setitem(sys.modules, "MetaTrader5", fake)
++    monkeypatch.setenv("DATA_SOURCE_PRIMARY", "mt5")
++    from services.market_data import MarketDataService
++    cfg = {"symbol": "XAU/USD", "data_source": {"api_keys": {},
++           "primary": "mt5", "resample_timeframes_from_base": True,
++           "base_timeframe": "5m"},
++           "timeframes": ["5m", "15m", "1H", "4H"],
++           "primary_timeframe": "15m"}
++    svc = MarketDataService(cfg)
++    data = svc.get_gold_data()
++    assert data is not None
++    assert set(seen) == {"5m", "15m", "1H", "4H"}  # native, no base-only resample
++    _feed._offset_cache.clear()
++
++
++def test_ensure_ticket_auto_initializes_terminal(monkeypatch):
++    """Live incident 2026-08-10: the executor queried the terminal without
++    ever calling initialize() -> 'no tick for XAUUSD.s' -> no order was ever
++    sent. ensure_ticket must self-initialize."""
++    from services import mt5_executor as ex_mod
++    ex_mod._MT5_READY["ok"] = False
++    state = mt5_fake.FakeState()
++    monkeypatch.setitem(sys.modules, "MetaTrader5", mt5_fake.install(state))
++    ex = ex_mod.Mt5DemoExecutor({"execution": {"demo": {}}})
++    t = ex.ensure_ticket("T-AUTO", "BUY", "BUY_MARKET", 4350.0, 4320.0,
++                         4420.0, "XAU/USD")
++    assert t is not None
++    assert ex_mod._MT5_READY["ok"] is True
++    ex_mod._MT5_READY["ok"] = False
++
++
++def test_be_wiring_arms_when_gate_passes(monkeypatch):
++    """Same wide stop but +$20 favorable (200 pts ≥ 172.85) → BE arms at entry."""
++    monkeypatch.setitem(sys.modules, "MetaTrader5",
++                        mt5_fake.install(mt5_fake.FakeState()))
++    db = _StubDB()
++    tm = _tm()
++    tm.database = db
++    ex = _StubExecutor()
++    row = _row(entry_price=4327.57, stop_loss=4293.0, initial_stop_loss=4293.0,
++               tp1=4367.0, tp2=4425.0, sl_moved_to_entry=False)
++    tick = types.SimpleNamespace(bid=4347.0, ask=4347.57)  # +$20 favorable
++    tm._handle_row(row, tick, ex, None)
++    assert any(u[1].get("sl_moved_to_entry") is True
++               and u[1].get("stop_loss") == 4327.57 for u in db.updates)
