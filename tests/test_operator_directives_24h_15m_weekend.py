@@ -11,12 +11,14 @@ from utils.helpers import is_weekend_hebron, load_config
 
 
 def test_weekend_detection():
-    sat = datetime(2026, 8, 8, 12, 0)   # Saturday
-    sun = datetime(2026, 8, 9, 12, 0)   # Sunday
-    mon = datetime(2026, 8, 10, 3, 0)   # Monday
-    fri = datetime(2026, 8, 14, 23, 59)  # Friday late
+    sat = datetime(2026, 8, 8, 12, 0)     # Saturday noon -> closed
+    sun_noon = datetime(2026, 8, 9, 12, 0)  # Sunday daytime -> closed
+    sun_night = datetime(2026, 8, 9, 21, 30)  # Sunday after weekly open -> LIVE
+    mon = datetime(2026, 8, 10, 3, 0)     # Monday
+    fri = datetime(2026, 8, 14, 23, 59)   # Friday late (24h rule)
     assert is_weekend_hebron(sat) is True
-    assert is_weekend_hebron(sun) is True
+    assert is_weekend_hebron(sun_noon) is True
+    assert is_weekend_hebron(sun_night) is False
     assert is_weekend_hebron(mon) is False
     assert is_weekend_hebron(fri) is False
 
