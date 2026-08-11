@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gold AI Signals Dashboard</title>
+<style>
+  :root { --bg:#0f172a; --panel:#111827; --card:#1f2937; --text:#f8fafc; --muted:#94a3b8; --gold:#facc15; --green:#22c55e; --red:#ef4444; --blue:#38bdf8; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: Arial, Tahoma, sans-serif; background:linear-gradient(135deg,#020617,#111827); color:var(--text); }
+  .wrap { max-width:1200px; margin:auto; padding:24px; }
+  .hero { padding:24px; background:rgba(250,204,21,.08); border:1px solid rgba(250,204,21,.25); border-radius:18px; margin-bottom:20px; }
+  h1 { margin:0 0 8px; color:var(--gold); }
+  .muted { color:var(--muted); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; margin:20px 0; }
+  .card { background:rgba(31,41,55,.9); border:1px solid rgba(148,163,184,.18); border-radius:16px; padding:18px; }
+  .card-icon { font-size:24px; } .card-title { color:var(--muted); font-size:13px; margin-top:6px; } .card-value { font-size:28px; font-weight:bold; margin-top:8px; }
+  .panel { background:rgba(17,24,39,.92); border:1px solid rgba(148,163,184,.18); border-radius:18px; padding:18px; margin-top:20px; overflow:hidden; }
+  .table-wrap { overflow:auto; }
+  table { width:100%; border-collapse:collapse; min-width:980px; }
+  th, td { border-bottom:1px solid rgba(148,163,184,.15); padding:10px; text-align:right; white-space:nowrap; }
+  th { color:var(--gold); font-size:13px; background:rgba(250,204,21,.05); }
+  code { direction:ltr; unicode-bidi:bidi-override; color:#c4b5fd; }
+  .badge { display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; font-weight:bold; }
+  .buy,.win { background:rgba(34,197,94,.16); color:#86efac; } .sell,.loss { background:rgba(239,68,68,.16); color:#fca5a5; } .open { background:rgba(56,189,248,.16); color:#7dd3fc; } .neutral { background:rgba(148,163,184,.16); color:#cbd5e1; }
+  .pos { color:#86efac; font-weight:bold; } .neg { color:#fca5a5; font-weight:bold; } .flat { color:#cbd5e1; }
+  .review { background:rgba(31,41,55,.72); border:1px solid rgba(148,163,184,.15); border-radius:14px; padding:14px; margin:10px 0; }
+  .review-head { color:#fca5a5; font-weight:bold; } .review-cause { margin:8px 0; color:#e2e8f0; }
+  .empty,.empty-box { color:var(--muted); text-align:center; padding:20px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <h1>🏆 Gold AI Signals Dashboard</h1>
+      <div class="muted">Generated at 2026-08-10 08:05 UTC · XAU/USD</div>
+    </div>
+    <div class="grid">
+        <div class="card">
+          <div class="card-icon">📊</div>
+          <div class="card-title">Total Trades</div>
+          <div class="card-value">0</div>
+        </div>
+        
+
+        <div class="card">
+          <div class="card-icon">🟡</div>
+          <div class="card-title">Open</div>
+          <div class="card-value">0</div>
+        </div>
+        
+
+        <div class="card">
+          <div class="card-icon">✅</div>
+          <div class="card-title">Win Rate</div>
+          <div class="card-value">0.0%</div>
+        </div>
+        
+
+        <div class="card">
+          <div class="card-icon">💰</div>
+          <div class="card-title">Net Points</div>
+          <div class="card-value">+0</div>
+        </div>
+        
+
+        <div class="card">
+          <div class="card-icon">⚖️</div>
+          <div class="card-title">Profit Factor</div>
+          <div class="card-value">0.0</div>
+        </div>
+        
+
+        <div class="card">
+          <div class="card-icon">🎯</div>
+          <div class="card-title">Avg Confidence</div>
+          <div class="card-value">0.0%</div>
+        </div>
+        </div>
+    <div class="panel">
+      <h2>📊 Latest Trades</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Entry</th><th>Current</th><th>SL</th><th>TP1</th><th>TP2</th><th>PnL</th><th>Conf</th><th>Mode</th><th>Created</th></tr></thead>
+        <tbody><tr><td colspan='12' class='empty'>No trades found</td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,1710 @@
+{
+  "report_date": "2026-08-11",
+  "total_signals": 0,
+  "new_trades": 0,
+  "closed_trades": 0,
+  "winning_trades": 0,
+  "losing_trades": 0,
+  "daily_pnl": 0.0,
+  "win_rate": 0.0,
+  "market_summary": "Generated from SmartSignal closed/open trades.",
+  "technical_summary": "PF=0 | Best=0 | Worst=0",
+  "recommendations": "Sample is small; keep paper trading before judging performance.",
+  "report_text": "📊 <b>SmartSignal — Daily Summary</b>\n━━━━━━━━━━━━━━━━━━━━━\n📅 2026-08-11 (Asia/Hebron)\n\n📊 <b>Performance (today)</b>\n• Trades: 0 (✅ 0 · ❌ 0 · ➖ 0 · 🔄 0 · ⏳ 0 pending, no P&L)\n• Win rate: 0%\n• Closed Net: +0 pts (+0.0$)\n\n🏁 <b>Head-to-Head (points)</b>\nHead-to-head (XAU/USD): Level by 0 pts\nAnalyst +0 pts | System +0 pts\nSystem placed no order on this symbol today.\n\n📌 <b>Management Brief</b>\n• Priority: NORMAL\n• day-map loop stable enough for controlled monitoring\n• Next move: Keep current map discipline and verify the next sample before changing thresholds again.\n\n🧭 <b>Operator Focus</b>\n• No urgent operator pain-point stands out from the latest loop; continue controlled monitoring.\n\n📕 <b>Closed Trades:</b> none today\n\n🔄 <b>Open Trades:</b> none\n\n⚠️ Paper-trading only • Educational\n━━━━━━━━━━━━━━━━━━━━━",
+  "stats_json": {
+    "total": 0,
+    "wins": 0,
+    "losses": 0,
+    "breakeven": 0,
+    "open": 0,
+    "pending": 0,
+    "win_rate": 0,
+    "net_points": 0,
+    "best_trade": 0,
+    "worst_trade": 0,
+    "avg_win": 0,
+    "avg_loss": 0,
+    "profit_factor": 0,
+    "gross_profit": 0,
+    "gross_loss": 0,
+    "by_direction": {
+      "BUY": {
+        "count": 0,
+        "net": 0.0
+      },
+      "SELL": {
+        "count": 0,
+        "net": 0.0
+      }
+    },
+    "by_agent": {},
+    "by_session": {},
+    "by_instrument": {},
+    "recommendations": [
+      "Sample is small; keep paper trading before judging performance."
+    ],
+    "rr_efficiency": {
+      "sample": 0
+    },
+    "session_breakdown": {},
+    "news_proximity": {},
+    "regime_fit": {},
+    "day_map_execution": {
+      "tracked_trade_count": 0,
+      "scenario_count": 0,
+      "role_breakdown": {},
+      "scenario_metrics": {
+        "main_worked_count": 0,
+        "add_needed_count": 0,
+        "starter_survived_alone_count": 0,
+        "day_map_failed_count": 0,
+        "map_changed_cancelled_count": 0
+      }
+    },
+    "analyst_overlap": {
+      "symbol": "XAU/USD",
+      "labels_considered": 0,
+      "matched_labels": 0,
+      "partial_matches": 0,
+      "missed_labels": 0,
+      "extra_bot_setups": 100,
+      "match_rate_pct": 0.0,
+      "coverage_rate_pct": 0.0,
+      "direction_match_rate_pct": 0.0,
+      "setup_type_match_rate_pct": 0.0,
+      "poi_type_match_rate_pct": 0.0,
+      "avg_entry_distance_points": null,
+      "insight_breakdown": {
+        "NO_ANALYST_LABEL": 100
+      },
+      "top_missed_reasons": [
+        {
+          "reason_code": "NO_ANALYST_LABEL",
+          "count": 100
+        }
+      ],
+      "setup_type_insights": {},
+      "selection_role_insights": {},
+      "comparisons": [],
+      "extra_setup_records": [
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786379400::ORDER_BLOCK_PULLBACK::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786379400::ORDER_BLOCK_PULLBACK::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "ORDER_BLOCK_PULLBACK",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4332.65
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786398300::ORDER_BLOCK_PULLBACK::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786398300::ORDER_BLOCK_PULLBACK::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "ORDER_BLOCK_PULLBACK",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4376.55
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786401900::FAILED_RECLAIM_CONTINUATION::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786401900::FAILED_RECLAIM_CONTINUATION::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "FAILED_RECLAIM_CONTINUATION",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4394.0
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786401900::LIQUIDITY_REVERSAL::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786401900::LIQUIDITY_REVERSAL::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4394.0
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786380300::ORDER_BLOCK_PULLBACK::2",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786380300::ORDER_BLOCK_PULLBACK::2",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "ORDER_BLOCK_PULLBACK",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4323.84
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786401900::LIQUIDITY_REVERSAL::2",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786401900::LIQUIDITY_REVERSAL::2",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4355.94
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786401000::LIQUIDITY_REVERSAL::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786401000::LIQUIDITY_REVERSAL::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4391.52
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786394700::ORDER_BLOCK_PULLBACK::3",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786394700::ORDER_BLOCK_PULLBACK::3",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "ORDER_BLOCK_PULLBACK",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4358.99
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786380300::ORDER_BLOCK_PULLBACK::3",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786380300::ORDER_BLOCK_PULLBACK::3",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "ORDER_BLOCK_PULLBACK",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4323.84
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786398300::FAILED_RECLAIM_CONTINUATION::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786398300::FAILED_RECLAIM_CONTINUATION::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "FAILED_RECLAIM_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4376.55
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786380300::CONTINUATION_BREAKDOWN::3",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786380300::CONTINUATION_BREAKDOWN::3",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "CONTINUATION_BREAKDOWN",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4323.84
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786394700::CONTINUATION_BREAKDOWN::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786394700::CONTINUATION_BREAKDOWN::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "CONTINUATION_BREAKDOWN",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4358.99
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786398300::CONTINUATION_BREAKDOWN::5",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786398300::CONTINUATION_BREAKDOWN::5",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "CONTINUATION_BREAKDOWN",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4370.26
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786398300::STRUCTURE_CONTINUATION::5",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786398300::STRUCTURE_CONTINUATION::5",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "STRUCTURE_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4370.26
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786379400::ORDER_BLOCK_PULLBACK::2",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786379400::ORDER_BLOCK_PULLBACK::2",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "ORDER_BLOCK_PULLBACK",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4332.65
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786396500::CONTINUATION_BREAKDOWN::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786396500::CONTINUATION_BREAKDOWN::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "CONTINUATION_BREAKDOWN",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4361.39
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786398300::FAILED_RECLAIM_CONTINUATION::5",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786398300::FAILED_RECLAIM_CONTINUATION::5",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "FAILED_RECLAIM_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4370.26
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786396500::STRUCTURE_CONTINUATION::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786396500::STRUCTURE_CONTINUATION::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "STRUCTURE_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4361.39
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786383000::CONTINUATION_BREAKDOWN::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786383000::CONTINUATION_BREAKDOWN::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "CONTINUATION_BREAKDOWN",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4337.91
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786396500::FAILED_RECLAIM_CONTINUATION::5",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786396500::FAILED_RECLAIM_CONTINUATION::5",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "FAILED_RECLAIM_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4361.39
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786379400::CONTINUATION_BREAKDOWN::2",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786379400::CONTINUATION_BREAKDOWN::2",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "CONTINUATION_BREAKDOWN",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4332.65
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786396500::STRUCTURE_CONTINUATION::5",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786396500::STRUCTURE_CONTINUATION::5",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "STRUCTURE_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4361.9
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786383000::STRUCTURE_CONTINUATION::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786383000::STRUCTURE_CONTINUATION::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "STRUCTURE_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4337.91
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::now::CONTINUATION_BREAKDOWN::5",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::now::CONTINUATION_BREAKDOWN::5",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "CONTINUATION_BREAKDOWN",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4340.68
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786393800::FAILED_RECLAIM_CONTINUATION::5",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786393800::FAILED_RECLAIM_CONTINUATION::5",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "FAILED_RECLAIM_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4358.9
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786393800::STRUCTURE_CONTINUATION::5",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786393800::STRUCTURE_CONTINUATION::5",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "STRUCTURE_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4359.55
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::now::STRUCTURE_CONTINUATION::5",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::now::STRUCTURE_CONTINUATION::5",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "STRUCTURE_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4340.68
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::now::CONTINUATION_BREAKDOWN::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::now::CONTINUATION_BREAKDOWN::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "CONTINUATION_BREAKDOWN",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4340.68
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::now::STRUCTURE_CONTINUATION::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::now::STRUCTURE_CONTINUATION::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "STRUCTURE_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4340.68
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786388400::STRUCTURE_CONTINUATION::5",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786388400::STRUCTURE_CONTINUATION::5",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "STRUCTURE_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4354.38
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786388400::FAILED_RECLAIM_CONTINUATION::5",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786388400::FAILED_RECLAIM_CONTINUATION::5",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "FAILED_RECLAIM_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4354.38
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786388400::LIQUIDITY_REVERSAL::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786388400::LIQUIDITY_REVERSAL::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4359.42
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786388400::LIQUIDITY_REVERSAL::2",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786388400::LIQUIDITY_REVERSAL::2",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4339.32
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786362300::LIQUIDITY_REVERSAL::3",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786362300::LIQUIDITY_REVERSAL::3",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4350.68
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786383000::LIQUIDITY_REVERSAL::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786383000::LIQUIDITY_REVERSAL::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4348.09
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786383900::STRUCTURE_CONTINUATION::5",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786383900::STRUCTURE_CONTINUATION::5",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "STRUCTURE_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4348.66
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786362300::STRUCTURE_CONTINUATION::3",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786362300::STRUCTURE_CONTINUATION::3",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "STRUCTURE_CONTINUATION",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4350.68
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786383000::LIQUIDITY_REVERSAL::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786383000::LIQUIDITY_REVERSAL::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4339.32
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786367700::ORDER_BLOCK_PULLBACK::3",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786367700::ORDER_BLOCK_PULLBACK::3",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "ORDER_BLOCK_PULLBACK",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4342.49
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786377600::ORDER_BLOCK_PULLBACK::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786377600::ORDER_BLOCK_PULLBACK::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "ORDER_BLOCK_PULLBACK",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4335.08
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::now::STRUCTURE_CONTINUATION::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::now::STRUCTURE_CONTINUATION::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "STRUCTURE_CONTINUATION",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4337.7
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786120200::ORDER_BLOCK_PULLBACK::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786120200::ORDER_BLOCK_PULLBACK::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "ORDER_BLOCK_PULLBACK",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4362.13
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786381200::STRUCTURE_CONTINUATION::5",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786381200::STRUCTURE_CONTINUATION::5",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "STRUCTURE_CONTINUATION",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4328.57
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786367700::CONTINUATION_BREAKDOWN::3",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786367700::CONTINUATION_BREAKDOWN::3",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "CONTINUATION_BREAKDOWN",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4342.49
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786377600::FAILED_RECLAIM_CONTINUATION::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786377600::FAILED_RECLAIM_CONTINUATION::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "FAILED_RECLAIM_CONTINUATION",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4335.08
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786363200::ORDER_BLOCK_PULLBACK::2",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786363200::ORDER_BLOCK_PULLBACK::2",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "ORDER_BLOCK_PULLBACK",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4348.34
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786120200::CONTINUATION_BREAKDOWN::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786120200::CONTINUATION_BREAKDOWN::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "CONTINUATION_BREAKDOWN",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4362.13
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::now::FAILED_RECLAIM_CONTINUATION::5",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::now::FAILED_RECLAIM_CONTINUATION::5",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "FAILED_RECLAIM_CONTINUATION",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4337.7
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::now::STRUCTURE_CONTINUATION::5",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::now::STRUCTURE_CONTINUATION::5",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "STRUCTURE_CONTINUATION",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4337.7
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786372200::ORDER_BLOCK_PULLBACK::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786372200::ORDER_BLOCK_PULLBACK::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "ORDER_BLOCK_PULLBACK",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4336.93
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786343400::LIQUIDITY_REVERSAL::2",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786343400::LIQUIDITY_REVERSAL::2",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4322.97
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786372200::FAILED_RECLAIM_CONTINUATION::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786372200::FAILED_RECLAIM_CONTINUATION::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "FAILED_RECLAIM_CONTINUATION",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4336.93
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786371300::FAILED_RECLAIM_CONTINUATION::5",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786371300::FAILED_RECLAIM_CONTINUATION::5",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "FAILED_RECLAIM_CONTINUATION",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4337.7
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786371300::STRUCTURE_CONTINUATION::5",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786371300::STRUCTURE_CONTINUATION::5",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "STRUCTURE_CONTINUATION",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4337.7
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786371300::LIQUIDITY_REVERSAL::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786371300::LIQUIDITY_REVERSAL::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4329.88
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786371300::LIQUIDITY_REVERSAL::2",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786371300::LIQUIDITY_REVERSAL::2",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4337.7
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786346100::LIQUIDITY_REVERSAL::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786346100::LIQUIDITY_REVERSAL::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4329.4
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786371300::LIQUIDITY_REVERSAL::5",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786371300::LIQUIDITY_REVERSAL::5",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4337.7
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786346100::FAILED_RECLAIM_CONTINUATION::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786346100::FAILED_RECLAIM_CONTINUATION::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "FAILED_RECLAIM_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4329.4
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786371300::FAILED_RECLAIM_CONTINUATION::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786371300::FAILED_RECLAIM_CONTINUATION::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "FAILED_RECLAIM_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4329.88
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786366800::LIQUIDITY_REVERSAL::5",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786366800::LIQUIDITY_REVERSAL::5",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4337.7
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786370400::STRUCTURE_CONTINUATION::5",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786370400::STRUCTURE_CONTINUATION::5",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "STRUCTURE_CONTINUATION",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4337.29
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786366800::LIQUIDITY_REVERSAL::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786366800::LIQUIDITY_REVERSAL::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4340.61
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786349700::LIQUIDITY_REVERSAL::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786349700::LIQUIDITY_REVERSAL::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4333.9
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786348800::LIQUIDITY_REVERSAL::2",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786348800::LIQUIDITY_REVERSAL::2",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4336.49
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786348800::FAILED_RECLAIM_CONTINUATION::2",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786348800::FAILED_RECLAIM_CONTINUATION::2",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "FAILED_RECLAIM_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4336.49
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786366800::FAILED_RECLAIM_CONTINUATION::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786366800::FAILED_RECLAIM_CONTINUATION::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "FAILED_RECLAIM_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4340.61
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786349700::CONTINUATION_BREAKDOWN::3",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786349700::CONTINUATION_BREAKDOWN::3",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "CONTINUATION_BREAKDOWN",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4333.9
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786348800::LIQUIDITY_REVERSAL::3::MAIN",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786348800::LIQUIDITY_REVERSAL::3::MAIN",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4339.44
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786348800::LIQUIDITY_REVERSAL::2::ADD",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786348800::LIQUIDITY_REVERSAL::2::ADD",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4336.17
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786365000::LIQUIDITY_REVERSAL::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786365000::LIQUIDITY_REVERSAL::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4343.93
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786343400::ORDER_BLOCK_PULLBACK::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786343400::ORDER_BLOCK_PULLBACK::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "ORDER_BLOCK_PULLBACK",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4326.01
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786349700::ORDER_BLOCK_PULLBACK::3",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786349700::ORDER_BLOCK_PULLBACK::3",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "ORDER_BLOCK_PULLBACK",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4333.9
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786360500::LIQUIDITY_REVERSAL::2",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786360500::LIQUIDITY_REVERSAL::2",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4355.5
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786348800::ORDER_BLOCK_PULLBACK::2",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786348800::ORDER_BLOCK_PULLBACK::2",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "ORDER_BLOCK_PULLBACK",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4336.49
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786352400::ORDER_BLOCK_PULLBACK::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786352400::ORDER_BLOCK_PULLBACK::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "ORDER_BLOCK_PULLBACK",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4344.6
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786358700::CONTINUATION_BREAKDOWN::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786358700::CONTINUATION_BREAKDOWN::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "CONTINUATION_BREAKDOWN",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4359.91
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786358700::LIQUIDITY_REVERSAL::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786358700::LIQUIDITY_REVERSAL::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4337.7
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::2026-08-10T17:45:00Z::CONTINUATION_BREAKDOWN::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::2026-08-10T17:45:00Z::CONTINUATION_BREAKDOWN::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "CONTINUATION_BREAKDOWN",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4359.58
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786358700::LIQUIDITY_REVERSAL::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786358700::LIQUIDITY_REVERSAL::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4359.91
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786358700::LIQUIDITY_REVERSAL::2",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786358700::LIQUIDITY_REVERSAL::2",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4337.7
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::2026-08-10T17:45:00Z::LIQUIDITY_REVERSAL::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::2026-08-10T17:45:00Z::LIQUIDITY_REVERSAL::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4359.58
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::2026-08-10T17:45:00Z::LIQUIDITY_REVERSAL::2",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::2026-08-10T17:45:00Z::LIQUIDITY_REVERSAL::2",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4337.5
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::1786358700::FAILED_RECLAIM_CONTINUATION::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::1786358700::FAILED_RECLAIM_CONTINUATION::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "FAILED_RECLAIM_CONTINUATION",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4359.91
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::SELL::2026-08-10T17:45:00Z::FAILED_RECLAIM_CONTINUATION::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::SELL::2026-08-10T17:45:00Z::FAILED_RECLAIM_CONTINUATION::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "FAILED_RECLAIM_CONTINUATION",
+            "direction": "SELL",
+            "lead_agent": "smc",
+            "entry_price": 4359.58
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::2026-08-10T16:15:00Z::ORDER_BLOCK_PULLBACK::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::2026-08-10T16:15:00Z::ORDER_BLOCK_PULLBACK::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "ORDER_BLOCK_PULLBACK",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4346.23
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::2026-08-10T16:15:00Z::LIQUIDITY_REVERSAL::5::ADD",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::2026-08-10T16:15:00Z::LIQUIDITY_REVERSAL::5::ADD",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4345.85
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::2026-08-10T16:15:00Z::LIQUIDITY_REVERSAL::5::MAIN",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::2026-08-10T16:15:00Z::LIQUIDITY_REVERSAL::5::MAIN",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4349.54
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::2026-08-10T15:45:00Z::LIQUIDITY_REVERSAL::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::2026-08-10T15:45:00Z::LIQUIDITY_REVERSAL::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4342.2
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::2026-08-10T16:15:00Z::FAILED_RECLAIM_CONTINUATION::5::MAIN",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::2026-08-10T16:15:00Z::FAILED_RECLAIM_CONTINUATION::5::MAIN",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "FAILED_RECLAIM_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4349.54
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::2026-08-10T16:15:00Z::FAILED_RECLAIM_CONTINUATION::5::ADD",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::2026-08-10T16:15:00Z::FAILED_RECLAIM_CONTINUATION::5::ADD",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "FAILED_RECLAIM_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4345.86
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786348800::CONTINUATION_BREAKDOWN::2",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786348800::CONTINUATION_BREAKDOWN::2",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "CONTINUATION_BREAKDOWN",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4336.49
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::2026-08-10T15:45:00Z::CONTINUATION_BREAKDOWN::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::2026-08-10T15:45:00Z::CONTINUATION_BREAKDOWN::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "CONTINUATION_BREAKDOWN",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4342.2
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::2026-08-10T15:15:00Z::CONTINUATION_BREAKDOWN::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::2026-08-10T15:15:00Z::CONTINUATION_BREAKDOWN::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "CONTINUATION_BREAKDOWN",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4334.12
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::2026-08-10T15:00:00Z::CONTINUATION_BREAKDOWN::3",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::2026-08-10T15:00:00Z::CONTINUATION_BREAKDOWN::3",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "CONTINUATION_BREAKDOWN",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4335.95
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::2026-08-10T15:45:00Z::FAILED_RECLAIM_CONTINUATION::1",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::2026-08-10T15:45:00Z::FAILED_RECLAIM_CONTINUATION::1",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "FAILED_RECLAIM_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4342.2
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::1786352400::FAILED_RECLAIM_CONTINUATION::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::1786352400::FAILED_RECLAIM_CONTINUATION::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "FAILED_RECLAIM_CONTINUATION",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4344.6
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::2026-08-10T15:15:00Z::ORDER_BLOCK_PULLBACK::4",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::2026-08-10T15:15:00Z::ORDER_BLOCK_PULLBACK::4",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "ORDER_BLOCK_PULLBACK",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4334.12
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::2026-08-10T15:00:00Z::ORDER_BLOCK_PULLBACK::3",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::2026-08-10T15:00:00Z::ORDER_BLOCK_PULLBACK::3",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "ORDER_BLOCK_PULLBACK",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4335.95
+          }
+        },
+        {
+          "id": "EXTRA_SMC::XAU/USD::15m::BUY::2026-08-10T15:15:00Z::LIQUIDITY_REVERSAL::5",
+          "analyst_label_id": null,
+          "setup_candidate_id": "SMC::XAU/USD::15m::BUY::2026-08-10T15:15:00Z::LIQUIDITY_REVERSAL::5",
+          "symbol": "XAU/USD",
+          "match_score": 0.0,
+          "classification": "EXTRA_BOT_SETUP",
+          "reason_code": "NO_ANALYST_LABEL",
+          "summary": "Bot saw a setup without a matching analyst label in the comparison window.",
+          "payload": {
+            "setup_type": "LIQUIDITY_REVERSAL",
+            "direction": "BUY",
+            "lead_agent": "smc",
+            "entry_price": 4334.12
+          }
+        }
+      ]
+    },
+    "analyst_scoreboard": {
+      "symbol": "XAU/USD",
+      "analyst_points": 0.0,
+      "analyst_traded": false,
+      "analyst_detail": [],
+      "system_points": 0.0,
+      "system_traded": false,
+      "system_detail": [],
+      "gap_points": 0.0,
+      "verdict": "TIE",
+      "summary": "Analyst and system finished level on captured points."
+    }
+  },
+  "recommendations_json": [
+    "Sample is small; keep paper trading before judging performance."
+  ],
+  "status": "ok",
+  "saved_at": "2026-08-10T22:00:26.160056+00:00"
+}

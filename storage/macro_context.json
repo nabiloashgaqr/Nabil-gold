@@ -1,0 +1,246 @@
+{
+  "source": "yfinance_macro_proxy",
+  "provider": "yfinance",
+  "generated_at": "2026-08-11T09:07:15Z",
+  "freshness": "OK",
+  "update_frequency": "hourly",
+  "quota_policy": {
+    "credits_used_estimate": 0,
+    "daily_estimate_at_hourly": 0,
+    "free_daily_limit": "unlimited",
+    "yfinance_credits": 0,
+    "yfinance_note": "completely free, no API key, no quota"
+  },
+  "dxy_trend": "rising",
+  "usd_trend": "rising",
+  "risk_sentiment": "risk_on",
+  "us10y_trend": "rising",
+  "real_yields_trend": "rising",
+  "fed_tone": "hawkish",
+  "inflation_surprise": "neutral",
+  "oil_trend": "rising",
+  "vix_level": 15.5,
+  "yield_curve_spread": null,
+  "dxy_direct_trend": "flat",
+  "fx_observations": {
+    "EURUSD=X": {
+      "symbol": "EURUSD=X",
+      "description": "EUR/USD",
+      "component": "usd",
+      "usable": true,
+      "first_close": 1.153536,
+      "last_close": 1.153802,
+      "trend_pct": 0.0231,
+      "usd_score": -0.0231,
+      "usd_read": "flat",
+      "data_age_hours": 0.1
+    },
+    "GBPUSD=X": {
+      "symbol": "GBPUSD=X",
+      "description": "GBP/USD",
+      "component": "usd",
+      "usable": true,
+      "first_close": 1.345135,
+      "last_close": 1.350257,
+      "trend_pct": 0.3808,
+      "usd_score": -0.3808,
+      "usd_read": "weaker",
+      "data_age_hours": 0.1
+    },
+    "USDJPY=X": {
+      "symbol": "USDJPY=X",
+      "description": "USD/JPY",
+      "component": "usd",
+      "usable": true,
+      "first_close": 157.705994,
+      "last_close": 159.354996,
+      "trend_pct": 1.0456,
+      "usd_score": 1.0456,
+      "usd_read": "stronger",
+      "data_age_hours": 0.1
+    },
+    "AUDUSD=X": {
+      "symbol": "AUDUSD=X",
+      "description": "AUD/USD",
+      "component": "usd",
+      "usable": true,
+      "first_close": 0.70492,
+      "last_close": 0.705517,
+      "trend_pct": 0.0847,
+      "usd_score": -0.0847,
+      "usd_read": "flat",
+      "data_age_hours": 0.1
+    },
+    "SPY": {
+      "symbol": "SPY",
+      "description": "S&P 500 ETF (risk-on/off proxy)",
+      "component": "risk",
+      "usable": true,
+      "first_close": 764.48999,
+      "last_close": 773.070007,
+      "trend_pct": 1.1223,
+      "usd_score": null,
+      "usd_read": null,
+      "data_age_hours": 13.6
+    }
+  },
+  "yfinance_observations": {
+    "risk_trend_pct": 1.1223,
+    "us10y_trend": "rising",
+    "us10y_trend_trend_pct": 0.8153,
+    "real_yields_trend": "rising",
+    "real_yields_trend_trend_pct": 0.9395,
+    "volatility_index": 15.5,
+    "volatility_index_trend_pct": -2.577,
+    "vix_level": 15.5,
+    "vix_trend_pct": -2.577,
+    "dxy_direct": 99.858,
+    "dxy_direct_trend_pct": 0.1354,
+    "dxy_direct_trend": "flat",
+    "dxy_direct_value": 99.86,
+    "oil_trend": "rising",
+    "oil_trend_trend_pct": 12.8325,
+    "inflation_tips": 106.87,
+    "inflation_tips_trend_pct": -0.1309,
+    "tips_trend_pct": -0.1309,
+    "tips_value": 106.87,
+    "inflation_stip": 100.685,
+    "inflation_stip_trend_pct": 0.0548,
+    "stip_trend_pct": 0.0548,
+    "stip_value": 100.68,
+    "fx_observations": {
+      "EURUSD=X": {
+        "symbol": "EURUSD=X",
+        "description": "EUR/USD",
+        "component": "usd",
+        "usable": true,
+        "first_close": 1.153536,
+        "last_close": 1.153802,
+        "trend_pct": 0.0231,
+        "usd_score": -0.0231,
+        "usd_read": "flat",
+        "data_age_hours": 0.1
+      },
+      "GBPUSD=X": {
+        "symbol": "GBPUSD=X",
+        "description": "GBP/USD",
+        "component": "usd",
+        "usable": true,
+        "first_close": 1.345135,
+        "last_close": 1.350257,
+        "trend_pct": 0.3808,
+        "usd_score": -0.3808,
+        "usd_read": "weaker",
+        "data_age_hours": 0.1
+      },
+      "USDJPY=X": {
+        "symbol": "USDJPY=X",
+        "description": "USD/JPY",
+        "component": "usd",
+        "usable": true,
+        "first_close": 157.705994,
+        "last_close": 159.354996,
+        "trend_pct": 1.0456,
+        "usd_score": 1.0456,
+        "usd_read": "stronger",
+        "data_age_hours": 0.1
+      },
+      "AUDUSD=X": {
+        "symbol": "AUDUSD=X",
+        "description": "AUD/USD",
+        "component": "usd",
+        "usable": true,
+        "first_close": 0.70492,
+        "last_close": 0.705517,
+        "trend_pct": 0.0847,
+        "usd_score": -0.0847,
+        "usd_read": "flat",
+        "data_age_hours": 0.1
+      },
+      "SPY": {
+        "symbol": "SPY",
+        "description": "S&P 500 ETF (risk-on/off proxy)",
+        "component": "risk",
+        "usable": true,
+        "first_close": 764.48999,
+        "last_close": 773.070007,
+        "trend_pct": 1.1223,
+        "usd_score": null,
+        "usd_read": null,
+        "data_age_hours": 13.6
+      }
+    }
+  },
+  "freshness_detail": {
+    "EURUSD=X": {
+      "age_hours": 0.1,
+      "stale": false,
+      "last_candle_time": "2026-08-11T10:00:00+01:00"
+    },
+    "GBPUSD=X": {
+      "age_hours": 0.1,
+      "stale": false,
+      "last_candle_time": "2026-08-11T10:00:00+01:00"
+    },
+    "USDJPY=X": {
+      "age_hours": 0.1,
+      "stale": false,
+      "last_candle_time": "2026-08-11T10:00:00+01:00"
+    },
+    "AUDUSD=X": {
+      "age_hours": 0.1,
+      "stale": false,
+      "last_candle_time": "2026-08-11T10:00:00+01:00"
+    },
+    "SPY": {
+      "age_hours": 13.6,
+      "stale": false,
+      "last_candle_time": "2026-08-10T15:30:00-04:00"
+    },
+    "^TNX": {
+      "age_hours": 14.8,
+      "stale": false,
+      "last_candle_time": "2026-08-10T13:20:00-05:00"
+    },
+    "^FVX": {
+      "age_hours": 14.8,
+      "stale": false,
+      "last_candle_time": "2026-08-10T13:20:00-05:00"
+    },
+    "^VIX": {
+      "age_hours": 1.1,
+      "stale": false,
+      "last_candle_time": "2026-08-11T03:00:00-05:00"
+    },
+    "DX-Y.NYB": {
+      "age_hours": 1.1,
+      "stale": false,
+      "last_candle_time": "2026-08-11T04:00:00-04:00"
+    },
+    "CL=F": {
+      "age_hours": 1.1,
+      "stale": false,
+      "last_candle_time": "2026-08-11T04:00:00-04:00"
+    },
+    "TIP": {
+      "age_hours": 13.6,
+      "stale": false,
+      "last_candle_time": "2026-08-10T15:30:00-04:00"
+    },
+    "STIP": {
+      "age_hours": 13.6,
+      "stale": false,
+      "last_candle_time": "2026-08-10T15:30:00-04:00"
+    }
+  },
+  "stale_symbols": [],
+  "errors": [],
+  "data_quality": {
+    "source": "yfinance",
+    "freshness": "OK",
+    "stale_symbols": 0,
+    "fx_symbols": 5,
+    "macro_symbols": 23,
+    "missing_fields": []
+  }
+}
