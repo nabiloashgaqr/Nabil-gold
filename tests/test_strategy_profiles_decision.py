@@ -9,6 +9,11 @@ BASE_CONFIG = {
         "min_agents_agree": 3,
         "min_consensus_confidence": 72,
         "agent_min_confidence": 70,
+        "two_agent_entry": {
+            "enabled": True,
+            "min_agents_agree": 2,
+            "min_consensus_confidence": 72,
+        },
     },
     "agent_weights": {
         "technical": 0.20,
@@ -20,7 +25,7 @@ BASE_CONFIG = {
 }
 
 
-def test_liquidity_reversal_profile_allows_two_agent_entry_when_smc_leads() -> None:
+def test_liquidity_reversal_two_agents_wait_for_external_confirmation() -> None:
     agent = DecisionAgent(BASE_CONFIG)
     result = agent.decide(
         {
@@ -47,7 +52,8 @@ def test_liquidity_reversal_profile_allows_two_agent_entry_when_smc_leads() -> N
             "daily_bias": {"bias": "BEARISH", "enabled": True},
         }
     )
-    assert result["decision"] == "SELL"
+    assert result["decision"] == "WAIT"
+    assert result["classic"]["two_agent"]["side"] == "SELL"
     assert result["strategy_profile"]["name"] == "liquidity_reversal"
     assert result["classic"]["profile"]["lead_agent"] == "smc"
 

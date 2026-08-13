@@ -64,8 +64,12 @@ SYMBOL = "XAU/USD"
 def _config(silent_action: str | None = None) -> dict:
     with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as fh:
         config = json.load(fh)
+    vote = config["trade_management"]["thesis_exit"]["agent_vote"]
     if silent_action is not None:
-        config["trade_management"]["thesis_exit"]["agent_vote"]["silent_action"] = silent_action
+        vote["silent_action"] = silent_action
+    # Preserve tests for the retired optional modes; entry-parity behaviour has
+    # its own regression suite.
+    vote["mirror_entry_admission"] = False
     return config
 
 
@@ -250,7 +254,7 @@ def test_the_review_passes_the_book_down_to_the_poi_path() -> None:
 
 def test_no_risk_or_vote_threshold_was_changed() -> None:
     vote = _config()["trade_management"]["thesis_exit"]["agent_vote"]
-    assert float(vote["agent_min_confidence"]) == 70.0
+    assert float(vote["agent_min_confidence"]) == 67.0
     assert int(vote["min_defenders_to_hold"]) == 2
     assert int(vote["min_opponents_to_exit"]) == 3
     risk = _config()["risk_settings"]

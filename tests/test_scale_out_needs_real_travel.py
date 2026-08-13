@@ -58,7 +58,9 @@ def _scaling_config() -> dict:
     is the quietest way for a guard to stop guarding anything.
     """
     config = load_config()
-    config["trade_management"]["thesis_exit"]["agent_vote"]["silent_action"] = "SCALE_OUT"
+    vote = config["trade_management"]["thesis_exit"]["agent_vote"]
+    vote["silent_action"] = "SCALE_OUT"
+    vote["mirror_entry_admission"] = False
     return config
 
 

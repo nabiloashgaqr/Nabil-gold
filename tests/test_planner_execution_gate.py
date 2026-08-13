@@ -122,7 +122,7 @@ def test_planner_execution_gate_allows_two_agent_direct_gemini_macro_confirmatio
     assert gate["support_count"] == 2
 
 
-def test_planner_execution_gate_allows_objective_aligned_two_agent_override() -> None:
+def test_objective_alignment_cannot_bypass_shared_two_agent_confirmation() -> None:
     decision = {
         "decision": "BUY",
         "agent_details": {
@@ -142,10 +142,11 @@ def test_planner_execution_gate_allows_objective_aligned_two_agent_override() ->
         },
     }
     gate = ra._planner_execution_gate(decision, _config())
-    assert gate["allow"] is True
-    assert gate["kind"] == "OBJECTIVE_ALIGNED_TWO_AGENT_OVERRIDE"
+    assert gate["allow"] is False
+    assert gate["kind"] == "SHARED_ADMISSION_BLOCKED"
     assert gate["support_count"] == 2
     assert "smc" in gate["support_agents"]
+    assert "macro" not in str(gate.get("path") or "").lower()
 
 
 def test_planner_execution_gate_blocks_without_required_admission() -> None:

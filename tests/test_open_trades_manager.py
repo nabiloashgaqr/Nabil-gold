@@ -11,7 +11,7 @@ sys.path.append(str(ROOT))
 
 from agents.open_trades_manager import OpenTradesManager
 from services.database import DatabaseService
-from utils.helpers import canonical_session_label, load_trades, save_trades
+from utils.helpers import canonical_session_label, load_config, load_trades, save_trades
 
 
 def base_trade(**overrides):
@@ -32,6 +32,12 @@ def base_trade(**overrides):
     }
     trade.update(overrides)
     return trade
+
+
+def _legacy_thesis_manager() -> OpenTradesManager:
+    config = load_config()
+    config["trade_management"]["thesis_exit"]["agent_vote"]["mirror_entry_admission"] = False
+    return OpenTradesManager(config)
 
 
 def _db(tmp_path: Path) -> DatabaseService:
@@ -832,7 +838,7 @@ def test_pending_trade_saves_recent_30m_high_low_from_last_6_candles() -> None:
 
 
 def test_open_sell_trade_can_auto_exit_on_bullish_continuation_reclaim() -> None:
-    manager = OpenTradesManager()
+    manager = _legacy_thesis_manager()
     trade = base_trade(
         type="SELL",
         status="OPEN",
@@ -854,7 +860,7 @@ def test_open_sell_trade_can_auto_exit_on_bullish_continuation_reclaim() -> None
 
 
 def test_open_sell_trade_scales_out_on_opposing_poi_rejection_before_tp1_when_aligned() -> None:
-    manager = OpenTradesManager()
+    manager = _legacy_thesis_manager()
     trade = base_trade(
         type="SELL",
         status="OPEN",
@@ -884,7 +890,7 @@ def test_open_sell_trade_scales_out_on_opposing_poi_rejection_before_tp1_when_al
 
 
 def test_open_sell_trade_closes_on_opposing_poi_rejection_if_not_aligned() -> None:
-    manager = OpenTradesManager()
+    manager = _legacy_thesis_manager()
     trade = base_trade(
         type="SELL",
         status="OPEN",
@@ -913,7 +919,7 @@ def test_open_sell_trade_closes_on_opposing_poi_rejection_if_not_aligned() -> No
 
 
 def test_countertrend_trade_exits_early_when_it_fails_to_follow_through() -> None:
-    manager = OpenTradesManager()
+    manager = _legacy_thesis_manager()
     trade = base_trade(
         type="SELL",
         status="OPEN",

@@ -113,7 +113,7 @@ def test_agent_votes_have_direction_markers():
     text = _capture_signal(decision)
     assert "AGENT VOTES" in text
     # Directional dots present: red for SELL, yellow for WAIT.
-    assert "🔴" in text and "🟡" in text
+    assert "🔴" in text and "⚪" in text
 
 
 def test_signal_includes_trade_management_rule():
@@ -469,8 +469,11 @@ def test_votes_distinguish_qualified_agents_and_opposing_macro():
         },
     })
     text = "\n".join(lines)
-    assert text.count("✅") == 3
-    assert "below 70% threshold" in text
+    # Fixed color contract: every BUY stays green, SELL red, WAIT white;
+    # qualification is text and never replaces direction with a check mark.
+    assert text.count("🟢") == 4
+    assert "✅" not in text
+    assert "below 70% threshold" not in text
     assert "opposes this BUY" in text
 
 
