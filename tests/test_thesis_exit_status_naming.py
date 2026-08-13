@@ -35,7 +35,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def _config() -> dict:
     with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as fh:
-        return json.load(fh)
+        config = json.load(fh)
+    # This file tests legacy automatic-status naming, not the new admission
+    # policy that decides whether an exit is allowed.
+    config["trade_management"]["thesis_exit"]["agent_vote"]["mirror_entry_admission"] = False
+    return config
 
 
 def _bullish_reclaim() -> list[dict]:

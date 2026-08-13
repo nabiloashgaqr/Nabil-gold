@@ -26,11 +26,12 @@ def test_analyze_validation_skips_live_twelvedata_quota_test(monkeypatch, capsys
 
 
 def test_trade_update_extremes_prefer_latest_5m_payload():
+    """Extremes read the 5m series (all four candles available)."""
     import scripts.run_analysis as ra
 
     high, low = ra._latest_candle_extremes({
         "current_price": 100.0,
-        "data": [{"high": 999.0, "low": 1.0}],  # primary 15m fallback, should be ignored
+        "data": [{"high": 999.0, "low": 1.0}],  # fallback, should be ignored
         "timeframes": {
             "5m": {"data": [
                 {"high": 101.0, "low": 99.0},

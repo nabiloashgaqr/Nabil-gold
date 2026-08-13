@@ -52,7 +52,11 @@ def _config(silent_action: str = "SCALE_OUT") -> dict:
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     with open(os.path.join(root, "config.json"), encoding="utf-8") as fh:
         config = json.load(fh)
-    config["trade_management"]["thesis_exit"]["agent_vote"]["silent_action"] = silent_action
+    vote = config["trade_management"]["thesis_exit"]["agent_vote"]
+    vote["silent_action"] = silent_action
+    # These legacy-mechanism tests intentionally exercise the pre-parity
+    # candle/scale-out modes; production parity is covered separately.
+    vote["mirror_entry_admission"] = False
     return config
 
 
