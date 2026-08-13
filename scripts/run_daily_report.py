@@ -10,6 +10,13 @@
 
 from __future__ import annotations
 
+# --- VPS: load .env if present (real env vars ALWAYS win over .env) ---
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv()  # override=False: task-wrapper vars take precedence
+except Exception:
+    pass
+
 import json
 import logging
 import os
@@ -759,7 +766,7 @@ def main() -> None:
                     logger.warning("🧠 Gemini daily review unavailable: %s", daily_review.get("summary") or daily_review.get("reason"))
         except Exception: logger.exception("Gemini daily report failed")
 
-        lines.append("⚠️ Paper-trading only • Educational")
+        lines.append("⚠️ Educational use only • Not financial advice")
         lines.append("━━━━━━━━━━━━━━━━━━━━━")
 
         message = "\n".join(lines)

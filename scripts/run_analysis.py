@@ -6,6 +6,13 @@ Runs every 5 minutes via cron-job.org/GitHub Actions. Fetches market data, runs 
 
 from __future__ import annotations
 
+# --- VPS: load .env if present (real env vars ALWAYS win over .env) ---
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv()  # override=False: task-wrapper vars take precedence
+except Exception:
+    pass
+
 import logging
 import os
 import sys
@@ -20,16 +27,18 @@ from typing import Any, Dict, List
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.classical_agent import ClassicalAgent
+from agents.auction_flow_agent import AuctionFlowAgent
+from agents.unified_trend_agent import UnifiedTrendAgent
 from agents.decision_agent import DecisionAgent
 from agents.daily_bias_agent import DailyBiasAgent
-from agents.multitimeframe_agent import MultiTimeframeAgent
 from agents.macro_fundamental_agent import MacroFundamentalAgent
 from agents.news_risk_agent import NewsRiskAgent
 from agents.price_action_agent import PriceActionAgent
 from agents.risk_management_agent import RiskManagementAgent
 from agents.smc_agent import SMCAgent
-from agents.technical_agent import TechnicalAgent
+from services.map_quality import bounded_map_display_quality
 from services.market_snapshot import build_market_snapshot
+from services.shared_market_data import publish_shared_market_data
 from agents.trading_session_agent import TradingSessionAgent
 from agents.open_trades_manager import OpenTradesManager
 from services.database import DatabaseService
@@ -46,12 +55,27 @@ from services.day_map_sanity import DayMapSanityService
 from services.setup_memory import SetupMemoryService
 from services.setup_performance import SetupPerformanceService
 from services.session_planner import SessionPlannerService
+from services.thesis_consensus import evaluate_directional_admission
 from utils.helpers import load_config, setup_logging, get_agent_weights
 from utils import trading_rules as _tr
 from utils.instruments import enabled_instruments, config_for_instrument, normalize_symbol, price_to_points, points_to_price
 
 setup_logging()
 logger = logging.getLogger(__name__)
+
+CORE_VOTING_AGENTS = ("unified_trend", "classical", "smc", "price_action", "auction_flow")
+LEGACY_AGENT_ALIASES = {"unified_trend": "technical", "auction_flow": "multitimeframe"}
+
+
+def _book_agent(book: Dict[str, Any] | None, name: str) -> tuple[str, Dict[str, Any]]:
+    """Read the new book; accept old snapshots only for historical replay."""
+    payload = book if isinstance(book, dict) else {}
+    value = payload.get(name)
+    if isinstance(value, dict):
+        return name, value
+    legacy = LEGACY_AGENT_ALIASES.get(name)
+    value = payload.get(legacy) if legacy else None
+    return (str(legacy), value) if isinstance(value, dict) else (name, {})
 
 
 def synthetic_timeframe_sources(data: Dict[str, Any]) -> list[str]:
@@ -680,6 +704,63 @@ def _unreachable_pending_violation(
     )
 
 
+def _queue_opposite_exposure_exit(
+    decision: Dict[str, Any],
+    open_trades: List[Dict[str, Any]],
+    database: DatabaseService,
+    config: Dict[str, Any],
+) -> List[str]:
+    """Queue broker-first closure before an accepted opposite entry.
+
+    Called only at the final order boundary, after every admission/validation
+    gate has passed. The new row carries dependencies so TickManager cannot
+    place it until the old MT5 positions have actually disappeared.
+    """
+    guard = (config.get("opposite_entry_guard") or {}) if isinstance(config, dict) else {}
+    if not bool(guard.get("enabled", True)):
+        return []
+    side = str(decision.get("decision") or "").upper()
+    symbol = normalize_symbol(decision.get("symbol") or config.get("symbol", "XAU/USD"))
+    if side not in {"BUY", "SELL"}:
+        return []
+    opposite = "SELL" if side == "BUY" else "BUY"
+    live_ids: List[str] = []
+    pending_ids: List[str] = []
+    for trade in open_trades or []:
+        if normalize_symbol(trade.get("symbol") or symbol) != symbol:
+            continue
+        trade_side = str(trade.get("type") or trade.get("side") or "").upper()
+        if trade_side != opposite:
+            continue
+        status = str(trade.get("status") or "").upper()
+        tid = str(trade.get("id") or "")
+        if not tid:
+            continue
+        if status in {"OPEN", "PARTIAL", "TP1_HIT"}:
+            database.update_trade(tid, {
+                "requested_exit": True,
+                "requested_exit_reason": "OPPOSITE_ENTRY_FLIP",
+                "flip_target_side": side,
+                "flip_target_trade_id": decision.get("trade_id"),
+            })
+            live_ids.append(tid)
+        elif status == "PENDING":
+            database.update_trade(tid, {
+                "status": "CANCELLED", "result": "CANCELLED",
+                "reasons": [f"Cancelled before accepted opposite {side} entry"],
+                "last_updated": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            })
+            pending_ids.append(tid)
+    if live_ids:
+        decision["opposite_exit_required"] = True
+        decision["opposite_trade_ids"] = live_ids
+        decision.setdefault("reasons", []).append(
+            f"Broker-first flip guard: close {len(live_ids)} live {opposite} position(s) before {side}")
+    if pending_ids:
+        decision["opposite_pending_cancelled_ids"] = pending_ids
+    return live_ids
+
+
 def _counter_to_live_winner_violation(
     decision: Dict[str, Any],
     config: Dict[str, Any],
@@ -966,13 +1047,13 @@ def _planner_display_confidence(
     direction: str,
 ) -> float:
     sig_cfg = (config.get("signal_requirements") or {}) if isinstance(config, dict) else {}
-    min_agent_conf = float(sig_cfg.get("agent_min_confidence", 70) or 70)
+    min_agent_conf = float(sig_cfg.get("agent_min_confidence", 67) or 67)
     details = base_decision.get("agent_details") or {}
     support_confidences: List[float] = []
     oppose_confidences: List[float] = []
-    for key in ["technical", "classical", "smc", "price_action", "multitimeframe"]:
-        detail = (details or {}).get(key)
-        if not isinstance(detail, dict):
+    for key in CORE_VOTING_AGENTS:
+        used_key, detail = _book_agent(details, key)
+        if not detail:
             continue
         agent_direction = str(detail.get("direction") or "WAIT").upper()
         agent_confidence = _safe_float(detail.get("confidence"), 0.0)
@@ -1332,14 +1413,8 @@ def _planner_context_confirmation(decision: Dict[str, Any], config: Dict[str, An
 
 
 def _planner_execution_gate(decision: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
+    """Use the exact shared Entry/Thesis admission at the order boundary."""
     side = str(decision.get("decision") or "").upper()
-    # The planner is a separate admission path: it maps a direction in advance
-    # and waits at a level, rather than reacting to the current bar. The live
-    # consensus therefore often reads WAIT while a confirmed map exists, and
-    # falling back to the mapped bias is what lets those pending orders be
-    # placed at all. Without it a READY map is published every cycle and no
-    # order is ever created, because the gate closes before the agents are
-    # even counted. The count below still has to pass on its own.
     if side not in {"BUY", "SELL"}:
         plan = decision.get("session_plan") or {}
         if isinstance(plan, dict) and plan.get("plan_ready"):
@@ -1347,148 +1422,81 @@ def _planner_execution_gate(decision: Dict[str, Any], config: Dict[str, Any]) ->
     if side not in {"BUY", "SELL"}:
         return {"allow": False, "reason": "no approved directional admission"}
 
-    sig_cfg = (config.get("signal_requirements") or {}) if isinstance(config, dict) else {}
-    min_agents = int(sig_cfg.get("min_agents_agree", 3) or 3)
-    min_agent_conf = float(sig_cfg.get("agent_min_confidence", 70) or 70)
-    details = decision.get("agent_details") or {}
-    support_count = 0
-    support_agents: list[str] = []
-    oppose_agents: list[str] = []
-    for key in ["technical", "classical", "smc", "price_action", "multitimeframe"]:
-        detail = (details or {}).get(key)
-        if not isinstance(detail, dict):
-            continue
-        direction = str(detail.get("direction") or "WAIT").upper()
-        confidence = _safe_float(detail.get("confidence"), 0.0)
-        if confidence < min_agent_conf:
-            continue
-        if direction == side:
-            support_count += 1
-            support_agents.append(key)
-        elif direction in {"BUY", "SELL"}:
-            oppose_agents.append(key)
+    details = dict(decision.get("agent_details") or {})
+    external_mode = None
+    confirm_source = str(decision.get("confirm_source") or "").lower()
+    confirm_conf = _safe_float(decision.get("confirm_confidence"), 0.0)
+    if confirm_source == "macro":
+        details["macro_fundamental"] = {"direction": side, "confidence": confirm_conf}
+        external_mode = "direct"
+    elif confirm_source == "gemini":
+        details["gemini"] = {"direction": side, "confidence": confirm_conf, "available": True}
+        external_mode = "direct"
+    context_confirmation = _planner_context_confirmation(decision, config, side)
+    if context_confirmation.get("allow"):
+        source = str(context_confirmation.get("source") or "").lower()
+        confidence = _safe_float(context_confirmation.get("confidence"), 0.0)
+        if source == "macro":
+            details["macro_fundamental"] = {"direction": side, "confidence": confidence}
+        elif source == "gemini":
+            details["gemini"] = {"direction": side, "confidence": confidence, "available": True}
+        external_mode = external_mode or "context"
+    # The shared evaluator accepts these canonical external-confirmation keys.
+    for candidate in (
+        decision.get("gemini_review"), decision.get("gemini_macro_review"),
+        decision.get("gemini_analysis"),
+    ):
+        if "gemini" not in details and isinstance(candidate, dict) and candidate.get("available"):
+            details["gemini"] = candidate
+            break
+    admission = evaluate_directional_admission(side, details, config)
 
-    # Opposition used to be reported here and enforced only by the planner,
-    # on the grounds that a second veto would be redundant. It is not: the
-    # planner tests opposition when it *builds* a map, while this gate is the
-    # last point that sees the agents as they are right now, immediately
-    # before an order is created. Those are different moments, and two paths
-    # exploit the gap:
-    #
-    #   - a revived map (_revive_recent_ready_plan) replays a snapshot built
-    #     hours earlier and never re-tests the current agent split;
-    #   - a WAIT cycle falls back to the plan's session_bias above, so the
-    #     agents are re-counted against a direction the live consensus did
-    #     not choose.
-    #
-    # The result was an admission printed as "3 qualified agents aligned"
-    # while three qualified agents were arguing the other way. Apply the same
-    # ceiling the planner uses, at the moment it actually matters.
     planner_cfg = (config.get("session_planner") or {}) if isinstance(config, dict) else {}
-    # Default to the planner's own ceiling of 1. `or 0` would be wrong here:
-    # a config without a session_planner block would collapse the limit to
-    # zero and refuse any dissent at all.
-    _raw_max_opposing = planner_cfg.get("max_opposing_agents_for_ready", 1)
     try:
-        max_opposing = int(_raw_max_opposing)
+        max_opposing = int(planner_cfg.get("max_opposing_agents_for_ready", 1))
     except (TypeError, ValueError):
         max_opposing = 1
-    oppose_count = len(oppose_agents)
+    oppose_count = int(admission.get("opposition_count", 0) or 0)
     if oppose_count > max_opposing:
         return {
+            **admission,
             "allow": False,
             "kind": "OPPOSED_BY_LIVE_AGENTS",
-            "support_count": support_count,
-            "support_agents": support_agents,
-            "oppose_agents": oppose_agents,
+            "support_agents": list(admission.get("supporters") or []),
+            "oppose_agents": list(admission.get("opponents") or []),
             "oppose_count": oppose_count,
             "reason": (
                 f"{oppose_count} qualified agents oppose the mapped {side} "
-                f"(limit {max_opposing}): {', '.join(oppose_agents)}"
+                f"(limit {max_opposing})"
             ),
         }
-
-    if support_count >= min_agents:
+    if admission.get("allow"):
+        path = str(admission.get("path") or "SHARED_ADMISSION")
+        if path == "THREE_AGENT_CONSENSUS":
+            kind = "THREE_AGENT_ADMISSION"
+        elif path.startswith("TWO_AGENT_") and external_mode == "direct":
+            kind = "TWO_AGENT_CONFIRMED_ADMISSION"
+        elif path.startswith("TWO_AGENT_"):
+            kind = "TWO_AGENT_CONTEXT_CONFIRMED_ADMISSION"
+        else:
+            kind = path
         return {
-            "allow": True,
-            "kind": "THREE_AGENT_ADMISSION",
-            "support_count": support_count,
-            "support_agents": support_agents,
-            "oppose_agents": oppose_agents,
-            "reason": f"{support_count} qualified agents aligned with the mapped direction",
+            **admission,
+            "kind": kind,
+            "support_agents": list(admission.get("supporters") or []),
+            "oppose_agents": list(admission.get("opponents") or []),
+            "oppose_count": oppose_count,
+            "reason": str(admission.get("reason") or "shared admission passed"),
         }
-
-    confirm_source = str(decision.get("confirm_source") or "").lower()
-    confirm_conf = _safe_float(decision.get("confirm_confidence"), 0.0)
-    if support_count >= 2 and confirm_source in {"macro", "gemini"}:
-        return {
-            "allow": True,
-            "kind": "TWO_AGENT_CONFIRMED_ADMISSION",
-            "support_count": support_count,
-            "support_agents": support_agents,
-            "confirm_source": confirm_source,
-            "confirm_confidence": round(confirm_conf, 1),
-            "reason": f"{support_count} qualified agents + {confirm_source} confirmation",
-        }
-
-    direct_context_confirmation = _planner_context_confirmation(decision, config, side)
-    if support_count >= 2 and direct_context_confirmation.get("allow"):
-        return {
-            "allow": True,
-            "kind": "TWO_AGENT_CONTEXT_CONFIRMED_ADMISSION",
-            "support_count": support_count,
-            "support_agents": support_agents,
-            "confirm_source": direct_context_confirmation.get("source"),
-            "confirm_confidence": direct_context_confirmation.get("confidence"),
-            "reason": f"{support_count} qualified agents + {direct_context_confirmation.get('reason')}",
-        }
-
-    plan = decision.get("session_plan") or {}
-    if isinstance(plan, dict):
-        objective_direction = str(plan.get("market_objective_direction") or "").upper()
-        objective_alignment = str(plan.get("objective_alignment") or "").upper()
-        scenario_type = str(plan.get("scenario_type") or "").upper()
-        poi_classification = str(plan.get("poi_classification") or "").upper()
-        structure_trend = str(plan.get("structure_trend") or "").upper()
-        recent_sweep = plan.get("recent_sweep") or {}
-        sweep_type = str((recent_sweep or {}).get("type") or "")
-        aligned_sweep = (side == "BUY" and sweep_type == "sell_side") or (side == "SELL" and sweep_type == "buy_side")
-        structure_aligned = structure_trend == ("BULLISH" if side == "BUY" else "BEARISH")
-        objective_aligned = objective_direction == side and objective_alignment == "ALIGNED_WITH_MARKET_OBJECTIVE"
-        quality_plan = poi_classification in {"EXTREME_POI", "HIGH_PROBABILITY_POI"}
-        continuation_family = scenario_type in {"STRUCTURE_CONTINUATION", "ORDER_BLOCK_PULLBACK", "LIQUIDITY_REVERSAL"}
-        has_smc = "smc" in support_agents
-        has_local_confirmation = any(agent in support_agents for agent in {"price_action", "classical"})
-        if (
-            support_count >= 2
-            and has_smc
-            and has_local_confirmation
-            and objective_aligned
-            and structure_aligned
-            and aligned_sweep
-            and quality_plan
-            and continuation_family
-        ):
-            return {
-                "allow": True,
-                "kind": "OBJECTIVE_ALIGNED_TWO_AGENT_OVERRIDE",
-                "support_count": support_count,
-                "support_agents": support_agents,
-                "reason": "objective-aligned continuation override: 2 qualified agents including SMC + local confirmation, with aligned sweep and structure",
-            }
-
     return {
+        **admission,
         "allow": False,
-        "support_count": support_count,
-        "support_agents": support_agents,
-        # Carry the dissent on the refusal too: a rejection that reports only
-        # the support count reads as "not quite enough agreement" when the
-        # real story may be active disagreement.
-        "oppose_agents": oppose_agents,
-        "oppose_count": len(oppose_agents),
-        "reason": f"planner execution requires 3 qualified agents or 2 agents + macro/gemini; got {support_count}",
+        "kind": "SHARED_ADMISSION_BLOCKED",
+        "support_agents": list(admission.get("supporters") or []),
+        "oppose_agents": list(admission.get("opponents") or []),
+        "oppose_count": oppose_count,
+        "reason": str(admission.get("reason") or "shared admission failed"),
     }
-
 
 def _add_leg_rejection_reason(
     plan: Dict[str, Any],
@@ -1756,8 +1764,8 @@ def _revive_recent_ready_plan(
                 # fossil stamp survives under a fresh coat of paint.
                 live_for_readiness = dict(all_results)
                 details = (base_decision or {}).get("agent_details") or {}
-                for _agent_name in ("technical", "classical", "smc",
-                                    "price_action", "multitimeframe"):
+                for _agent_name in ("unified_trend", "classical", "smc",
+                                    "price_action", "auction_flow"):
                     if not isinstance(live_for_readiness.get(_agent_name), dict):
                         _detail = details.get(_agent_name)
                         if isinstance(_detail, dict):
@@ -1863,6 +1871,8 @@ def _execute_session_plan_ladder(
     database: DatabaseService,
     telegram: TelegramService,
     config: Dict[str, Any],
+    *,
+    demo_execution: bool = False,
 ) -> int:
     # Clear first: a stale reason from a previous cycle would be worse than
     # no reason at all, because it would read as fact.
@@ -2035,21 +2045,32 @@ def _execute_session_plan_ladder(
             continue
         trade_id = database.new_trade_id()
         ladder_decision["trade_id"] = trade_id
-        delivered = False
-        try:
-            delivered = bool(telegram.send_signal(ladder_decision))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to send session-plan ladder signal (%s) for %s: %s", role, symbol, exc)
+        _queue_opposite_exposure_exit(
+            ladder_decision, staged_trades, database, config)
+        if demo_execution:
+            # Broker-first delivery: persist an unsent execution intent. The
+            # tick manager sends the rich card only after MT5 accepts it.
+            ladder_decision["_telegram_signal_sent"] = False
+            database.save_trade(ladder_decision)
+            delivered = True
+        else:
             delivered = False
-        if not delivered:
-            _ladder_stop(f"{role} telegram delivery failed; order not recorded")
-            if role in {"PRIMARY", "STARTER"}:
-                return created
-            continue
-        database.save_trade(ladder_decision)
+            try:
+                delivered = bool(telegram.send_signal(ladder_decision))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to send session-plan ladder signal (%s) for %s: %s", role, symbol, exc)
+                delivered = False
+            if not delivered:
+                _ladder_stop(f"{role} telegram delivery failed; order not recorded")
+                if role in {"PRIMARY", "STARTER"}:
+                    return created
+                continue
+            database.save_trade(ladder_decision)
         _record_decision_audit(
             database, ladder_decision, config,
-            stage="delivered", outcome="SENT", reason=f"planner ladder {role}",
+            stage="execution_queued" if demo_execution else "delivered",
+            outcome="QUEUED" if demo_execution else "SENT",
+            reason=f"planner ladder {role}",
         )
         staged_trades.append(
             {
@@ -2545,7 +2566,7 @@ def _levels_from_results(all_results: Dict[str, Any], side: str) -> List[float]:
         else ("resistance_levels", "resistances", "resistance")
     )
     levels: List[float] = []
-    for section_name in ("classical", "smc", "price_action", "technical"):
+    for section_name in ("classical", "smc", "price_action", "unified_trend", "auction_flow"):
         section = all_results.get(section_name, {}) or {}
         for key in wanted_keys:
             raw = section.get(key)
@@ -2581,6 +2602,8 @@ async def _check_scale_in(
     open_trades: List[Dict[str, Any]],
     database: DatabaseService,
     telegram: TelegramService,
+    *,
+    demo_execution: bool = False,
 ) -> None:
     """Send and persist fixed-risk scale-in trades when price retests a level.
 
@@ -2663,18 +2686,18 @@ async def _check_scale_in(
         # Must have fresh agent agreement, not just price proximity.
         sr = config.get("signal_requirements", {}) or {}
         min_agents = int(sr.get("min_agents_agree", 3) or 3)
-        min_agent_conf = int(sr.get("agent_min_confidence", 70) or 70)
+        min_agent_conf = int(sr.get("agent_min_confidence", 67) or 67)
         min_net_conf = float(sr.get("min_consensus_confidence", 72) or 72)
 
-        agent_names = ["technical", "classical", "smc", "price_action", "multitimeframe"]
+        agent_names = ["unified_trend", "classical", "smc", "price_action", "auction_flow"]
         weights = get_agent_weights(config)
         agree_count = 0
         oppose_count = 0
         net_weighted = 0.0
         total_weight = 0.0
         for name in agent_names:
-            result = all_results.get(name, {}) or {}
-            agent_signal = str(result.get("signal", "WAIT")).upper()
+            _used_name, result = _book_agent(all_results, name)
+            agent_signal = str(result.get("signal") or result.get("direction") or "WAIT").upper()
             agent_conf = float(result.get("confidence", 0) or 0)
             weight = float(weights.get(name, 0.2))
             if agent_conf < min_agent_conf:
@@ -2777,8 +2800,8 @@ async def _check_scale_in(
         vote_emojis = {"BUY": "🟢", "SELL": "🔴", "WAIT": "🟡"}
         agent_lines = []
         for name in agent_names:
-            result = all_results.get(name, {}) or {}
-            agent_signal = str(result.get("signal", "WAIT")).upper()
+            _used_name, result = _book_agent(all_results, name)
+            agent_signal = str(result.get("signal") or result.get("direction") or "WAIT").upper()
             agent_conf = float(result.get("confidence", 0) or 0)
             if agent_conf < min_agent_conf:
                 emoji = "⚪"
@@ -2808,15 +2831,20 @@ async def _check_scale_in(
             "━━━━━━━━━━━━━━━━━━━━━\n"
             f"<i>ID: {html.escape(trade_id)}</i>"
         )
-        delivered = False
-        try:
-            delivered = bool(telegram.send_message(message, urgent=True))
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Failed to send scale-in Telegram message for %s: %s", parent_id, exc)
-        if delivered:
+        if demo_execution:
+            decision["_telegram_signal_sent"] = False
+            decision["_telegram_pending_message"] = message
             database.save_trade(decision)
         else:
-            logger.error("Scale-in for %s was not saved because Telegram delivery failed", parent_id)
+            delivered = False
+            try:
+                delivered = bool(telegram.send_message(message, urgent=True))
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Failed to send scale-in Telegram message for %s: %s", parent_id, exc)
+            if delivered:
+                database.save_trade(decision)
+            else:
+                logger.error("Scale-in for %s was not saved because Telegram delivery failed", parent_id)
         return
 
 
@@ -3018,11 +3046,17 @@ def _crash_site(exc: BaseException) -> str:
     return f"{os.path.basename(best.filename)}:{best.lineno} in {best.name}"
 
 
-def _session_plan_agent_opinions(agent_details: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _session_plan_agent_opinions(
+    agent_details: Dict[str, Any],
+    *,
+    weights: Dict[str, Any] | None = None,
+    min_confidence: float = 67.0,
+) -> List[Dict[str, Any]]:
     opinions: List[Dict[str, Any]] = []
-    for key in ["technical", "classical", "smc", "price_action", "multitimeframe", "macro_fundamental"]:
-        detail = (agent_details or {}).get(key)
-        if not isinstance(detail, dict):
+    weights = weights if isinstance(weights, dict) else {}
+    for key in [*CORE_VOTING_AGENTS, "macro_fundamental"]:
+        used_key, detail = _book_agent(agent_details, key)
+        if not detail:
             continue
         direction = str(detail.get("direction") or "WAIT").upper()
         confidence = _safe_float(detail.get("confidence"), 0.0)
@@ -3032,10 +3066,14 @@ def _session_plan_agent_opinions(agent_details: Dict[str, Any]) -> List[Dict[str
             summary = "No strong directional edge yet."
         opinions.append(
             {
-                "key": key,
-                "label": str(detail.get("label") or key),
+                "key": used_key,
+                "label": str(detail.get("label") or used_key),
                 "direction": direction,
                 "confidence": round(confidence, 1),
+                "weight": round(_safe_float(weights.get(key), 0.0), 4) if key in CORE_VOTING_AGENTS else None,
+                "qualified": bool(key in CORE_VOTING_AGENTS and direction in {"BUY", "SELL"} and confidence >= min_confidence),
+                "external_confirmation": key == "macro_fundamental",
+                "qualification_bar": round(float(min_confidence), 1),
                 "summary": summary,
                 "signals": signals[:2],
             }
@@ -3043,15 +3081,109 @@ def _session_plan_agent_opinions(agent_details: Dict[str, Any]) -> List[Dict[str
     return opinions
 
 
+def _session_plan_book_summary(
+    opinions: List[Dict[str, Any]],
+    *,
+    target_side: str,
+    min_confidence: float,
+) -> Dict[str, Any]:
+    """Recount the Telegram header directly from the rendered core opinions."""
+    side = str(target_side or "").upper()
+    opposite = "SELL" if side == "BUY" else "BUY"
+    supporters: List[str] = []
+    opponents: List[str] = []
+    inactive: List[str] = []
+    support_score = 0.0
+    opposition_score = 0.0
+    aliases = {"technical": "unified_trend", "multitimeframe": "auction_flow"}
+    for opinion in opinions:
+        if not isinstance(opinion, dict) or opinion.get("external_confirmation"):
+            continue
+        raw_key = str(opinion.get("key") or "")
+        key = aliases.get(raw_key, raw_key)
+        if key not in CORE_VOTING_AGENTS:
+            continue
+        direction = str(opinion.get("direction") or "WAIT").upper()
+        confidence = _safe_float(opinion.get("confidence"), 0.0)
+        weight = _safe_float(opinion.get("weight"), 0.0)
+        qualified = direction in {"BUY", "SELL"} and confidence >= min_confidence
+        if not qualified:
+            inactive.append(key)
+            continue
+        score = weight * confidence / 100.0
+        if direction == side:
+            supporters.append(key)
+            support_score += score
+        elif direction == opposite:
+            opponents.append(key)
+            opposition_score += score
+        else:
+            inactive.append(key)
+    return {
+        "target_side": side,
+        "supporters": supporters,
+        "opponents": opponents,
+        "inactive_or_unqualified": inactive,
+        "support_count": len(supporters),
+        "opposition_count": len(opponents),
+        "inactive_count": len(inactive),
+        "support_score": round(support_score, 4),
+        "opposition_score": round(opposition_score, 4),
+        "agent_min_confidence": float(min_confidence),
+    }
+
+
 def _decorate_session_plan_for_delivery(
     plan: Dict[str, Any],
     decision: Dict[str, Any],
     all_results: Dict[str, Any],
     delivery_context: Dict[str, Any] | None = None,
+    config: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     payload = deepcopy(plan) if isinstance(plan, dict) else {}
+    cfg = config if isinstance(config, dict) else {}
+    payload["map_display_quality"] = bounded_map_display_quality(payload, cfg)
     agent_details = decision.get("agent_details") or _compact_agent_details(all_results)
-    payload["agent_opinions"] = _session_plan_agent_opinions(agent_details if isinstance(agent_details, dict) else {})
+    weights = decision.get("weights") or get_agent_weights(cfg)
+    min_agent_conf = _safe_float((cfg.get("signal_requirements") or {}).get("agent_min_confidence"), 67.0)
+    payload["agent_opinions"] = _session_plan_agent_opinions(
+        agent_details if isinstance(agent_details, dict) else {},
+        weights=weights if isinstance(weights, dict) else {},
+        min_confidence=min_agent_conf,
+    )
+    admission_details = dict(agent_details) if isinstance(agent_details, dict) else {}
+    target_side = str(payload.get("session_bias") or payload.get("authority_direction") or "").upper()
+    context_confirmation = _planner_context_confirmation(decision, cfg, target_side)
+    if context_confirmation.get("allow"):
+        source = str(context_confirmation.get("source") or "").lower()
+        confidence = _safe_float(context_confirmation.get("confidence"), 0.0)
+        if source == "macro":
+            admission_details["macro_fundamental"] = {"direction": target_side, "confidence": confidence}
+        elif source == "gemini":
+            admission_details["gemini"] = {"direction": target_side, "confidence": confidence, "available": True}
+    for candidate in (
+        decision.get("gemini_review"), decision.get("gemini_macro_review"),
+        decision.get("gemini_analysis"),
+    ):
+        if "gemini" not in admission_details and isinstance(candidate, dict) and candidate.get("available"):
+            admission_details["gemini"] = candidate
+            break
+    payload["execution_admission"] = evaluate_directional_admission(target_side, admission_details, cfg)
+    payload["agent_book_summary"] = _session_plan_book_summary(
+        payload.get("agent_opinions") or [],
+        target_side=target_side,
+        min_confidence=min_agent_conf,
+    )
+    admission_support = set((payload.get("execution_admission") or {}).get("supporters") or [])
+    admission_oppose = set((payload.get("execution_admission") or {}).get("opponents") or [])
+    rendered_support = set((payload.get("agent_book_summary") or {}).get("supporters") or [])
+    rendered_oppose = set((payload.get("agent_book_summary") or {}).get("opponents") or [])
+    payload["agent_book_summary"]["matches_execution_admission"] = (
+        admission_support == rendered_support and admission_oppose == rendered_oppose
+    )
+    payload["decision_weights"] = deepcopy(weights if isinstance(weights, dict) else {})
+    payload["agent_min_confidence"] = min_agent_conf
+    payload["shared_market_data"] = deepcopy(all_results.get("shared_market_data") or {})
     payload["gemini_plan_review"] = deepcopy(decision.get("gemini_analysis") or {})
     payload["gemini_macro_review"] = deepcopy(decision.get("gemini_macro_review") or {})
     payload["gemini_news_review"] = deepcopy(decision.get("gemini_news_review") or {})
@@ -3478,18 +3610,31 @@ def _build_market_status_message(
 
 
 def _compact_agent_details(all_results: Dict[str, Any]) -> Dict[str, Any]:
-    labels = {"technical": "Technical", "classical": "Classical", "smc": "SMC", "price_action": "Price Action", "multitimeframe": "Multi-Timeframe", "macro_fundamental": "Macro / Fundamental"}
+    labels = {"unified_trend": "Unified Trend", "classical": "Classical", "smc": "SMC", "price_action": "Price Action", "auction_flow": "Auction Flow", "macro_fundamental": "Macro / Fundamental"}
     details: Dict[str, Any] = {}
     for key, label in labels.items():
-        result = all_results.get(key, {}) or {}
+        used_key, result = _book_agent(all_results, key)
         # Unify reading order: signal first, then direction (same as DecisionAgent._collect_votes)
         direction = str(result.get("signal") or result.get("direction") or "WAIT").upper()
         if direction in {"NEUTRAL", "HOLD", "NO_TRADE", "NONE", ""}: direction = "WAIT"
         signals = result.get("signals") or result.get("reasons") or []
-        if not signals and key == "technical": signals = (result.get("technical", {}) or {}).get("reasons") or []
+        if not signals and key == "unified_trend": signals = result.get("reasons") or []
         if not isinstance(signals, list): signals = [signals] if signals else []
         summary = result.get("summary") or result.get("reasoning") or ""
-        details[key] = {"label": label, "direction": direction, "confidence": result.get("confidence", 0), "summary": summary, "signals": [str(x) for x in signals[:4] if x]}
+        details[key] = {
+            "label": label,
+            "direction": direction,
+            "confidence": result.get("confidence", 0),
+            "summary": summary,
+            "signals": [str(x) for x in signals[:4] if x],
+            "raw_edge": result.get("raw_edge"),
+            "coherence": result.get("coherence"),
+            "coverage": result.get("coverage"),
+            "state": result.get("state"),
+            "family_scores": deepcopy(result.get("family_scores") or {}),
+            "timeframe_analysis": deepcopy(result.get("timeframe_analysis") or result.get("timeframe_family_scores") or {}),
+            "key_levels": deepcopy(result.get("key_levels") or {}),
+        }
     return details
 
 
@@ -3559,7 +3704,7 @@ def _select_setup_candidate(decision_type: str, all_results: Dict[str, Any]) -> 
 def _setup_context_payload(decision: Dict[str, Any], all_results: Dict[str, Any]) -> Dict[str, Any]:
     decision_type = str(decision.get("decision") or "").upper()
     selected = _select_setup_candidate(decision_type, all_results)
-    mtf = all_results.get("multitimeframe", {}) or {}
+    mtf = all_results.get("unified_trend", {}) or {}
     quality = decision.get("quality") or {}
     entry_attr = decision.get("entry_attribution") or {}
     classic = decision.get("classic", {}) or {}
@@ -3609,7 +3754,10 @@ def _setup_context_payload(decision: Dict[str, Any], all_results: Dict[str, Any]
 def run_agent(agent_name: str, agent: Any, data: Dict[str, Any]) -> Dict[str, Any]:
     try:
         logger.info("Running agent: %s", agent_name)
-        return agent.analyze(data)
+        result = agent.analyze(data)
+        if isinstance(result, dict) and isinstance(data.get("shared_market_data"), dict):
+            result["shared_market_data"] = deepcopy(data.get("shared_market_data"))
+        return result
     except Exception as exc:
         logger.exception("Agent %s failed", agent_name)
         return {"agent": agent_name, "signal": "WAIT", "confidence": 0, "reasoning": f"Agent failed: {exc}"}
@@ -3708,6 +3856,10 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
     status_delivery = _HourlyStatusDelivery(telegram, config)
     try:
         database = DatabaseService(config)
+        # Exactly one mode read in this entrypoint: every demo delivery path
+        # below persists first, then lets the tick manager announce only after
+        # MT5 accepts the order.
+        demo_execution = os.environ.get("EXECUTION_MODE") == "mt5_demo"
         symbol = str(config.get("symbol", "XAU/USD"))
         # Arm immediately, not 400 lines later at the decision. An agent that
         # raises, a market-data timeout, or a Supabase error all abort the
@@ -3793,12 +3945,25 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 reason=f"Price {_cp:.2f} failed the sanity range [{_sane_min:.0f}-{_sane_max:.0f}].",
             )
             return
+        # Publish the exact frozen native book once. Every core agent below
+        # receives this same object/snapshot_id; no agent fetches candles.
+        data = publish_shared_market_data(data, config)
+        logger.info(
+            "Shared market-data book ready: %s source=%s stored=%s",
+            (data.get("shared_market_data") or {}).get("snapshot_id"),
+            (data.get("shared_market_data") or {}).get("source"),
+            (data.get("shared_market_data") or {}).get("storage_path"),
+        )
         persisted_macro_context = database.get_macro_context()
         # The verified snapshot is an input to three of the five voting agents,
         # so it has to exist before any of them are asked anything. It is built
         # purely from `data` and `config`, both already in hand.
         verified_snapshot = build_market_snapshot(data, config)
         data["verified_snapshot"] = verified_snapshot
+        # Macro is part of both entry Path 2 and the mirrored thesis-exit Path
+        # 2, so compute it once before managing existing positions.
+        macro_input = {**data, "macro_context": persisted_macro_context} if persisted_macro_context else data
+        macro = run_agent("macro_fundamental", MacroFundamentalAgent(config), macro_input)
         if has_symbol_active_trades:
             high, low = _latest_candle_extremes(data)
             recent_candles = (((data.get("timeframes", {}) or {}).get("5m") or {}).get("data") or data.get("data") or [])[-6:]
@@ -3822,11 +3987,12 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             exit_agent_details: Dict[str, Any] | None = None
             try:
                 pre_exit_results = {
-                    "technical": run_agent("technical", TechnicalAgent(config), data),
+                    "unified_trend": run_agent("unified_trend", UnifiedTrendAgent(config), data),
                     "classical": run_agent("classical", ClassicalAgent(config), data),
                     "smc": run_agent("smc", SMCAgent(config), data),
                     "price_action": run_agent("price_action", PriceActionAgent(config), data),
-                    "multitimeframe": run_agent("multitimeframe", MultiTimeframeAgent(config), data),
+                    "auction_flow": run_agent("auction_flow", AuctionFlowAgent(config), data),
+                    "macro_fundamental": macro,
                 }
                 exit_agent_details = _compact_agent_details(pre_exit_results)
                 logger.info(
@@ -3837,14 +4003,26 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Could not build the exit agent book for %s: %s", symbol, exc)
                 exit_agent_details = None
+            # Demo mode (2026-08-10 single-owner + thesis handoff): the
+            # embedded manager may DECIDE (thesis exits/scale-outs/staleness)
+            # but never BOOK execution — DemoHandoffDB converts close intents
+            # into requested_* flags the tick manager executes at the broker
+            # first, and suppresses its cards (tick sends truthful ones).
+            if demo_execution:
+                from services.demo_handoff import DemoHandoffDB
+                _db = DemoHandoffDB(database)
+                _tg = None
+            else:
+                _db = database
+                _tg = telegram
             OpenTradesManager(config).update_trades(
                 open_trades=[t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol],
                 current_price=float(data.get("current_price", 0)),
                 candle_high=high,
                 candle_low=low,
                 recent_candles=recent_candles,
-                database=database,
-                telegram=telegram,
+                database=_db,
+                telegram=_tg,
                 now=datetime.now(timezone.utc),
                 news_blocked=news_blocked_pre,
                 news_context=news_pre,
@@ -3852,14 +4030,12 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 agent_details=exit_agent_details,
             )
         if not session.get("trading_allowed"): return
-        macro_input = {**data, "macro_context": persisted_macro_context} if persisted_macro_context else data
-        macro = run_agent("macro_fundamental", MacroFundamentalAgent(config), macro_input)
         news_config = {**config, "macro_context": persisted_macro_context} if persisted_macro_context else config
         news = NewsRiskAgent(news_config).check()
         if isinstance(news, dict) and isinstance(macro, dict) and macro.get("macro_direction"):
             news["macro_direction"] = macro.get("macro_direction")
             news["macro_agent"] = macro
-        all_results = {"technical": run_agent("technical", TechnicalAgent(config), data), "classical": run_agent("classical", ClassicalAgent(config), data), "smc": run_agent("smc", SMCAgent(config), data), "price_action": run_agent("price_action", PriceActionAgent(config), data), "multitimeframe": run_agent("multitimeframe", MultiTimeframeAgent(config), data), "macro_fundamental": macro, "current_price": data["current_price"], "symbol": symbol, "session": session, "verified_snapshot": verified_snapshot, "news": news, "daily_bias": run_agent("daily_bias", DailyBiasAgent(config), data)}
+        all_results = {"unified_trend": run_agent("unified_trend", UnifiedTrendAgent(config), data), "classical": run_agent("classical", ClassicalAgent(config), data), "smc": run_agent("smc", SMCAgent(config), data), "price_action": run_agent("price_action", PriceActionAgent(config), data), "auction_flow": run_agent("auction_flow", AuctionFlowAgent(config), data), "macro_fundamental": macro, "current_price": data["current_price"], "symbol": symbol, "session": session, "verified_snapshot": verified_snapshot, "shared_market_data": deepcopy(data.get("shared_market_data") or {}), "news": news, "daily_bias": run_agent("daily_bias", DailyBiasAgent(config), data)}
         # Sprint 2 foundation: persist setup-state transitions across cycles.
         setup_memory = SetupMemoryService(database, config)
         try:
@@ -3999,6 +4175,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 [t for t in open_trades_snapshot if normalize_symbol(t.get("symbol") or symbol) == normalized_symbol],
                 database,
                 telegram,
+                demo_execution=demo_execution,
             )
         all_results["dynamic_risk"] = DynamicRiskManager(config).evaluate(database)
         learning_service = None
@@ -4010,7 +4187,31 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
         decision = await DecisionAgent(config, learning_service=learning_service).decide_async(all_results)
         decision["agent_details"] = _compact_agent_details(all_results)
         decision["symbol"] = symbol
+        decision["shared_market_data"] = deepcopy(all_results.get("shared_market_data") or {})
         decision["session_plan"] = all_results.get("session_plan", {})
+        # Persist opinions/actual decision weights for EVERY map snapshot,
+        # including NOT_READY. Previously these existed only in a throwaway
+        # Telegram copy or READY execution audit, making current refusals
+        # impossible to diagnose from session_plans.json.
+        if session_plan_snapshot_id:
+            try:
+                database.merge_session_plan_payload(
+                    session_plan_snapshot_id,
+                    {
+                        "agent_opinions": _session_plan_agent_opinions(
+                            decision.get("agent_details") or {}),
+                        "decision_context": {
+                            "decision": decision.get("decision"),
+                            "confidence": decision.get("confidence"),
+                            "weights": deepcopy(decision.get("weights") or {}),
+                            "strategy_profile": deepcopy(decision.get("strategy_profile") or {}),
+                            "rejection_reason": ((decision.get("classic") or {}).get("rejection_reason")
+                                                 if isinstance(decision.get("classic"), dict) else None),
+                        },
+                    },
+                )
+            except Exception as audit_exc:  # noqa: BLE001
+                logger.warning("Failed to persist map agent opinions: %s", audit_exc)
         # Phase 5 data-enrichment: persist compact context with each trade so
         # learning/weekly reports can reason about sessions, news proximity,
         # volatility regime, and planned-vs-actual R:R without reconstructing
@@ -4023,10 +4224,9 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             "ai": all_results.get("news_ai", {}),
         }
         decision["market_context"] = {
-            "technical_regime": ((all_results.get("technical", {}) or {}).get("technical", {}) or {}).get("market_regime")
-            or (all_results.get("technical", {}) or {}).get("market_regime")
-            or {},
-            "rsi": ((all_results.get("technical", {}) or {}).get("technical", {}) or {}).get("rsi"),
+            "technical_regime": (all_results.get("unified_trend", {}) or {}).get("market_regime") or {},
+            "unified_trend_edge": (all_results.get("unified_trend", {}) or {}).get("raw_edge"),
+            "rsi": (((all_results.get("unified_trend", {}) or {}).get("timeframe_raw_features") or {}).get("15m") or {}).get("rsi_center"),
             "daily_bias": all_results.get("daily_bias", {}),
             "macro_direction": (all_results.get("news", {}) or {}).get("macro_direction") or (all_results.get("macro_fundamental", {}) or {}).get("macro_direction", {}),
         }
@@ -4302,7 +4502,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                         _log_gemini_result("signal review", decision.get("gemini_review"))
                     else:
                         logger.info("🧠 Gemini signal review skipped: WAIT hourly status")
-                    decision["gemini_news_review"] = gemini.interpret_news_context({"symbol": symbol, "current_price": data.get("current_price"), "session": all_results.get("session"), "news": all_results.get("news"), "daily_bias": all_results.get("daily_bias"), "technical_context": all_results.get("technical"), "macro_agent": all_results.get("macro_fundamental")})
+                    decision["gemini_news_review"] = gemini.interpret_news_context({"symbol": symbol, "current_price": data.get("current_price"), "session": all_results.get("session"), "news": all_results.get("news"), "daily_bias": all_results.get("daily_bias"), "technical_context": all_results.get("unified_trend"), "macro_agent": all_results.get("macro_fundamental")})
                     _log_gemini_result("news review", decision.get("gemini_news_review"))
 
                     # ── NEW: Macro-only independent review — July 2026 ──
@@ -4338,8 +4538,21 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                         "message_kind": session_plan_delivery_meta.get("kind"),
                         "delivery_reason": session_plan_delivery_meta.get("reason"),
                     },
+                    config,
                 )
-                sent = telegram.send_session_plan(plan_message)
+                enforce_shared_delivery = bool((config.get("shared_market_data") or {}).get("enabled", False))
+                admission_allowed = bool((plan_message.get("execution_admission") or {}).get("allow"))
+                book_consistent = bool((plan_message.get("agent_book_summary") or {}).get("matches_execution_admission"))
+                if enforce_shared_delivery and (not admission_allowed or not book_consistent):
+                    logger.info(
+                        "Session plan Telegram suppressed: admission=%s book_consistent=%s reason=%s",
+                        admission_allowed,
+                        book_consistent,
+                        (plan_message.get("execution_admission") or {}).get("reason"),
+                    )
+                    sent = False
+                else:
+                    sent = telegram.send_session_plan(plan_message)
                 if sent:
                     if session_plan_snapshot_id:
                         try:
@@ -4403,6 +4616,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
             database,
             telegram,
             config,
+            demo_execution=demo_execution,
         )
         if session_plan_snapshot_id and planner_gate_preview:
             try:
@@ -4450,7 +4664,7 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                             ),
                             "agent_min_confidence": _safe_float(
                                 ((config.get("signal_requirements") or {})
-                                 .get("agent_min_confidence")), 70.0
+                                 .get("agent_min_confidence")), 67.0
                             ),
                             "mapped_side": str(
                                 (all_results.get("session_plan") or {}).get("session_bias")
@@ -4521,9 +4735,8 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                              .get("agent_min_confidence"))
                             or config.get("agent_min_confidence") or 67)
                         _sup = 0
-                        for _an in ("technical", "classical", "smc", "price_action",
-                                  "multitimeframe", "macro_fundamental"):
-                            _ar = all_results.get(_an) or {}
+                        for _an in CORE_VOTING_AGENTS:
+                            _used_an, _ar = _book_agent(all_results, _an)
                             if (float(_ar.get("confidence") or 0) >= _min_conf
                                     and str(_ar.get("direction") or "").upper() == decision_type):
                                 _sup += 1
@@ -4726,17 +4939,28 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                 return
             trade_id = database.new_trade_id()
             decision["trade_id"] = trade_id
-            delivered = False
-            try:
-                delivered = bool(telegram.send_signal(decision))
-                if delivered:
-                    # The trade alert already carries this cycle's context.
-                    status_delivery.mark_sent()
-            except Exception as exc:  # noqa: BLE001
-                telegram.send_error_alert(f"Signal delivery failed: {exc}")
+            _queue_opposite_exposure_exit(
+                decision, open_trades_snapshot, database, config)
+            if demo_execution:
+                # Do not announce an order that the broker has not accepted.
+                # The tick manager retries MT5 and sends this snapshot only
+                # after a real position/pending ticket exists.
+                decision["_telegram_signal_sent"] = False
+                delivered = True  # accepted into the durable execution queue
+            else:
+                delivered = False
+                try:
+                    delivered = bool(telegram.send_signal(decision))
+                except Exception as exc:  # noqa: BLE001
+                    telegram.send_error_alert(f"Signal delivery failed: {exc}")
+                    return
+            if not delivered:
+                telegram.send_error_alert("Signal delivery failed: Telegram returned False; trade was not saved.")
                 return
-            if delivered and not decision.get("golden_dual_entry"):
-                cancelled_pending = 0
+
+            # Golden dual keeps its existing same-direction pending; every
+            # other accepted replacement cancels the older pending family.
+            if not decision.get("golden_dual_entry"):
                 try:
                     cancelled_pending = database.cancel_pending_orders(
                         reason=f"Replaced by newer {decision_type} signal",
@@ -4747,27 +4971,28 @@ async def _run_analysis_for_config(config: Dict[str, Any]) -> None:
                         logger.info("Cancelled %s stale pending %s order(s) for %s before saving new signal", cancelled_pending, decision_type, symbol)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Failed to cancel stale pending orders before saving new signal: %s", exc)
-                database.save_trade(decision)
-                # The delivered half of the trail. Without it the audit can
-                # count refusals but not the rate they represent.
-                _record_decision_audit(
-                    database, decision, config,
-                    stage="delivered", outcome="SENT",
-                    reason=decision.get("entry_mode"),
-                )
-                if decision.get("setup_id"):
-                    try:
-                        setup_memory.mark_entry_triggered(
-                            setup_id=str(decision.get("setup_id")),
-                            state_key=str((decision.get("setup_context") or {}).get("state_key") or ""),
-                            trade_id=trade_id,
-                            current_price=float(decision.get("current_price") or 0),
-                            symbol=symbol,
-                        )
-                    except Exception as exc:  # noqa: BLE001
-                        logger.warning("Failed to link setup candidate %s to trade %s: %s", decision.get("setup_id"), trade_id, exc)
-            else:
-                telegram.send_error_alert("Signal delivery failed: Telegram returned False; trade was not saved.")
+
+            # This also fixes the old golden-dual branch that sent its card but
+            # skipped save_trade entirely.
+            database.save_trade(decision)
+            status_delivery.mark_sent()
+            _record_decision_audit(
+                database, decision, config,
+                stage="execution_queued" if demo_execution else "delivered",
+                outcome="QUEUED" if demo_execution else "SENT",
+                reason=decision.get("entry_mode"),
+            )
+            if decision.get("setup_id"):
+                try:
+                    setup_memory.mark_entry_triggered(
+                        setup_id=str(decision.get("setup_id")),
+                        state_key=str((decision.get("setup_context") or {}).get("state_key") or ""),
+                        trade_id=trade_id,
+                        current_price=float(decision.get("current_price") or 0),
+                        symbol=symbol,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed to link setup candidate %s to trade %s: %s", decision.get("setup_id"), trade_id, exc)
         elif decision_type == "WAIT":
             if send_hourly_now:
                 status_delivery.arm(decision=decision, all_results=all_results, database=database)
@@ -4875,6 +5100,12 @@ async def run_analysis_async() -> None:
         await _run_analysis_for_config(config_for_instrument(base_config, instrument))
 
 def main() -> None:
+    # Weekend hard gate (operator directive 2026-08-09): Sat/Sun = no analysis.
+    from utils.helpers import is_weekend_hebron
+    if is_weekend_hebron():
+        logging.info("Weekend (Sat/Sun Hebron) — analysis skipped by operator directive.")
+        return
+
     import asyncio
     asyncio.run(run_analysis_async())
 
