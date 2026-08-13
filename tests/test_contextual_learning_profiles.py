@@ -105,7 +105,7 @@ def test_learning_service_ignores_small_contextual_samples() -> None:
     assert service.get_contextual_weight_overrides(setup_type="LIQUIDITY_REVERSAL") == {}
 
 
-def test_decision_agent_blends_contextual_weights_with_strategy_profile() -> None:
+def test_decision_agent_keeps_canonical_weights_when_profile_overrides_disabled() -> None:
     config = _base_config()
     service = LearningService(database_service=object(), config=config)
     service.learning_history.append(
@@ -153,5 +153,5 @@ def test_decision_agent_blends_contextual_weights_with_strategy_profile() -> Non
         }
     )
     assert result["strategy_profile"]["name"] == "liquidity_reversal"
-    assert result["weights"]["technical"] > 0.10  # contextual learning boosted it above profile default
-    assert result["weights"]["smc"] < 0.35       # contextual learning softened the profile's SMC emphasis
+    assert result["strategy_profile"]["weight_policy"] == "canonical_config_only"
+    assert result["weights"] == config["agent_weights"]

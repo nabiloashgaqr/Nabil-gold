@@ -148,13 +148,14 @@ def test_the_profile_honours_the_config():
     )
 
 
-def test_an_explicit_per_profile_override_still_wins():
-    """Tuning one profile in config.json is a decision, and must be kept."""
+def test_unified_operator_bar_outranks_per_profile_values():
+    """2026-08-11: one 67% qualification bar across every profile/path."""
     cfg = copy.deepcopy(CONFIG)
+    cfg["unify_agent_min_confidence"] = True
     cfg["strategy_profiles"] = {"classic_consensus": {"agent_min_confidence": 75}}
     results = {"smc": {"setup_structure": {"setup_type": "FAILED_RECLAIM_CONTINUATION"}}}
     profile = DecisionAgent(cfg)._strategy_profile(results)
-    assert int(profile["agent_min_confidence"]) == 75
+    assert int(profile["agent_min_confidence"]) == 67
 
 
 def test_changing_the_config_moves_the_profile():

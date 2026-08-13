@@ -8,6 +8,12 @@ def _base_config() -> dict:
         "risk_settings": {"min_confidence": 60, "min_rr_ratio": 1.5},
         "signal_requirements": {"min_agents_agree": 2, "min_consensus_confidence": 70, "agent_min_confidence": 68},
         "agent_weights": {"technical": 0.20, "classical": 0.25, "smc": 0.20, "price_action": 0.20, "multitimeframe": 0.15},
+        # Legacy two-agent profile isolated to test trigger refinement itself;
+        # production reserves two-agent entries for Macro/Gemini Path 2.
+        "strategy_profiles": {"liquidity_reversal": {
+            "min_agents_agree": 2,
+            "min_consensus_confidence": 70,
+        }},
     }
 
 
