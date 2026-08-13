@@ -133,6 +133,13 @@ jobs:
             tests/test_one_source_of_trading_rules.py \
             tests/test_pending_staleness_direction.py \
             tests/test_golden_dual_entry.py \
+            tests/test_mt5_phase1.py \
+            tests/test_tick_manager_logic.py \
+            tests/test_vps_task_guards.py \
+            tests/test_dashboard_demo_mode.py \
+            tests/test_market_data_server_guard.py \
+            tests/test_mt5_execution_correctness.py \
+            tests/test_operator_directives_24h_15m_weekend.py \
             tests/test_adaptive_execution.py \
             tests/test_smc_projects_liquidity_pools.py \
             tests/test_sl_floor_measures_every_path.py \

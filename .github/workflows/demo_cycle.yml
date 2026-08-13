@@ -1,0 +1,37 @@
+# Phase-3 shadow cycle on the demo branch. Triggered externally
+# (cron-job.org) via workflow_dispatch with ref=demo/mt5.
+name: 🧪 Demo Shadow Cycle
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: demo-cycle-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  demo-cycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 📥 Checkout (no external action)
+        run: |
+          git clone --depth 1 --branch "${{ github.ref_name }}" \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" .
+      - name: 🐍 Prepare Python (system)
+        run: |
+          sudo ln -sf "$(command -v python3)" /usr/local/bin/python || true
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: 🧪 Run demo shadow cycle
+        run: python scripts/run_demo_cycle.py
+        env:
+          TRADES_TABLE: trades_demo
+          EXECUTION_MODE: paper
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_DEMO_CHAT_ID: ${{ secrets.TELEGRAM_DEMO_CHAT_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          TWELVEDATA_API_KEY: ${{ secrets.TWELVEDATA_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
