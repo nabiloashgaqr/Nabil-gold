@@ -16,7 +16,7 @@ DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
         "setup_types": ["*"],
         "min_agents_agree": 3,
         "min_consensus_confidence": 72,
-        "agent_min_confidence": 70,
+        "agent_min_confidence": 67,
         "lead_agent": None,
         "require_lead_alignment": False,
         "min_structure_quality": None,
@@ -24,14 +24,14 @@ DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
         "min_trigger_score": 0,
         "required_trigger_states": [],
         "require_sweep_confirmation": None,
-        "description": "Legacy 5-agent weighted consensus.",
+        "description": "Unified five-agent weighted consensus.",
     },
     "liquidity_reversal": {
         "name": "liquidity_reversal",
         "setup_types": ["LIQUIDITY_REVERSAL", "REVERSAL_ATTEMPT"],
-        "min_agents_agree": 2,
-        "min_consensus_confidence": 70,
-        "agent_min_confidence": 68,
+        "min_agents_agree": 3,
+        "min_consensus_confidence": 72,
+        "agent_min_confidence": 67,
         "lead_agent": "smc",
         "require_lead_alignment": True,
         "min_structure_quality": "MODERATE",
@@ -39,13 +39,6 @@ DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
         "min_trigger_score": 70,
         "required_trigger_states": ["REJECTION_CONFIRMED"],
         "require_sweep_confirmation": "MODERATE",
-        "weight_overrides": {
-            "smc": 0.35,
-            "price_action": 0.25,
-            "multitimeframe": 0.20,
-            "classical": 0.10,
-            "technical": 0.10,
-        },
         "description": "SMC-led reversal profile: sweep + POI + reaction can qualify with 2 strong aligned agents.",
     },
     "trend_pullback": {
@@ -53,29 +46,22 @@ DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
         "setup_types": ["ORDER_BLOCK_PULLBACK", "STRUCTURE_CONTINUATION", "TREND_CONTINUATION", "PULLBACK_ENTRY"],
         "min_agents_agree": 3,
         "min_consensus_confidence": 72,
-        "agent_min_confidence": 70,
-        "lead_agent": "multitimeframe",
+        "agent_min_confidence": 67,
+        "lead_agent": "unified_trend",
         "require_lead_alignment": True,
         "min_structure_quality": "MODERATE",
         "min_poi_rank_score": 24,
         "min_trigger_score": 40,
         "required_trigger_states": [],
         "require_sweep_confirmation": None,
-        "weight_overrides": {
-            "multitimeframe": 0.30,
-            "classical": 0.25,
-            "price_action": 0.20,
-            "smc": 0.15,
-            "technical": 0.10,
-        },
         "description": "Trend-pullback profile favouring HTF alignment and structure continuation.",
     },
     "range_fade": {
         "name": "range_fade",
         "setup_types": ["RANGE_FADE", "SMC_CONTEXT", "MIXED_ALIGNMENT"],
-        "min_agents_agree": 2,
-        "min_consensus_confidence": 71,
-        "agent_min_confidence": 68,
+        "min_agents_agree": 3,
+        "min_consensus_confidence": 72,
+        "agent_min_confidence": 67,
         "lead_agent": "price_action",
         "require_lead_alignment": False,
         "min_structure_quality": "WEAK",
@@ -83,13 +69,6 @@ DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
         "min_trigger_score": 55,
         "required_trigger_states": ["REJECTION_CONFIRMED", "TOUCH_NO_REJECTION"],
         "require_sweep_confirmation": None,
-        "weight_overrides": {
-            "price_action": 0.30,
-            "classical": 0.25,
-            "smc": 0.20,
-            "technical": 0.15,
-            "multitimeframe": 0.10,
-        },
         "description": "Range/extreme reaction profile with softer lead-agent enforcement.",
     },
 }
@@ -103,17 +82,25 @@ def _normalized_setup_type(agents_results: Dict[str, Any]) -> str:
     smc_structure = smc.get("setup_structure") or {}
     if isinstance(smc_structure, dict) and smc_structure.get("setup_type"):
         return str(smc_structure.get("setup_type")).upper()
-    mtf = agents_results.get("multitimeframe", {}) or {}
+    mtf = agents_results.get("unified_trend") or agents_results.get("multitimeframe", {}) or {}
     if mtf.get("setup_type"):
         return str(mtf.get("setup_type")).upper()
     return "CLASSIC_CONSENSUS"
+
+
+def _compatible_lead(config: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep historical replay books readable without changing the live lead."""
+    weights = (config.get("agent_weights") or {}) if isinstance(config, dict) else {}
+    if profile.get("lead_agent") == "unified_trend" and "unified_trend" not in weights and "multitimeframe" in weights:
+        profile["lead_agent"] = "multitimeframe"
+    return profile
 
 
 def select_strategy_profile(config: Dict[str, Any], agents_results: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(config, dict) and config.get("strategy_profiles_enabled") is False:
         fallback = dict(DEFAULT_PROFILES["classic_consensus"])
         fallback["resolved_setup_type"] = _normalized_setup_type(agents_results)
-        return fallback
+        return _compatible_lead(config, fallback)
     custom = (config.get("strategy_profiles") or {}) if isinstance(config, dict) else {}
     merged: Dict[str, Dict[str, Any]] = {name: dict(profile) for name, profile in DEFAULT_PROFILES.items()}
     for name, override in custom.items():
@@ -130,13 +117,13 @@ def select_strategy_profile(config: Dict[str, Any], agents_results: Dict[str, An
         if setup_type in setup_types:
             selected = dict(profile)
             selected["resolved_setup_type"] = setup_type
-            return selected
+            return _compatible_lead(config, selected)
     for profile in merged.values():
         setup_types = [str(x).upper() for x in (profile.get("setup_types") or [])]
         if "*" in setup_types:
             selected = dict(profile)
             selected["resolved_setup_type"] = setup_type
-            return selected
+            return _compatible_lead(config, selected)
     fallback = dict(merged.get("classic_consensus", DEFAULT_PROFILES["classic_consensus"]))
     fallback["resolved_setup_type"] = setup_type
-    return fallback
+    return _compatible_lead(config, fallback)

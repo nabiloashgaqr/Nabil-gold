@@ -139,7 +139,7 @@ def _render_trades_table(trades: List[Dict[str, Any]]) -> str:
             f"<td>{html.escape(str(trade.get('tp2', '')))}</td>"
             f"<td class='{pnl_cls}'>{pnl:+.2f}</td>"
             f"<td>{html.escape(str(trade.get('confidence', '')))}%</td>"
-            f"<td>{html.escape(str(trade.get('trading_mode', 'paper')))}</td>"
+            f"<td>{html.escape(str(trade.get('trading_mode', 'mt5_demo')))}</td>"
             f"<td>{html.escape(str(trade.get('created_at', ''))[:19])}</td>"
             "</tr>"
         )
@@ -148,17 +148,41 @@ def _render_trades_table(trades: List[Dict[str, Any]]) -> str:
     return "\n".join(rows)
 
 
+def merge_trade_rows(*lists: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Merge trade rows from several tables into ONE continuous history.
+
+    Operator directive (2026-08-09): the dashboard must read as a single
+    unbroken record — paper history + live execution — as if no migration
+    ever happened. Dedup by trade id (ids are unique per row; a row can
+    never exist in two tables). Pure + unit-tested.
+    """
+    seen: Dict[str, Dict[str, Any]] = {}
+    order: List[str] = []
+    for rows in lists:
+        for row in rows or []:
+            key = str(row.get("id") or id(row))
+            if key not in seen:
+                seen[key] = row
+                order.append(key)
+    return [seen[k] for k in order]
+
+
 def render_dashboard(trades: List[Dict[str, Any]]) -> str:
     summary = summarize_trades(trades)
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     cards = _render_cards(summary)
     rows = _render_trades_table(sorted(trades, key=lambda t: str(t.get("created_at", "")), reverse=True))
+    # One continuous record (operator directive 2026-08-09): no paper/demo
+    # split markers anywhere — the history reads as a single system.
+    h1 = "🏆 Gold AI Signals Dashboard"
+    mode_label = "XAU/USD"
+    title = "Gold AI Signals Dashboard"
     return f"""<!doctype html>
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Gold AI Signals Dashboard</title>
+<title>{html.escape(title)}</title>
 <style>
   :root {{ --bg:#0f172a; --panel:#111827; --card:#1f2937; --text:#f8fafc; --muted:#94a3b8; --gold:#facc15; --green:#22c55e; --red:#ef4444; --blue:#38bdf8; }}
   * {{ box-sizing: border-box; }}
@@ -187,8 +211,8 @@ def render_dashboard(trades: List[Dict[str, Any]]) -> str:
 <body>
   <div class="wrap">
     <div class="hero">
-      <h1>🏆 Gold AI Signals Dashboard</h1>
-      <div class="muted">Generated at {html.escape(generated)} · Paper Trading / XAU/USD</div>
+      <h1>{h1}</h1>
+      <div class="muted">Generated at {html.escape(generated)} · {mode_label}</div>
     </div>
     <div class="grid">{cards}</div>
     <div class="panel">

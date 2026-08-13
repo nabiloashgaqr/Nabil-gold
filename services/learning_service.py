@@ -290,10 +290,14 @@ class LearningService:
         snap = self._snapshot(trade)
         attr = snap.get("entry_attribution") or {}
         base_rates = {
-            "technical": 0.55,
+            "unified_trend": 0.55,
             "classical": 0.52,
             "smc": 0.58,
             "price_action": 0.50,
+            "auction_flow": 0.54,
+            # Historical snapshots remain attributable under their old names;
+            # they are never promoted into the new agents' performance.
+            "technical": 0.55,
             "multitimeframe": 0.54,
         }
         agents = list(attr.get("supporting_agents") or [])

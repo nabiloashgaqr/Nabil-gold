@@ -94,6 +94,21 @@ class MarketDataService:
                 "timeframe": tf,
                 "resampled_from": resampled or None,
             }
+        if src == "mt5":
+            # Broker candles (live feed). Freshness is stamped by mt5_feed
+            # itself; when the classifier is asked directly (no payload
+            # integrity present) assume HIGH — the production guard still
+            # blocks synthetic/absent data upstream.
+            return {
+                "source": src,
+                "source_type": "historical_ohlc",
+                "reliability_grade": "HIGH",
+                "supports_signal_generation": True,
+                "supports_pending_activation": True,
+                "supports_intrabar_levels": True,
+                "timeframe": tf,
+                "resampled_from": resampled or None,
+            }
         if src == "swissquote_spot_quote_fallback":
             return {
                 "source": src,
@@ -130,14 +145,29 @@ class MarketDataService:
     @classmethod
     def enrich_payload_integrity(cls, payload: Dict[str, Any]) -> Dict[str, Any]:
         enriched = dict(payload or {})
-        integrity = cls._source_integrity(
-            enriched.get("source"),
-            timeframe=str(enriched.get("timeframe") or ""),
-            resampled_from=str(enriched.get("resampled_from") or ""),
-        )
-        enriched["source_integrity"] = integrity
-        enriched["supports_signal_generation"] = bool(integrity.get("supports_signal_generation"))
-        enriched["supports_pending_activation"] = bool(integrity.get("supports_pending_activation"))
+        existing = enriched.get("source_integrity")
+        if enriched.get("source") == "mt5" and isinstance(existing, dict):
+            # The broker feed stamps its OWN freshness-aware integrity
+            # (stale candles => MEDIUM + signal_generation False). Never
+            # overwrite it with the static classifier — live incident
+            # 2026-08-10: overwriting made every mt5 cycle UNKNOWN and the
+            # analysis refused its own best data source.
+            integ = dict(existing)
+            integ.setdefault("source", "mt5")
+            integ.setdefault("source_type", "historical_ohlc")
+            if "grade" in integ and "reliability_grade" not in integ:
+                integ["reliability_grade"] = integ["grade"]
+            integ.setdefault("reliability_grade", "HIGH")
+            integ.setdefault("supports_intrabar_levels", True)
+        else:
+            integ = cls._source_integrity(
+                enriched.get("source"),
+                timeframe=str(enriched.get("timeframe") or ""),
+                resampled_from=str(enriched.get("resampled_from") or ""),
+            )
+        enriched["source_integrity"] = integ
+        enriched["supports_signal_generation"] = bool(integ.get("supports_signal_generation"))
+        enriched["supports_pending_activation"] = bool(integ.get("supports_pending_activation"))
         return enriched
 
     @classmethod
@@ -166,7 +196,12 @@ class MarketDataService:
         timeframes = self.config.get("timeframes", ["5m", "15m", "1H", "4H"])
         primary_tf = self.config.get("primary_timeframe", "15m")
         data_cfg = self.config.get("data_source", {}) or {}
-        if data_cfg.get("resample_timeframes_from_base", False):
+        # MT5 supplies every timeframe natively with deep history for free.
+        # Resampling 4H from a shallow 5m base (2500 candles = ~8 days) made
+        # daily_bias/multitimeframe votes systematically weaker than the
+        # paper system's native 4H — live divergence incident 2026-08-10.
+        primary_src = os.environ.get("DATA_SOURCE_PRIMARY") or data_cfg.get("primary")
+        if data_cfg.get("resample_timeframes_from_base", False) and str(primary_src) != "mt5":
             base_tf = str(data_cfg.get("base_timeframe", "5m"))
             base_outputsize = int(data_cfg.get("base_outputsize", max(outputsize, 2500)) or max(outputsize, 2500))
             base_payload = self.get_ohlcv(timeframe=base_tf, outputsize=base_outputsize)
@@ -199,20 +234,39 @@ class MarketDataService:
             return cached["payload"]
 
         payload: Dict[str, Any] | None = None
-        if self.api_key and self.api_key != "YOUR_API_KEY":
+        # demo/mt5 branch (phase 1): MT5 as primary feed when configured;
+        # paper main keeps data_source.primary=twelvedata so nothing changes.
+        data_cfg_src = (self.config.get("data_source") or {})
+        primary_src = os.environ.get("DATA_SOURCE_PRIMARY") or data_cfg_src.get("primary")
+        if str(primary_src) == "mt5":
+            try:
+                from services import mt5_feed
+                demo_map = (((self.config.get("execution") or {})
+                             .get("demo") or {}).get("symbol_map")) or None
+                payload = mt5_feed.get_candles(
+                    self.symbol, timeframe=timeframe, count=outputsize,
+                    symbol_map=demo_map)
+            except Exception as exc:  # noqa: BLE001 - fall back silently
+                self.logger.warning("MT5 feed unavailable, falling back: %s", exc)
+                payload = None
+        if self.api_key and self.api_key != "YOUR_API_KEY" and payload is None:
             payload = self._fetch_data(timeframe, outputsize)
 
         if payload is None:
             # Production guard: synthetic data is NEVER acceptable for signal
             # analysis or trade management. It produced a catastrophic false SELL
-            # at 3366 (real gold ~4150) and a false TP2_HIT. If Twelve Data is
-            # down and no quote fallback worked, stop cleanly.
-            in_production = os.environ.get('GITHUB_ACTIONS', '') == 'true'
+            # at 3366 (real gold ~4150) and a false TP2_HIT. If there is no real
+            # feed (MT5 down and no/failing TwelveData), stop cleanly.
+            # The guard must also hold on the VPS: there the env says
+            # EXECUTION_MODE=paper|mt5_demo instead of GITHUB_ACTIONS, and the
+            # signals go straight to the subscribers channel.
+            in_production = (os.environ.get('GITHUB_ACTIONS', '') == 'true'
+                             or os.environ.get('EXECUTION_MODE', '') in ('paper', 'mt5_demo'))
             in_test = os.environ.get('PYTEST_RUNNING', '') == 'true' or os.environ.get('PYTEST_CURRENT_TEST', '') != ''
             if in_production and not in_test:
                 self.logger.error(
-                    'No real market data for %s %s — Twelve Data may be exhausted '
-                    'or API key invalid. Synthetic data is blocked in production. '
+                    'No real market data for %s %s — MT5 feed down and no usable '
+                    'TwelveData fallback. Synthetic data is blocked in production. '
                     'Stopping this cycle cleanly.',
                     self.symbol,
                     timeframe,

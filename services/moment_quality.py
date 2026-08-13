@@ -82,8 +82,8 @@ class MomentQualityService:
                 multiplier *= self.news_caution_factor
                 factors.append(f"news caution ×{self.news_caution_factor:g}")
 
-            technical = (all_results.get("technical") or {}) if isinstance(all_results, dict) else {}
-            regime = technical.get("market_regime") or (technical.get("technical") or {}).get("market_regime") or {}
+            technical = (all_results.get("unified_trend") or {}) if isinstance(all_results, dict) else {}
+            regime = technical.get("market_regime") or {}
             volatility = str((regime or {}).get("volatility_regime") or "").upper()
             if volatility in {"EXTREME", "VERY_HIGH"}:
                 multiplier *= self.extreme_volatility_factor

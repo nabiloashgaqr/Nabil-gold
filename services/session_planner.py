@@ -60,7 +60,7 @@ class SessionPlannerService:
         self.min_main_rr_for_ready = float(cfg.get("min_main_rr_for_ready", (self.config.get("risk_settings", {}) or {}).get("min_rr_ratio", 1.5)) or 1.5)
         self.min_supporting_agents_for_ready = int(cfg.get("min_supporting_agents_for_ready", 2) or 2)
         self.max_opposing_agents_for_ready = int(cfg.get("max_opposing_agents_for_ready", 1) or 1)
-        self.agent_alignment_min_confidence = float(cfg.get("agent_alignment_min_confidence", 68) or 68)
+        self.agent_alignment_min_confidence = float(cfg.get("agent_alignment_min_confidence", 67) or 67)
         self.min_authority_alignment_count = int(cfg.get("min_authority_alignment_count", 2) or 2)
         self.fallback_zone_half_width_points = float(cfg.get("fallback_zone_half_width_points", 120) or 120)
         self.fallback_max_reference_levels = int(cfg.get("fallback_max_reference_levels", 3) or 3)
@@ -695,11 +695,11 @@ class SessionPlannerService:
             standby=standby,
             primary_execution=primary_execution_preview,
             all_results={
-                "technical": all_results.get("technical", {}),
+                "unified_trend": all_results.get("unified_trend") or all_results.get("technical", {}),
                 "classical": all_results.get("classical", {}),
                 "smc": all_results.get("smc", {}),
                 "price_action": all_results.get("price_action", {}),
-                "multitimeframe": all_results.get("multitimeframe", {}),
+                "auction_flow": all_results.get("auction_flow") or all_results.get("multitimeframe", {}),
             },
             symbol=symbol,
         )
@@ -1155,20 +1155,36 @@ class SessionPlannerService:
     def _agent_alignment_summary(self, direction: str, all_results: Dict[str, Any]) -> Dict[str, Any]:
         supporting: List[str] = []
         opposing: List[str] = []
-        for name in ["technical", "classical", "smc", "price_action", "multitimeframe"]:
+        observed: List[str] = []
+        unqualified: List[str] = []
+        aliases = {"unified_trend": "technical", "auction_flow": "multitimeframe"}
+        for name in ["unified_trend", "classical", "smc", "price_action", "auction_flow"]:
+            used_name = name
             result = all_results.get(name, {}) or {}
+            if not result and aliases.get(name):
+                result = all_results.get(aliases[name], {}) or {}
+                if result:
+                    used_name = aliases[name]
+            if not isinstance(result, dict) or not result:
+                continue
+            observed.append(used_name)
             signal = str(result.get("signal") or result.get("direction") or "WAIT").upper()
             confidence = self._f(result.get("confidence"), 0.0)
             if confidence < self.agent_alignment_min_confidence:
+                unqualified.append(used_name)
                 continue
             if signal == direction:
-                supporting.append(name)
+                supporting.append(used_name)
             elif signal in {"BUY", "SELL"} and signal != direction:
-                opposing.append(name)
+                opposing.append(used_name)
         return {
             "support_count": len(supporting),
             "opposition_count": len(opposing),
             "available_count": len(supporting) + len(opposing),
+            "observed_count": len(observed),
+            "unqualified_count": len(unqualified),
+            "observed_agents": observed,
+            "unqualified_agents": unqualified,
             "supporting_agents": supporting,
             "opposing_agents": opposing,
         }
@@ -1188,6 +1204,8 @@ class SessionPlannerService:
         support_count = int(diag.get("support_count", 0) or 0)
         opposition_count = int(diag.get("opposition_count", 0) or 0)
         available_count = int(diag.get("available_count", 0) or 0)
+        observed_count = int(diag.get("observed_count", 0) or 0)
+        unqualified_count = int(diag.get("unqualified_count", 0) or 0)
         supporting_agents = list(diag.get("supporting_agents", []) or [])
         smc_result = all_results.get("smc", {}) or {}
         smc_signal = str(smc_result.get("signal") or smc_result.get("direction") or "WAIT").upper()
@@ -1223,7 +1241,13 @@ class SessionPlannerService:
                 reason = "map is valid but still waiting for stronger execution confirmation"
         else:
             state = "MAP_ONLY"
-            if support_count == 0 and not has_smc_alignment and not has_macro_confirmation:
+            if observed_count > 0 and available_count == 0:
+                reason = (
+                    f"0/{observed_count} core agents qualified at "
+                    f"{self.agent_alignment_min_confidence:.0f}% "
+                    f"({unqualified_count} below the bar)"
+                )
+            elif support_count == 0 and not has_smc_alignment and not has_macro_confirmation:
                 reason = "no execution-support alignment: SMC, macro, and qualified agents do not confirm the map"
             elif support_count == 0:
                 reason = "no qualified execution-support agents are aligned with the mapped direction"
@@ -1243,6 +1267,8 @@ class SessionPlannerService:
             "support_count": support_count,
             "opposition_count": opposition_count,
             "available_count": available_count,
+            "observed_count": observed_count,
+            "unqualified_count": unqualified_count,
             "supporting_agents": supporting_agents,
             "opposing_agents": list(diag.get("opposing_agents", []) or []),
             "has_smc_alignment": has_smc_alignment,
@@ -1303,9 +1329,18 @@ class SessionPlannerService:
                 f"main area RR {diagnostics['main_rr']:.2f} below "
                 f"{self.min_main_rr_for_ready:.2f} (note only, 2026-08-07c)"
             )
-        if diagnostics.get("available_count", 0) > 0:
+        # If agent results were observed, the configured support floor is
+        # mandatory even when every result fell below 67%. Previously
+        # available_count=0 made an all-unqualified live book look like a
+        # legacy snapshot with no agent data, allowing an A+ READY map at 0/5.
+        if diagnostics.get("observed_count", 0) > 0:
             if diagnostics["support_count"] < self.min_supporting_agents_for_ready:
-                return False, f"only {diagnostics['support_count']} supporting agents for the mapped direction", diagnostics
+                return False, (
+                    f"only {diagnostics['support_count']} qualified supporting agents "
+                    f"for the mapped direction; observed {diagnostics['observed_count']} "
+                    f"core agents, {diagnostics.get('unqualified_count', 0)} below "
+                    f"{self.agent_alignment_min_confidence:.0f}%"
+                ), diagnostics
             if diagnostics["opposition_count"] > self.max_opposing_agents_for_ready:
                 return False, f"too many opposing agents ({diagnostics['opposition_count']}) for a ready map", diagnostics
         return True, None, diagnostics

@@ -28,14 +28,14 @@ class DirectionalAuthorityService:
         # agents it claims to summarise could never contradict it.
         self.allow_live_book_retirement = bool(cfg.get("allow_live_book_retirement", True))
         sig_cfg = (self.config.get("signal_requirements") or {}) if isinstance(self.config, dict) else {}
-        self.agent_min_confidence = self._f(sig_cfg.get("agent_min_confidence", 70), 70.0)
+        self.agent_min_confidence = self._f(sig_cfg.get("agent_min_confidence", 67), 67.0)
         # Retirement needs the same majority a fresh plan needs to be admitted,
         # so a map is never retired by a book that could not have produced one.
         self.min_agents_to_retire_map = int(
             cfg.get("min_agents_to_retire_map", (sig_cfg.get("min_agents_agree") or 3)) or 3
         )
 
-    VOTING_AGENTS = ("technical", "classical", "smc", "price_action", "multitimeframe")
+    VOTING_AGENTS = ("unified_trend", "classical", "smc", "price_action", "auction_flow")
 
     def _live_book_split(self, decision: Dict[str, Any], side: str) -> Dict[str, Any]:
         """Count qualified agents for and against ``side`` right now."""
@@ -44,17 +44,24 @@ class DirectionalAuthorityService:
             return {"available": False, "support": [], "oppose": []}
         support: List[str] = []
         oppose: List[str] = []
+        aliases = {"unified_trend": "technical", "auction_flow": "multitimeframe"}
         for name in self.VOTING_AGENTS:
+            used_name = name
             detail = details.get(name)
+            if not isinstance(detail, dict):
+                legacy = aliases.get(name)
+                detail = details.get(legacy) if legacy else None
+                if isinstance(detail, dict):
+                    used_name = str(legacy)
             if not isinstance(detail, dict):
                 continue
             direction = str(detail.get("direction") or detail.get("signal") or "WAIT").upper()
             if self._f(detail.get("confidence"), 0.0) < self.agent_min_confidence:
                 continue
             if direction == side:
-                support.append(name)
+                support.append(used_name)
             elif direction in {"BUY", "SELL"}:
-                oppose.append(name)
+                oppose.append(used_name)
         return {"available": True, "support": support, "oppose": oppose}
 
     def _is_at_risk(self, trade: Dict[str, Any], direction: str) -> bool:

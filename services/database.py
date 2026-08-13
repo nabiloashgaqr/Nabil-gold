@@ -22,10 +22,32 @@ except Exception:  # pragma: no cover - dependency may be absent in local Python
     Client = Any  # type: ignore[misc,assignment]
     create_client = None  # type: ignore[assignment]
 
-from utils.helpers import load_config, load_trades, save_trades
+from utils.helpers import (
+    load_config, load_trades, load_trades_checked, mutate_trades, save_trades,
+)
 from utils.instruments import price_decimals, price_to_points
 from utils.sessions import session_label_from_utc, SESSION_ORDER
 from services import performance_stats
+
+
+def _iso_ts(value: Any) -> Any:
+    """Normalize epoch seconds (int or digit-string) to ISO-8601 UTC.
+
+    Supabase timestamptz columns reject raw epoch strings (SQLSTATE 22008
+    'date/time field value out of range' — live incident 2026-08-10: SMC
+    candidates carry candle-epoch created_at). ISO strings pass through.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) or (isinstance(value, str) and value.strip().isdigit()):
+        try:
+            return datetime.fromtimestamp(int(value), tz=timezone.utc).replace(
+                microsecond=0).isoformat()
+        except Exception:  # noqa: BLE001
+            return None
+    return value
 
 
 class DatabaseService:
@@ -34,6 +56,8 @@ class DatabaseService:
     def __init__(self, config: Dict[str, Any] | None = None) -> None:
         self.config = config or load_config()
         self.logger = logging.getLogger(self.__class__.__name__)
+        # demo/mt5 branch: demo executions write to trades_demo via env.
+        self.trades_table = os.environ.get("TRADES_TABLE") or "trades"
         db_config = self.config.get("database", {})
         self.url = os.environ.get("SUPABASE_URL") or db_config.get("url")
         self.key = os.environ.get("SUPABASE_KEY") or db_config.get("key")
@@ -136,8 +160,10 @@ class DatabaseService:
             "tp1": round(float(signal.get("tp1", 0)), decimals),
             "tp2": round(float(signal.get("tp2", 0)), decimals),
             "confidence": int(decision.get("confidence", 0)),
-            "trading_mode": decision.get("trading_mode", "paper"),
-            "paper_trading": bool(decision.get("paper_trading", True)),
+            "trading_mode": ("mt5_demo" if os.environ.get("EXECUTION_MODE") == "mt5_demo"
+                             else decision.get("trading_mode", "demo")),
+            "paper_trading": (False if os.environ.get("EXECUTION_MODE") == "mt5_demo"
+                              else bool(decision.get("paper_trading", False))),
             "paper_balance_start": decision.get("paper_config", {}).get("starting_balance"),
             "paper_lot_size": decision.get("paper_config", {}).get("default_lot_size"),
             "status": initial_status,
@@ -148,6 +174,18 @@ class DatabaseService:
             "current_pnl_points": 0,
             "sl_moved_to_entry": False,
             "partial_close": False,
+            # Rechecked against the broker's actual fill before any signal card.
+            "execution_stop_normalized": False,
+            "execution_stop_points": None,
+            "opposite_exit_required": bool(decision.get("opposite_exit_required", False)),
+            "opposite_trade_ids": list(decision.get("opposite_trade_ids") or []),
+            "opposite_pending_cancelled_ids": list(decision.get("opposite_pending_cancelled_ids") or []),
+            "opposite_exit_completed": False,
+            # In mt5_demo, analysis persists the execution intent first and the
+            # tick manager sends the rich signal card only AFTER MT5 accepts the
+            # order. Paper mode keeps its historical send-before-save flow.
+            "telegram_signal_sent": bool(decision.get("_telegram_signal_sent", True)),
+            "telegram_signal_sent_at": decision.get("_telegram_signal_sent_at"),
             "pending_cycles": 0,  # hybrid mode: how many cycles a PENDING order has survived
             "updates_sent": [],
             "result": None,
@@ -174,9 +212,7 @@ class DatabaseService:
                     raise RuntimeError(f"Failed to save trade in Supabase in production: {exc}") from exc
                 self.logger.error("Failed to save trade in Supabase, falling back local: %s", exc)
 
-        trades = load_trades(self.local_path)
-        trades.append(trade_data)
-        save_trades(trades, self.local_path)
+        mutate_trades(lambda trades: trades.append(trade_data), self.local_path)
         return trade_id
 
     def save_setup_candidate(self, candidate: Dict[str, Any]) -> str:
@@ -215,9 +251,9 @@ class DatabaseService:
             "details": candidate.get("details") or {},
             "source": candidate.get("source") or "smc",
             "is_active": bool(candidate.get("is_active", True)),
-            "first_seen_at": candidate.get("first_seen_at") or candidate.get("created_at") or now_iso,
-            "last_seen_at": candidate.get("last_seen_at") or now_iso,
-            "last_transition_at": candidate.get("last_transition_at") or now_iso,
+            "first_seen_at": _iso_ts(candidate.get("first_seen_at") or candidate.get("created_at")) or now_iso,
+            "last_seen_at": _iso_ts(candidate.get("last_seen_at")) or now_iso,
+            "last_transition_at": _iso_ts(candidate.get("last_transition_at")) or now_iso,
             "transition_count": int(candidate.get("transition_count", 0) or 0),
             "missing_cycles": int(candidate.get("missing_cycles", 0) or 0),
             "last_trade_id": candidate.get("last_trade_id"),
@@ -298,7 +334,7 @@ class DatabaseService:
             "reason": event.get("reason") or "state_transition",
             "price": event.get("price"),
             "payload": event.get("payload") or {},
-            "created_at": event.get("created_at") or now_iso,
+            "created_at": _iso_ts(event.get("created_at")) or now_iso,
             "updated_at": now_iso,
         }
         path = self.setup_state_events_path
@@ -783,13 +819,16 @@ class DatabaseService:
         plus not-yet-filled PENDING limit/stop orders."""
         if self.use_supabase and self.client:
             try:
-                response = self.client.table("trades").select("*").in_("status", self.ACTIVE_STATUSES).execute()
+                response = self.client.table(self.trades_table).select("*").in_("status", self.ACTIVE_STATUSES).execute()
                 return list(response.data or [])
             except Exception as exc:  # noqa: BLE001
                 if self._strict_supabase():
                     raise RuntimeError(f"Failed to fetch open trades from Supabase in production: {exc}") from exc
                 self.logger.error("Failed to fetch open trades from Supabase: %s", exc)
-        return [trade for trade in load_trades(self.local_path) if trade.get("status") in set(self.ACTIVE_STATUSES)]
+        # Execution path uses the strict read: corrupt/contended storage must
+        # fail closed, never masquerade as an empty book and cancel broker orders.
+        return [trade for trade in load_trades_checked(self.local_path)
+                if trade.get("status") in set(self.ACTIVE_STATUSES)]
 
     def save_macro_context(self, context: Dict[str, Any]) -> bool:
         """Persist latest hourly macro context in Supabase when schema exists.
@@ -850,7 +889,7 @@ class DatabaseService:
             trades = load_trades(self.local_path)
             if self.use_supabase and self.client:
                 try:
-                    response = self.client.table("trades").select("*").execute()
+                    response = self.client.table(self.trades_table).select("*").execute()
                     trades = list(response.data or [])
                 except Exception as exc:  # noqa: BLE001
                     self.logger.error("execute_query trades fallback after Supabase error: %s", exc)
@@ -895,18 +934,18 @@ class DatabaseService:
                     raise RuntimeError(f"Failed to update Supabase trade {trade_id} in production: {exc}") from exc
                 self.logger.error("Failed to update Supabase trade %s: %s", trade_id, exc)
 
-        trades = load_trades(self.local_path)
-        for trade in trades:
-            if str(trade.get("id")) == trade_id:
-                # Apply updates
-                trade.update(updates)
-                # Keep type/side in sync for backward compatibility
-                if "type" in updates and "side" not in updates:
-                    trade["side"] = updates.get("type")
-                if "side" in updates and "type" not in updates:
-                    trade["type"] = updates.get("side")
-                break
-        save_trades(trades, self.local_path)
+        def _update_local(trades: List[Dict[str, Any]]) -> None:
+            for trade in trades:
+                if str(trade.get("id")) == trade_id:
+                    trade.update(updates)
+                    # Keep type/side in sync for backward compatibility.
+                    if "type" in updates and "side" not in updates:
+                        trade["side"] = updates.get("type")
+                    if "side" in updates and "type" not in updates:
+                        trade["type"] = updates.get("side")
+                    break
+
+        mutate_trades(_update_local, self.local_path)
 
 
     def cancel_pending_orders(
@@ -939,7 +978,7 @@ class DatabaseService:
 
         if self.use_supabase and self.client:
             try:
-                query = self.client.table("trades").select("id,symbol,type,side,status").eq("status", "PENDING")
+                query = self.client.table(self.trades_table).select("id,symbol,type,side,status").eq("status", "PENDING")
                 if norm_symbol:
                     query = query.eq("symbol", norm_symbol)
                 if norm_direction:
@@ -962,20 +1001,19 @@ class DatabaseService:
                     raise RuntimeError(f"Failed to cancel pending orders in production: {exc}") from exc
                 self.logger.error("Failed to cancel pending orders from Supabase: %s", exc)
 
-        trades = load_trades(self.local_path)
-        changed = False
-        for trade in trades:
-            if _matches(trade):
-                trade.update({
-                    "status": "CANCELLED", "result": "CANCELLED",
-                    "closed_at": now_iso, "close_time": now_iso,
-                    "reasons": [reason], "last_updated": now_iso,
-                })
-                cancelled += 1
-                changed = True
-        if changed:
-            save_trades(trades, self.local_path)
-        return cancelled
+        def _cancel_local(trades: List[Dict[str, Any]]) -> int:
+            count = 0
+            for trade in trades:
+                if _matches(trade):
+                    trade.update({
+                        "status": "CANCELLED", "result": "CANCELLED",
+                        "closed_at": now_iso, "close_time": now_iso,
+                        "reasons": [reason], "last_updated": now_iso,
+                    })
+                    count += 1
+            return count
+
+        return mutate_trades(_cancel_local, self.local_path)
 
     def _missing_column_name(self, exc: Exception) -> str | None:
         """Extract the missing column name from a Supabase/PostgREST error.
@@ -1053,7 +1091,7 @@ class DatabaseService:
                 # Using an 'or' filter in Supabase: (created_at >= start AND created_at < end) OR (closed_at >= start AND closed_at < end)
                 filter_str = f"and(created_at.gte.{start_utc},created_at.lt.{end_utc}),and(closed_at.gte.{start_utc},closed_at.lt.{end_utc})"
                 response = (
-                    self.client.table("trades")
+                    self.client.table(self.trades_table)
                     .select("*")
                     .or_(filter_str)
                     .execute()
@@ -1081,12 +1119,12 @@ class DatabaseService:
         """Return recent trades ordered newest first, supporting legacy schemas."""
         if self.use_supabase and self.client:
             try:
-                response = self.client.table("trades").select("*").order("created_at", desc=True).limit(limit).execute()
+                response = self.client.table(self.trades_table).select("*").order("created_at", desc=True).limit(limit).execute()
                 return list(response.data or [])
             except Exception as exc:  # noqa: BLE001
                 if self._missing_column(exc, "created_at"):
                     try:
-                        response = self.client.table("trades").select("*").order("updated_at", desc=True).limit(limit).execute()
+                        response = self.client.table(self.trades_table).select("*").order("updated_at", desc=True).limit(limit).execute()
                         return list(response.data or [])
                     except Exception as fallback_exc:  # noqa: BLE001
                         if self._strict_supabase():
@@ -1123,7 +1161,7 @@ class DatabaseService:
             for order_column in ("closed_at", "close_time", "created_at"):
                 try:
                     response = (
-                        self.client.table("trades").select("*")
+                        self.client.table(self.trades_table).select("*")
                         .in_("status", statuses)
                         .order(order_column, desc=True)
                         .limit(limit)
@@ -1172,7 +1210,7 @@ class DatabaseService:
             for column in ("closed_at", "close_time"):
                 try:
                     query = (
-                        self.client.table("trades").select("*")
+                        self.client.table(self.trades_table).select("*")
                         .gte(column, since_iso)
                         .order(column, desc=True)
                         .limit(limit)
@@ -1266,12 +1304,12 @@ class DatabaseService:
         """
         assert self.client is not None
         try:
-            self.client.table("trades").insert(trade_data).execute()
+            self.client.table(self.trades_table).insert(trade_data).execute()
             return
         except Exception as exc:  # noqa: BLE001
             try:
                 _, dropped = self._drop_missing_columns_and_retry(
-                    lambda p: self.client.table("trades").insert(p).execute(), trade_data
+                    lambda p: self.client.table(self.trades_table).insert(p).execute(), trade_data
                 )
                 if dropped:
                     self.logger.warning(
@@ -1285,7 +1323,7 @@ class DatabaseService:
                 if legacy == trade_data:
                     raise
                 self.logger.warning("Full trade insert failed, trying legacy schema: %s", exc)
-                self.client.table("trades").insert(legacy).execute()
+                self.client.table(self.trades_table).insert(legacy).execute()
 
     def _update_trade_supabase(self, trade_id: str, updates: Dict[str, Any]) -> None:
         """Update full trade row.
@@ -1295,12 +1333,12 @@ class DatabaseService:
         """
         assert self.client is not None
         try:
-            self.client.table("trades").update(updates).eq("id", trade_id).execute()
+            self.client.table(self.trades_table).update(updates).eq("id", trade_id).execute()
             return
         except Exception as exc:  # noqa: BLE001
             try:
                 _, dropped = self._drop_missing_columns_and_retry(
-                    lambda p: self.client.table("trades").update(p).eq("id", trade_id).execute(), updates
+                    lambda p: self.client.table(self.trades_table).update(p).eq("id", trade_id).execute(), updates
                 )
                 if dropped:
                     self.logger.warning(
@@ -1314,7 +1352,7 @@ class DatabaseService:
                 if not legacy or legacy == updates:
                     raise
                 self.logger.warning("Full trade update failed, trying legacy schema: %s", exc)
-                self.client.table("trades").update(legacy).eq("id", trade_id).execute()
+                self.client.table(self.trades_table).update(legacy).eq("id", trade_id).execute()
 
     def _legacy_payload(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Keep only columns from the initial Supabase schema for compatibility."""

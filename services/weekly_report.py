@@ -301,7 +301,7 @@ class WeeklyReportService:
         data = json.dumps(stats.to_prompt_dict(), ensure_ascii=False, indent=2)
         return (
             "You are the weekly performance analyst for a SmartSignal system "
-            "(XAU/USD, Paper Trading).\n\n"
+            "(XAU/USD, Demo Account).\n\n"
             "📊 Real data for the past week (do NOT invent numbers, use only this data):\n"
             f"```json\n{data}\n```\n\n"
             "✍️ Write a concise report in English with the following sections, in order:\n"
@@ -594,7 +594,7 @@ class WeeklyReportService:
             "🎯 NEXT WEEK ACTIONS",
             *[f"• {rec}" for rec in recommendations[:4]],
             separator,
-            "⚠️ Paper trading only — not financial advice.",
+            "⚠️ Educational use only — not financial advice.",
         ]
         return "\n".join(lines)
 

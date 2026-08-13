@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
+import logging
 import os
 import re
+import sqlite3
+import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List
 
 import requests
+
+logger = logging.getLogger("telegram_bot")
 
 from utils import trading_rules as _tr
 from utils.helpers import format_price, load_config
@@ -48,22 +55,140 @@ class TelegramService:
         self.bot_token = os.environ.get("TELEGRAM_BOT_TOKEN") or c.get("bot_token")
         self.chat_id = os.environ.get("TELEGRAM_CHAT_ID") or c.get("chat_id")
         self.session = requests.Session()
+        self._recent_messages: Dict[str, float] = {}
+        self._dedup_path = Path(__file__).resolve().parents[1] / "storage" / "telegram_delivery_dedup.sqlite3"
+        dedup_cfg = (self.config.get("telegram_delivery") or {}) if isinstance(self.config, dict) else {}
+        self._dedup_seconds = float(dedup_cfg.get("dedup_seconds", 180) or 180)
+        self._pending_dedup_seconds = float(dedup_cfg.get("pending_dedup_seconds", 30) or 30)
+
+    @staticmethod
+    def _polish_message_text(text: Any, *, demo: bool) -> str:
+        """One final truth/polish boundary for every Telegram producer."""
+        value = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+        # Operator 2026-08-11: the retired paper label must never reach users.
+        value = re.sub(r"(?i)\bpaper[\s-]*trading\b", "demo execution", value)
+        value = re.sub(r"(?i)\bpaper[\s-]*traded\b", "evaluated on demo", value)
+        value = re.sub(r"(?i)\bpaper_trading\b", "demo", value)
+        value = re.sub(r"(?i)\bpaper\b", "demo", value)
+        value = re.sub(r"ورقي(?:ة)?", "ديمو", value)
+        # Canonicalize all historic tick-manager prefixes to one clean marker.
+        value = re.sub(r"^\s*🧪\s*DEMO\s*(?:[·:—-]\s*)?", "", value,
+                       count=1, flags=re.IGNORECASE)
+        if demo:
+            value = "🧪 DEMO · " + value.lstrip()
+
+        # Collapse accidental adjacent duplicates while preserving intentional
+        # section separators used between different card blocks.
+        out: List[str] = []
+        for raw in value.split("\n"):
+            line = raw.rstrip()
+            if line and out and line == out[-1]:
+                continue
+            if not line and out and out[-1] == "":
+                continue
+            out.append(line)
+        return "\n".join(out).strip()
+
+    def _delivery_key(self, chat_id: Any, text: str) -> str:
+        return hashlib.sha256(f"{chat_id}\0{text}".encode("utf-8")).hexdigest()
+
+    def _reserve_delivery(self, key: str) -> bool:
+        now = time.time()
+        if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("PYTEST_RUNNING") == "true":
+            last = self._recent_messages.get(key, 0.0)
+            if now - last < self._dedup_seconds:
+                return False
+            self._recent_messages[key] = now
+            return True
+
+        try:
+            self._dedup_path.parent.mkdir(parents=True, exist_ok=True)
+            with sqlite3.connect(self._dedup_path, timeout=8.0) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS deliveries "
+                    "(key TEXT PRIMARY KEY, ts REAL NOT NULL, state TEXT NOT NULL)"
+                )
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute("DELETE FROM deliveries WHERE ts < ?", (now - max(self._dedup_seconds, 3600),))
+                row = conn.execute(
+                    "SELECT ts, state FROM deliveries WHERE key = ?", (key,)
+                ).fetchone()
+                if row:
+                    age = now - float(row[0] or 0)
+                    ttl = self._pending_dedup_seconds if row[1] == "pending" else self._dedup_seconds
+                    if age < ttl:
+                        conn.rollback()
+                        return False
+                conn.execute(
+                    "INSERT INTO deliveries(key, ts, state) VALUES(?, ?, 'pending') "
+                    "ON CONFLICT(key) DO UPDATE SET ts=excluded.ts, state='pending'",
+                    (key, now),
+                )
+                conn.commit()
+                return True
+        except Exception as exc:  # noqa: BLE001
+            # Never lose a real message merely because dedup storage is damaged.
+            logger.warning("telegram dedup reserve failed open: %s", exc)
+            return True
+
+    def _finish_delivery(self, key: str, success: bool) -> None:
+        if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("PYTEST_RUNNING") == "true":
+            if not success:
+                self._recent_messages.pop(key, None)
+            return
+        now = time.time()
+        try:
+            with sqlite3.connect(self._dedup_path, timeout=8.0) as conn:
+                if success:
+                    conn.execute(
+                        "UPDATE deliveries SET ts = ?, state = 'delivered' WHERE key = ?",
+                        (now, key),
+                    )
+                else:
+                    conn.execute("DELETE FROM deliveries WHERE key = ?", (key,))
+                conn.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("telegram dedup finish failed: %s", exc)
 
     def send_message(self, text: str, urgent: bool = False, chat_id: str | None = None) -> bool:
-        if not self.bot_token or not (chat_id or self.chat_id):
+        demo = os.environ.get("EXECUTION_MODE") == "mt5_demo"
+        demo_chat = os.environ.get("TELEGRAM_DEMO_CHAT_ID")
+        if demo and not chat_id and demo_chat:
+            chat_id = demo_chat
+        target_chat = chat_id or self.chat_id
+        text = self._polish_message_text(text, demo=demo)
+        if not self.bot_token or not target_chat:
             return False
+
+        key = self._delivery_key(target_chat, text)
+        if not self._reserve_delivery(key):
+            logger.info("telegram duplicate suppressed: %.80s", text)
+            # Treat exact duplicate as already delivered so callers never create
+            # a second trade/error merely because the card was suppressed.
+            return True
+
         url = self.API_BASE.format(token=self.bot_token, method="sendMessage")
         payload = {
-            "chat_id": chat_id or self.chat_id,
+            "chat_id": target_chat,
             "text": text,
             "parse_mode": "HTML",
             "disable_web_page_preview": True,
         }
         try:
             resp = self.session.post(url, json=payload, timeout=20)
-            return resp.status_code == 200
+            ok = resp.status_code == 200
         except Exception:
+            self._finish_delivery(key, False)
+            logger.error("telegram send crashed for: %.60s", text)
             return False
+        self._finish_delivery(key, ok)
+        if not ok:
+            logger.error("telegram send HTTP %s for: %.60s",
+                         resp.status_code, text)
+        else:
+            logger.info("telegram delivered: %.60s", text)
+        return ok
 
     @staticmethod
     def _money(value: Any, symbol: str = "XAU/USD") -> str:
@@ -113,10 +238,16 @@ class TelegramService:
         if not agent_details:
             return []
         lines = ["🗳️ <b>AGENT VOTES</b>"]
-        # Emoji by direction: green=BUY, red=SELL, yellow=WAIT/neutral
-        marker = {"BUY": "🟢", "SELL": "🔴"}
+        shared = decision.get("shared_market_data") or {}
+        if isinstance(shared, dict) and shared.get("snapshot_id"):
+            lines.append(
+                f"📚 One shared stored MT5 snapshot · "
+                f"{html.escape(str(shared.get('snapshot_id')))}"
+            )
+        # Fixed color contract: BUY green, SELL red, WAIT white.
+        marker = {"BUY": "🟢", "SELL": "🔴", "WAIT": "⚪"}
         # Render order: core 5 agents first, then any extras
-        core_order = ["technical", "classical", "smc", "price_action", "multitimeframe", "macro_fundamental"]
+        core_order = ["unified_trend", "classical", "smc", "price_action", "auction_flow", "macro_fundamental"]
         ordered_keys = [k for k in core_order if k in agent_details]
         for key in agent_details:
             if key not in ordered_keys:
@@ -126,9 +257,9 @@ class TelegramService:
         # four green agents while the header said "3 qualified agents".
         sig_cfg = (self.config.get("signal_requirements") or {}) if isinstance(self.config, dict) else {}
         try:
-            min_agent_conf = float(sig_cfg.get("agent_min_confidence", 70) or 70)
+            min_agent_conf = float(sig_cfg.get("agent_min_confidence", 67) or 67)
         except (TypeError, ValueError):
-            min_agent_conf = 70.0
+            min_agent_conf = 67.0
         side = str(decision.get("decision") or (decision.get("signal") or {}).get("type") or "").upper()
 
         for key in ordered_keys:
@@ -144,7 +275,7 @@ class TelegramService:
                 conf_value = float(confidence)
             except (TypeError, ValueError):
                 conf_value = None
-            emoji = marker.get(direction, "🟡")
+            emoji = marker.get(direction, "⚪")
             conf_text = f" {confidence}%" if confidence is not None else ""
 
             note = ""
@@ -158,12 +289,27 @@ class TelegramService:
                     note = f" — {direction} (supports)"
             elif conf_value is not None and direction in {"BUY", "SELL"}:
                 if conf_value >= min_agent_conf:
-                    emoji = "✅" if direction == side else "⛔"
-                    note = "" if direction == side else " — opposes"
+                    note = " — QUALIFIED" if direction == side else " — QUALIFIED, opposes"
                 else:
-                    note = f" — below {min_agent_conf:.0f}% threshold"
+                    note = f" — NOT QUALIFIED (<{min_agent_conf:.0f}%)"
+            elif direction == "WAIT":
+                note = " — WAIT"
 
-            lines.append(f"{emoji} <b>{html.escape(label)}</b>{html.escape(conf_text)}{html.escape(note)}")
+            icon = "🧭 " if key == "unified_trend" else "🌊 " if key == "auction_flow" else ""
+            decision_weights = decision.get("weights") or {}
+            if key != "macro_fundamental" and isinstance(decision_weights, dict) and key in decision_weights:
+                note = f" · weight {float(decision_weights.get(key) or 0) * 100:.0f}%" + note
+            lines.append(f"{emoji} {icon}<b>{html.escape(label)}</b>{html.escape(conf_text)}{html.escape(note)}")
+            if key == "unified_trend" and detail.get("raw_edge") is not None:
+                lines.append(
+                    f"  • Edge {float(detail.get('raw_edge') or 0):+.3f} · "
+                    f"Coherence {float(detail.get('coherence') or 0) * 100:.0f}%"
+                )
+            elif key == "auction_flow" and detail.get("state"):
+                lines.append(
+                    f"  • {html.escape(str(detail.get('state')).replace('_', ' ').title())} · "
+                    f"Edge {float(detail.get('raw_edge') or 0):+.3f}"
+                )
             signals = detail.get("signals") or []
             if not signals:
                 # Some agents (multitimeframe) emit only a summary, which left
@@ -171,8 +317,10 @@ class TelegramService:
                 summary = str(detail.get("summary") or "").strip()
                 if summary:
                     signals = [summary]
-            for sig in signals[:3]:
+            for sig in signals[:2]:
                 text = self._friendly_signal_text(sig)
+                if len(text) > 160:
+                    text = text[:157].rstrip() + "..."
                 lines.append(f"  • {text}")
         return lines
 
@@ -585,14 +733,15 @@ class TelegramService:
         return lines[:2]
 
     def _technical_caution_lines(self, decision: Dict[str, Any]) -> List[str]:
+        """Backward-named formatter for Unified Trend cautions."""
         details = decision.get("agent_details") or {}
-        tech = details.get("technical") if isinstance(details, dict) else {}
-        signals = (tech or {}).get("signals") if isinstance(tech, dict) else []
+        trend = details.get("unified_trend") if isinstance(details, dict) else {}
+        signals = (trend or {}).get("signals") if isinstance(trend, dict) else []
         cautions = []
         for sig in signals or []:
             lower = str(sig).lower()
-            if any(word in lower for word in ("bearish", "weakening", "divergence", "overbought", "oversold")):
-                cautions.append(f"• Technical caution: {self._friendly_signal_text(sig)}")
+            if any(word in lower for word in ("bearish", "weakening", "divergence", "overbought", "oversold", "conflict")):
+                cautions.append(f"• Unified Trend caution: {self._friendly_signal_text(sig)}")
         return cautions[:1]
 
     def _independent_review_lines(self, decision: Dict[str, Any]) -> List[str]:
@@ -648,6 +797,9 @@ class TelegramService:
         standby_zone = plan.get("standby_entry_zone") or {}
         confidence = float(plan.get("planner_confidence") or 0)
         grade = str(plan.get("planner_grade") or "--")
+        display_quality = plan.get("map_display_quality") or {}
+        display_score = float(display_quality.get("score") if isinstance(display_quality, dict) and display_quality.get("score") is not None else min(confidence, 95.0))
+        display_grade = str(display_quality.get("grade") if isinstance(display_quality, dict) and display_quality.get("grade") else grade)
         authority = str(plan.get("authority_state") or "--")
         side_word = "BUY" if bias == "BUY" else "SELL" if bias == "SELL" else "TRADE"
         manual_plan = plan.get("manual_plan") or {}
@@ -691,16 +843,27 @@ class TelegramService:
 
         def _opinion_line(opinion: Dict[str, Any]) -> str:
             direction = str(opinion.get("direction") or "WAIT").upper()
-            emoji = "🟢" if direction == "BUY" else "🔴" if direction == "SELL" else "🟡"
+            emoji = "🟢" if direction == "BUY" else "🔴" if direction == "SELL" else "⚪"
             label = str(opinion.get("label") or opinion.get("key") or "Agent")
             conf = opinion.get("confidence")
-            note = str(opinion.get("summary") or "").strip()
-            if not note:
-                signals = [str(x).strip() for x in (opinion.get("signals") or []) if str(x).strip()]
-                note = signals[0] if signals else ""
+            signals = [str(x).strip() for x in (opinion.get("signals") or []) if str(x).strip()]
+            note = "; ".join(signals[:2]) if signals else str(opinion.get("summary") or "").strip()
+            if len(note) > 180:
+                note = note[:177].rstrip() + "..."
             line = f"{emoji} <b>{html.escape(label)}</b>: {html.escape(direction)}"
             if conf not in {None, ""}:
                 line += f" ({float(conf):.0f}%)"
+            if opinion.get("external_confirmation"):
+                line += " · external confirmation"
+            else:
+                weight = opinion.get("weight")
+                if weight not in {None, ""}:
+                    line += f" · weight {float(weight) * 100:.0f}%"
+                if opinion.get("qualified"):
+                    line += " · QUALIFIED"
+                else:
+                    bar = float(opinion.get("qualification_bar") or 67)
+                    line += f" · NOT QUALIFIED (<{bar:.0f}%)"
             if note:
                 line += f" — {self._clean_text(note)}"
             return line
@@ -717,6 +880,15 @@ class TelegramService:
         map_change_plan = str(manual_plan.get("map_change_plan") or "").strip()
         risk_note = str(manual_plan.get("risk_note") or "").strip()
         agent_opinions = [op for op in (plan.get("agent_opinions") or []) if isinstance(op, dict)]
+        execution_admission = plan.get("execution_admission") or {}
+        agent_book = plan.get("agent_book_summary") or {}
+        shared_market_data = plan.get("shared_market_data") or {}
+        qualified_core = sum(1 for op in agent_opinions if op.get("qualified"))
+        support_count = int(agent_book.get("support_count", 0) or 0)
+        opposition_count = int(agent_book.get("opposition_count", 0) or 0)
+        inactive_count = int(agent_book.get("inactive_count", max(0, 5 - qualified_core)) or 0)
+        support_names = [str(x) for x in (agent_book.get("supporters") or [])]
+        opposition_names = [str(x) for x in (agent_book.get("opponents") or [])]
         gemini_plan_review = plan.get("gemini_plan_review") or {}
         gemini_macro_review = plan.get("gemini_macro_review") or {}
         gemini_news_review = plan.get("gemini_news_review") or {}
@@ -732,8 +904,21 @@ class TelegramService:
             "━━━━━━━━━━━━━━━━━━━━━",
             f"{'🟢' if bias == 'BUY' else '🔴' if bias == 'SELL' else '🟡'} <b>Bias:</b> {html.escape(bias)}",
             f"🏷️ <b>Session:</b> {html.escape(str(plan.get('session_label') or '--'))} · {html.escape(str(plan.get('session_quality') or '--'))}",
-            f"🏅 <b>Plan:</b> {html.escape(grade)} {confidence:.1f}% · {html.escape(authority)}",
+            f"🏅 <b>Map quality:</b> {html.escape(display_grade)} {display_score:.1f}/100 <i>(quality, not probability)</i>",
+            f"🧭 <b>Authority:</b> {html.escape(authority)}",
+            f"🗳️ <b>Core book:</b> 🟢 {support_count} support · 🔴 {opposition_count} oppose · ⚪ {inactive_count} wait/below {float(plan.get('agent_min_confidence') or 67):.0f}%",
+            f"⚙️ <b>Execution admission:</b> {html.escape(str(execution_admission.get('path') or 'BLOCKED'))} · net {float(execution_admission.get('confidence') or 0):.1f}%",
         ]
+        if support_names or opposition_names:
+            lines.append(
+                f"📌 <b>Counted:</b> support [{html.escape(', '.join(support_names) or 'none')}] · "
+                f"oppose [{html.escape(', '.join(opposition_names) or 'none')}]"
+            )
+        if shared_market_data:
+            lines.append(
+                f"📚 <b>Data:</b> one shared stored MT5 snapshot · "
+                f"{html.escape(str(shared_market_data.get('snapshot_id') or '--'))}"
+            )
         if market_objective_label:
             lines.append(f"🎯 <b>Market objective:</b> {html.escape(market_objective_label)}")
         if objective_label and objective_label != market_objective_label:
@@ -845,7 +1030,7 @@ class TelegramService:
         if status != "READY" and str(plan.get("plan_reason") or "").strip():
             lines.append(f"⚠️ <b>Plan status:</b> {html.escape(str(plan.get('plan_reason')))}")
         lines.append("━━━━━━━━━━━━━━━━━━━━━")
-        lines.append("<i>Session map only — execution still depends on live validation.</i>")
+        lines.append("<i>Shared agent admission passed; final risk, price and broker validation still apply.</i>")
         compact = [line for line in lines if str(line).strip()]
         return self.send_message("\n".join(compact), urgent=True)
 
@@ -1088,12 +1273,13 @@ class TelegramService:
 
         lines.extend([
             "━━━━━━━━━━━━━━━━━━━━━",
-            "<i>Paper trading signal; not financial advice.</i>",
+            "<i>Educational signal; not financial advice.</i>",
             f"<i>ID: {html.escape(str(decision.get('trade_id') or 'N/A'))}</i>",
         ])
         text = "\n".join(line for line in lines if str(line).strip())
         while "\n\n\n" in text:
             text = text.replace("\n\n\n", "\n\n")
+        # send_message owns the single canonical DEMO marker and dedup boundary.
         return self.send_message(text)
 
     def _event_title(self, events: List[str]) -> str:

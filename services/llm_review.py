@@ -433,7 +433,7 @@ class GeminiReviewService:
         )
         # Agent votes summary
         votes_summary = {}
-        for name in ("technical","classical","smc","price_action","multitimeframe"):
+        for name in ("unified_trend", "classical", "smc", "price_action", "auction_flow"):
             r = ar.get(name, {}) or {}
             if r:
                 votes_summary[name] = {
@@ -462,10 +462,7 @@ class GeminiReviewService:
                 "bias": (ar.get("daily_bias", {}) or {}).get("bias"),
                 "confidence": (ar.get("daily_bias", {}) or {}).get("confidence"),
             },
-            "technical_regime": (
-                (ar.get("technical", {}) or {}).get("market_regime")
-                or ((ar.get("technical", {}) or {}).get("technical") or {}).get("market_regime")
-            ),
+            "technical_regime": (ar.get("unified_trend", {}) or {}).get("market_regime"),
             "news_status": (ar.get("news", {}) or {}).get("market_status"),
             "agent_votes": votes_summary,
             "quality": d.get("quality"),
@@ -480,13 +477,12 @@ class GeminiReviewService:
             or (ar.get("macro_fundamental", {}) or {}).get("macro_direction")
             or {}
         )
-        tech = ar.get("technical", {}) or {}
-        tech_inner = tech.get("technical", {}) or {}
+        tech = ar.get("unified_trend", {}) or {}
         return {
             "symbol": p.get("symbol"),
             "price": p.get("current_price"),
             "bias": (ar.get("daily_bias", {}) or {}).get("bias"),
-            "rsi": tech_inner.get("rsi") or tech.get("rsi"),
+            "rsi": tech.get("rsi"),
             "macro_direction": {
                 "bias": macro.get("bias"),
                 "confidence": macro.get("confidence"),
@@ -494,7 +490,7 @@ class GeminiReviewService:
                 "drivers": macro.get("drivers", [])[:3],
                 "breakdown": macro.get("confidence_breakdown"),
             } if macro else None,
-            "technical_regime": tech_inner.get("market_regime") or tech.get("market_regime"),
+            "technical_regime": tech.get("market_regime"),
             "session": (ar.get("session", {}) or {}).get("current_session"),
         }
 
