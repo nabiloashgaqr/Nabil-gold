@@ -20,7 +20,7 @@ let autoRefreshInterval = null;
 
 const I18N = {
     ar: {
-        api404: 'ملف API غير منشور على Vercel: /api/dashboard يرجع 404. إذا كان Root Directory في Vercel هو dashboard، يجب رفع الملف داخل dashboard/api/dashboard.js ثم عمل Redeploy.',
+        api404: 'واجهة البيانات المحلية /api/dashboard غير متاحة. تأكد أن مهمة SS_DashboardAPI تعمل على VPS.',
         loadError: 'تعذر تحميل البيانات',
         noClosed: 'لا توجد صفقات مغلقة حسب الفلتر الحالي',
         noLive: 'لا توجد صفقات حية أو TP1 حالياً',
@@ -46,7 +46,7 @@ const I18N = {
         noReportText: 'لا يوجد نص للتقرير',
     },
     en: {
-        api404: 'Dashboard API is not deployed: /api/dashboard returns 404. If Vercel Root Directory is dashboard, upload dashboard/api/dashboard.js and redeploy.',
+        api404: 'The local /api/dashboard endpoint is unavailable. Verify that SS_DashboardAPI is running on the VPS.',
         loadError: 'Failed to load data',
         noClosed: 'No closed trades match the current filter',
         noLive: 'No live or TP1 trades right now',
@@ -892,7 +892,7 @@ function updateAgentPerformance() {
     if (!grid) return;
     if (!agents.length) {
         // Fallback weights — must match config.json::agent_weights and utils/helpers.py::get_agent_weights
-        const fallbackWeights = {multitimeframe: 0.15, classical: 0.25, smc: 0.20, price_action: 0.20, technical: 0.20};
+        const fallbackWeights = {unified_trend: 0.20, classical: 0.25, smc: 0.20, price_action: 0.20, auction_flow: 0.15};
         grid.innerHTML = Object.keys(fallbackWeights).map(name => `<div class="agent-card"><div class="agent-header"><span class="agent-icon">🤖</span><span class="agent-name">${name}</span></div><div class="agent-stats"><div class="agent-metric"><span>${currentLang === 'ar' ? 'الوزن' : 'Weight'}</span><strong>${(fallbackWeights[name]*100).toFixed(1)}%</strong></div></div><div class="muted">No performance data yet</div></div>`).join('');
         setText('consensusStrength', '--');
         return;
@@ -961,7 +961,7 @@ function showTradeModal(trade) {
         <div><strong>${tr('tp2')}:</strong> ${trade.tp2 ?? '-'}</div>
         <div><strong>${tr('pnl')}:</strong> <span class="${pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}">${signed(pnl)}</span></div>
         <div><strong>${tr('confidence')}:</strong> ${esc(trade.confidence ?? '--')}%</div>
-        <div><strong>${tr('mode')}:</strong> ${esc(trade.trading_mode || 'paper')}</div>
+        <div><strong>${tr('mode')}:</strong> ${esc(trade.trading_mode || 'mt5_demo')}</div>
     </div>`;
     modal.style.display = 'flex';
 }

@@ -3,11 +3,11 @@
 No external model final gate is used. The final signal is calculated from the
 five analysis agents only:
 
-- Technical
+- Unified Trend
 - Classical
 - SMC
 - Price Action
-- Multi-Timeframe
+- Auction Flow
 
 Rules:
 - Ignore agents below ``agent_min_confidence`` (default 70%).
@@ -44,7 +44,7 @@ class DecisionAgent(BaseAgent):
         self.min_agents_agree = int(signal_req.get("min_agents_agree", 3) or 3)
         self.min_agreement_pct = float(signal_req.get("min_agreement_percentage", 1) or 1)
         self.allow_all_signals = bool(signal_req.get("allow_all_signals", False))
-        self.agent_min_confidence = int(signal_req.get("agent_min_confidence", 70) or 70)
+        self.agent_min_confidence = int(signal_req.get("agent_min_confidence", 67) or 67)
         self.min_consensus_confidence = float(signal_req.get("min_consensus_confidence", 72) or 72)
 
         # ── Two-Agent Entry Path (Path 2) ──
@@ -62,6 +62,12 @@ class DecisionAgent(BaseAgent):
 
         self.default_weights = get_agent_weights(config)
         self.current_weights = self._load_weights()
+        # Operator 2026-08-11: canonical config weights are the only decision
+        # weights unless the legacy behaviour is explicitly re-enabled.
+        self.profile_weight_overrides_enabled = bool(
+            config.get("strategy_profile_weight_overrides_enabled", False))
+        self.unify_agent_min_confidence = bool(
+            config.get("unify_agent_min_confidence", True))
         self.voting_agents = set(self.default_weights)
         self.active_profile: Dict[str, Any] = {
             "name": "classic_consensus",
@@ -164,8 +170,13 @@ class DecisionAgent(BaseAgent):
         # `strategy_profiles` in config.json stays authoritative -- an
         # operator who tunes one profile means it. What loses is the value
         # compiled into the source, which is a default and nothing more.
-        if not self._profile_overridden_in_config(profile):
+        if self.unify_agent_min_confidence or not self._profile_overridden_in_config(profile):
             profile["agent_min_confidence"] = self.agent_min_confidence
+        if not self.profile_weight_overrides_enabled:
+            # Do not even publish a dormant override in the active profile: it
+            # made diagnostics claim one policy while votes used another.
+            profile.pop("weight_overrides", None)
+            profile["weight_policy"] = "canonical_config_only"
         profile.setdefault("lead_agent", None)
         profile.setdefault("require_lead_alignment", False)
         return profile
@@ -175,8 +186,8 @@ class DecisionAgent(BaseAgent):
         setup_context = agents_results.get("setup_context") or {}
         smc = agents_results.get("smc", {}) or {}
         smc_structure = smc.get("setup_structure") or {}
-        technical = agents_results.get("technical", {}) or {}
-        technical_regime = technical.get("market_regime") or ((technical.get("technical") or {}).get("market_regime") or {})
+        technical = agents_results.get("unified_trend") or agents_results.get("technical", {}) or {}
+        technical_regime = technical.get("market_regime") or {}
         session = agents_results.get("session", {}) or agents_results.get("session_info", {}) or {}
         return {
             "setup_type": str(profile.get("resolved_setup_type") or setup_context.get("setup_type") or smc_structure.get("setup_type") or "CLASSIC_CONSENSUS"),
@@ -188,6 +199,12 @@ class DecisionAgent(BaseAgent):
     def _weights_for_profile(self, profile: Dict[str, Any] | None = None, agents_results: Dict[str, Any] | None = None) -> Dict[str, float]:
         profile = profile or {}
         weights = dict(self.current_weights)
+        if not self.profile_weight_overrides_enabled:
+            # Canonical policy: no setup-profile or contextual-learning weight
+            # can silently replace config.json::agent_weights.
+            return weights
+
+        # Legacy opt-in path retained only for controlled historical replay.
         overrides = profile.get("weight_overrides") or {}
         if isinstance(overrides, dict) and overrides:
             for name, value in overrides.items():
@@ -222,8 +239,15 @@ class DecisionAgent(BaseAgent):
         min_agent_conf = int(profile.get("agent_min_confidence", self.agent_min_confidence) or self.agent_min_confidence)
         profile_weights = self._weights_for_profile(profile, agents_results=agents_results)
         votes = {"BUY": [], "SELL": [], "WAIT": []}
+        legacy_to_new = {"technical": "unified_trend", "multitimeframe": "auction_flow"}
         for agent_name, result in agents_results.items():
-            if agent_name not in self.voting_agents or not isinstance(result, dict):
+            canonical_name = agent_name if agent_name in self.voting_agents else legacy_to_new.get(agent_name)
+            if canonical_name not in self.voting_agents or not isinstance(result, dict):
+                continue
+            # A historical snapshot may carry the old key. Never count it when
+            # the new canonical agent is present in the same book.
+            if (agent_name in legacy_to_new and canonical_name != agent_name
+                    and isinstance(agents_results.get(canonical_name), dict)):
                 continue
             signal = str(result.get("signal") or result.get("direction") or "WAIT").upper()
             if signal in {"NEUTRAL", "HOLD", "NO_TRADE", "NONE", ""}:
@@ -236,8 +260,8 @@ class DecisionAgent(BaseAgent):
                 confidence = 0
             if confidence < min_agent_conf:
                 continue
-            weight = float(profile_weights.get(agent_name, self.default_weights.get(agent_name, 0.15)) or 0.15)
-            adjusted = self.get_adjusted_confidence(agent_name, confidence)
+            weight = float(profile_weights.get(canonical_name, self.default_weights.get(canonical_name, 0.15)) or 0.15)
+            adjusted = self.get_adjusted_confidence(canonical_name, confidence)
             score = (adjusted / 100.0) * weight
             votes[signal].append({
                 "agent": agent_name,
@@ -353,7 +377,7 @@ class DecisionAgent(BaseAgent):
                 "require_lead_alignment": bool(profile.get("require_lead_alignment", False)),
             },
             "consensus": {
-                "mode": "5_agent_weighted_consensus",
+                "mode": "unified_5_agent_weighted_consensus",
                 "selected": selected_metrics,
                 "BUY": buy,
                 "SELL": sell,
@@ -367,11 +391,18 @@ class DecisionAgent(BaseAgent):
 
     def _agent_structured_payload(self, agents_results: Dict[str, Any]) -> Dict[str, Any]:
         payload: Dict[str, Any] = {}
+        aliases = {"unified_trend": "technical", "auction_flow": "multitimeframe"}
         for name in self.voting_agents:
+            output_name = name
             result = agents_results.get(name) or {}
-            if not isinstance(result, dict):
+            if not isinstance(result, dict) or not result:
+                legacy = aliases.get(name)
+                result = agents_results.get(legacy) or {} if legacy else {}
+                if isinstance(result, dict) and result:
+                    output_name = str(legacy)
+            if not isinstance(result, dict) or not result:
                 continue
-            payload[name] = {
+            payload[output_name] = {
                 "signal": result.get("signal") or result.get("direction") or "WAIT",
                 "confidence": result.get("confidence", 0),
                 "reason_codes": list(result.get("reason_codes", []) or [])[:10],
@@ -412,14 +443,15 @@ class DecisionAgent(BaseAgent):
                 confidence = float(result.get("confidence", 0) or 0)
             except (TypeError, ValueError):
                 confidence = 0.0
-            weight = float(self.current_weights.get(name, self.default_weights.get(name, 0.15)) or 0.15)
+            canonical = {"technical": "unified_trend", "multitimeframe": "auction_flow"}.get(name, name)
+            weight = float(self.current_weights.get(canonical, self.default_weights.get(canonical, 0.15)) or 0.15)
             return confidence * weight
 
         ranked = sorted(supporters, key=agent_score, reverse=True)
         primary = ranked[0] if ranked else (((classic.get("strongest_directional") or {}).get("agent")) if isinstance(classic, dict) else None)
-        mtf = agents_results.get("multitimeframe", {}) or {}
+        mtf = agents_results.get("unified_trend") or agents_results.get("multitimeframe", {}) or {}
         classical = agents_results.get("classical", {}) or {}
-        technical = agents_results.get("technical", {}) or {}
+        technical = agents_results.get("unified_trend") or agents_results.get("technical", {}) or {}
         news = agents_results.get("news", {}) or {}
         daily = agents_results.get("daily_bias", {}) or {}
 
@@ -457,7 +489,7 @@ class DecisionAgent(BaseAgent):
             "entry_permission": mtf.get("entry_permission"),
             "pattern_quality": classical.get("pattern_quality", {}),
             "breakout_quality": classical.get("breakout_quality", {}),
-            "technical_regime": technical.get("market_regime") or (technical.get("technical") or {}).get("market_regime", {}),
+            "technical_regime": technical.get("market_regime") or {},
             "event_risk": news.get("event_risk", {}) if isinstance(news, dict) else {},
             "macro_direction": macro if isinstance(macro, dict) else {},
             "daily_bias": {"bias": daily.get("bias"), "confidence": daily.get("confidence"), "strength_band": daily.get("strength_band")},
@@ -477,11 +509,11 @@ class DecisionAgent(BaseAgent):
         edge = float(selected_metrics.get("edge", 0) or 0)
 
         names = {
-            "technical": "Technical",
+            "unified_trend": "Unified Trend",
             "classical": "Classical",
             "smc": "SMC",
             "price_action": "Price Action",
-            "multitimeframe": "Multi-Timeframe",
+            "auction_flow": "Auction Flow",
         }
         support_labels = [names.get(str(a), str(a).replace("_", " ").title()) for a in supporters]
         opponent_labels = [names.get(str(a), str(a).replace("_", " ").title()) for a in opponents]

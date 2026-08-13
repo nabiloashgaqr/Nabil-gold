@@ -330,8 +330,9 @@ class RiskManagementAgent(BaseAgent):
         buy_count = 0
         sell_count = 0
         details: Dict[str, Any] = {}
-        for agent in ["technical", "classical", "smc", "price_action", "multitimeframe"]:
-            result = results.get(agent, {}) or {}
+        aliases = {"unified_trend": "technical", "auction_flow": "multitimeframe"}
+        for agent in ["unified_trend", "classical", "smc", "price_action", "auction_flow"]:
+            result = results.get(agent) or results.get(aliases.get(agent, ""), {}) or {}
             direction = str(result.get("direction", result.get("signal", "NEUTRAL"))).upper()
             confidence = max(0.0, min(100.0, self._f(result.get("confidence"))))
             weight = self._f(self.weights.get(agent), 0.0)
@@ -365,6 +366,7 @@ class RiskManagementAgent(BaseAgent):
         candidates = [
             results.get("atr"),
             results.get("indicators", {}).get("atr") if isinstance(results.get("indicators"), dict) else None,
+            (results.get("unified_trend", {}).get("market_regime", {}) or {}).get("atr"),
             results.get("technical", {}).get("indicators_raw", {}).get("atr"),
             results.get("technical", {}).get("technical", {}).get("indicators_raw", {}).get("atr"),
             results.get("technical", {}).get("technical", {}).get("atr"),
@@ -404,16 +406,22 @@ class RiskManagementAgent(BaseAgent):
         for key in ("resistance", "nearest_resistance"):
             add_resistance(results.get(key))
 
-        tech = results.get("technical", {}) or {}
-        tech_levels = tech.get("key_levels", {}) or {}
-        add_support(tech_levels.get("nearest_support"))
-        add_resistance(tech_levels.get("nearest_resistance"))
-        tech_nested = tech.get("technical", {}) or {}
-        add_support(tech_nested.get("support"))
-        add_resistance(tech_nested.get("resistance"))
-        nested_levels = tech_nested.get("key_levels", {}) or {}
-        add_support(nested_levels.get("nearest_support"))
-        add_resistance(nested_levels.get("nearest_resistance"))
+        unified = results.get("unified_trend", {}) or {}
+        unified_levels = unified.get("key_levels", {}) or {}
+        add_support(unified_levels.get("nearest_support"))
+        add_resistance(unified_levels.get("nearest_resistance"))
+        for value in unified.get("support_levels", []) or []:
+            add_support(value)
+        for value in unified.get("resistance_levels", []) or []:
+            add_resistance(value)
+
+        legacy_technical = results.get("technical", {}) or {}
+        legacy_levels = legacy_technical.get("key_levels", {}) or {}
+        add_support(legacy_levels.get("nearest_support"))
+        add_resistance(legacy_levels.get("nearest_resistance"))
+        legacy_nested = legacy_technical.get("technical", {}) or {}
+        add_support(legacy_nested.get("support"))
+        add_resistance(legacy_nested.get("resistance"))
 
         classical = results.get("classical", {}) or {}
         supports.extend(self._f(x) for x in classical.get("support_levels", []) if self._f(x) > 0)
@@ -750,7 +758,7 @@ class RiskManagementAgent(BaseAgent):
         setup_type = str(
             (results.get("setup_context") or {}).get("setup_type")
             or smc_structure.get("setup_type")
-            or (results.get("multitimeframe", {}) or {}).get("setup_type")
+            or (results.get("unified_trend") or results.get("multitimeframe", {}) or {}).get("setup_type")
             or ""
         ).upper()
         if setup_type in {"LIQUIDITY_REVERSAL", "REVERSAL_ATTEMPT"}:
@@ -760,8 +768,8 @@ class RiskManagementAgent(BaseAgent):
         if setup_type in {"RANGE_FADE", "SMC_CONTEXT", "MIXED_ALIGNMENT"}:
             return "range_profile"
         # Fallback from direction + MTF context when setup labels are absent.
-        mtf = results.get("multitimeframe", {}) or {}
-        if str(mtf.get("timing_state") or "").upper() in {"EARLY", "VALID"} and str(mtf.get("alignment") or "").upper() in {"FULL", "PARTIAL"}:
+        mtf = results.get("unified_trend") or results.get("multitimeframe", {}) or {}
+        if str(mtf.get("timing_state") or "").upper() in {"EARLY", "VALID"} and (str(mtf.get("setup_type") or "").upper() in {"TREND_CONTINUATION", "PULLBACK_ENTRY"} or str(mtf.get("alignment") or "").upper() in {"FULL", "PARTIAL"}):
             return "continuation_profile"
         return "default_profile"
 
@@ -1219,8 +1227,8 @@ class RiskManagementAgent(BaseAgent):
         else:
             score -= 8; notes.append("Weak agent agreement")
 
-        mtf = results.get("multitimeframe", {}) or {}
-        if mtf.get("direction") == direction and mtf.get("alignment") in {"FULL", "PARTIAL"}:
+        mtf = results.get("unified_trend") or results.get("multitimeframe", {}) or {}
+        if mtf.get("direction") == direction and (mtf.get("setup_type") in {"TREND_CONTINUATION", "PULLBACK_ENTRY"} or mtf.get("alignment") in {"FULL", "PARTIAL"}):
             score += 15; notes.append("Timeframes aligned")
         elif mtf.get("counter_trend"):
             score -= 15; notes.append("Against higher timeframe")

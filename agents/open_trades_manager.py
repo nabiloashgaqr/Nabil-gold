@@ -14,6 +14,7 @@ from typing import Any, Dict, List
 from agents.base_agent import BaseAgent
 from services.pending_governor import PendingGovernor
 from services.scenario_governor import ScenarioGovernor
+from services.thesis_consensus import evaluate_directional_admission
 from utils.helpers import calculate_pips, canonical_session_label, load_config
 from utils import trading_rules as _tr
 from utils.instruments import points_to_price
@@ -263,13 +264,15 @@ class OpenTradesManager(BaseAgent):
         self.thesis_exit_agent_vote_enabled = bool(agent_vote.get("enabled", True))
         self.thesis_exit_agent_min_confidence = float(
             agent_vote.get("agent_min_confidence")
-            or (self.config.get("signal_requirements", {}) or {}).get("agent_min_confidence", 70)
+            or (self.config.get("signal_requirements", {}) or {}).get("agent_min_confidence", 67)
             or 70
         )
         self.thesis_exit_min_defenders = int(agent_vote.get("min_defenders_to_hold", 2) or 2)
         self.thesis_exit_min_opponents = int(agent_vote.get("min_opponents_to_exit", 2) or 2)
         self.thesis_exit_silent_action = str(agent_vote.get("silent_action", "SCALE_OUT")).upper()
         self.thesis_exit_silent_scale_fraction = float(agent_vote.get("silent_scale_fraction", 0.5) or 0.5)
+        self.thesis_exit_mirror_entry_admission = bool(
+            agent_vote.get("mirror_entry_admission", False))
         # When the agent book turns against a winning trade but the candle has
         # not broken, the exit correctly holds -- a thesis should not die on an
         # opinion the price action has not confirmed. But holding used to mean
@@ -2415,7 +2418,7 @@ class OpenTradesManager(BaseAgent):
                     }
         return {"exit_now": False, "scale_out": False}
 
-    AGENT_VOTE_AGENTS = ("technical", "classical", "smc", "price_action", "multitimeframe")
+    AGENT_VOTE_AGENTS = ("unified_trend", "classical", "smc", "price_action", "auction_flow")
 
     def _agent_exit_vote(self, agent_details: Dict[str, Any] | None, trade_type: str) -> Dict[str, Any]:
         """Ask the live agent book whether the trade's thesis still stands.
@@ -2433,19 +2436,52 @@ class OpenTradesManager(BaseAgent):
             return {"verdict": "SILENT", "available": False, "defenders": [], "opponents": []}
 
         opposite = "BUY" if trade_type == "SELL" else "SELL"
+        if self.thesis_exit_mirror_entry_admission:
+            opposite_admission = evaluate_directional_admission(
+                opposite, agent_details, self.config)
+            current_admission = evaluate_directional_admission(
+                trade_type, agent_details, self.config)
+            if opposite_admission.get("allow"):
+                return {
+                    "verdict": "CONFIRM", "available": True,
+                    "defenders": list(opposite_admission.get("opponents") or []),
+                    "opponents": list(opposite_admission.get("supporters") or []),
+                    "admission": opposite_admission,
+                }
+            if current_admission.get("allow"):
+                return {
+                    "verdict": "DEFEND", "available": True,
+                    "defenders": list(current_admission.get("supporters") or []),
+                    "opponents": list(current_admission.get("opponents") or []),
+                    "admission": current_admission,
+                }
+            return {
+                "verdict": "SILENT", "available": True,
+                "defenders": list(current_admission.get("supporters") or []),
+                "opponents": list(opposite_admission.get("supporters") or []),
+                "admission": opposite_admission,
+            }
+
         defenders: List[str] = []
         opponents: List[str] = []
+        legacy_aliases = {"unified_trend": "technical", "auction_flow": "multitimeframe"}
         for name in self.AGENT_VOTE_AGENTS:
+            used_name = name
             detail = agent_details.get(name)
+            if not isinstance(detail, dict):
+                legacy = legacy_aliases.get(name)
+                detail = agent_details.get(legacy) if legacy else None
+                if isinstance(detail, dict):
+                    used_name = str(legacy)
             if not isinstance(detail, dict):
                 continue
             direction = str(detail.get("direction") or detail.get("signal") or "WAIT").upper()
             if self._f(detail.get("confidence"), 0.0) < self.thesis_exit_agent_min_confidence:
                 continue
             if direction == trade_type:
-                defenders.append(name)
+                defenders.append(used_name)
             elif direction == opposite:
-                opponents.append(name)
+                opponents.append(used_name)
 
         if len(defenders) >= self.thesis_exit_min_defenders and len(defenders) > len(opponents):
             verdict = "DEFEND"
@@ -2478,6 +2514,36 @@ class OpenTradesManager(BaseAgent):
     ) -> Dict[str, Any]:
         if not self.thesis_exit_enabled or trade_type not in {"BUY", "SELL"}:
             return {"exit_now": False, "scale_out": False}
+
+        # Operator 2026-08-12: a thesis may die only when the opposite side
+        # earns the SAME admission as a new entry (3 agents, or 2 + Macro/
+        # Gemini, with the same weighted confidence/opposition penalty).
+        # Price/candle heuristics no longer close a trade on weaker evidence.
+        if self.thesis_exit_mirror_entry_admission:
+            vote = self._agent_exit_vote(agent_details, trade_type)
+            if str(vote.get("verdict")) == "CONFIRM":
+                admission = vote.get("admission") or {}
+                return {
+                    "exit_now": True,
+                    "scale_out": False,
+                    "kind": "ENTRY_GRADE_OPPOSITE_THESIS",
+                    "reason": (
+                        f"Thesis exit: opposite entry-grade admission via "
+                        f"{admission.get('path')} — {admission.get('reason')}"
+                    ),
+                    "agent_vote": vote,
+                }
+            return {
+                "exit_now": False,
+                "scale_out": False,
+                "kind": "THESIS_HELD_NO_OPPOSITE_ADMISSION",
+                "reason": (
+                    f"Thesis held: opposite side did not meet entry admission "
+                    f"({(vote.get('admission') or {}).get('reason', 'no consensus')})"
+                ),
+                "agent_vote": vote,
+            }
+
         opposite_continuation = self._continuation_trigger_against_trade(trade_type, recent_candles, symbol)
         if opposite_continuation:
             vote = self._agent_exit_vote(agent_details, trade_type)

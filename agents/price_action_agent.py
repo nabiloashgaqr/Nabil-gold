@@ -10,6 +10,10 @@ from statistics import mean
 from typing import Any, Dict, List, Tuple
 
 from agents.base_agent import BaseAgent
+from services.timeframe_fusion import (
+    CANONICAL_TIMEFRAMES, fuse_timeframe_results, missing_required_timeframes,
+    native_timeframe_failure, native_timeframe_payloads,
+)
 from utils.indicators import calculate_atr, detect_support_resistance
 
 Candle = Dict[str, Any]
@@ -21,6 +25,35 @@ class PriceActionAgent(BaseAgent):
     name = "price_action"
 
     def analyze(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze every native 5m/15m/1H/4H payload and emit one vote."""
+        cfg = self.config.get("all_agents_timeframes", {}) or {}
+        tf_book = market_data.get("timeframes") or {}
+        if not market_data.get("data") and not tf_book:
+            return self._empty("No candle data supplied")
+        # Backward compatibility for focused unit tests/manual callers. VPS
+        # production sets require_all=true and therefore never takes this path.
+        if not tf_book and not bool(cfg.get("require_all", False)):
+            return self._analyze_single(market_data)
+        missing = missing_required_timeframes(market_data, self.config)
+        # Legacy/manual single-payload callers carry no verified source. VPS
+        # production is source=mt5 and always fails closed on a missing native
+        # frame. This keeps focused indicator tests callable without weakening
+        # the live contract.
+        verified_runtime = bool(market_data.get("source"))
+        if bool(cfg.get("require_all", False)) and missing:
+            if not verified_runtime and market_data.get("data"):
+                return self._analyze_single(market_data)
+            return native_timeframe_failure(self.name, missing)
+        payloads = native_timeframe_payloads(market_data, self.config)
+        results = {tf: self._analyze_single(payload) for tf, payload in payloads.items()}
+        if not results:
+            return native_timeframe_failure(self.name, CANONICAL_TIMEFRAMES)
+        return fuse_timeframe_results(
+            self.name, results, required_timeframes=CANONICAL_TIMEFRAMES,
+            primary_timeframe=str(self.config.get("primary_timeframe", "15m")),
+        )
+
+    def _analyze_single(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
         """Run price action analysis and return a confirmation/rejection role."""
         try:
             candles = market_data.get("data", [])

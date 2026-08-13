@@ -180,7 +180,7 @@ class DailyReportAgent(BaseAgent):
 💡 RECOMMENDATIONS
 {recommendations}
 
-⚠️ Paper trading only — not financial advice.""".strip()
+⚠️ Educational use only — not financial advice.""".strip()
 
     def _format_instruments(self, by_instrument: Dict[str, Dict[str, Any]]) -> str:
         if not by_instrument:
@@ -403,7 +403,7 @@ class DailyReportAgent(BaseAgent):
     def _recommendations(self, total: int, win_rate: float, net: float, profit_factor: float, by_agent: Dict[str, Any], by_direction: Dict[str, Any]) -> List[str]:
         recs: List[str] = []
         if total < 5:
-            recs.append("Sample is small; keep paper trading before judging performance.")
+            recs.append("Sample is small; keep evaluating on the demo account before judging performance.")
         if win_rate < 45 and total >= 5:
             recs.append("Low win rate; raise confidence/quality thresholds or block D/E signals.")
         if net < 0:

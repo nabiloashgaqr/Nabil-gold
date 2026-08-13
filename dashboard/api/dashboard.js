@@ -414,14 +414,14 @@ function extractAgentVotes(trade) {
 }
 
 function computeAgentPerformance(closedTrades, agentWeights = []) {
-  const defaultAgents = ['technical', 'classical', 'smc', 'price_action', 'multitimeframe'];
+  const defaultAgents = ['unified_trend', 'classical', 'smc', 'price_action', 'auction_flow'];
   // Fallback weights — must match config.json::agent_weights and utils/helpers.py::get_agent_weights
   const CURRENT_WEIGHTS = {
-    technical: 0.20,
+    unified_trend: 0.20,
     classical: 0.25,
     smc: 0.20,
     price_action: 0.20,
-    multitimeframe: 0.15,
+    auction_flow: 0.15,
   };
   const stats = {};
   function ensure(agent) {
