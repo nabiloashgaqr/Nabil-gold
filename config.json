@@ -10,22 +10,28 @@
   "trend_timeframe": "4H",
   "entry_timeframe": "15m",
   "data_source": {
-    "primary": "twelvedata",
+    "primary": "mt5",
     "fallback": null,
     "description_fallback": "لا يوجد fallback مجاني موثوق لشموع XAU/USD 5m للتحليل. عند انتهاء كوتة Twelve Data يتم إيقاف التحليل بأمان. لإدارة الصفقات المفتوحة فقط يستخدم النظام Swissquote spot quote كسعر حي لحماية SL/TP دون توليد إشارات جديدة.",
     "api_keys": {
       "twelvedata": "ENV:TWELVEDATA_API_KEY"
     },
     "allow_synthetic_in_production": false,
-    "resample_timeframes_from_base": true,
+    "resample_timeframes_from_base": false,
     "base_timeframe": "5m",
     "base_outputsize": 2500,
-    "description_resample_timeframes_from_base": "Fetch one 5m series per symbol then locally resample 15m/1H/4H to reduce API calls."
+    "description_resample_timeframes_from_base": "توضيح المشغل 2026-08-09: تُجلب شمعة 5m أساساً وتُشتق منها 15m/1H/4H — الشموع الأربع كلها متاحة للتحليل.",
+    "description_native_timeframes": "قرار المشغل 2026-08-12: تُجلب شموع MT5 الأصلية M5/M15/H1/H4 كلٌ على حدة مرة واحدة للدورة، ثم يقرأها جميع الوكلاء الخمسة. لا اشتقاق أو resample بين الفريمات."
   },
   "telegram": {
     "bot_token": "ENV:TELEGRAM_BOT_TOKEN",
     "chat_id": "ENV:TELEGRAM_CHAT_ID",
     "signals_channel": "ENV:TELEGRAM_CHAT_ID"
+  },
+  "telegram_delivery": {
+    "dedup_seconds": 180,
+    "pending_dedup_seconds": 30,
+    "description": "Operator 2026-08-11: canonical DEMO prefix, retired-paper wording removal, and exact-message dedup across VPS processes."
   },
   "database": {
     "provider": "supabase",
@@ -34,11 +40,11 @@
     "local_fallback_file": "storage/trades.json"
   },
   "agent_weights": {
-    "multitimeframe": 0.15,
+    "unified_trend": 0.2,
     "classical": 0.25,
     "smc": 0.2,
     "price_action": 0.2,
-    "technical": 0.2
+    "auction_flow": 0.15
   },
   "risk_settings": {
     "min_confidence": 65,
@@ -161,10 +167,10 @@
     "timezone": "Asia/Hebron",
     "sessions": [
       {
-        "name": "Main Trading Session",
-        "start_hour": 3,
+        "name": "Full-Day Session (24h, operator directive 2026-08-09)",
+        "start_hour": 0,
         "start_minute": 0,
-        "end_hour": 22,
+        "end_hour": 24,
         "end_minute": 0,
         "days": [
           0,
@@ -176,7 +182,7 @@
         "quality": "HIGH",
         "allow_signals": true,
         "allow_reports": true,
-        "description": "Signals allowed 3:00 AM - 10:00 PM on weekdays (Monday-Friday) in Asia/Hebron timezone. Weekends are blocked."
+        "description": "قرار المشغل 2026-08-09: تداول 24 ساعة يومياً الإثنين-الجمعة (ترميز days: 0=الإثنين). السبت والأحد مغلق تماماً."
       }
     ],
     "min_quality_required": "HIGH",
@@ -185,7 +191,7 @@
     "exclude_weekends": false,
     "enforce_friday_cutoff": false,
     "friday_cutoff_minute": 0,
-    "description": "توليد الإشارات مسموح 3:00-22:00 خلال أيام العمل فقط (الإثنين-الجمعة) بتوقيت Asia/Hebron. لا إشارات يومي السبت والأحد. متابعة الصفقات المفتوحة تبقى منفصلة وتعمل عند وجود صفقة لحماية SL/TP/Trailing."
+    "description": "قرار المشغل 2026-08-09: نافذة 24/5 (الإثنين-الجمعة كاملة) بتوقيت Asia/Hebron؛ السبت والأحد لا تحليل ولا تحديث صفقات. إدارة الصفقات المفتوحة داخل أيام العمل تعمل على مدار الساعة."
   },
   "signal_filters": {
     "require_trading_hours": true,
@@ -297,19 +303,21 @@
       "agent_vote": {
         "enabled": true,
         "description": "تصويت الوكلاء على خروج الشمعة. الشمعة وحدها دليل واحد: صفقتان حيّتان أنتجتا بصمة متطابقة بالحرف، إحداهما انعكاس حقيقي (وفّر الخروج 314 نقطة) والأخرى ضجيج (كلّف 107 نقاط ثم أعاد المخطِّط نشر نفس المنطقة A+). لا عتبة تفرّق بينهما لأن العيب في المُدخَل.",
-        "agent_min_confidence": 70,
+        "agent_min_confidence": 67,
         "description_agent_min_confidence": "نفس عتبة signal_requirements.agent_min_confidence المستعملة في كل مكان — لا رقم جديد.",
         "min_defenders_to_hold": 2,
-        "description_min_defenders_to_hold": "إذا دافع هذا العدد من الوكلاء المؤهلين عن اتجاه الصفقة وكانوا أكثر من المعارضين، يُلغى الخروج.",
+        "description_min_defenders_to_hold": "Legacy-only when mirror_entry_admission=false. Production defence now requires the current trade direction to earn the same entry-grade admission.",
         "min_opponents_to_exit": 3,
-        "description_min_opponents_to_exit": "إذا عارض هذا العدد من الوكلاء المؤهَّلين ولا مدافع واحد، يُنفَّذ الخروج كاملاً. رُفع من 2 إلى 3: الوكلاء المصوّتون خمسة (technical · classical · smc · price_action · multitimeframe)، فاشتراط ثلاثة يعني أغلبية حقيقية لا مجرد رأيين. مع silent_action=HOLD صار الإغلاق التلقائي مقصوراً على الحالة التي يجمع فيها أكثر الكتاب على أن الأطروحة انتهت؛ ما دون ذلك تُدار الصفقة بوقفها وأهدافها. الخروج السعري (وقف الخسارة، التعادل، الوقف المتحرك، TP1، TP2) لا يتأثر بهذا الرقم إطلاقاً.",
+        "description_min_opponents_to_exit": "Legacy-only when mirror_entry_admission=false. Production exit now uses THREE_AGENT_CONSENSUS or TWO_AGENT_MACRO/GEMINI with net confidence >=72.",
         "silent_action": "HOLD",
-        "description_silent_action": "ماذا يحدث حين يصمت الوكلاء (لا أغلبية مؤهَّلة مع الصفقة ولا ضدها). HOLD: لا إغلاق ولا تخفيف — الصفقة تبقى على وقفها الحالي، وهو الوضع الحالي. SCALE_OUT: تخفيف جزئي مع نقل الوقف للتعادل. FULL_EXIT: السلوك القديم بإغلاق كامل. الصمت أضعف دليل في النظام: إشارة الشمعة وحدها دليل واحد، وفي 2026-07-30 أغلقت صفقة بيع بـ-39.2 بينما Classical 71 وSMC 90 وMulti-TF 83 ما زالوا يدافعون عنها، ثم أعاد المخطِّط نشر نفس المنطقة كخريطة A+. الإغلاق الكامل ما زال يعمل عند CONFIRM (معارضان مؤهَّلان بلا مدافع). تنبيه: هذا الإعداد يُقرأ في مسارين — إشارة الشمعة ورفض الـPOI المعاكس — فتغييره يسري على كليهما.",
+        "description_silent_action": "Legacy-only when mirror_entry_admission=false. In production, no opposite entry-grade admission means HOLD; SL/TP/BE/trailing remain authoritative.",
         "silent_scale_fraction": 0.5,
         "description_silent_scale_fraction": "نسبة الإغلاق الفعلي عند الصمت. تُحتسب محاسبياً على الجزء المُغلق بسعره، والباقي بسعر إغلاقه.",
         "tighten_trail_on_reversal": true,
         "reversal_trail_distance_points": 60,
-        "description_reversal_trail_distance_points": "حين ينقلب الوكلاء على صفقة رابحة والشمعة لم تكسر، لا تُغلق الصفقة بل تضيق فجوة التتبّع من 150 إلى 60 نقطة. كانت صفقة +191 نقطة تحمي 41 فقط وتترك 150 معرّضة. الوقف يتحرك في اتجاه الربح فقط، فلا مخاطرة تُضاف — يتغيّر فقط مقدار الربح المدافَع عنه. يُشترط: حكم CONFIRM من الوكلاء + ربح مفتوح + وقف عند التعادل أو أفضل."
+        "description_reversal_trail_distance_points": "حين ينقلب الوكلاء على صفقة رابحة والشمعة لم تكسر، لا تُغلق الصفقة بل تضيق فجوة التتبّع من 150 إلى 60 نقطة. كانت صفقة +191 نقطة تحمي 41 فقط وتترك 150 معرّضة. الوقف يتحرك في اتجاه الربح فقط، فلا مخاطرة تُضاف — يتغيّر فقط مقدار الربح المدافَع عنه. يُشترط: حكم CONFIRM من الوكلاء + ربح مفتوح + وقف عند التعادل أو أفضل.",
+        "mirror_entry_admission": true,
+        "description_mirror_entry_admission": "قرار المشغّل 2026-08-12: خروج الأطروحة يحتاج نفس قبول الدخول المعاكس: 3 وكلاء مؤهلين بصافي >=72، أو وكيلين + Macro/Gemini. لا خروج شمعة/POI على دليل أضعف."
       }
     }
   },
@@ -535,7 +543,7 @@
     "min_main_rr_for_ready": 1.5,
     "min_supporting_agents_for_ready": 2,
     "max_opposing_agents_for_ready": 1,
-    "agent_alignment_min_confidence": 68,
+    "agent_alignment_min_confidence": 67,
     "create_pending_orders_from_plan": true,
     "description": "Day-Map Authority + Planner Fallback: if structured setup candidates are missing or weak, build a morning/session plan from daily bias, macro, structure, PDH/PDL, session liquidity, and premium/discount map instead of leaving the system blind. Additional guards block micro / contradictory / overly wide execution maps from being published as READY.",
     "min_add_leg_return_probability": 25,
@@ -554,7 +562,17 @@
     "revive_unexpired_plans": true,
     "min_thesis_objective_points": 30,
     "description_min_thesis_objective_points": "أدنى مسافة للهدف المذكور في نص الأطروحة. هدف على بُعد 6 نقاط أمام الدخول يمرّ فحص الاتجاه لكنه يناقض TP1 المعروض فوقه في نفس الرسالة. دون هذا الحد يُقال \"الهدف: السيولة التالية أمامنا\" بدل رقم بلا معنى.",
-    "description_revive_unexpired_plans": "الخطة تُبنى من الصفر كل دورة ولا تُحفظ للاستخدام، فإن لم تُنشئ أوامرها في نفس الدورة تُنسى. هذا يفعّل إحياء آخر خطة جاهزة لم تنتهِ صلاحيتها (plan_expires_at) حين يعجز التحليل عن بناء خطة جديدة — مثل تفرّق الوكلاء مؤقتًا. كل الفحوص اللاحقة (القبول، العائد، التكرار، مسافة السعر) تُطبَّق على الأسعار الحية. اضبطه false للعودة لسلوك 'دورة واحدة فقط'."
+    "description_revive_unexpired_plans": "الخطة تُبنى من الصفر كل دورة ولا تُحفظ للاستخدام، فإن لم تُنشئ أوامرها في نفس الدورة تُنسى. هذا يفعّل إحياء آخر خطة جاهزة لم تنتهِ صلاحيتها (plan_expires_at) حين يعجز التحليل عن بناء خطة جديدة — مثل تفرّق الوكلاء مؤقتًا. كل الفحوص اللاحقة (القبول، العائد، التكرار، مسافة السعر) تُطبَّق على الأسعار الحية. اضبطه false للعودة لسلوك 'دورة واحدة فقط'.",
+    "map_display_quality": {
+      "ceiling": 95,
+      "weights": {
+        "thesis_dominance": 0.3,
+        "return_probability": 0.25,
+        "setup_quality": 0.25,
+        "trigger_quality": 0.2
+      },
+      "description": "درجة عرض الخريطة وليست احتمال ربح. متوسط موزون لمكونات الخريطة فقط بسقف 95؛ لا تجمع bonuses حتى 100. planner_confidence الداخلي وعتبة min_plan_score لا يتغيران."
+    }
   },
   "session_plan_delivery": {
     "enabled": true,
@@ -563,9 +581,9 @@
     "min_update_interval_minutes": 25,
     "description": "Deliver day-map / morning-plan only by Telegram. Send one opening plan per session when the map first becomes ready, then send updates only on material changes and not more frequently than the configured interval. Do not expose it in the public dashboard/API."
   },
-  "trading_mode": "paper",
+  "trading_mode": "mt5_demo",
   "paper_trading": {
-    "enabled": true,
+    "enabled": false,
     "starting_balance": 10000,
     "currency": "USD",
     "default_lot_size": 0.01,
@@ -573,7 +591,7 @@
     "description": "وضع تجريبي: يتم حفظ ومتابعة الصفقات افتراضياً بدون تنفيذ حقيقي"
   },
   "daily_bias_filter": {
-    "enabled": true,
+    "enabled": false,
     "timeframe": "4H",
     "ema_fast": 20,
     "ema_slow": 50,
@@ -616,7 +634,7 @@
   },
   "order_execution": {
     "enabled": true,
-    "mode": "paper",
+    "mode": "mt5_demo",
     "default_order_type": "AUTO",
     "entry_style": "hybrid",
     "description_entry_style": "hybrid: إذا كان السعر ملاصقاً لمنطقة قوية يدخل MARKET، وإذا كانت المنطقة أعلى/أسفل بسحب منطقي يدخل LIMIT/STOP من zone حقيقية. هذا يعيد تفعيل zone execution تدريجياً بدون كسر الحماية الحالية.",
@@ -704,12 +722,12 @@
     "pending_support_removed": false,
     "description_allowed_order_types": "أوامر الدخول: ماركت أو ليميت فقط. أُلغي BUY_STOP و SELL_STOP نهائياً. أمر STOP يشتري فوق السوق أو يبيع تحته — أي يدفع سعراً أسوأ من المتاح الآن مقابل انتظار تأكيد الحركة، وهذه مطاردة. صفقة 29 يوليو الخاسرة كانت بهذا الشكل: BUY STOP عند 4028.77 فوق السوق بينما ثلاثة وكلاء مؤهلين يقولون بيع، فامتلأت داخل هبوط 310 نقطة. أمر LIMIT عكسه: يبيع في القوة ويشتري في الضعف بسعر أفضل دائماً. حين يقع المستوى في الجهة التي لا تسمح بذلك، يُنفَّذ ماركت بالسعر الحالي بدل انتظار سعر أسوأ — لا صفقة تُهمَل ولا سعر يُطارَد."
   },
-  "operation_mode": "classic_consensus",
+  "operation_mode": "unified_five_agent_consensus",
   "operation_modes": {
-    "classic_consensus": {
-      "description": "Final signal from 5-agent weighted consensus + risk/news/session/duplicate filters.",
-      "requires_three_agents": false,
-      "paper_only": true
+    "unified_five_agent_consensus": {
+      "description": "Final signal from Unified Trend, Classical, SMC, Price Action and Auction Flow; each reads native M5/M15/H1/H4 and emits one weighted vote.",
+      "requires_three_agents": true,
+      "demo_only": true
     }
   },
   "pending_governor": {
@@ -827,12 +845,16 @@
     "description_convert_touched_zone_to_market": "حين يبلغ السعر المنطقة المرسومة تُنفَّذ الرِجل ماركت بدل إلغائها. سابقاً كانت تُرفض بالكامل عند التسعير كـ MARKET، فلا يُنشأ أمر إلا والسعر بعيد، ويُرفض التنفيذ في اللحظة الصحيحة. كل بوابات المخاطرة والتكرار تبقى سارية.",
     "description": "Phase C: when the planner classifies a zone as EXTREME_POI and price is already inside the first half of the zone, create a starter market entry plus an add-on pending order under one scenario family and one shared risk budget."
   },
+  "strategy_profile_weight_overrides_enabled": false,
+  "description_strategy_profile_weight_overrides_enabled": "قرار المشغّل 2026-08-11: الأوزان العامة هي المصدر الوحيد في كل المسارات؛ لا profile overrides ولا contextual learning weights في القرار.",
+  "unify_agent_min_confidence": true,
+  "description_unify_agent_min_confidence": "قرار المشغّل 2026-08-11: حاجز تأهيل الوكيل 67% موحّد في القرار والبروفايلات والمخطط وإدارة الخروج.",
   "strategy_profiles": {
     "liquidity_reversal": {
       "description": "SMC-led reversal profile: sweep + POI + reaction can qualify with 2 strong aligned agents.",
-      "min_agents_agree": 2,
-      "min_consensus_confidence": 70,
-      "agent_min_confidence": 68,
+      "min_agents_agree": 3,
+      "min_consensus_confidence": 72,
+      "agent_min_confidence": 67,
       "lead_agent": "smc",
       "require_lead_alignment": true,
       "min_structure_quality": "MODERATE",
@@ -841,40 +863,26 @@
       "required_trigger_states": [
         "REJECTION_CONFIRMED"
       ],
-      "require_sweep_confirmation": "MODERATE",
-      "weight_overrides": {
-        "smc": 0.35,
-        "price_action": 0.25,
-        "multitimeframe": 0.2,
-        "classical": 0.1,
-        "technical": 0.1
-      }
+      "require_sweep_confirmation": "MODERATE"
     },
     "trend_pullback": {
-      "description": "Trend continuation / pullback profile with stronger HTF alignment requirements.",
+      "description": "Unified-Trend-led continuation/pullback profile using native M5/M15/H1/H4 evidence.",
       "min_agents_agree": 3,
       "min_consensus_confidence": 72,
-      "agent_min_confidence": 70,
-      "lead_agent": "multitimeframe",
+      "agent_min_confidence": 67,
+      "lead_agent": "unified_trend",
       "require_lead_alignment": true,
       "min_structure_quality": "MODERATE",
       "min_poi_rank_score": 24,
       "min_trigger_score": 40,
       "required_trigger_states": [],
-      "require_sweep_confirmation": null,
-      "weight_overrides": {
-        "multitimeframe": 0.3,
-        "classical": 0.25,
-        "price_action": 0.2,
-        "smc": 0.15,
-        "technical": 0.1
-      }
+      "require_sweep_confirmation": null
     },
     "range_fade": {
       "description": "Range/extreme reaction profile with softer lead-agent enforcement.",
-      "min_agents_agree": 2,
-      "min_consensus_confidence": 71,
-      "agent_min_confidence": 68,
+      "min_agents_agree": 3,
+      "min_consensus_confidence": 72,
+      "agent_min_confidence": 67,
       "lead_agent": "price_action",
       "require_lead_alignment": false,
       "min_structure_quality": "WEAK",
@@ -884,14 +892,7 @@
         "REJECTION_CONFIRMED",
         "TOUCH_NO_REJECTION"
       ],
-      "require_sweep_confirmation": null,
-      "weight_overrides": {
-        "price_action": 0.3,
-        "classical": 0.25,
-        "smc": 0.2,
-        "technical": 0.15,
-        "multitimeframe": 0.1
-      }
+      "require_sweep_confirmation": null
     }
   },
   "weekly_report": {
@@ -977,5 +978,79 @@
       "min_distance_points": 250,
       "window_hours": 2.5
     }
+  },
+  "execution": {
+    "execution_mode": "mt5_demo",
+    "description": "Demo-only VPS: MT5 is the execution authority; local JSON is the book; retired paper wording is never user-facing.",
+    "demo": {
+      "symbol_map": {
+        "XAU/USD": "XAUUSD.s"
+      },
+      "lot_size": 0.1,
+      "max_open_demo_trades": 3,
+      "max_new_orders_per_day": 6,
+      "deviation_points_mt5": 30,
+      "reconcile_halt_on_mismatch": true
+    }
+  },
+  "opposite_entry_guard": {
+    "enabled": true,
+    "close_before_new_entry": true,
+    "description": "An accepted opposite entry queues broker-first exits for all live opposite positions and cannot be placed until those MT5 positions are gone."
+  },
+  "all_agents_timeframes": {
+    "enabled": true,
+    "required": [
+      "5m",
+      "15m",
+      "1H",
+      "4H"
+    ],
+    "require_all": true,
+    "require_native": true,
+    "aggregation": "equal_native_timeframes_one_vote",
+    "description": "كل وكيل أساسي يقرأ الكتاب الأصلي نفسه M5/M15/H1/H4 ويصدر صوتاً واحداً. الجلب مركزي مرة واحدة للدورة لمنع اختلاف اللقطات واستهلاك الحصة؛ لا وكيل يعيد اشتقاق فريم أو يجلب API منفرداً."
+  },
+  "unified_trend": {
+    "enabled": true,
+    "calibration_required": true,
+    "calibration_version": "unified_trend_v1",
+    "calibration_path": "storage/model_calibration/unified_trend_v1.json",
+    "min_calibration_samples": 500,
+    "history_days": 90,
+    "outcome_barrier_atr_15m": 1.0,
+    "outcome_horizon_15m_bars": 16,
+    "description": "بديل Technical وMulti-Timeframe: أدلة EMA/structure/momentum/MACD/RSI الخام على M5/M15/H1/H4، توحيد percentile، edge واحد وثقة تاريخية واحدة وصوت واحد."
+  },
+  "auction_flow": {
+    "enabled": true,
+    "storage_path": "storage/auction_flow.sqlite3",
+    "session_timezone": "Asia/Hebron",
+    "profile_bin_points": 10,
+    "value_area_pct": 70,
+    "min_unique_ticks_5m": 60,
+    "max_tick_age_seconds": 5,
+    "max_heartbeat_age_seconds": 10,
+    "second_retention_days": 7,
+    "minute_retention_days": 90,
+    "calibration_required": true,
+    "calibration_version": "auction_flow_v1",
+    "calibration_path": "storage/model_calibration/auction_flow_v1.json",
+    "min_calibration_samples": 300,
+    "tick_history_days": 30,
+    "description": "الوكيل الخامس: تدفق Tick من MT5 + VWAP/POC/VAH/VAL والقبول/الرفض، مع سياق M5/M15/H1/H4 الأصلي. يجهز التاريخ والمعايرة قبل التحويل ويصدر صوتاً واحداً."
+  },
+  "shared_market_data": {
+    "enabled": true,
+    "storage_path": "storage/shared_market_data.json",
+    "source": "mt5_native",
+    "fetch_once_per_cycle": true,
+    "required_timeframes": [
+      "5m",
+      "15m",
+      "1H",
+      "4H"
+    ],
+    "description": "مصدر مركزي واحد: تُجلب شموع MT5 الأصلية مرة واحدة وتُخزن كل دورة، ثم يستلم الوكلاء الخمسة نفس snapshot_id والكائن المجمد؛ لا وكيل يجلب البيانات منفرداً."
   }
 }
